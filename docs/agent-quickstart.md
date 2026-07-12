@@ -41,12 +41,16 @@ Run:
 luthn connect codex
 ```
 
-Restart Codex, open `/hooks`, and approve the Luthn `Stop` hook when prompted.
-Then check both channels:
+The command configures both channels, then prints the required one-time Codex
+security steps. Setup is not complete until you restart Codex, enter `/hooks`,
+open `Stop > luthn.agent-connector.v1`, choose **Trust**, and complete one Codex
+turn. Then check both channels:
 
 ```bash
 luthn connection status codex
 ```
+
+Automatic capture is ready only when `automatic-ingestion` reports `Active`.
 
 The hook sends only the bounded final assistant response with hashed stable
 identifiers. It does not read or upload the transcript, user prompts, working

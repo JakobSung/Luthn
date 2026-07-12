@@ -26,13 +26,13 @@ print_usage() {
 usage: luthn <command> [options]
 
 commands:
-  install                         Install and start Luthn.
+  install [--connect-codex]       Install Luthn and optionally configure Codex.
   status                          Show services, readiness, console, and image.
   update [image]                  Back up, pull, migrate, restart, and verify.
   reset --yes                     Delete data volumes and recreate the stack.
   uninstall                      Remove services and runtime; preserve data/config.
   uninstall --purge-data --yes   Remove services, data, config, backups, and CLI.
-  connect codex                   Configure Codex automatic capture and MCP.
+  connect codex                   Configure Codex capture and show required trust steps.
   connection status codex        Show local and server Codex connection state.
   disconnect codex                Remove only Luthn-owned Codex configuration.
   adapter                         Upload a turn-summary JSON payload from stdin.
@@ -437,6 +437,15 @@ start_stack() {
 }
 
 install_luthn() {
+  connect_after_install=false
+  while (( $# > 0 )); do
+    case "$1" in
+      --connect-codex) connect_after_install=true ;;
+      *) echo "usage: luthn install [--connect-codex]" >&2; return 2 ;;
+    esac
+    shift
+  done
+
   require_docker
   require_command curl
 
@@ -509,6 +518,11 @@ Status:  $cli_path status
 Config:  $config_file
 Agent:   $cli_path connect codex
 EOF
+
+  if [[ "$connect_after_install" == "true" ]]; then
+    echo
+    connect_codex
+  fi
 }
 
 show_status() {
@@ -890,12 +904,18 @@ connect_codex() {
   fi
 
   cat <<EOF
-Codex is connected to Luthn.
-  automatic ingestion: configured; trust confirmation pending
+Codex connector files are configured, but automatic memory capture is not ready yet.
+  automatic ingestion: waiting for Codex hook trust
   MCP: configured and verified
 
-Restart Codex, open /hooks, and approve the Luthn Stop hook when prompted.
-Check later with: $cli_path connection status codex
+Required one-time Codex security steps:
+  1. Quit and reopen Codex.
+  2. In a Codex message box, enter /hooks.
+  3. Open Stop > luthn.agent-connector.v1 and choose Trust.
+  4. Complete one Codex turn, then verify with:
+     $cli_path connection status codex
+
+Setup is complete only when automatic-ingestion reports Active.
 EOF
 }
 
@@ -932,11 +952,20 @@ show_codex_connection_status() {
   service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"
   base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
   if [[ -f "$helper" && -f "$service_token_file" ]]; then
-    if ! python3 "$helper" status \
+    if ! server_status="$(python3 "$helper" status \
       --base-url "$base_url" \
       --token-file "$service_token_file" \
-      --agent-id codex; then
+      --agent-id codex)"; then
       echo "Server observation: unavailable"
+    else
+      printf '%s\n' "$server_status"
+      if ! printf '%s\n' "$server_status" | grep -q '^  automatic-ingestion: Active'; then
+        cat <<EOF
+Automatic memory capture is not active yet.
+  Restart Codex, enter /hooks, trust Stop > luthn.agent-connector.v1,
+  then complete one Codex turn and run this status command again.
+EOF
+      fi
     fi
   else
     echo "Server observation: unavailable"
@@ -1227,7 +1256,7 @@ run_mcp() {
 
 command="${1:-help}"
 case "$command" in
-  install) install_luthn ;;
+  install) shift; install_luthn "$@" ;;
   status|check) show_status ;;
   update) shift; update_luthn "${1:-}" ;;
   reset) shift; reset_luthn "${1:-}" ;;
