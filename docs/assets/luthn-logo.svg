@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Luthn logo</title>
+  <desc id="desc">Dotted signal-routing mark for Luthn.</desc>
+  <rect width="128" height="128" rx="24" fill="#F8FAFC"/>
+  <path d="M32 36h22c10 0 14 8 20 18l8 14c5 9 10 14 22 14" fill="none" stroke="#64748B" stroke-width="6" stroke-linecap="round"/>
+  <path d="M32 92h26c9 0 14-7 20-17l8-15c5-9 9-14 18-14" fill="none" stroke="#14B8A6" stroke-width="6" stroke-linecap="round"/>
+  <path d="M32 64h64" fill="none" stroke="#3B82F6" stroke-width="6" stroke-linecap="round"/>
+  <g fill="#0F172A">
+    <circle cx="32" cy="36" r="7"/>
+    <circle cx="32" cy="64" r="7"/>
+    <circle cx="32" cy="92" r="7"/>
+  </g>
+  <g fill="#14B8A6">
+    <circle cx="64" cy="64" r="8"/>
+    <circle cx="96" cy="46" r="7"/>
+    <circle cx="96" cy="82" r="7"/>
+  </g>
+  <g fill="#22D3EE">
+    <circle cx="54" cy="36" r="5"/>
+    <circle cx="58" cy="92" r="5"/>
+    <circle cx="96" cy="64" r="5"/>
+  </g>
+</svg>

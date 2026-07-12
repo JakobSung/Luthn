@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a public-safe improvement to Luthn
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Explain the user problem without including private records or customer data.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired outcome and public API or workflow when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or alternative designs.
+  - type: dropdown
+    id: boundary
+    attributes:
+      label: Primary area
+      options:
+        - Agent connection
+        - Shared memory and retrieval
+        - Classification and policy
+        - Self-host operations
+        - SDK or API
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: acknowledgement
+    attributes:
+      label: Contribution policy
+      options:
+        - label: I understand that public Issues are welcome and pull requests are currently restricted to invited collaborators.
+          required: true

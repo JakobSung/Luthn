@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 360" role="img" aria-labelledby="title desc">
+  <title id="title">Luthn safe context pipeline</title>
+  <desc id="desc">Raw and private inputs flow through a policy layer into safe context outputs for agents.</desc>
+  <rect width="920" height="360" rx="18" fill="#F8FAFC"/>
+  <defs>
+    <marker id="arrow-teal" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#14B8A6"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#3B82F6"/>
+    </marker>
+  </defs>
+  <g fill="#E2E8F0">
+    <circle cx="90" cy="84" r="3"/>
+    <circle cx="116" cy="84" r="3"/>
+    <circle cx="142" cy="84" r="3"/>
+    <circle cx="90" cy="110" r="3"/>
+    <circle cx="116" cy="110" r="3"/>
+    <circle cx="142" cy="110" r="3"/>
+    <circle cx="766" cy="86" r="3"/>
+    <circle cx="792" cy="86" r="3"/>
+    <circle cx="818" cy="86" r="3"/>
+    <circle cx="766" cy="112" r="3"/>
+    <circle cx="792" cy="112" r="3"/>
+    <circle cx="818" cy="112" r="3"/>
+  </g>
+  <g>
+    <rect x="48" y="118" width="188" height="124" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+    <text x="80" y="164" fill="#0F172A" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700">raw/private</text>
+    <circle cx="88" cy="196" r="7" fill="#64748B"/>
+    <circle cx="116" cy="196" r="7" fill="#64748B"/>
+    <circle cx="144" cy="196" r="7" fill="#64748B"/>
+    <path d="M82 214h120" stroke="#CBD5E1" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <g>
+    <rect x="366" y="82" width="188" height="196" rx="14" fill="#0F172A"/>
+    <text x="428" y="124" fill="#F8FAFC" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700">policy</text>
+    <circle cx="418" cy="166" r="9" fill="#14B8A6"/>
+    <circle cx="460" cy="166" r="9" fill="#22D3EE"/>
+    <circle cx="502" cy="166" r="9" fill="#3B82F6"/>
+    <path d="M418 200h84" stroke="#64748B" stroke-width="6" stroke-linecap="round"/>
+    <path d="M418 226h56" stroke="#14B8A6" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <g>
+    <rect x="686" y="118" width="188" height="124" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+    <text x="720" y="164" fill="#0F172A" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700">safe context</text>
+    <circle cx="726" cy="196" r="7" fill="#14B8A6"/>
+    <circle cx="754" cy="196" r="7" fill="#22D3EE"/>
+    <circle cx="782" cy="196" r="7" fill="#3B82F6"/>
+    <path d="M720 214h120" stroke="#CBD5E1" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <g fill="none" stroke-linecap="round" stroke-width="7">
+    <path d="M236 152 C290 152 308 120 366 120" stroke="#64748B"/>
+    <path d="M236 180 C292 180 310 180 366 180" stroke="#14B8A6" marker-end="url(#arrow-teal)"/>
+    <path d="M236 208 C292 208 308 240 366 240" stroke="#3B82F6"/>
+    <path d="M554 132 C604 132 626 152 686 152" stroke="#14B8A6" marker-end="url(#arrow-teal)"/>
+    <path d="M554 180 C612 180 628 180 686 180" stroke="#22D3EE"/>
+    <path d="M554 228 C606 228 626 208 686 208" stroke="#3B82F6" marker-end="url(#arrow-blue)"/>
+  </g>
+  <g>
+    <rect x="368" y="306" width="184" height="34" rx="17" fill="#E0F2FE"/>
+    <text x="405" y="329" fill="#0F172A" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" font-weight="700">agents</text>
+    <circle cx="494" cy="323" r="5" fill="#14B8A6"/>
+    <circle cx="516" cy="323" r="5" fill="#3B82F6"/>
+  </g>
+</svg>

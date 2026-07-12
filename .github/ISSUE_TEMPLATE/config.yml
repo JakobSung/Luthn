@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/JakobSung/Luthn/security
+    about: Report vulnerabilities privately from the Security tab; do not open a public issue.

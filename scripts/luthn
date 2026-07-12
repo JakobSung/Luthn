@@ -1,0 +1,1258 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_name="${LUTHN_PROJECT_NAME:-luthn}"
+data_dir="${LUTHN_DATA_DIR:-${XDG_DATA_HOME:-${HOME:?HOME is required}/.local/share}/luthn}"
+config_dir="${LUTHN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/luthn}"
+state_dir="${LUTHN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/luthn}"
+bin_dir="${LUTHN_BIN_DIR:-$HOME/.local/bin}"
+compose_file="${LUTHN_COMPOSE_FILE:-$data_dir/compose.yaml}"
+config_file="${LUTHN_CONFIG_FILE:-$config_dir/luthn.env}"
+state_file="${LUTHN_STATE_FILE:-$state_dir/install-state.env}"
+cli_path="${LUTHN_CLI_PATH:-$bin_dir/luthn}"
+token_file="${LUTHN_SERVICE_TOKEN_FILE:-$config_dir/service-token}"
+runtime_dir="${LUTHN_RUNTIME_DIR:-$data_dir/runtime}"
+connector_state_dir="${LUTHN_CONNECTOR_STATE_DIR:-$state_dir/connectors}"
+codex_state_file="${LUTHN_CODEX_STATE_FILE:-$connector_state_dir/codex.env}"
+codex_pending_state_file="${LUTHN_CODEX_PENDING_STATE_FILE:-$connector_state_dir/codex.pending.env}"
+codex_disconnect_pending_state_file="${LUTHN_CODEX_DISCONNECT_PENDING_STATE_FILE:-$connector_state_dir/codex.disconnect.pending.env}"
+codex_connector_version="1"
+distribution_ref="${LUTHN_DISTRIBUTION_REF:-main}"
+source_base_url="${LUTHN_SOURCE_BASE_URL:-https://raw.githubusercontent.com/JakobSung/Luthn/${distribution_ref}}"
+default_image="ghcr.io/jakobsung/luthn:main"
+
+print_usage() {
+  cat <<'USAGE'
+usage: luthn <command> [options]
+
+commands:
+  install                         Install and start Luthn.
+  status                          Show services, readiness, console, and image.
+  update [image]                  Back up, pull, migrate, restart, and verify.
+  reset --yes                     Delete data volumes and recreate the stack.
+  uninstall                      Remove services and runtime; preserve data/config.
+  uninstall --purge-data --yes   Remove services, data, config, backups, and CLI.
+  connect codex                   Configure Codex automatic capture and MCP.
+  connection status codex        Show local and server Codex connection state.
+  disconnect codex                Remove only Luthn-owned Codex configuration.
+  adapter                         Upload a turn-summary JSON payload from stdin.
+  mcp [--list-tools]              Run the MCP stdio server from the image.
+  help                            Show this help.
+USAGE
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+require_docker() {
+  require_command docker
+  if ! docker compose version >/dev/null 2>&1; then
+    echo "docker compose plugin is required" >&2
+    exit 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    cat >&2 <<'ERROR'
+Docker is installed, but the Docker daemon is not reachable.
+
+Start Docker Desktop or OrbStack, then verify the active context with:
+  docker context ls
+  docker context use <context-name>
+ERROR
+    exit 1
+  fi
+}
+
+ensure_directories() {
+  umask 077
+  mkdir -p "$data_dir" "$runtime_dir" "$config_dir" "$state_dir/backups" "$connector_state_dir" "$bin_dir"
+  chmod 0700 "$runtime_dir" "$config_dir" "$state_dir" "$state_dir/backups" "$connector_state_dir"
+}
+
+has_codex_connector_state() {
+  [[ -f "$codex_state_file" || -f "$codex_pending_state_file" ]]
+}
+
+has_codex_connector_artifact() {
+  [[ -f "$codex_state_file" || -f "$codex_pending_state_file" \
+    || -f "$codex_disconnect_pending_state_file" ]]
+}
+
+read_config() {
+  key="$1"
+  fallback="${2:-}"
+  if [[ ! -f "$config_file" ]]; then
+    printf '%s' "$fallback"
+    return
+  fi
+
+  value="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$config_file")"
+  printf '%s' "${value:-$fallback}"
+}
+
+set_config() {
+  key="$1"
+  value="$2"
+  ensure_directories
+  tmp_file="$(mktemp "${config_file}.XXXXXX")"
+  if [[ -f "$config_file" ]]; then
+    awk -F= -v key="$key" -v value="$value" '
+      BEGIN { updated = 0 }
+      $1 == key { print key "=" value; updated = 1; next }
+      { print }
+      END { if (!updated) print key "=" value }
+    ' "$config_file" >"$tmp_file"
+  else
+    printf '%s=%s\n' "$key" "$value" >"$tmp_file"
+  fi
+  chmod 0600 "$tmp_file"
+  mv "$tmp_file" "$config_file"
+}
+
+remove_config() {
+  key="$1"
+  [[ -f "$config_file" ]] || return 0
+  tmp_file="$(mktemp "${config_file}.XXXXXX")"
+  awk -F= -v key="$key" '$1 != key { print }' "$config_file" >"$tmp_file"
+  chmod 0600 "$tmp_file"
+  mv "$tmp_file" "$config_file"
+}
+
+write_token_file() {
+  token="$1"
+  ensure_directories
+  umask 077
+  printf '%s' "$token" >"$token_file"
+  chmod 0600 "$token_file"
+}
+
+write_initial_config() {
+  image="$1"
+  digest="$2"
+  port="${LUTHN_PORT:-8080}"
+  postgres_volume="${LUTHN_POSTGRES_VOLUME:-luthn-postgres}"
+  operator_volume="${LUTHN_OPERATOR_VOLUME:-luthn-operator}"
+  ensure_directories
+  umask 077
+  cat >"$config_file" <<EOF
+LUTHN_IMAGE=$image
+LUTHN_PORT=$port
+LUTHN_ENVIRONMENT=Development
+LUTHN_BASE_URL=http://127.0.0.1:$port
+LUTHN_POSTGRES_VOLUME=$postgres_volume
+LUTHN_OPERATOR_VOLUME=$operator_volume
+LUTHN_SERVICE_TOKEN_FILE=$token_file
+LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=luthn
+POSTGRES_DB=luthn
+POSTGRES_USER=luthn
+POSTGRES_HOST_AUTH_METHOD=trust
+Luthn__Classification__Provider=mock
+Luthn__Auth__RequireServiceToken=true
+Luthn__Auth__Tokens__0__Name=local-agent
+Luthn__Auth__Tokens__0__Sha256Digest=$digest
+Luthn__Auth__Tokens__0__Scopes__0=agent.read
+Luthn__Auth__Tokens__0__Scopes__1=agent.write.summary
+Luthn__Auth__Tokens__0__Scopes__2=memory.write
+Luthn__Auth__Tokens__0__Scopes__3=memory.read
+Luthn__Auth__Tokens__0__Scopes__4=classification.preview
+Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read
+Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write
+EOF
+  chmod 0600 "$config_file"
+}
+
+generate_token() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24
+  else
+    od -An -N 24 -tx1 /dev/urandom | tr -d ' \n'
+  fi
+}
+
+ensure_config_value() {
+  key="$1"
+  value="$2"
+  if [[ -z "$(read_config "$key")" ]]; then
+    set_config "$key" "$value"
+  fi
+}
+
+pull_image() {
+  image="$1"
+  if [[ "${LUTHN_SKIP_PULL:-false}" == "true" ]]; then
+    docker image inspect "$image" >/dev/null
+  else
+    docker pull "$image"
+  fi
+}
+
+runtime_source_for_image() {
+  image="$1"
+  revision="${2:-}"
+  if [[ "$image" == ghcr.io/jakobsung/luthn:* && "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+    printf 'https://raw.githubusercontent.com/JakobSung/Luthn/%s' "$revision"
+  elif [[ "$image" =~ ^ghcr\.io/jakobsung/luthn:sha-([0-9a-f]{40})$ ]]; then
+    printf 'https://raw.githubusercontent.com/JakobSung/Luthn/%s' "${BASH_REMATCH[1]}"
+  else
+    printf '%s' "$source_base_url"
+  fi
+}
+
+download_runtime() {
+  runtime_source="${1:-$source_base_url}"
+  require_command curl
+  ensure_directories
+
+  compose_tmp="$(mktemp "${compose_file}.XXXXXX")"
+  cli_tmp="$(mktemp "${cli_path}.XXXXXX")"
+  connector_tmp="$(mktemp "${runtime_dir}/luthn-codex-connector.py.XXXXXX")"
+  if ! curl -fsSL "$runtime_source/deploy/compose.yaml" -o "$compose_tmp" \
+    || ! curl -fsSL "$runtime_source/scripts/luthn" -o "$cli_tmp" \
+    || ! bash -n "$cli_tmp"; then
+    rm -f "$compose_tmp" "$cli_tmp" "$connector_tmp"
+    return 1
+  fi
+
+  connector_available=true
+  if ! curl -fsSL "$runtime_source/scripts/luthn-codex-connector.py" -o "$connector_tmp"; then
+    connector_available=false
+    rm -f "$connector_tmp"
+    if grep -q 'luthn-codex-connector.py' "$cli_tmp"; then
+      rm -f "$compose_tmp" "$cli_tmp"
+      return 1
+    fi
+    if has_codex_connector_artifact; then
+      rm -f "$compose_tmp" "$cli_tmp"
+      echo "The target runtime predates Codex connector support. Run 'luthn disconnect codex' before updating or rolling back." >&2
+      return 1
+    fi
+  elif ! grep -q '^#!/usr/bin/env python3' "$connector_tmp"; then
+    rm -f "$compose_tmp" "$cli_tmp" "$connector_tmp"
+    return 1
+  fi
+
+  if ! chmod 0644 "$compose_tmp" \
+    || ! chmod 0755 "$cli_tmp" \
+    || ! mv "$compose_tmp" "$compose_file" \
+    || ! mv "$cli_tmp" "$cli_path"; then
+    rm -f "$compose_tmp" "$cli_tmp" "$connector_tmp"
+    return 1
+  fi
+
+  if [[ "$connector_available" == "true" ]]; then
+    if ! chmod 0700 "$connector_tmp" \
+      || ! mv "$connector_tmp" "$runtime_dir/luthn-codex-connector.py"; then
+      rm -f "$connector_tmp"
+      return 1
+    fi
+  else
+    rm -f "$runtime_dir/luthn-codex-connector.py"
+  fi
+}
+
+ensure_connector_scopes() {
+  connector_scopes_changed=false
+  if ! ensure_directories; then
+    return 1
+  fi
+
+  local read_present=false
+  local write_present=false
+  local wildcard_present=false
+  local scope_value
+  local scope_index
+  local empty_indices=()
+  for scope_index in {0..15}; do
+    if ! scope_value="$(read_config "Luthn__Auth__Tokens__0__Scopes__${scope_index}")"; then
+      return 1
+    fi
+    case "$scope_value" in
+      '*') wildcard_present=true ;;
+      agent.connection.read) read_present=true ;;
+      agent.connection.write) write_present=true ;;
+      '') empty_indices+=("$scope_index") ;;
+    esac
+  done
+
+  if [[ "$wildcard_present" == "true" \
+    || ( "$read_present" == "true" && "$write_present" == "true" ) ]]; then
+    return 0
+  fi
+
+  local required_slots=0
+  [[ "$read_present" == "true" ]] || required_slots=$((required_slots + 1))
+  [[ "$write_present" == "true" ]] || required_slots=$((required_slots + 1))
+  if (( ${#empty_indices[@]} < required_slots )); then
+    echo "No free service-token scope slots are available for the connector." >&2
+    return 1
+  fi
+
+  local key1=""
+  local value1=""
+  local key2=""
+  local value2=""
+  local next_slot=0
+  if [[ "$read_present" != "true" ]]; then
+    key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+    value1="agent.connection.read"
+    next_slot=$((next_slot + 1))
+  fi
+  if [[ "$write_present" != "true" ]]; then
+    if [[ -z "$key1" ]]; then
+      key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value1="agent.connection.write"
+    else
+      key2="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value2="agent.connection.write"
+    fi
+  fi
+
+  local input_file="$config_file"
+  [[ -f "$input_file" ]] || input_file=/dev/null
+  local config_tmp
+  if ! config_tmp="$(mktemp "${config_file}.connector-scopes.XXXXXX")"; then
+    return 1
+  fi
+  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" '
+    BEGIN { updated1 = 0; updated2 = 0 }
+    key1 != "" && $1 == key1 { print key1 "=" value1; updated1 = 1; next }
+    key2 != "" && $1 == key2 { print key2 "=" value2; updated2 = 1; next }
+    { print }
+    END {
+      if (key1 != "" && !updated1) print key1 "=" value1
+      if (key2 != "" && !updated2) print key2 "=" value2
+    }
+  ' "$input_file" >"$config_tmp"; then
+    rm -f "$config_tmp"
+    return 1
+  fi
+  if ! chmod 0600 "$config_tmp" || ! mv "$config_tmp" "$config_file"; then
+    rm -f "$config_tmp"
+    return 1
+  fi
+  connector_scopes_changed=true
+}
+
+require_installation() {
+  if [[ ! -f "$compose_file" || ! -f "$config_file" ]]; then
+    echo "Luthn is not installed. Run: luthn install" >&2
+    exit 1
+  fi
+}
+
+compose_cmd() {
+  docker compose --project-name "$project_name" --env-file "$config_file" -f "$compose_file" "$@"
+}
+
+stop_api_fail_closed() {
+  if compose_cmd stop api >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local api_container_id
+  if ! api_container_id="$(compose_cmd ps -q api 2>/dev/null)"; then
+    return 1
+  fi
+  if [[ -z "$api_container_id" ]]; then
+    return 0
+  fi
+
+  docker stop "$api_container_id" >/dev/null 2>&1 \
+    || docker kill "$api_container_id" >/dev/null 2>&1
+}
+
+wait_for_postgres() {
+  attempts=60
+  while (( attempts > 0 )); do
+    if compose_cmd exec -T postgres pg_isready \
+      -U "$(read_config POSTGRES_USER luthn)" \
+      -d "$(read_config POSTGRES_DB luthn)" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts - 1))
+    sleep 2
+  done
+  echo "PostgreSQL did not become ready." >&2
+  compose_cmd ps postgres >&2 || true
+  return 1
+}
+
+wait_for_api() {
+  require_command curl
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  attempts=60
+  while (( attempts > 0 )); do
+    if curl -fsS "$base_url/healthz" >/dev/null 2>&1 \
+      && curl -fsS "$base_url/readyz" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts - 1))
+    sleep 2
+  done
+  echo "Luthn did not pass health and readiness checks." >&2
+  compose_cmd ps >&2 || true
+  compose_cmd logs --tail 100 api migrate >&2 || true
+  return 1
+}
+
+image_id_for_container() {
+  container_id="$(compose_cmd ps -q api 2>/dev/null || true)"
+  if [[ -n "$container_id" ]]; then
+    docker inspect --format '{{.Image}}' "$container_id" 2>/dev/null || true
+  fi
+}
+
+record_state() {
+  status="$1"
+  image_ref="$2"
+  image_id="$3"
+  previous_image_id="${4:-}"
+  backup_path="${5:-}"
+  ensure_directories
+  umask 077
+  cat >"$state_file" <<EOF
+STATUS=$status
+IMAGE_REF=$image_ref
+IMAGE_ID=$image_id
+PREVIOUS_IMAGE_ID=$previous_image_id
+BACKUP_PATH=$backup_path
+UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  chmod 0600 "$state_file"
+}
+
+start_stack() {
+  seed_demo="$1"
+  compose_cmd up -d postgres
+  wait_for_postgres
+  compose_cmd run --rm --no-deps migrate
+  compose_cmd up -d api
+  wait_for_api
+  if [[ "$seed_demo" == "true" ]]; then
+    compose_cmd --profile tools run --rm --no-deps seed
+  fi
+}
+
+install_luthn() {
+  require_docker
+  require_command curl
+
+  image="$(read_config LUTHN_IMAGE "${LUTHN_IMAGE:-$default_image}")"
+  echo "Pulling $image..."
+  pull_image "$image"
+  image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
+  download_runtime "$(runtime_source_for_image "$image" "$image_revision")"
+
+  if [[ ! -f "$config_file" ]]; then
+    token="$(generate_token)"
+    digest="$(printf '%s' "$token" | docker run --rm -i "$image" token-digest --stdin)"
+    write_token_file "$token"
+    write_initial_config "$image" "$digest"
+  else
+    ensure_config_value LUTHN_IMAGE "$image"
+    ensure_config_value LUTHN_PORT "${LUTHN_PORT:-8080}"
+    ensure_config_value LUTHN_ENVIRONMENT Development
+    ensure_config_value LUTHN_BASE_URL "http://127.0.0.1:$(read_config LUTHN_PORT 8080)"
+    ensure_config_value LUTHN_POSTGRES_VOLUME "${LUTHN_POSTGRES_VOLUME:-luthn-postgres}"
+    ensure_config_value LUTHN_OPERATOR_VOLUME "${LUTHN_OPERATOR_VOLUME:-luthn-operator}"
+    token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"
+    token=""
+    if [[ -f "$token_file" ]]; then
+      token="$(cat "$token_file")"
+    elif [[ -n "$(read_config LUTHN_SERVICE_VALUE)" ]]; then
+      token="$(read_config LUTHN_SERVICE_VALUE)"
+      write_token_file "$token"
+    else
+      token="$(generate_token)"
+      write_token_file "$token"
+    fi
+    set_config LUTHN_SERVICE_TOKEN_FILE "$token_file"
+    remove_config LUTHN_SERVICE_VALUE
+    digest="$(printf '%s' "$token" | docker run --rm -i "$image" token-digest --stdin)"
+    set_config Luthn__Auth__Tokens__0__Sha256Digest "$digest"
+    ensure_config_value LUTHN_DOCKER_CONNECTION_STRING "Host=postgres;Port=5432;Database=luthn;Username=luthn"
+    ensure_config_value POSTGRES_DB luthn
+    ensure_config_value POSTGRES_USER luthn
+    ensure_config_value POSTGRES_HOST_AUTH_METHOD trust
+    ensure_config_value Luthn__Classification__Provider mock
+    ensure_config_value Luthn__Auth__RequireServiceToken true
+    ensure_config_value Luthn__Auth__Tokens__0__Name local-agent
+    ensure_config_value Luthn__Auth__Tokens__0__Scopes__0 agent.read
+    ensure_config_value Luthn__Auth__Tokens__0__Scopes__1 agent.write.summary
+    ensure_config_value Luthn__Auth__Tokens__0__Scopes__2 memory.write
+    ensure_config_value Luthn__Auth__Tokens__0__Scopes__3 memory.read
+    ensure_config_value Luthn__Auth__Tokens__0__Scopes__4 classification.preview
+  fi
+  if has_codex_connector_state; then
+    if ! ensure_connector_scopes; then
+      echo "Install stopped because the active Codex connector scopes could not be configured." >&2
+      return 1
+    fi
+  fi
+
+  echo "Starting Luthn..."
+  compose_cmd pull postgres
+  start_stack true
+  current_id="$(image_id_for_container)"
+  record_state ready "$(read_config LUTHN_IMAGE "$image")" "$current_id"
+  refresh_codex_connection_observation || \
+    echo "warning: installed Codex connector status could not be reported" >&2
+
+  cat <<EOF
+
+Luthn is ready.
+Console: $(read_config LUTHN_BASE_URL http://127.0.0.1:8080)/
+Status:  $cli_path status
+Config:  $config_file
+Agent:   $cli_path connect codex
+EOF
+}
+
+show_status() {
+  require_installation
+  require_docker
+  require_command curl
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  image_ref="$(read_config LUTHN_IMAGE "$default_image")"
+  image_id="$(image_id_for_container)"
+  image_digest=""
+  if [[ -n "$image_id" ]]; then
+    image_digest="$(docker image inspect --format '{{join .RepoDigests ", "}}' "$image_id" 2>/dev/null || true)"
+  fi
+
+  echo "Luthn services:"
+  compose_cmd ps
+  echo
+  if curl -fsS "$base_url/healthz" >/dev/null 2>&1; then
+    echo "Health: ready"
+  else
+    echo "Health: unavailable"
+  fi
+  if curl -fsS "$base_url/readyz" >/dev/null 2>&1; then
+    echo "Readiness: ready"
+  else
+    echo "Readiness: not ready"
+  fi
+  echo "Console: $base_url/"
+  echo "Image: $image_ref"
+  echo "Image ID: ${image_id:-unavailable}"
+  echo "Digest: ${image_digest:-unavailable}"
+  refresh_codex_connection_observation || \
+    echo "warning: Codex connector status could not be reported" >&2
+}
+
+codex_helper_path() {
+  if [[ -n "${LUTHN_CODEX_CONNECTOR_HELPER:-}" ]]; then
+    printf '%s' "$LUTHN_CODEX_CONNECTOR_HELPER"
+    return
+  fi
+  if [[ -f "$runtime_dir/luthn-codex-connector.py" ]]; then
+    printf '%s' "$runtime_dir/luthn-codex-connector.py"
+    return
+  fi
+  source_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/luthn-codex-connector.py"
+  printf '%s' "$source_helper"
+}
+
+ensure_codex_connector_helper() {
+  helper="$(codex_helper_path)"
+  [[ -f "$helper" ]] && return 0
+
+  image="$(read_config LUTHN_IMAGE "$default_image")"
+  image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
+  runtime_source="$(runtime_source_for_image "$image" "$image_revision")"
+  helper_parent="$(dirname "$helper")"
+  mkdir -p "$helper_parent" || return 1
+  helper_tmp="$(mktemp "${helper}.XXXXXX")" || return 1
+  if ! curl -fsSL "$runtime_source/scripts/luthn-codex-connector.py" -o "$helper_tmp" \
+    || ! grep -q '^#!/usr/bin/env python3' "$helper_tmp" \
+    || ! chmod 0700 "$helper_tmp" \
+    || ! mv "$helper_tmp" "$helper"; then
+    rm -f "$helper_tmp"
+    return 1
+  fi
+}
+
+codex_hooks_path() {
+  printf '%s' "${LUTHN_CODEX_HOOKS_FILE:-${CODEX_HOME:-$HOME/.codex}/hooks.json}"
+}
+
+codex_hook_command() {
+  printf '%q codex-hook' "$cli_path"
+}
+
+codex_mcp_registration_status() {
+  if ! mcp_output="$(codex mcp get luthn 2>/dev/null)"; then
+    return 1
+  fi
+
+  registered_command="$(printf '%s\n' "$mcp_output" | sed -n 's/^  command: //p' | head -n 1)"
+  registered_args="$(printf '%s\n' "$mcp_output" | sed -n 's/^  args: //p' | head -n 1)"
+  if [[ "$registered_command" == "$cli_path" && "$registered_args" == "mcp" ]]; then
+    return 0
+  fi
+  return 2
+}
+
+record_codex_connector_state() {
+  hooks_file="$1"
+  destination="${2:-$codex_state_file}"
+  setup_state="${3:-configured}"
+  mcp_changed="${4:-false}"
+  ensure_directories || return 1
+  state_tmp="$(mktemp "${destination}.XXXXXX")" || return 1
+  if ! cat >"$state_tmp" <<EOF
+AGENT_ID=codex
+AGENT_NAME=Codex
+INTEGRATION_KIND=host-hook-mcp
+CONNECTOR_VERSION=$codex_connector_version
+CONFIGURATION_OWNER=luthn
+CHANNELS=automatic-ingestion,mcp
+HOOKS_FILE=$hooks_file
+MCP_NAME=luthn
+SETUP_STATE=$setup_state
+MCP_CHANGED=$mcp_changed
+UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  then
+    rm -f "$state_tmp"
+    return 1
+  fi
+  if ! chmod 0600 "$state_tmp" || ! mv "$state_tmp" "$destination"; then
+    rm -f "$state_tmp"
+    return 1
+  fi
+}
+
+codex_state_value() {
+  key="$1"
+  connector_state="$codex_state_file"
+  [[ -f "$connector_state" ]] || connector_state="$codex_pending_state_file"
+  [[ -f "$connector_state" ]] || connector_state="$codex_disconnect_pending_state_file"
+  [[ -f "$connector_state" ]] || return 0
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$connector_state"
+}
+
+report_codex_observation() {
+  helper="$(codex_helper_path)"
+  [[ -f "$helper" && -f "$config_file" ]] || return 1
+  service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  [[ -f "$service_token_file" ]] || return 1
+
+  report_args=(
+    "$helper" report
+    --base-url "$base_url"
+    --token-file "$service_token_file"
+    --connector-version "$codex_connector_version"
+  )
+  while (( $# > 0 )); do
+    report_args+=(--channel "$1")
+    shift
+  done
+  python3 "${report_args[@]}"
+}
+
+report_pending_codex_disconnect() {
+  [[ -f "$codex_disconnect_pending_state_file" ]] || return 0
+
+  mcp_changed="$(awk -F= '$1 == "MCP_CHANGED" { print $2; exit }' "$codex_disconnect_pending_state_file")"
+  if [[ "$mcp_changed" == "true" ]]; then
+    if ! report_codex_observation \
+      "automatic-ingestion:false:Unknown:Unknown:" \
+      "mcp:true:Failed:Unknown:configuration.changed" >/dev/null; then
+      return 1
+    fi
+  else
+    if ! report_codex_observation \
+      "automatic-ingestion:false:Unknown:Unknown:" \
+      "mcp:false:Unknown:Unknown:" >/dev/null; then
+      return 1
+    fi
+  fi
+  rm -f "$codex_disconnect_pending_state_file"
+}
+
+refresh_codex_connection_observation() {
+  if [[ -f "$codex_disconnect_pending_state_file" ]]; then
+    if has_codex_connector_state; then
+      rm -f "$codex_disconnect_pending_state_file"
+    else
+      report_pending_codex_disconnect
+      return
+    fi
+  fi
+  [[ -f "$codex_state_file" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 1
+  helper="$(codex_helper_path)"
+  [[ -f "$helper" ]] || return 1
+
+  hooks_file="$(codex_state_value HOOKS_FILE)"
+  [[ -n "$hooks_file" ]] || hooks_file="$(codex_hooks_path)"
+  hook_command="$(codex_hook_command)"
+  if python3 "$helper" hooks check --path "$hooks_file" --command "$hook_command"; then
+    automatic_spec="automatic-ingestion:true:Unknown:Unknown:"
+  else
+    automatic_spec="automatic-ingestion:false:Unknown:Unknown:"
+  fi
+
+  if command -v codex >/dev/null 2>&1; then
+    if codex_mcp_registration_status; then
+      mcp_spec="mcp:true:Verified:Unknown:"
+    else
+      mcp_status=$?
+      if [[ "$mcp_status" -eq 2 ]]; then
+        mcp_spec="mcp:true:Failed:Unknown:configuration.changed"
+      else
+        mcp_spec="mcp:false:Unknown:Unknown:"
+      fi
+    fi
+  else
+    mcp_spec="mcp:false:Unknown:Unknown:"
+  fi
+
+  report_codex_observation "$automatic_spec" "$mcp_spec" >/dev/null
+}
+
+restore_hooks_backup() {
+  hooks_file="$1"
+  backup_file="$2"
+  hooks_existed="$3"
+  if [[ "$hooks_existed" == "true" ]]; then
+    cp -p "$backup_file" "$hooks_file"
+  else
+    rm -f "$hooks_file"
+  fi
+}
+
+rollback_codex_registration() {
+  hooks_file="$1"
+  hooks_backup="$2"
+  hooks_existed="$3"
+  mcp_preexisting="$4"
+
+  restore_hooks_backup "$hooks_file" "$hooks_backup" "$hooks_existed"
+  if [[ "$mcp_preexisting" == "false" ]] \
+    && ! codex mcp remove luthn >/dev/null 2>&1; then
+    echo "Codex MCP cleanup failed. Partial connector ownership was preserved; run 'luthn disconnect codex' and retry." >&2
+    return 1
+  fi
+  rm -f "$codex_pending_state_file"
+}
+
+restore_connector_config_backup() {
+  backup_file="$1"
+  restore_tmp="$(mktemp "${config_file}.restore.XXXXXX")" || return 1
+  if ! cp -p "$backup_file" "$restore_tmp" || ! mv "$restore_tmp" "$config_file"; then
+    rm -f "$restore_tmp"
+    return 1
+  fi
+}
+
+connect_codex() {
+  require_installation
+  require_docker
+  require_command curl
+  require_command codex
+  require_command python3
+
+  if ! ensure_codex_connector_helper; then
+    echo "Codex connector runtime is missing and could not be restored from the installed image revision." >&2
+    return 1
+  fi
+  helper="$(codex_helper_path)"
+  if ! report_pending_codex_disconnect; then
+    echo "A previous Codex disconnect is still pending server observation; retry after the Luthn API is available." >&2
+    return 1
+  fi
+  if [[ ! -x "$cli_path" ]]; then
+    echo "Luthn CLI is not installed at $cli_path" >&2
+    return 1
+  fi
+
+  if codex_mcp_registration_status; then
+    mcp_preexisting=true
+  else
+    mcp_status=$?
+    if [[ "$mcp_status" -eq 2 ]]; then
+      echo "Codex already has an unrelated MCP registration named 'luthn'; no configuration was changed." >&2
+      return 1
+    fi
+    mcp_preexisting=false
+  fi
+
+  hooks_file="$(codex_hooks_path)"
+  hook_command="$(codex_hook_command)"
+  ensure_directories
+  hooks_backup="$(mktemp "$connector_state_dir/codex-hooks.XXXXXX")"
+  hooks_existed=false
+  if [[ -f "$hooks_file" ]]; then
+    cp -p "$hooks_file" "$hooks_backup"
+    hooks_existed=true
+  fi
+
+  if ! record_codex_connector_state "$hooks_file" "$codex_pending_state_file" partial; then
+    rm -f "$hooks_backup"
+    echo "Codex connector ownership state could not be prepared; no configuration was changed." >&2
+    return 1
+  fi
+
+  if ! python3 "$helper" hooks install \
+    --path "$hooks_file" \
+    --command "$hook_command"; then
+    rm -f "$hooks_backup" "$codex_pending_state_file"
+    return 1
+  fi
+
+  if [[ "$mcp_preexisting" == "false" ]]; then
+    if ! codex mcp add luthn -- "$cli_path" mcp >/dev/null; then
+      rollback_codex_registration "$hooks_file" "$hooks_backup" "$hooks_existed" true
+      rm -f "$hooks_backup"
+      return 1
+    fi
+  fi
+
+  if ! mcp_probe="$(compose_cmd --profile tools run --rm --no-deps -T mcp mcp --list-tools 2>&1)" \
+    || ! printf '%s\n' "$mcp_probe" | grep -q '^get_context_pack$'; then
+    rollback_codex_registration "$hooks_file" "$hooks_backup" "$hooks_existed" "$mcp_preexisting"
+    rm -f "$hooks_backup"
+    echo "Codex MCP probe failed; Luthn rolled back the connector configuration." >&2
+    return 1
+  fi
+
+  if ! config_backup="$(mktemp "${config_file}.codex-connect.XXXXXX")" \
+    || ! cp -p "$config_file" "$config_backup"; then
+    rm -f "${config_backup:-}"
+    rollback_codex_registration "$hooks_file" "$hooks_backup" "$hooks_existed" "$mcp_preexisting"
+    rm -f "$hooks_backup"
+    echo "Codex connector authorization backup could not be created; Luthn rolled back the connector configuration." >&2
+    return 1
+  fi
+  if ! ensure_connector_scopes; then
+    rollback_codex_registration "$hooks_file" "$hooks_backup" "$hooks_existed" "$mcp_preexisting"
+    rm -f "$hooks_backup" "$config_backup"
+    echo "Codex connector authorization could not be configured; Luthn rolled back the connector configuration." >&2
+    return 1
+  fi
+  if [[ "$connector_scopes_changed" == "true" ]]; then
+    echo "Refreshing Luthn API authorization scopes..."
+    if ! stop_api_fail_closed; then
+      if ! restore_connector_config_backup "$config_backup"; then
+        rollback_codex_registration "$hooks_file" "$hooks_backup" "$hooks_existed" "$mcp_preexisting"
+        rm -f "$hooks_backup"
+        echo "Codex connector setup stopped before API restart, and the previous configuration must be restored from: $config_backup" >&2
+        return 1
+      fi
+      rollback_codex_registration "$hooks_file" "$hooks_backup" "$hooks_existed" "$mcp_preexisting"
+      rm -f "$hooks_backup" "$config_backup"
+      echo "Codex connector setup could not stop the API; Luthn restored the previous configuration." >&2
+      return 1
+    fi
+    if ! compose_cmd up -d --force-recreate api >/dev/null || ! wait_for_api; then
+      stop_api_fail_closed || true
+      recovery_succeeded=true
+      if ! restore_connector_config_backup "$config_backup" \
+        || ! compose_cmd up -d --force-recreate api >/dev/null \
+        || ! wait_for_api; then
+        recovery_succeeded=false
+        api_stop_confirmed=true
+        if ! stop_api_fail_closed; then
+          api_stop_confirmed=false
+        fi
+      fi
+      rollback_codex_registration "$hooks_file" "$hooks_backup" "$hooks_existed" "$mcp_preexisting"
+      rm -f "$hooks_backup"
+      if [[ "$recovery_succeeded" == "true" ]]; then
+        rm -f "$config_backup"
+        echo "Codex connector authorization did not become ready; Luthn restored the previous API configuration." >&2
+      elif [[ "$api_stop_confirmed" == "true" ]]; then
+        echo "Codex connector authorization did not become ready. The API was stopped; restore the previous configuration from: $config_backup" >&2
+      else
+        echo "Codex connector authorization did not become ready, and Luthn could not confirm that the API stopped. Stop the API immediately and restore: $config_backup" >&2
+      fi
+      return 1
+    fi
+  fi
+  if ! record_codex_connector_state "$hooks_file" "$codex_pending_state_file" configured \
+    || ! mv "$codex_pending_state_file" "$codex_state_file"; then
+    echo "Codex is configured, but its pending ownership state could not be finalized. Run 'luthn disconnect codex' before uninstalling." >&2
+    return 1
+  fi
+  rm -f "$config_backup"
+  rm -f "$hooks_backup"
+  if ! report_codex_observation \
+    "automatic-ingestion:true:Unknown:Unknown:" \
+    "mcp:true:Verified:Succeeded:" >/dev/null; then
+    echo "warning: Codex is configured, but Luthn could not record the initial connection observation" >&2
+  fi
+
+  cat <<EOF
+Codex is connected to Luthn.
+  automatic ingestion: configured; trust confirmation pending
+  MCP: configured and verified
+
+Restart Codex, open /hooks, and approve the Luthn Stop hook when prompted.
+Check later with: $cli_path connection status codex
+EOF
+}
+
+show_codex_connection_status() {
+  require_installation
+  require_command python3
+  refresh_codex_connection_observation || \
+    echo "warning: pending Codex connector status could not be reported" >&2
+  helper="$(codex_helper_path)"
+  hooks_file="$(codex_state_value HOOKS_FILE)"
+  [[ -n "$hooks_file" ]] || hooks_file="$(codex_hooks_path)"
+  hook_command="$(codex_hook_command)"
+
+  if [[ -f "$codex_state_file" ]]; then
+    echo "Local connector: configured"
+  else
+    echo "Local connector: not configured"
+  fi
+
+  if [[ -f "$helper" ]] && python3 "$helper" hooks check \
+    --path "$hooks_file" \
+    --command "$hook_command"; then
+    echo "  automatic-ingestion: configured"
+  else
+    echo "  automatic-ingestion: missing"
+  fi
+
+  if command -v codex >/dev/null 2>&1 && codex_mcp_registration_status; then
+    echo "  mcp: configured"
+  else
+    echo "  mcp: missing or changed"
+  fi
+
+  service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  if [[ -f "$helper" && -f "$service_token_file" ]]; then
+    if ! python3 "$helper" status \
+      --base-url "$base_url" \
+      --token-file "$service_token_file" \
+      --agent-id codex; then
+      echo "Server observation: unavailable"
+    fi
+  else
+    echo "Server observation: unavailable"
+  fi
+}
+
+disconnect_codex() {
+  require_installation
+  require_command python3
+  if [[ -f "$codex_disconnect_pending_state_file" ]] \
+    && ! has_codex_connector_state \
+    && ! command -v codex >/dev/null 2>&1; then
+    if report_pending_codex_disconnect; then
+      echo "Luthn-owned Codex connector configuration was removed."
+    else
+      echo "warning: Codex is disconnected locally, but the server observation is still pending" >&2
+    fi
+    return 0
+  fi
+  require_command codex
+  helper="$(codex_helper_path)"
+  if [[ ! -f "$helper" ]]; then
+    if ! ensure_codex_connector_helper; then
+      echo "Codex connector runtime is missing and could not be restored from the installed image revision." >&2
+      return 1
+    fi
+    helper="$(codex_helper_path)"
+  fi
+
+  hooks_file="$(codex_state_value HOOKS_FILE)"
+  [[ -n "$hooks_file" ]] || hooks_file="$(codex_hooks_path)"
+  ensure_directories
+  hooks_backup="$(mktemp "$connector_state_dir/codex-hooks.XXXXXX")"
+  hooks_existed=false
+  if [[ -f "$hooks_file" ]]; then
+    cp -p "$hooks_file" "$hooks_backup"
+    hooks_existed=true
+  fi
+
+  mcp_changed=false
+  mcp_registered=false
+  if codex_mcp_registration_status; then
+    mcp_registered=true
+  else
+    mcp_status=$?
+    if [[ "$mcp_status" -eq 2 ]]; then
+      mcp_changed=true
+      echo "warning: the 'luthn' MCP registration changed after setup and was preserved" >&2
+    fi
+  fi
+
+  if ! record_codex_connector_state \
+    "$hooks_file" "$codex_disconnect_pending_state_file" pending-disconnect "$mcp_changed"; then
+    rm -f "$hooks_backup"
+    echo "Codex disconnect state could not be prepared; no configuration was changed." >&2
+    return 1
+  fi
+
+  if ! python3 "$helper" hooks remove --path "$hooks_file"; then
+    rm -f "$codex_disconnect_pending_state_file" "$hooks_backup"
+    return 1
+  fi
+
+  if [[ "$mcp_registered" == "true" ]] && ! codex mcp remove luthn >/dev/null; then
+    restore_hooks_backup "$hooks_file" "$hooks_backup" "$hooks_existed"
+    rm -f "$codex_disconnect_pending_state_file" "$hooks_backup"
+    return 1
+  fi
+
+  rm -f "$codex_state_file" "$codex_pending_state_file" "$hooks_backup"
+  if ! report_pending_codex_disconnect; then
+    echo "warning: Codex is disconnected locally, but the server observation is pending and will be retried" >&2
+  fi
+  echo "Luthn-owned Codex connector configuration was removed."
+}
+
+run_codex_hook() {
+  helper="$(codex_helper_path)"
+  [[ -f "$helper" && -f "$config_file" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  [[ -f "$service_token_file" ]] || return 0
+  python3 "$helper" hook-run \
+    --base-url "$base_url" \
+    --token-file "$service_token_file" \
+    --connector-version "$codex_connector_version" >/dev/null 2>&1 || true
+}
+
+stop_write_paths() {
+  compose_cmd stop api >/dev/null 2>&1 || true
+  for service in mcp adapter; do
+    ids="$(docker ps -q \
+      --filter "label=com.docker.compose.project=$project_name" \
+      --filter "label=com.docker.compose.service=$service")"
+    if [[ -n "$ids" ]]; then
+      # shellcheck disable=SC2086
+      docker stop $ids >/dev/null
+    fi
+  done
+}
+
+update_luthn() {
+  require_installation
+  require_docker
+  require_command curl
+  target_image="${1:-$(read_config LUTHN_IMAGE "$default_image")}"
+  previous_ref="$(read_config LUTHN_IMAGE "$default_image")"
+  previous_id="$(image_id_for_container)"
+
+  ensure_directories
+  backup_path="$state_dir/backups/luthn-$(date -u +%Y%m%dT%H%M%SZ).dump"
+
+  echo "Pulling $target_image..."
+  if ! pull_image "$target_image"; then
+    record_state failed "$target_image" "" "$previous_id"
+    echo "Update failed while pulling the target image. The running API and previous image were preserved." >&2
+    return 1
+  fi
+
+  target_id="$(docker image inspect --format '{{.Id}}' "$target_image")"
+  target_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target_image" 2>/dev/null || true)"
+  echo "Refreshing lifecycle runtime..."
+  if ! download_runtime "$(runtime_source_for_image "$target_image" "$target_revision")"; then
+    record_state failed "$target_image" "$target_id" "$previous_id"
+    echo "Update failed while downloading lifecycle runtime. The running API and previous image were preserved." >&2
+    return 1
+  fi
+  if has_codex_connector_state; then
+    if ! ensure_connector_scopes; then
+      record_state failed "$target_image" "$target_id" "$previous_id"
+      echo "Update stopped because the active Codex connector scopes could not be configured." >&2
+      return 1
+    fi
+  fi
+
+  compose_cmd up -d postgres
+  wait_for_postgres
+  echo "Stopping API and MCP write paths..."
+  stop_write_paths
+  if [[ -n "${LUTHN_UPDATE_AFTER_STOP_HOOK:-}" ]]; then
+    "$LUTHN_UPDATE_AFTER_STOP_HOOK"
+  fi
+  echo "Backing up PostgreSQL to $backup_path..."
+  umask 077
+  if ! compose_cmd exec -T postgres pg_dump \
+    -U "$(read_config POSTGRES_USER luthn)" \
+    -d "$(read_config POSTGRES_DB luthn)" \
+    -Fc >"$backup_path"; then
+    rm -f "$backup_path"
+    recovery_ref="$previous_ref"
+    [[ -n "$previous_id" ]] && recovery_ref="$previous_id"
+    set_config LUTHN_IMAGE "$recovery_ref"
+    record_state failed "$recovery_ref" "$previous_id" "$previous_id"
+    if ! compose_cmd up -d api; then
+      echo "Update failed while backing up PostgreSQL, and the previous API could not be restarted." >&2
+    else
+      echo "Update failed while backing up PostgreSQL. The previous API was restarted." >&2
+    fi
+    return 1
+  fi
+  record_state updating "$target_image" "$target_id" "$previous_id" "$backup_path"
+
+  set_config LUTHN_IMAGE "$target_image"
+  echo "Applying target-image migrations..."
+  if ! compose_cmd run --rm --no-deps migrate; then
+    [[ -n "$previous_id" ]] && set_config LUTHN_IMAGE "$previous_id" || set_config LUTHN_IMAGE "$previous_ref"
+    record_state failed "$target_image" "$target_id" "$previous_id" "$backup_path"
+    echo "Update failed during migration. API remains stopped; use the recorded backup and previous image for recovery." >&2
+    return 1
+  fi
+
+  compose_cmd up -d api
+  if ! wait_for_api; then
+    stop_write_paths
+    [[ -n "$previous_id" ]] && set_config LUTHN_IMAGE "$previous_id" || set_config LUTHN_IMAGE "$previous_ref"
+    record_state failed "$target_image" "$target_id" "$previous_id" "$backup_path"
+    echo "Update failed readiness. API is stopped; the backup and previous image ID are recorded." >&2
+    return 1
+  fi
+
+  current_id="$(image_id_for_container)"
+  record_state ready "$target_image" "$current_id" "$previous_id" "$backup_path"
+  refresh_codex_connection_observation || \
+    echo "warning: updated Codex connector status could not be reported" >&2
+  echo "Luthn update completed: $target_image"
+}
+
+reset_luthn() {
+  if [[ "${1:-}" != "--yes" ]]; then
+    echo "usage: luthn reset --yes" >&2
+    echo "This permanently deletes the Luthn PostgreSQL and operator volumes." >&2
+    exit 2
+  fi
+  require_installation
+  require_docker
+  compose_cmd down --volumes --remove-orphans
+  docker volume rm \
+    "$(read_config LUTHN_POSTGRES_VOLUME luthn-postgres)" \
+    "$(read_config LUTHN_OPERATOR_VOLUME luthn-operator)" >/dev/null 2>&1 || true
+  start_stack true
+  current_id="$(image_id_for_container)"
+  record_state ready "$(read_config LUTHN_IMAGE "$default_image")" "$current_id"
+  refresh_codex_connection_observation || \
+    echo "warning: reset completed, but Codex connector status could not be reported" >&2
+  echo "Luthn data was reset and the stack is ready."
+}
+
+uninstall_luthn() {
+  purge_data=false
+  confirmed=false
+  while (( $# > 0 )); do
+    case "$1" in
+      --purge-data) purge_data=true ;;
+      --yes) confirmed=true ;;
+      *) echo "unknown uninstall option: $1" >&2; exit 2 ;;
+    esac
+    shift
+  done
+
+  if [[ "$purge_data" == "true" && "$confirmed" != "true" ]]; then
+    echo "usage: luthn uninstall --purge-data --yes" >&2
+    echo "Purging persistent data requires both flags." >&2
+    exit 2
+  fi
+
+  require_docker
+  if has_codex_connector_artifact; then
+    if ! disconnect_codex; then
+      echo "Uninstall stopped because Codex connector cleanup did not complete." >&2
+      echo "Restore Codex prerequisites, run 'luthn disconnect codex', and retry." >&2
+      return 1
+    fi
+  fi
+  if [[ -f "$compose_file" && -f "$config_file" ]]; then
+    if [[ "$purge_data" == "true" ]]; then
+      compose_cmd down --volumes --remove-orphans
+    else
+      compose_cmd down --remove-orphans
+    fi
+  fi
+
+  if [[ "$purge_data" == "true" ]]; then
+    docker volume rm \
+      "$(read_config LUTHN_POSTGRES_VOLUME luthn-postgres)" \
+      "$(read_config LUTHN_OPERATOR_VOLUME luthn-operator)" >/dev/null 2>&1 || true
+    rm -rf "$data_dir" "$config_dir" "$state_dir"
+    echo "Luthn services, persistent data, configuration, backups, and runtime were removed."
+  else
+    rm -rf "$data_dir"
+    echo "Luthn services and runtime were removed. Data volumes, configuration, and backups were preserved."
+  fi
+  rm -f "$cli_path"
+}
+
+run_adapter() {
+  require_installation
+  require_docker
+  compose_cmd --profile tools run --rm --no-deps -T adapter
+}
+
+run_mcp() {
+  require_installation
+  require_docker
+  if (( $# == 0 )); then
+    if [[ -f "$codex_state_file" ]] && command -v python3 >/dev/null 2>&1; then
+      report_codex_observation "mcp:true:Verified:Succeeded:" >/dev/null 2>&1 || true
+    fi
+    if ! compose_cmd --profile tools run --rm --no-deps -T mcp; then
+      if [[ -f "$codex_state_file" ]] && command -v python3 >/dev/null 2>&1; then
+        report_codex_observation "mcp:true:Verified:Failed:mcp.launch_failed" >/dev/null 2>&1 || true
+      fi
+      return 1
+    fi
+  else
+    if compose_cmd --profile tools run --rm --no-deps -T mcp mcp "$@"; then
+      if [[ -f "$codex_state_file" ]] && command -v python3 >/dev/null 2>&1; then
+        report_codex_observation "mcp:true:Verified:Succeeded:" >/dev/null 2>&1 || true
+      fi
+    else
+      if [[ -f "$codex_state_file" ]] && command -v python3 >/dev/null 2>&1; then
+        report_codex_observation "mcp:true:Verified:Failed:mcp.probe_failed" >/dev/null 2>&1 || true
+      fi
+      return 1
+    fi
+  fi
+}
+
+command="${1:-help}"
+case "$command" in
+  install) install_luthn ;;
+  status|check) show_status ;;
+  update) shift; update_luthn "${1:-}" ;;
+  reset) shift; reset_luthn "${1:-}" ;;
+  uninstall) shift; uninstall_luthn "$@" ;;
+  connect)
+    shift
+    [[ "${1:-}" == "codex" ]] || { echo "usage: luthn connect codex" >&2; exit 2; }
+    connect_codex
+    ;;
+  connection)
+    shift
+    [[ "${1:-}" == "status" && "${2:-}" == "codex" ]] || {
+      echo "usage: luthn connection status codex" >&2
+      exit 2
+    }
+    show_codex_connection_status
+    ;;
+  disconnect)
+    shift
+    [[ "${1:-}" == "codex" ]] || { echo "usage: luthn disconnect codex" >&2; exit 2; }
+    disconnect_codex
+    ;;
+  codex-hook) run_codex_hook ;;
+  adapter) run_adapter ;;
+  mcp) shift; run_mcp "$@" ;;
+  help|-h|--help) print_usage ;;
+  *) echo "unknown command: $command" >&2; print_usage >&2; exit 2 ;;
+esac

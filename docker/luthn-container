@@ -1,0 +1,87 @@
+#!/bin/sh
+set -eu
+
+print_usage() {
+  cat >&2 <<'USAGE'
+usage: luthn-container <command> [args]
+
+commands:
+  api
+  migrate-db
+  seed-demo
+  migration-script
+  token-digest --stdin
+  mcp [--list-tools]
+  adapter
+USAGE
+}
+
+run_adapter() {
+  base_url="${LUTHN_BASE_URL:-http://api:8080}"
+  bearer="${LUTHN_SERVICE_BEARER:-${LUTHN_SERVICE_VALUE:-}}"
+  if [ -z "$bearer" ] && [ -n "${LUTHN_SERVICE_BEARER_FILE:-}" ] && [ -r "$LUTHN_SERVICE_BEARER_FILE" ]; then
+    bearer="$(cat "$LUTHN_SERVICE_BEARER_FILE")"
+  fi
+  if [ -z "$bearer" ]; then
+    echo "missing service bearer environment value or readable LUTHN_SERVICE_BEARER_FILE" >&2
+    return 2
+  fi
+
+  payload_file="$(mktemp)"
+  curl_config="$(mktemp)"
+  trap 'rm -f "$payload_file" "$curl_config"' EXIT HUP INT TERM
+  chmod 0600 "$payload_file" "$curl_config"
+  cat >"$payload_file"
+  if [ ! -s "$payload_file" ]; then
+    echo "expected turn-summary JSON payload on stdin" >&2
+    return 2
+  fi
+
+  {
+    printf 'url = "%s/api/agent/turn-summaries"\n' "$base_url"
+    printf 'request = "POST"\n'
+    printf 'header = "content-type: application/json"\n'
+    printf 'header = "Authorization: Bearer %s"\n' "$bearer"
+    printf 'fail\nshow-error\nsilent\n'
+  } >"$curl_config"
+
+  if ! curl --config "$curl_config" --data-binary "@$payload_file" >/dev/null; then
+    echo "warning: Luthn turn-summary upload failed" >&2
+    return 0
+  fi
+}
+
+command="${1:-api}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "$command" in
+  api)
+    cd /app/api
+    exec dotnet /app/api/Luthn.Host.Api.dll "$@"
+    ;;
+  migrate-db|seed-demo|migration-script|token-digest)
+    exec dotnet /app/tools/Luthn.Tools.dll "$command" "$@"
+    ;;
+  mcp)
+    if [ -z "${LUTHN_SERVICE_BEARER:-${LUTHN_SERVICE_VALUE:-}}" ] \
+      && [ -n "${LUTHN_SERVICE_BEARER_FILE:-}" ] \
+      && [ -r "$LUTHN_SERVICE_BEARER_FILE" ]; then
+      LUTHN_SERVICE_BEARER="$(cat "$LUTHN_SERVICE_BEARER_FILE")"
+      export LUTHN_SERVICE_BEARER
+    fi
+    exec dotnet /app/mcp/Luthn.McpServer.dll "$@"
+    ;;
+  adapter)
+    run_adapter
+    ;;
+  help|-h|--help)
+    print_usage
+    ;;
+  *)
+    echo "unknown command: $command" >&2
+    print_usage
+    exit 2
+    ;;
+esac

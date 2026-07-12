@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible problem with Luthn
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove tokens, credentials, private data, and local paths from all fields.
+  - type: input
+    id: version
+    attributes:
+      label: Version or image digest
+      description: Provide the Luthn version, commit, image tag, or image digest.
+      placeholder: ghcr.io/jakobsung/luthn@sha256:...
+    validations:
+      required: true
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation method
+      options:
+        - Docker installer
+        - Docker Compose from source
+        - Local .NET development
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, architecture, Docker runtime, and agent client when relevant.
+      placeholder: macOS arm64, OrbStack, Codex CLI
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe what happened and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Optional logs with credentials, private content, and local paths removed.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed tokens, credentials, private records, customer data, and identifying local paths.
+          required: true
+        - label: I searched existing issues for the same problem.
+          required: true

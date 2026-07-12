@@ -1,0 +1,170 @@
+using Microsoft.EntityFrameworkCore;
+
+namespace Luthn.Core.Persistence;
+
+public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : DbContext(options)
+{
+    public DbSet<SourceEventRecord> SourceEvents => Set<SourceEventRecord>();
+    public DbSet<ClassificationResultRecord> ClassificationResults => Set<ClassificationResultRecord>();
+    public DbSet<WikiProposalRecord> WikiProposals => Set<WikiProposalRecord>();
+    public DbSet<SensitiveRecordReferenceRecord> SensitiveRecordReferences => Set<SensitiveRecordReferenceRecord>();
+    public DbSet<SensitiveAccessRequestRecord> SensitiveAccessRequests => Set<SensitiveAccessRequestRecord>();
+    public DbSet<SensitiveAccessDecisionRecord> SensitiveAccessDecisions => Set<SensitiveAccessDecisionRecord>();
+    public DbSet<SharedMemoryItemRecord> SharedMemoryItems => Set<SharedMemoryItemRecord>();
+    public DbSet<AgentConnectionChannelRecord> AgentConnectionChannels => Set<AgentConnectionChannelRecord>();
+    public DbSet<AuditEventRecord> AuditEvents => Set<AuditEventRecord>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<SourceEventRecord>(entity =>
+        {
+            entity.ToTable("source_events");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.SourceSystem).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SourceType).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.ContentDigest).HasMaxLength(256).IsRequired();
+        });
+
+        modelBuilder.Entity<ClassificationResultRecord>(entity =>
+        {
+            entity.ToTable("classification_results");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.Sensitivity).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.StorageDecision).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.Categories).HasColumnType("jsonb");
+            entity.HasOne(record => record.SourceEvent)
+                .WithMany()
+                .HasForeignKey(record => record.SourceEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WikiProposalRecord>(entity =>
+        {
+            entity.ToTable("wiki_proposals");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.Title).HasMaxLength(200).IsRequired();
+            entity.Property(record => record.SafeSummary).HasMaxLength(4000).IsRequired();
+            entity.Property(record => record.Sensitivity).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.CoreTags).HasColumnType("jsonb");
+            entity.HasIndex(record => new
+            {
+                record.AllowsAgentContext,
+                record.Sensitivity,
+                record.CreatedAt
+            });
+            entity.HasOne(record => record.SourceEvent)
+                .WithMany()
+                .HasForeignKey(record => record.SourceEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SensitiveRecordReferenceRecord>(entity =>
+        {
+            entity.ToTable("sensitive_record_references");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SourceSystem).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SourceType).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.ReferenceLabel).HasMaxLength(256).IsRequired();
+            entity.Property(record => record.RedactedSummary).HasMaxLength(4000).IsRequired();
+            entity.HasOne(record => record.SourceEvent)
+                .WithMany()
+                .HasForeignKey(record => record.SourceEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SensitiveAccessRequestRecord>(entity =>
+        {
+            entity.ToTable("sensitive_access_requests");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.SensitiveRecordReferenceId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.RequestedBy).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.RequestReason).HasMaxLength(1000).IsRequired();
+            entity.Property(record => record.Status).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.DecidedBy).HasMaxLength(128);
+            entity.HasIndex(record => new { record.Status, record.UpdatedAt });
+            entity.HasOne(record => record.SensitiveRecordReference)
+                .WithMany()
+                .HasForeignKey(record => record.SensitiveRecordReferenceId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SensitiveAccessDecisionRecord>(entity =>
+        {
+            entity.ToTable("sensitive_access_decisions");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.SensitiveAccessRequestId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.Decision).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.DecidedBy).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.DecisionReason).HasMaxLength(1000).IsRequired();
+            entity.Property(record => record.PayloadClass).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.RedactionState).HasMaxLength(128).IsRequired();
+            entity.HasOne(record => record.SensitiveAccessRequest)
+                .WithMany()
+                .HasForeignKey(record => record.SensitiveAccessRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SharedMemoryItemRecord>(entity =>
+        {
+            entity.ToTable("shared_memory_items");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.Title).HasMaxLength(200).IsRequired();
+            entity.Property(record => record.SafeSummary).HasMaxLength(4000).IsRequired();
+            entity.Property(record => record.Sensitivity).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.CoreTags).HasColumnType("jsonb");
+            entity.Property(record => record.Visibility).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.RetentionKind).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.SourceSessionId).HasMaxLength(128);
+            entity.Property(record => record.CreatedBy).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => new
+            {
+                record.AllowsAgentContext,
+                record.Sensitivity,
+                record.Visibility,
+                record.ExpiresAt
+            });
+        });
+
+        modelBuilder.Entity<AgentConnectionChannelRecord>(entity =>
+        {
+            entity.ToTable("agent_connection_channels");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(160);
+            entity.Property(record => record.AgentId).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.AgentName).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.IntegrationKind).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.ConnectorVersion).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.Channel).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.ConfigurationOwner).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.VerificationState).HasConversion<string>().HasMaxLength(32);
+            entity.Property(record => record.ActivityState).HasConversion<string>().HasMaxLength(32);
+            entity.Property(record => record.FailureCode).HasMaxLength(64);
+            entity.HasIndex(record => new { record.AgentId, record.Channel }).IsUnique();
+            entity.HasIndex(record => record.UpdatedAt);
+        });
+
+        modelBuilder.Entity<AuditEventRecord>(entity =>
+        {
+            entity.ToTable("audit_events");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.Actor).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.Action).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SubjectId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.PayloadVersion).HasDefaultValue(AuditEventPayloadVersions.Current);
+            entity.Property(record => record.PayloadClass).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.RedactionState).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => new { record.SubjectId, record.OccurredAt });
+        });
+    }
+}

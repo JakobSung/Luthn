@@ -1,0 +1,118 @@
+name: luthn
+
+x-luthn-image: &luthn-image ${LUTHN_IMAGE:-ghcr.io/jakobsung/luthn:main}
+x-luthn-database: &luthn-database ${LUTHN_DOCKER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=luthn;Username=luthn}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-luthn}
+      POSTGRES_USER: ${POSTGRES_USER:-luthn}
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD:-trust}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+  migrate:
+    image: *luthn-image
+    command: migrate-db
+    environment:
+      ConnectionStrings__LuthnDb: *luthn-database
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: *luthn-image
+    command: api
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: ${LUTHN_ENVIRONMENT:-Development}
+      ConnectionStrings__LuthnDb: *luthn-database
+      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-mock}
+      Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
+      Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
+      Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
+      Luthn__OperatorConfig__Directory: /var/lib/luthn/operator
+      Luthn__Host__RequestTimeoutSeconds: ${Luthn__Host__RequestTimeoutSeconds:-65}
+      Luthn__Auth__RequireServiceToken: ${Luthn__Auth__RequireServiceToken:-true}
+      Luthn__Auth__Tokens__0__Name: ${Luthn__Auth__Tokens__0__Name:-local-agent}
+      Luthn__Auth__Tokens__0__Sha256Digest: ${Luthn__Auth__Tokens__0__Sha256Digest:?service token digest is required}
+      Luthn__Auth__Tokens__0__Scopes__0: ${Luthn__Auth__Tokens__0__Scopes__0:-agent.read}
+      Luthn__Auth__Tokens__0__Scopes__1: ${Luthn__Auth__Tokens__0__Scopes__1:-agent.write.summary}
+      Luthn__Auth__Tokens__0__Scopes__2: ${Luthn__Auth__Tokens__0__Scopes__2:-memory.write}
+      Luthn__Auth__Tokens__0__Scopes__3: ${Luthn__Auth__Tokens__0__Scopes__3:-memory.read}
+      Luthn__Auth__Tokens__0__Scopes__4: ${Luthn__Auth__Tokens__0__Scopes__4:-classification.preview}
+      Luthn__Auth__Tokens__0__Scopes__5: ${Luthn__Auth__Tokens__0__Scopes__5:-agent.connection.read}
+      Luthn__Auth__Tokens__0__Scopes__6: ${Luthn__Auth__Tokens__0__Scopes__6:-agent.connection.write}
+      Luthn__Auth__Tokens__0__Scopes__7: ${Luthn__Auth__Tokens__0__Scopes__7:-}
+      Luthn__Auth__Tokens__0__Scopes__8: ${Luthn__Auth__Tokens__0__Scopes__8:-}
+      Luthn__Auth__Tokens__0__Scopes__9: ${Luthn__Auth__Tokens__0__Scopes__9:-}
+      Luthn__Auth__Tokens__0__Scopes__10: ${Luthn__Auth__Tokens__0__Scopes__10:-}
+      Luthn__Auth__Tokens__0__Scopes__11: ${Luthn__Auth__Tokens__0__Scopes__11:-}
+      Luthn__Auth__Tokens__0__Scopes__12: ${Luthn__Auth__Tokens__0__Scopes__12:-}
+      Luthn__Auth__Tokens__0__Scopes__13: ${Luthn__Auth__Tokens__0__Scopes__13:-}
+      Luthn__Auth__Tokens__0__Scopes__14: ${Luthn__Auth__Tokens__0__Scopes__14:-}
+      Luthn__Auth__Tokens__0__Scopes__15: ${Luthn__Auth__Tokens__0__Scopes__15:-}
+    ports:
+      - "127.0.0.1:${LUTHN_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    volumes:
+      - operator-data:/var/lib/luthn/operator
+
+  seed:
+    profiles: ["tools"]
+    image: *luthn-image
+    command: seed-demo
+    environment:
+      ConnectionStrings__LuthnDb: *luthn-database
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  mcp:
+    profiles: ["tools"]
+    image: *luthn-image
+    command: mcp
+    stdin_open: true
+    environment:
+      LUTHN_BASE_URL: http://api:8080
+      LUTHN_SERVICE_BEARER_FILE: /run/secrets/service-token
+    secrets:
+      - service-token
+
+  adapter:
+    profiles: ["tools"]
+    image: *luthn-image
+    command: adapter
+    stdin_open: true
+    environment:
+      LUTHN_BASE_URL: http://api:8080
+      LUTHN_SERVICE_BEARER_FILE: /run/secrets/service-token
+    secrets:
+      - service-token
+
+secrets:
+  service-token:
+    file: ${LUTHN_SERVICE_TOKEN_FILE:?service token file is required}
+
+volumes:
+  postgres-data:
+    name: ${LUTHN_POSTGRES_VOLUME:-luthn-postgres}
+  operator-data:
+    name: ${LUTHN_OPERATOR_VOLUME:-luthn-operator}
