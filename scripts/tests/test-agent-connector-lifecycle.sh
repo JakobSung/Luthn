@@ -253,8 +253,12 @@ for group in groups:
 PY
 }
 
-echo "[1/17] connect installs both channels"
-run_luthn connect codex >/dev/null
+echo "[1/17] connect installs both channels and explains required hook trust"
+connect_output="$(run_luthn connect codex)"
+grep -q '^Required one-time Codex security steps:$' <<<"$connect_output"
+grep -q 'enter /hooks' <<<"$connect_output"
+grep -q 'luthn.agent-connector.v1 and choose Trust' <<<"$connect_output"
+grep -q 'Setup is complete only when automatic-ingestion reports Active' <<<"$connect_output"
 [[ "$(cat "$mcp_state")" == "$cli" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
 grep -q '^SETUP_STATE=configured$' "$state_dir/connectors/codex.env"
@@ -270,6 +274,8 @@ grep -q '^Local connector: configured$' <<<"$status_output"
 grep -q '^  automatic-ingestion: configured$' <<<"$status_output"
 grep -q '^  mcp: configured$' <<<"$status_output"
 grep -q '^Server observation: test$' <<<"$status_output"
+grep -q '^Automatic memory capture is not active yet.$' <<<"$status_output"
+grep -q 'Restart Codex, enter /hooks' <<<"$status_output"
 
 echo "[2/17] repeated connect is idempotent"
 run_luthn connect codex >/dev/null

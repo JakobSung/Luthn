@@ -80,8 +80,11 @@ agents open the original store or read the full source text directly.
 Install Docker with Docker Compose.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
 ```
+
+This one command installs Luthn and configures the Codex connector. The final
+Codex restart and `/hooks` Trust step is an intentional user security review.
 
 ### Optional: Ask an agent
 
@@ -125,8 +128,9 @@ Connect Codex with one command:
 luthn connect codex
 ```
 
-Restart Codex and approve the Luthn `Stop` hook through `/hooks` when prompted,
-then inspect or remove the connection with:
+Follow the command's required steps: restart Codex, open `/hooks`, trust
+`Stop > luthn.agent-connector.v1`, complete one turn, and confirm that
+`automatic-ingestion` reports `Active`. Then inspect or remove the connection with:
 
 ```bash
 luthn connection status codex

@@ -77,8 +77,11 @@ Luthn은 이 문제를 나누어 다룹니다.
 Docker Compose를 포함한 Docker가 필요합니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
 ```
+
+이 한 명령이 Luthn 설치와 Codex connector 등록을 진행합니다. 마지막에 출력되는
+Codex 재시작 및 `/hooks` Trust 단계는 사용자 확인이 필요한 보안 절차입니다.
 
 ### [선택] 에이전트에게 시키기
 
@@ -122,7 +125,9 @@ Codex는 한 명령으로 연결합니다.
 luthn connect codex
 ```
 
-Codex를 재시작한 뒤 `/hooks`에서 Luthn `Stop` hook을 승인합니다. 연결 상태 확인과
+명령이 안내하는 순서대로 Codex를 재시작하고 `/hooks`에서
+`Stop > luthn.agent-connector.v1`을 열어 **Trust**를 선택해야 연결이 완료됩니다.
+한 턴을 마친 뒤 `automatic-ingestion`이 `Active`인지 확인합니다. 연결 상태 확인과
 해제는 다음 명령을 사용합니다.
 
 ```bash

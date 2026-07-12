@@ -38,13 +38,15 @@ If Docker points at a stale socket, select a working context with
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
 ```
 
 The bootstrap installs the CLI at `~/.local/bin/luthn`. It downloads the
 source-free Compose bundle, pulls `ghcr.io/jakobsung/luthn:main`, creates a
 local service token, starts PostgreSQL, applies migrations before API startup,
 seeds public-safe demo data, and waits for health and readiness.
+With `--connect-codex`, the same bootstrap also configures the Codex hook and MCP
+registration, then prints the required restart and `/hooks` Trust steps.
 
 If `~/.local/bin` is not already on `PATH`, use the export command printed by
 the installer and add it to your shell profile.
