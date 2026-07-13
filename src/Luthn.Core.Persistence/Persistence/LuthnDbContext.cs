@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Luthn.Core.Memory;
 
 namespace Luthn.Core.Persistence;
 
@@ -11,6 +12,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public DbSet<SensitiveAccessRequestRecord> SensitiveAccessRequests => Set<SensitiveAccessRequestRecord>();
     public DbSet<SensitiveAccessDecisionRecord> SensitiveAccessDecisions => Set<SensitiveAccessDecisionRecord>();
     public DbSet<SharedMemoryItemRecord> SharedMemoryItems => Set<SharedMemoryItemRecord>();
+    public DbSet<LocalInstallationStateRecord> LocalInstallationStates => Set<LocalInstallationStateRecord>();
+    public DbSet<SafeProjectionSyncOutboxRecord> SafeProjectionSyncOutbox => Set<SafeProjectionSyncOutboxRecord>();
+    public DbSet<SafeProjectionSyncCheckpointRecord> SafeProjectionSyncCheckpoints => Set<SafeProjectionSyncCheckpointRecord>();
     public DbSet<AgentConnectionChannelRecord> AgentConnectionChannels => Set<AgentConnectionChannelRecord>();
     public DbSet<AuditEventRecord> AuditEvents => Set<AuditEventRecord>();
 
@@ -126,6 +130,13 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.RetentionKind).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.SourceSessionId).HasMaxLength(128);
             entity.Property(record => record.CreatedBy).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.Revision).HasDefaultValue(1L);
+            entity.Property(record => record.Revision).IsConcurrencyToken();
+            entity.Property(record => record.ExternalPublicationState)
+                .HasConversion<string>()
+                .HasMaxLength(64)
+                .HasDefaultValue(ExternalPublicationState.LocalOnly);
+            entity.Property(record => record.ExternalPublicationDecidedBy).HasMaxLength(128);
             entity.HasIndex(record => new
             {
                 record.AllowsAgentContext,
@@ -133,6 +144,47 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.Visibility,
                 record.ExpiresAt
             });
+        });
+
+        modelBuilder.Entity<LocalInstallationStateRecord>(entity =>
+        {
+            entity.ToTable("local_installation_state");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(32);
+            entity.Property(record => record.OriginInstanceId).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => record.OriginInstanceId).IsUnique();
+        });
+
+        modelBuilder.Entity<SafeProjectionSyncOutboxRecord>(entity =>
+        {
+            entity.ToTable("safe_projection_sync_outbox");
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.IdempotencyKey).HasMaxLength(512).IsRequired();
+            entity.Property(record => record.OriginInstanceId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.LocalRecordId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.Operation).HasConversion<string>().HasMaxLength(32);
+            entity.Property(record => record.SafeEnvelopeJson).HasColumnType("jsonb").IsRequired();
+            entity.Property(record => record.State).HasConversion<string>().HasMaxLength(32);
+            entity.Property(record => record.LastErrorCode).HasMaxLength(128);
+            entity.Property(record => record.RemoteCheckpoint).HasMaxLength(512);
+            entity.HasIndex(record => record.IdempotencyKey).IsUnique();
+            entity.HasIndex(record => new
+            {
+                record.OriginInstanceId,
+                record.LocalRecordId,
+                record.Revision,
+                record.Operation
+            }).IsUnique();
+            entity.HasIndex(record => new { record.State, record.NextAttemptAt, record.CreatedAt });
+        });
+
+        modelBuilder.Entity<SafeProjectionSyncCheckpointRecord>(entity =>
+        {
+            entity.ToTable("safe_projection_sync_checkpoints");
+            entity.HasKey(record => record.TransportName);
+            entity.Property(record => record.TransportName).HasMaxLength(128);
+            entity.Property(record => record.Checkpoint).HasMaxLength(512).IsRequired();
         });
 
         modelBuilder.Entity<AgentConnectionChannelRecord>(entity =>

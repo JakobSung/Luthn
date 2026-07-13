@@ -22,8 +22,8 @@ services:
       Luthn__Auth__Tokens__0__Scopes__4: ${Luthn__Auth__Tokens__0__Scopes__4:-classification.preview}
       Luthn__Auth__Tokens__0__Scopes__5: ${Luthn__Auth__Tokens__0__Scopes__5:-agent.connection.read}
       Luthn__Auth__Tokens__0__Scopes__6: ${Luthn__Auth__Tokens__0__Scopes__6:-agent.connection.write}
-      Luthn__Auth__Tokens__0__Scopes__7: ${Luthn__Auth__Tokens__0__Scopes__7:-}
-      Luthn__Auth__Tokens__0__Scopes__8: ${Luthn__Auth__Tokens__0__Scopes__8:-}
+      Luthn__Auth__Tokens__0__Scopes__7: ${Luthn__Auth__Tokens__0__Scopes__7:-external-publication.read}
+      Luthn__Auth__Tokens__0__Scopes__8: ${Luthn__Auth__Tokens__0__Scopes__8:-external-publication.write}
       Luthn__Auth__Tokens__0__Scopes__9: ${Luthn__Auth__Tokens__0__Scopes__9:-}
       Luthn__Auth__Tokens__0__Scopes__10: ${Luthn__Auth__Tokens__0__Scopes__10:-}
       Luthn__Auth__Tokens__0__Scopes__11: ${Luthn__Auth__Tokens__0__Scopes__11:-}
@@ -38,6 +38,21 @@ services:
         condition: service_healthy
     volumes:
       - luthn-operator:/var/lib/luthn/operator
+
+  worker:
+    profiles: ["sync-worker"]
+    build:
+      context: .
+      dockerfile: src/Luthn.Host.Api/Dockerfile
+    command: ["worker"]
+    environment:
+      ConnectionStrings__LuthnDb: ${LUTHN_DOCKER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=luthn;Username=luthn}
+      Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
+      Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
+      Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:18-alpine

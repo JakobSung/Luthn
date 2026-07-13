@@ -89,6 +89,33 @@ PostgreSQL storage. API reads expose only public, non-expired,
 agent-allowed projections; private, restricted, and raw source/Vault content
 remain outside the default read surface.
 
+## Cloud-Ready Local-First Foundation
+
+Every shared-memory record starts as `LocalOnly`. Agent visibility and external
+publication are independent decisions: an agent-safe record is not queued for
+external publication until an operator changes it to `ApprovedForExternal`.
+`Revoked` creates a new revision and a body-free tombstone so a future remote
+adapter can remove the previously published projection.
+
+The safe sync envelope is versioned and identified by `originInstanceId`, local
+record id, revision, and operation. The same tuple is the idempotency boundary.
+The initial upsert policy exports only the independently classified safe summary,
+bounded policy metadata, timestamps, and an optional provenance digest. Title and
+Core tags remain empty until those fields have an independent safe-projection
+classification path. Raw source,
+private/Vault content, credentials, prompts, transcripts, and local paths have
+no fields in the contract.
+
+Publication state, audit metadata, and the durable outbox row are committed
+together. The Worker claims ready rows with a bounded lease, retries with
+backoff, supersedes unsent older revisions, stores acknowledgements/checkpoints,
+and emits revocation tombstones. A newer revision is not sent while an older
+revision for the same local record is still processing.
+The only transport registered by this repository is `disabled`; it makes no
+network request and leaves queued records untouched. A real Luthn Ontology
+transport, tenant/auth service, billing, and shared team data plane belong to a
+separate commercial repository.
+
 ## Plugin Ingestion Contract
 
 Plugin ingestion starts as a metadata contract rather than a new storage path.

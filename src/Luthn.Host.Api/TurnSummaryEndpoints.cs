@@ -134,6 +134,7 @@ public static class TurnSummaryEndpoints
             SourceSessionId = memory.SourceSessionId?.Value,
             AllowsAgentContext = allowsAgentContext,
             CreatedAt = receivedAt,
+            UpdatedAt = receivedAt,
             CreatedBy = ServiceTokenAuthorization.GetActor(httpContext)
         });
         db.AuditEvents.Add(new AuditEventRecord

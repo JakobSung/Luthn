@@ -42,3 +42,15 @@ Use this file for concrete classification examples.
   source content.
 - Normal automated tests must use mock or fake providers unless an integration
   test is explicitly enabled by an operator.
+
+## External Publication Boundary
+
+- Agent visibility does not imply permission to publish externally.
+- Only an explicitly approved public, non-expired, agent-visible safe
+  projection can enter the external-publication outbox.
+- Revocation records contain identity, revision, operation, and bounded policy
+  metadata only; they do not repeat the projection body.
+- Raw source/Vault data, private memory, credentials, prompts, transcripts,
+  local paths, and sensitive-access output must never enter the sync contract.
+- The public self-host build has no active cloud transport and performs no
+  external sync by default.

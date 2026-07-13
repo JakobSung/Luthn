@@ -104,7 +104,58 @@ public sealed class SharedMemoryItemRecord
     public string? SourceSessionId { get; set; }
     public bool AllowsAgentContext { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
     public string CreatedBy { get; set; } = "";
+    public long Revision { get; set; } = 1;
+    public ExternalPublicationState ExternalPublicationState { get; set; } = ExternalPublicationState.LocalOnly;
+    public DateTimeOffset? ExternalPublicationDecidedAt { get; set; }
+    public string? ExternalPublicationDecidedBy { get; set; }
+}
+
+public sealed class LocalInstallationStateRecord
+{
+    public const string SingletonId = "local";
+
+    public string Id { get; set; } = SingletonId;
+    public string OriginInstanceId { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public enum SafeProjectionSyncOutboxState
+{
+    Pending,
+    Processing,
+    Failed,
+    Superseded,
+    Acknowledged
+}
+
+public sealed class SafeProjectionSyncOutboxRecord
+{
+    public string Id { get; set; } = "";
+    public string IdempotencyKey { get; set; } = "";
+    public string OriginInstanceId { get; set; } = "";
+    public string LocalRecordId { get; set; } = "";
+    public long Revision { get; set; }
+    public SafeProjectionSyncOperation Operation { get; set; }
+    public int ContractVersion { get; set; } = SafeProjectionSyncContractVersions.Current;
+    public string SafeEnvelopeJson { get; set; } = "";
+    public SafeProjectionSyncOutboxState State { get; set; } = SafeProjectionSyncOutboxState.Pending;
+    public int AttemptCount { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ProcessingStartedAt { get; set; }
+    public DateTimeOffset? LastAttemptAt { get; set; }
+    public DateTimeOffset? AcknowledgedAt { get; set; }
+    public string? LastErrorCode { get; set; }
+    public string? RemoteCheckpoint { get; set; }
+}
+
+public sealed class SafeProjectionSyncCheckpointRecord
+{
+    public string TransportName { get; set; } = "";
+    public string Checkpoint { get; set; } = "";
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public enum AgentConnectionVerificationState

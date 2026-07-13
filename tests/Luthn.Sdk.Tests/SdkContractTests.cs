@@ -6,12 +6,89 @@ using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
 using Luthn.Sdk.Plugins;
 using Luthn.Sdk.Source;
+using Luthn.Sdk.Sync;
 using Luthn.Sdk.Wiki;
 
 namespace Luthn.Sdk.Tests;
 
 public sealed class SdkContractTests
 {
+    [Fact]
+    public void SafeProjectionSyncEnvelopeUsesVersionedPublicSafeContract()
+    {
+        var envelope = new SafeProjectionSyncEnvelopeDto(
+            1,
+            "instance-1",
+            "memory-1",
+            2,
+            "Upsert",
+            "Release decision",
+            "Use the approved release process.",
+            ["release"],
+            "shared-memory-safe-projection",
+            "metadata-only",
+            "safe-projection-only",
+            DateTimeOffset.Parse("2026-07-12T00:00:00Z"),
+            DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
+            DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
+            DateTimeOffset.Parse("2027-07-13T00:00:00Z"),
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        var json = JsonSerializer.Serialize(envelope);
+        using var document = JsonDocument.Parse(json);
+        var actualProperties = document.RootElement
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        var expectedProperties = new[]
+        {
+            "contractVersion", "originInstanceId", "localRecordId", "revision", "operation",
+            "title", "safeSummary", "coreTags", "projectionKind", "payloadClass",
+            "redactionState", "createdAt", "updatedAt", "decidedAt", "expiresAt",
+            "provenanceDigest"
+        }.OrderBy(name => name, StringComparer.Ordinal).ToArray();
+
+        Assert.Equal(expectedProperties, actualProperties);
+        Assert.Contains("\"contractVersion\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"originInstanceId\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"localRecordId\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"revision\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"redactionState\":\"safe-projection-only\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("vault", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sourceContent", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SafeProjectionRevokeDtoOmitsProjectionBody()
+    {
+        var envelope = new SafeProjectionSyncEnvelopeDto(
+            1,
+            "instance-1",
+            "memory-1",
+            3,
+            "Revoke",
+            null,
+            null,
+            [],
+            "shared-memory-safe-projection",
+            "metadata-only",
+            "safe-projection-only",
+            DateTimeOffset.Parse("2026-07-12T00:00:00Z"),
+            DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
+            DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
+            null,
+            null);
+
+        var json = JsonSerializer.Serialize(envelope);
+
+        Assert.DoesNotContain("\"title\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"safeSummary\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"expiresAt\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"provenanceDigest\"", json, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ContextPackRequestSerializesCoreTagsContract()
     {

@@ -90,6 +90,37 @@
         </div>
       </section>
 
+      <section class="panel wide" aria-labelledby="externalPublicationTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Cloud-ready local foundation</p>
+            <h2 id="externalPublicationTitle">External publication</h2>
+          </div>
+          <div class="panel-heading-actions">
+            <span id="syncStatus" class="inline-status" role="status" aria-live="polite">Checking local outbox.</span>
+            <button id="refreshSyncStatus" type="button" class="secondary">Refresh</button>
+          </div>
+        </div>
+        <form id="publicationForm" class="stack">
+          <div class="form-grid">
+            <label>
+              Memory item id
+              <input name="memoryItemId" required maxlength="128" placeholder="memory item id">
+            </label>
+            <label>
+              Local publication state
+              <input id="publicationState" value="Not loaded" readonly>
+            </label>
+          </div>
+          <div class="row-actions">
+            <button id="readPublication" type="button" class="secondary">Read state</button>
+            <button id="approvePublication" type="button">Approve safe projection</button>
+            <button id="revokePublication" type="button" class="secondary">Revoke</button>
+          </div>
+        </form>
+        <pre id="publicationOutput" class="result compact" aria-live="polite">Cloud transport is disabled by default. Approved envelopes remain in the local durable outbox.</pre>
+      </section>
+
       <section class="panel wide">
         <div class="panel-heading">
           <div>

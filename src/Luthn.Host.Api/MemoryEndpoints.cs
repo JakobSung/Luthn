@@ -94,6 +94,7 @@ public static class MemoryEndpoints
             SourceSessionId = item.SourceSessionId?.Value,
             AllowsAgentContext = allowsAgentContext,
             CreatedAt = createdAt,
+            UpdatedAt = createdAt,
             CreatedBy = ServiceTokenAuthorization.GetActor(httpContext)
         });
 

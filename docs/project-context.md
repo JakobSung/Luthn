@@ -29,6 +29,9 @@ context.
   truth.
 - Local/PostgreSQL storage is the default self-host memory path; external memory
   services are optional adapters behind Luthn policy.
+- Local-only operation is the invariant. External publication requires an
+  operator action and exports only a versioned public-safe projection through a
+  durable local outbox. The public repository contains no active cloud client.
 - Local self-host smoke flows should run without provider credentials.
 - The repository must remain safe to expose: no credentials, private source
   records, customer originals, local agent artifacts, local planning state, or
@@ -42,6 +45,16 @@ Raw/private source
   -> Classification + policy
   -> Vault / Core graph / shared memory / Wiki projection / Ignore / NeedsReview
   -> Agent API returns Core-filtered, wiki-safe memory and context
+```
+
+Optional future team sharing follows a separate boundary:
+
+```text
+Approved shared memory
+  -> explicit external-publication approval
+  -> versioned safe projection in local durable outbox
+  -> disabled transport boundary
+  -> future commercial cloud adapter outside this repository
 ```
 
 Runtime projects:

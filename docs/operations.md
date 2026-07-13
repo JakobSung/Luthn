@@ -196,7 +196,31 @@ The adapter contract exports only `public-agent-allowed-safe-projections` with
 shared memory item is eligible only when it is public, agent-visible through
 `PublicSafe` or `SharedAcrossAgents`, and not expired.
 
-External adapters should treat the exported ID, title, safe summary, Core tags,
-projection kind, payload class, redaction state, and expiration as the complete
-payload. Any service-specific embedding, indexing, backup, restore, or deletion
-workflow must preserve this same safe projection boundary.
+External adapters should treat the exported ID, safe summary, projection kind,
+payload class, redaction state, and expiration as the complete initial payload.
+Title and Core tags are reserved in the versioned DTO but remain empty until they
+have an independent safe-projection classification path. Any service-specific
+embedding, indexing, backup, restore, or deletion workflow must preserve this
+same safe projection boundary.
+
+### Local outbox operation
+
+The migration adds local installation identity, publication lifecycle columns,
+a safe-projection outbox, and transport checkpoints. Existing memory rows are
+backfilled as `LocalOnly`, revision `1`, with `UpdatedAt` copied from
+`CreatedAt`; the migration does not queue historical data.
+When a newer local revision exists, unsent older operations become
+`Superseded`; they are retained for bounded audit/deduplication metadata but are
+not sent later.
+
+The Compose bundle contains an opt-in Worker profile:
+
+```bash
+docker compose --env-file .env --profile sync-worker up -d worker
+```
+
+The default Compose stack does not start this profile. Even when started, the
+public build registers only the disabled transport, performs no outbound
+connection, and leaves pending outbox rows untouched. Do not deploy a real
+cloud adapter until its endpoint authentication, tenant isolation, deletion,
+backup/restore, and audit boundaries are separately reviewed.

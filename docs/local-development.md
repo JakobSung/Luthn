@@ -131,7 +131,8 @@ Luthn__Auth__Tokens__0__ExpiresAt=2026-12-31T23:59:59Z
 
 Supported scopes include `agent.read`, `agent.write.summary`,
 `agent.connection.read`, `agent.connection.write`, `classification.preview`,
-`source.write`, `memory.read`, `memory.write`, `access.request`,
+`external-publication.read`, `external-publication.write`, `source.write`,
+`memory.read`, `memory.write`, `access.request`,
 `access.decide`, `audit.read`, and `*` for operator-controlled admin use. Local
 `Testing` mode remains credential-free unless token options are configured.
 `ExpiresAt` is optional. Expired tokens are ignored by the authorization filter

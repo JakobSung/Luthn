@@ -76,6 +76,7 @@ public sealed class PersistenceContractTests
             RetentionKind = MemoryRetentionKind.Durable,
             AllowsAgentContext = true,
             CreatedAt = receivedAt,
+            UpdatedAt = receivedAt,
             CreatedBy = "local-tools"
         });
         db.AgentConnectionChannels.Add(new AgentConnectionChannelRecord
@@ -162,6 +163,10 @@ public sealed class PersistenceContractTests
         Assert.Contains("wiki_proposals", script, StringComparison.Ordinal);
         Assert.Contains("shared_memory_items", script, StringComparison.Ordinal);
         Assert.Contains("agent_connection_channels", script, StringComparison.Ordinal);
+        Assert.Contains("local_installation_state", script, StringComparison.Ordinal);
+        Assert.Contains("safe_projection_sync_outbox", script, StringComparison.Ordinal);
+        Assert.Contains("safe_projection_sync_checkpoints", script, StringComparison.Ordinal);
+        Assert.Contains("ExternalPublicationState", script, StringComparison.Ordinal);
         Assert.Contains("\"CoreTags\"", script, StringComparison.Ordinal);
         Assert.Contains("IX_wiki_proposals_AllowsAgentContext_Sensitivity_CreatedAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_sensitive_access_requests_Status_UpdatedAt", script, StringComparison.Ordinal);
@@ -169,6 +174,9 @@ public sealed class PersistenceContractTests
         Assert.Contains("IX_agent_connection_channels_AgentId_Channel", script, StringComparison.Ordinal);
         Assert.DoesNotContain("raw_content", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("raw_source", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DEFAULT 'LocalOnly'", script, StringComparison.Ordinal);
+        Assert.Contains("SET \"UpdatedAt\" = \"CreatedAt\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("INSERT INTO safe_projection_sync_outbox", script, StringComparison.OrdinalIgnoreCase);
     }
 
     private static LuthnDbContext CreateDbContext()

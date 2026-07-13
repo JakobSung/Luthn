@@ -57,12 +57,14 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("Access requests", index, StringComparison.Ordinal);
         Assert.Contains("Agent connections", index, StringComparison.Ordinal);
         Assert.Contains("Read-only agent connection status", index, StringComparison.Ordinal);
+        Assert.Contains("External publication", index, StringComparison.Ordinal);
         Assert.DoesNotContain("Connect agent", index, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Disconnect agent", index, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("text/html", indexResponse.Content.Headers.ContentType?.MediaType);
         Assert.Equal(HttpStatusCode.OK, cssResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, jsResponse.StatusCode);
         Assert.Contains("/api/agent-connections", script, StringComparison.Ordinal);
+        Assert.Contains("/api/external-publication/status", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/observations", script, StringComparison.Ordinal);
     }
 
