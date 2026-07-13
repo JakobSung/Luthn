@@ -132,9 +132,9 @@ public sealed class SafeProjectionPublicationService(
             installation.OriginInstanceId,
             memory.Id,
             memory.Revision,
-            memory.Title,
+            string.Empty,
             memory.SafeSummary,
-            memory.CoreTags,
+            Array.Empty<string>(),
             memory.ExternalPublicationState,
             memory.Sensitivity,
             memory.Visibility,
@@ -294,8 +294,16 @@ public sealed class SafeProjectionOutboxProcessor(
         TimeSpan? processingLease = null,
         CancellationToken cancellationToken = default)
     {
+        var lease = processingLease ?? TimeSpan.FromMinutes(5);
+        if (lease <= TimeSpan.FromTicks(1))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(processingLease),
+                "The processing lease must be longer than one tick.");
+        }
+
         var recoveredCount = await RecoverAbandonedAsync(
-            now - (processingLease ?? TimeSpan.FromMinutes(5)),
+            now - lease,
             maxAttempts,
             cancellationToken);
         var supersededCount = await SupersedeOutdatedAsync(cancellationToken);
@@ -349,7 +357,9 @@ public sealed class SafeProjectionOutboxProcessor(
                 var envelope = JsonSerializer.Deserialize<SafeProjectionSyncEnvelope>(
                     record.SafeEnvelopeJson,
                     SerializerOptions) ?? throw new InvalidOperationException("Sync envelope is empty.");
-                result = await transport.SendAsync(envelope, cancellationToken);
+                using var sendCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                sendCancellation.CancelAfter(TimeSpan.FromTicks(lease.Ticks / 2));
+                result = await transport.SendAsync(envelope, sendCancellation.Token);
             }
             catch (Exception) when (!cancellationToken.IsCancellationRequested)
             {
@@ -484,7 +494,12 @@ public sealed class SafeProjectionOutboxProcessor(
                     (record.State == SafeProjectionSyncOutboxState.Pending ||
                         record.State == SafeProjectionSyncOutboxState.Failed) &&
                     record.AttemptCount < maxAttempts &&
-                    (record.NextAttemptAt == null || record.NextAttemptAt <= now))
+                    (record.NextAttemptAt == null || record.NextAttemptAt <= now) &&
+                    !db.SafeProjectionSyncOutbox.Any(older =>
+                        older.OriginInstanceId == record.OriginInstanceId &&
+                        older.LocalRecordId == record.LocalRecordId &&
+                        older.Revision < record.Revision &&
+                        older.State == SafeProjectionSyncOutboxState.Processing))
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(record => record.State, SafeProjectionSyncOutboxState.Processing)
                     .SetProperty(record => record.ProcessingStartedAt, now)
@@ -500,7 +515,14 @@ public sealed class SafeProjectionOutboxProcessor(
         if (record is null ||
             record.State is not (SafeProjectionSyncOutboxState.Pending or SafeProjectionSyncOutboxState.Failed) ||
             record.AttemptCount >= maxAttempts ||
-            record.NextAttemptAt is { } nextAttemptAt && nextAttemptAt > now)
+            record.NextAttemptAt is { } nextAttemptAt && nextAttemptAt > now ||
+            await db.SafeProjectionSyncOutbox.AnyAsync(
+                older =>
+                    older.OriginInstanceId == record.OriginInstanceId &&
+                    older.LocalRecordId == record.LocalRecordId &&
+                    older.Revision < record.Revision &&
+                    older.State == SafeProjectionSyncOutboxState.Processing,
+                cancellationToken))
         {
             return false;
         }
