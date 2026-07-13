@@ -23,7 +23,8 @@ public sealed class SafeProjectionSyncTests
         Assert.Equal(SafeProjectionSyncOperation.Upsert, envelope.Operation);
         Assert.Equal(1, envelope.ContractVersion);
         Assert.Equal("instance-1:memory-1:1:Upsert", SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope));
-        Assert.Equal(["decision", "project"], envelope.CoreTags);
+        Assert.Null(envelope.Title);
+        Assert.Empty(envelope.CoreTags);
     }
 
     [Fact]
@@ -81,9 +82,7 @@ public sealed class SafeProjectionSyncTests
             "instance-1",
             "memory-1",
             revision: 1,
-            " Project decision ",
             " Use PostgreSQL for durable storage. ",
-            [" decision ", "Decision", "project"],
             state,
             sensitivity,
             visibility,

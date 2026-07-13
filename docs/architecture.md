@@ -99,8 +99,10 @@ adapter can remove the previously published projection.
 
 The safe sync envelope is versioned and identified by `originInstanceId`, local
 record id, revision, and operation. The same tuple is the idempotency boundary.
-Only title, safe summary, Core tags, bounded policy metadata, timestamps, and an
-optional provenance digest can appear in an upsert envelope. Raw source,
+The initial upsert policy exports only the independently classified safe summary,
+bounded policy metadata, timestamps, and an optional provenance digest. Title and
+Core tags remain empty until those fields have an independent safe-projection
+classification path. Raw source,
 private/Vault content, credentials, prompts, transcripts, and local paths have
 no fields in the contract.
 

@@ -97,9 +97,7 @@ public static class SafeProjectionSyncPolicy
         string originInstanceId,
         string localRecordId,
         long revision,
-        string title,
         string safeSummary,
-        IReadOnlyList<string> coreTags,
         ExternalPublicationState publicationState,
         SensitivityLevel sensitivity,
         MemoryVisibility visibility,
@@ -123,9 +121,9 @@ public static class SafeProjectionSyncPolicy
             RequiredToken(localRecordId, nameof(localRecordId)),
             revision,
             SafeProjectionSyncOperation.Upsert,
-            RequiredText(title, nameof(title)),
+            Title: null,
             RequiredText(safeSummary, nameof(safeSummary)),
-            NormalizeTags(coreTags),
+            CoreTags: [],
             ExternalMemoryAdapterCatalog.SharedMemoryProjection,
             ExternalMemoryAdapterCatalog.MetadataOnlyPayload,
             ExternalMemoryAdapterCatalog.SafeProjectionOnly,
@@ -177,13 +175,6 @@ public static class SafeProjectionSyncPolicy
             throw new ArgumentOutOfRangeException(nameof(revision), "Sync revision must be positive.");
         }
     }
-
-    private static IReadOnlyList<string> NormalizeTags(IEnumerable<string> tags) =>
-        tags
-            .Where(tag => !string.IsNullOrWhiteSpace(tag))
-            .Select(tag => tag.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
 
     private static string RequiredText(string value, string parameterName)
     {

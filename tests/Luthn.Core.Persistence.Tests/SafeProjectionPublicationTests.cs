@@ -30,6 +30,10 @@ public sealed class SafeProjectionPublicationTests
         using var envelope = JsonDocument.Parse(outbox.SafeEnvelopeJson);
         var propertyNames = envelope.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
         Assert.Contains("safeSummary", propertyNames);
+        Assert.DoesNotContain("title", propertyNames);
+        Assert.Empty(envelope.RootElement.GetProperty("coreTags").EnumerateArray());
+        Assert.DoesNotContain("private-title-token", outbox.SafeEnvelopeJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-tag", outbox.SafeEnvelopeJson, StringComparison.Ordinal);
         Assert.DoesNotContain(propertyNames, name =>
             name.Contains("raw", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
@@ -186,9 +190,7 @@ public sealed class SafeProjectionPublicationTests
             "instance-test",
             "memory-1",
             2,
-            "Safe runbook",
             "Public-safe deployment steps.",
-            ["runbook"],
             ExternalPublicationState.ApprovedForExternal,
             SensitivityLevel.Public,
             MemoryVisibility.SharedAcrossAgents,
@@ -274,10 +276,10 @@ public sealed class SafeProjectionPublicationTests
     private static SharedMemoryItemRecord CreateSafeMemory(DateTimeOffset now) => new()
     {
         Id = "memory-1",
-        Title = "Safe runbook",
+        Title = "private-title-token",
         SafeSummary = "Public-safe deployment steps.",
         Sensitivity = SensitivityLevel.Public,
-        CoreTags = ["runbook"],
+        CoreTags = ["secret-tag"],
         Visibility = MemoryVisibility.SharedAcrossAgents,
         RetentionKind = MemoryRetentionKind.Durable,
         AllowsAgentContext = true,

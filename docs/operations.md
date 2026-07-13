@@ -196,10 +196,12 @@ The adapter contract exports only `public-agent-allowed-safe-projections` with
 shared memory item is eligible only when it is public, agent-visible through
 `PublicSafe` or `SharedAcrossAgents`, and not expired.
 
-External adapters should treat the exported ID, title, safe summary, Core tags,
-projection kind, payload class, redaction state, and expiration as the complete
-payload. Any service-specific embedding, indexing, backup, restore, or deletion
-workflow must preserve this same safe projection boundary.
+External adapters should treat the exported ID, safe summary, projection kind,
+payload class, redaction state, and expiration as the complete initial payload.
+Title and Core tags are reserved in the versioned DTO but remain empty until they
+have an independent safe-projection classification path. Any service-specific
+embedding, indexing, backup, restore, or deletion workflow must preserve this
+same safe projection boundary.
 
 ### Local outbox operation
 

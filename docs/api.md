@@ -163,6 +163,11 @@ connect to a cloud service. Revoke queues a tombstone without title, safe
 summary, expiration, or provenance body fields. Repeated approval or revocation
 returns the existing state without creating another revision.
 
+The initial upsert envelope exports the independently classified `safeSummary`.
+`title` and `coreTags` are reserved DTO fields but remain empty because the
+current memory intake classifier does not independently classify them for
+external publication.
+
 Example item status:
 
 ```json
