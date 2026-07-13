@@ -178,6 +178,77 @@ public sealed class SafeProjectionPublicationTests
     }
 
     [Fact]
+    public async Task ProcessorSupersedesOlderFailedUpsertBeforeSendingRevoke()
+    {
+        await using var db = CreateDbContext();
+        var now = DateTimeOffset.Parse("2026-07-13T01:00:00Z");
+        var upsert = SafeProjectionSyncPolicy.CreateUpsert(
+            "instance-test",
+            "memory-1",
+            2,
+            "Safe runbook",
+            "Public-safe deployment steps.",
+            ["runbook"],
+            ExternalPublicationState.ApprovedForExternal,
+            SensitivityLevel.Public,
+            MemoryVisibility.SharedAcrossAgents,
+            now.AddDays(-1),
+            now.AddMinutes(-2),
+            now.AddMinutes(-2),
+            expiresAt: null);
+        var revoke = SafeProjectionSyncPolicy.CreateRevoke(
+            "instance-test",
+            "memory-1",
+            3,
+            now.AddDays(-1),
+            now,
+            now);
+        var older = CreateOutbox(upsert, now.AddMinutes(-2));
+        older.State = SafeProjectionSyncOutboxState.Failed;
+        older.NextAttemptAt = now;
+        db.SafeProjectionSyncOutbox.AddRange(older, CreateOutbox(revoke, now));
+        await db.SaveChangesAsync();
+        var transport = new CapturingTransport();
+        var processor = new SafeProjectionOutboxProcessor(db, transport);
+
+        var result = await processor.ProcessBatchAsync(now, cancellationToken: CancellationToken.None);
+
+        Assert.Equal(1, result.SupersededCount);
+        Assert.Equal([SafeProjectionSyncOperation.Revoke], transport.Operations);
+        Assert.Equal(
+            SafeProjectionSyncOutboxState.Superseded,
+            (await db.SafeProjectionSyncOutbox.SingleAsync(record => record.Revision == 2)).State);
+        Assert.Equal(
+            SafeProjectionSyncOutboxState.Acknowledged,
+            (await db.SafeProjectionSyncOutbox.SingleAsync(record => record.Revision == 3)).State);
+    }
+
+    [Fact]
+    public async Task RecoveryMarksLeaseExpiredFinalAttemptAsFailed()
+    {
+        await using var db = CreateDbContext();
+        var now = DateTimeOffset.Parse("2026-07-13T01:00:00Z");
+        var outbox = CreateOutbox(now.AddMinutes(-10));
+        outbox.State = SafeProjectionSyncOutboxState.Processing;
+        outbox.ProcessingStartedAt = now.AddMinutes(-10);
+        outbox.AttemptCount = 5;
+        db.SafeProjectionSyncOutbox.Add(outbox);
+        await db.SaveChangesAsync();
+        var processor = new SafeProjectionOutboxProcessor(db, new DisabledSafeProjectionSyncTransport());
+
+        var result = await processor.ProcessBatchAsync(
+            now,
+            maxAttempts: 5,
+            processingLease: TimeSpan.FromMinutes(5),
+            cancellationToken: CancellationToken.None);
+
+        var recovered = await db.SafeProjectionSyncOutbox.SingleAsync();
+        Assert.Equal(1, result.RecoveredCount);
+        Assert.Equal(SafeProjectionSyncOutboxState.Failed, recovered.State);
+        Assert.Equal("processing.lease_expired_attempts_exhausted", recovered.LastErrorCode);
+    }
+
+    [Fact]
     public async Task LocalInstallationIdentitySurvivesDbContextRestart()
     {
         var databaseName = Guid.NewGuid().ToString("N");
@@ -224,9 +295,15 @@ public sealed class SafeProjectionPublicationTests
             now,
             now,
             now);
-        return new SafeProjectionSyncOutboxRecord
+        return CreateOutbox(envelope, now);
+    }
+
+    private static SafeProjectionSyncOutboxRecord CreateOutbox(
+        SafeProjectionSyncEnvelope envelope,
+        DateTimeOffset now) =>
+        new()
         {
-            Id = "sync-1",
+            Id = $"sync-{envelope.Revision}",
             IdempotencyKey = SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope),
             OriginInstanceId = envelope.OriginInstanceId,
             LocalRecordId = envelope.LocalRecordId,
@@ -237,7 +314,6 @@ public sealed class SafeProjectionPublicationTests
             State = SafeProjectionSyncOutboxState.Pending,
             CreatedAt = now
         };
-    }
 
     private static LuthnDbContext CreateDbContext()
     {
@@ -281,6 +357,21 @@ public sealed class SafeProjectionPublicationTests
         {
             SendCount++;
             return Task.FromResult(_results.Dequeue());
+        }
+    }
+
+    private sealed class CapturingTransport : ISafeProjectionSyncTransport
+    {
+        public string Name => "test-capturing";
+        public SafeProjectionSyncTransportState State => SafeProjectionSyncTransportState.Ready;
+        public List<SafeProjectionSyncOperation> Operations { get; } = [];
+
+        public Task<SafeProjectionSyncTransportResult> SendAsync(
+            SafeProjectionSyncEnvelope envelope,
+            CancellationToken cancellationToken)
+        {
+            Operations.Add(envelope.Operation);
+            return Task.FromResult(new SafeProjectionSyncTransportResult(true));
         }
     }
 }

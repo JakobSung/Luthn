@@ -31,12 +31,16 @@ public sealed class ExternalPublicationEndpointTests : IClassFixture<WebApplicat
         using var client = factory.CreateClient();
 
         using var response = await client.GetAsync("/api/external-publication/status");
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var responseJson = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(responseJson);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("Disabled", body.RootElement.GetProperty("connectionState").GetString());
         Assert.Equal("Idle", body.RootElement.GetProperty("outboxState").GetString());
         Assert.Equal(0, body.RootElement.GetProperty("pendingCount").GetInt32());
+        Assert.DoesNotContain("safeEnvelope", responseJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("originInstanceId", responseJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("token", responseJson, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -39,6 +39,21 @@ services:
     volumes:
       - luthn-operator:/var/lib/luthn/operator
 
+  worker:
+    profiles: ["sync-worker"]
+    build:
+      context: .
+      dockerfile: src/Luthn.Host.Api/Dockerfile
+    command: ["worker"]
+    environment:
+      ConnectionStrings__LuthnDb: ${LUTHN_DOCKER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=luthn;Username=luthn}
+      Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
+      Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
+      Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:18-alpine
     environment:

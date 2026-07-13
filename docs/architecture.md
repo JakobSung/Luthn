@@ -106,7 +106,9 @@ no fields in the contract.
 
 Publication state, audit metadata, and the durable outbox row are committed
 together. The Worker claims ready rows with a bounded lease, retries with
-backoff, stores acknowledgements/checkpoints, and emits revocation tombstones.
+backoff, supersedes unsent older revisions, stores acknowledgements/checkpoints,
+and emits revocation tombstones. A newer revision is not sent while an older
+revision for the same local record is still processing.
 The only transport registered by this repository is `disabled`; it makes no
 network request and leaves queued records untouched. A real Luthn Ontology
 transport, tenant/auth service, billing, and shared team data plane belong to a

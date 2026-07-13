@@ -275,6 +275,7 @@ public sealed class SafeProjectionPublicationService(
 
 public sealed record SafeProjectionOutboxProcessResult(
     int RecoveredCount,
+    int SupersededCount,
     int ClaimedCount,
     int AcknowledgedCount,
     int FailedCount,
@@ -295,12 +296,15 @@ public sealed class SafeProjectionOutboxProcessor(
     {
         var recoveredCount = await RecoverAbandonedAsync(
             now - (processingLease ?? TimeSpan.FromMinutes(5)),
+            maxAttempts,
             cancellationToken);
+        var supersededCount = await SupersedeOutdatedAsync(cancellationToken);
 
         if (transport.State != SafeProjectionSyncTransportState.Ready)
         {
             return new SafeProjectionOutboxProcessResult(
                 recoveredCount,
+                supersededCount,
                 0,
                 0,
                 0,
@@ -313,7 +317,12 @@ public sealed class SafeProjectionOutboxProcessor(
                 (record.State == SafeProjectionSyncOutboxState.Pending ||
                     record.State == SafeProjectionSyncOutboxState.Failed) &&
                 record.AttemptCount < maxAttempts &&
-                (record.NextAttemptAt == null || record.NextAttemptAt <= now))
+                (record.NextAttemptAt == null || record.NextAttemptAt <= now) &&
+                !db.SafeProjectionSyncOutbox.Any(older =>
+                    older.OriginInstanceId == record.OriginInstanceId &&
+                    older.LocalRecordId == record.LocalRecordId &&
+                    older.Revision < record.Revision &&
+                    older.State == SafeProjectionSyncOutboxState.Processing))
             .OrderBy(record => record.CreatedAt)
             .ThenBy(record => record.Id)
             .Select(record => record.Id)
@@ -377,6 +386,7 @@ public sealed class SafeProjectionOutboxProcessor(
 
         return new SafeProjectionOutboxProcessResult(
             recoveredCount,
+            supersededCount,
             claimed,
             acknowledged,
             failed,
@@ -385,6 +395,7 @@ public sealed class SafeProjectionOutboxProcessor(
 
     public async Task<int> RecoverAbandonedAsync(
         DateTimeOffset leaseExpiredBefore,
+        int maxAttempts,
         CancellationToken cancellationToken)
     {
         var abandoned = await db.SafeProjectionSyncOutbox
@@ -395,10 +406,15 @@ public sealed class SafeProjectionOutboxProcessor(
             .ToArrayAsync(cancellationToken);
         foreach (var record in abandoned)
         {
-            record.State = SafeProjectionSyncOutboxState.Pending;
+            var attemptsExhausted = record.AttemptCount >= maxAttempts;
+            record.State = attemptsExhausted
+                ? SafeProjectionSyncOutboxState.Failed
+                : SafeProjectionSyncOutboxState.Pending;
             record.ProcessingStartedAt = null;
             record.NextAttemptAt = null;
-            record.LastErrorCode = "processing.lease_expired";
+            record.LastErrorCode = attemptsExhausted
+                ? "processing.lease_expired_attempts_exhausted"
+                : "processing.lease_expired";
         }
 
         if (abandoned.Length > 0)
@@ -407,6 +423,51 @@ public sealed class SafeProjectionOutboxProcessor(
         }
 
         return abandoned.Length;
+    }
+
+    private async Task<int> SupersedeOutdatedAsync(CancellationToken cancellationToken)
+    {
+        if (db.Database.IsRelational())
+        {
+            var affected = await db.SafeProjectionSyncOutbox
+                .Where(record =>
+                    (record.State == SafeProjectionSyncOutboxState.Pending ||
+                        record.State == SafeProjectionSyncOutboxState.Failed) &&
+                    db.SafeProjectionSyncOutbox.Any(newer =>
+                        newer.OriginInstanceId == record.OriginInstanceId &&
+                        newer.LocalRecordId == record.LocalRecordId &&
+                        newer.Revision > record.Revision))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(record => record.State, SafeProjectionSyncOutboxState.Superseded)
+                    .SetProperty(record => record.NextAttemptAt, (DateTimeOffset?)null)
+                    .SetProperty(record => record.LastErrorCode, "operation.superseded"),
+                    cancellationToken);
+            db.ChangeTracker.Clear();
+            return affected;
+        }
+
+        var records = await db.SafeProjectionSyncOutbox.ToArrayAsync(cancellationToken);
+        var outdated = records
+            .Where(record =>
+                record.State is SafeProjectionSyncOutboxState.Pending or SafeProjectionSyncOutboxState.Failed &&
+                records.Any(newer =>
+                    newer.OriginInstanceId == record.OriginInstanceId &&
+                    newer.LocalRecordId == record.LocalRecordId &&
+                    newer.Revision > record.Revision))
+            .ToArray();
+        foreach (var record in outdated)
+        {
+            record.State = SafeProjectionSyncOutboxState.Superseded;
+            record.NextAttemptAt = null;
+            record.LastErrorCode = "operation.superseded";
+        }
+
+        if (outdated.Length > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return outdated.Length;
     }
 
     private async Task<bool> TryClaimAsync(

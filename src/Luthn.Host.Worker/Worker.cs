@@ -36,11 +36,12 @@ public sealed class Worker(
                 {
                     disabledLogged = false;
                     logger.LogInformation(
-                        "Safe-projection batch completed: claimed={Claimed}, acknowledged={Acknowledged}, failed={Failed}, recovered={Recovered}.",
+                        "Safe-projection batch completed: claimed={Claimed}, acknowledged={Acknowledged}, failed={Failed}, recovered={Recovered}, superseded={Superseded}.",
                         result.ClaimedCount,
                         result.AcknowledgedCount,
                         result.FailedCount,
-                        result.RecoveredCount);
+                        result.RecoveredCount,
+                        result.SupersededCount);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(5), timeProvider, stoppingToken);

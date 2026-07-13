@@ -126,6 +126,7 @@ public enum SafeProjectionSyncOutboxState
     Pending,
     Processing,
     Failed,
+    Superseded,
     Acknowledged
 }
 

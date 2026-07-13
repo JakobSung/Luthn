@@ -207,14 +207,17 @@ The migration adds local installation identity, publication lifecycle columns,
 a safe-projection outbox, and transport checkpoints. Existing memory rows are
 backfilled as `LocalOnly`, revision `1`, with `UpdatedAt` copied from
 `CreatedAt`; the migration does not queue historical data.
+When a newer local revision exists, unsent older operations become
+`Superseded`; they are retained for bounded audit/deduplication metadata but are
+not sent later.
 
-The image contains an optional `worker` command:
+The Compose bundle contains an opt-in Worker profile:
 
 ```bash
-docker run --rm --env-file .env <luthn-image> worker
+docker compose --env-file .env --profile sync-worker up -d worker
 ```
 
-The default Compose stack does not start this command. Even when started, the
+The default Compose stack does not start this profile. Even when started, the
 public build registers only the disabled transport, performs no outbound
 connection, and leaves pending outbox rows untouched. Do not deploy a real
 cloud adapter until its endpoint authentication, tenant isolation, deletion,
