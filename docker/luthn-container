@@ -7,6 +7,7 @@ usage: luthn-container <command> [args]
 
 commands:
   api
+  worker
   migrate-db
   seed-demo
   migration-script
@@ -60,6 +61,10 @@ case "$command" in
   api)
     cd /app/api
     exec dotnet /app/api/Luthn.Host.Api.dll "$@"
+    ;;
+  worker)
+    cd /app/worker
+    exec dotnet /app/worker/Luthn.Host.Worker.dll "$@"
     ;;
   migrate-db|seed-demo|migration-script|token-digest)
     exec dotnet /app/tools/Luthn.Tools.dll "$command" "$@"

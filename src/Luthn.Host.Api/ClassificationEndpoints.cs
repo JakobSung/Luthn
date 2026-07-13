@@ -31,6 +31,7 @@ public static class ClassificationEndpoints
         app.MapMemoryItems();
         app.MapTurnSummaryIntake();
         app.MapAgentConnections();
+        app.MapExternalPublication();
 
         var agent = app.MapGroup("/api/agent")
             .RequireServiceScope(ServiceScopes.AgentRead);

@@ -200,3 +200,22 @@ External adapters should treat the exported ID, title, safe summary, Core tags,
 projection kind, payload class, redaction state, and expiration as the complete
 payload. Any service-specific embedding, indexing, backup, restore, or deletion
 workflow must preserve this same safe projection boundary.
+
+### Local outbox operation
+
+The migration adds local installation identity, publication lifecycle columns,
+a safe-projection outbox, and transport checkpoints. Existing memory rows are
+backfilled as `LocalOnly`, revision `1`, with `UpdatedAt` copied from
+`CreatedAt`; the migration does not queue historical data.
+
+The image contains an optional `worker` command:
+
+```bash
+docker run --rm --env-file .env <luthn-image> worker
+```
+
+The default Compose stack does not start this command. Even when started, the
+public build registers only the disabled transport, performs no outbound
+connection, and leaves pending outbox rows untouched. Do not deploy a real
+cloud adapter until its endpoint authentication, tenant isolation, deletion,
+backup/restore, and audit boundaries are separately reviewed.

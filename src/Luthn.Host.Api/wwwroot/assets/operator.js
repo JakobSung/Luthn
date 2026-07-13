@@ -292,6 +292,66 @@ const refreshAgentConnections = async () => {
   }
 };
 
+const refreshSyncStatus = async () => {
+  const refreshButton = $("#refreshSyncStatus");
+  refreshButton.disabled = true;
+  try {
+    const result = await requestJson("/api/external-publication/status");
+    $("#syncStatus").textContent = `${result.connectionState} / ${result.outboxState}`;
+    writeResult($("#publicationOutput"), result);
+  } catch (error) {
+    $("#syncStatus").textContent = "Unavailable";
+    writeResult($("#publicationOutput"), error.message);
+  } finally {
+    refreshButton.disabled = false;
+  }
+};
+
+const publicationMemoryId = () =>
+  new FormData($("#publicationForm")).get("memoryItemId")?.toString().trim() || "";
+
+const readPublication = async () => {
+  const memoryItemId = publicationMemoryId();
+  if (!memoryItemId) {
+    writeResult($("#publicationOutput"), "Memory item id is required.");
+    return;
+  }
+
+  try {
+    const result = await requestJson(`/api/external-publication/memory-items/${encodeURIComponent(memoryItemId)}`);
+    $("#publicationState").value = result.publicationState;
+    writeResult($("#publicationOutput"), result);
+    setAction("publication read", result.publicationState);
+  } catch (error) {
+    $("#publicationState").value = "Unavailable";
+    writeResult($("#publicationOutput"), error.message);
+    setAction("publication read failed", error.message);
+  }
+};
+
+const changePublication = async (action) => {
+  const memoryItemId = publicationMemoryId();
+  if (!memoryItemId) {
+    writeResult($("#publicationOutput"), "Memory item id is required.");
+    return;
+  }
+
+  try {
+    const result = await requestJson(
+      `/api/external-publication/memory-items/${encodeURIComponent(memoryItemId)}/${action}`,
+      { method: "POST" }
+    );
+    $("#publicationState").value = result.publicationState;
+    writeResult($("#publicationOutput"), result);
+    setAction(`publication ${action}`, result.publicationState);
+    await refreshSyncStatus();
+    await refreshAudit();
+  } catch (error) {
+    writeResult($("#publicationOutput"), error.message);
+    setAction(`publication ${action} failed`, error.message);
+  }
+};
+
 const providerDefaults = {
   Mock: { model: "", endpoint: "", authHeaderName: "Authorization" },
   OpenAi: {
@@ -615,6 +675,7 @@ $("#saveToken").addEventListener("click", () => {
   }
   setAction("token saved", state.token ? "Bearer header enabled" : "No token set");
   refreshAgentConnections();
+  refreshSyncStatus();
 });
 $("#clearToken").addEventListener("click", () => {
   state.token = "";
@@ -625,6 +686,7 @@ $("#clearToken").addEventListener("click", () => {
   sessionStorage.removeItem("luthn.operatorIdentity");
   setAction("token cleared", "Bearer header disabled");
   refreshAgentConnections();
+  refreshSyncStatus();
 });
 $("#previewForm").addEventListener("submit", previewContent);
 $("#intakeForm").addEventListener("submit", submitSource);
@@ -636,9 +698,14 @@ $("#auditForm").addEventListener("submit", refreshAudit);
 $("#previewExample").addEventListener("click", fillPreviewExample);
 $("#intakeExample").addEventListener("click", fillIntakeExample);
 $("#refreshConnections").addEventListener("click", refreshAgentConnections);
+$("#refreshSyncStatus").addEventListener("click", refreshSyncStatus);
+$("#readPublication").addEventListener("click", readPublication);
+$("#approvePublication").addEventListener("click", () => changePublication("approve"));
+$("#revokePublication").addEventListener("click", () => changePublication("revoke"));
 
 refreshStatus();
 refreshAgentConnections();
+refreshSyncStatus();
 refreshProviderSettings();
 refreshAccessRequests();
 refreshAudit();

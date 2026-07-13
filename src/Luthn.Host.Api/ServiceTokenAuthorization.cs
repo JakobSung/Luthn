@@ -13,6 +13,8 @@ public static class ServiceScopes
     public const string AgentConnectionWrite = "agent.connection.write";
     public const string MemoryRead = "memory.read";
     public const string MemoryWrite = "memory.write";
+    public const string ExternalPublicationRead = "external-publication.read";
+    public const string ExternalPublicationWrite = "external-publication.write";
     public const string ClassificationPreview = "classification.preview";
     public const string SourceWrite = "source.write";
     public const string AccessRequest = "access.request";

@@ -48,6 +48,8 @@ builder.Services.AddSingleton<SafeSearchIndex>();
 builder.Services.AddSingleton<IRetrievalBackend, DeterministicRetrievalBackend>();
 builder.Services.AddSingleton<ContextPackBuilder>();
 builder.Services.AddSingleton<WikiMarkdownRenderer>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSafeProjectionSyncFoundation();
 builder.Services.AddProblemDetails();
 builder.Services.AddRequestTimeouts(options =>
 {

@@ -147,6 +147,39 @@ Connection states are `Unknown`, `Configured`, `Verified`, `Active`,
 configured channel into a disconnected channel. Reading requires
 `agent.connection.read`; reporting requires `agent.connection.write`.
 
+## External publication control
+
+```http
+GET  /api/external-publication/status
+GET  /api/external-publication/memory-items/{id}
+POST /api/external-publication/memory-items/{id}/approve
+POST /api/external-publication/memory-items/{id}/revoke
+```
+
+These endpoints operate on the local publication lifecycle. Approval is
+accepted only for public, agent-visible, non-expired safe memory. It writes a
+versioned safe-projection envelope to the local durable outbox; it does not
+connect to a cloud service. Revoke queues a tombstone without title, safe
+summary, expiration, or provenance body fields. Repeated approval or revocation
+returns the existing state without creating another revision.
+
+Example item status:
+
+```json
+{
+  "memoryItemId": "memory-1",
+  "publicationState": "ApprovedForExternal",
+  "revision": 2,
+  "updatedAt": "2026-07-13T00:00:00Z",
+  "decidedAt": "2026-07-13T00:00:00Z",
+  "syncState": "Pending"
+}
+```
+
+The aggregate status reports `connectionState: Disabled` in this repository.
+Reads require `external-publication.read`; approval and revocation require
+`external-publication.write`.
+
 ## Health
 
 The API host serves the self-host operator console at `/`.
@@ -533,6 +566,8 @@ Supported scopes:
 - `source.write`
 - `memory.write`
 - `memory.read`
+- `external-publication.read`
+- `external-publication.write`
 - `access.request`
 - `access.decide`
 - `audit.read`
