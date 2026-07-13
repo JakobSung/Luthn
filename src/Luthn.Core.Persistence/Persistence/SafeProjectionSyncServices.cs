@@ -132,7 +132,7 @@ public sealed class SafeProjectionPublicationService(
             installation.OriginInstanceId,
             memory.Id,
             memory.Revision,
-            string.Empty,
+            memory.SafeSummary,
             memory.SafeSummary,
             Array.Empty<string>(),
             memory.ExternalPublicationState,
