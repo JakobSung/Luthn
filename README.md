@@ -128,6 +128,13 @@ Connect Codex with one command:
 luthn connect codex
 ```
 
+Add `--auto-recall` to retrieve one small cached context pack when a new task or
+topic starts:
+
+```bash
+luthn connect codex --auto-recall
+```
+
 Follow the command's required steps: restart Codex, open `/hooks`, trust
 `Stop > luthn.agent-connector.v1`, complete one turn, and confirm that
 `automatic-ingestion` reports `Active`. Then inspect or remove the connection with:

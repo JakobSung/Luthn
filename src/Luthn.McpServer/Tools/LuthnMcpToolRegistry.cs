@@ -12,7 +12,12 @@ public static class LuthnMcpToolRegistry
             ToolSchema([
                 StringProperty("query", "Optional retrieval query."),
                 TagsProperty(),
-                IntegerProperty("maxItems", "Maximum context items to return.")
+                IntegerProperty("maxItems", "Maximum context items to return."),
+                IntegerProperty("maxTokens", "Optional conservative token budget for returned items.", 4_000),
+                IntegerProperty("timeoutMs", "Optional retrieval deadline in milliseconds.", 5_000),
+                StringProperty("cacheKey", "Optional non-sensitive project and task cache key."),
+                IntegerProperty("cacheTtlSeconds", "Optional in-process cache lifetime.", 3_600),
+                BooleanProperty("failOpen", "Return an empty context pack instead of an error when retrieval fails.")
             ])),
         new(
             "search_safe_context",
@@ -99,13 +104,23 @@ public static class LuthnMcpToolRegistry
             ["description"] = description
         });
 
-    private static KeyValuePair<string, object> IntegerProperty(string name, string description) =>
+    private static KeyValuePair<string, object> IntegerProperty(
+        string name,
+        string description,
+        int maximum = 50) =>
         new(name, new Dictionary<string, object>
         {
             ["type"] = "integer",
             ["description"] = description,
             ["minimum"] = 1,
-            ["maximum"] = 50
+            ["maximum"] = maximum
+        });
+
+    private static KeyValuePair<string, object> BooleanProperty(string name, string description) =>
+        new(name, new Dictionary<string, object>
+        {
+            ["type"] = "boolean",
+            ["description"] = description
         });
 
     private static KeyValuePair<string, object> TagsProperty() =>

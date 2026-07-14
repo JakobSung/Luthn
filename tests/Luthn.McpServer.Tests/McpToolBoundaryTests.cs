@@ -62,6 +62,98 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task LightweightContextPackCachesWithinTtlAndRefreshesForTopicOrExpiry()
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var client = new FakeLuthnClient
+        {
+            ContextPackResult = ContextPack("memory-1", "Cached context")
+        };
+        var tool = new GetContextPackTool(client, () => now);
+        using var firstArgs = JsonDocument.Parse(
+            """{"query":"release","cacheKey":"project:release","cacheTtlSeconds":600,"maxItems":3,"maxTokens":600}""");
+        using var changedTopicArgs = JsonDocument.Parse(
+            """{"query":"billing","cacheKey":"project:billing","cacheTtlSeconds":600,"maxItems":3,"maxTokens":600}""");
+
+        await tool.InvokeAsync(firstArgs.RootElement);
+        await tool.InvokeAsync(firstArgs.RootElement);
+        Assert.Equal(1, client.ContextPackCallCount);
+
+        await tool.InvokeAsync(changedTopicArgs.RootElement);
+        Assert.Equal(2, client.ContextPackCallCount);
+
+        now = now.AddMinutes(11);
+        await tool.InvokeAsync(firstArgs.RootElement);
+        Assert.Equal(3, client.ContextPackCallCount);
+    }
+
+    [Fact]
+    public async Task LightweightContextPackAppliesItemAndConservativeTokenBounds()
+    {
+        var client = new FakeLuthnClient
+        {
+            ContextPackResult = new ContextPackDto(
+                ["project"],
+                Enumerable.Range(1, 5)
+                    .Select(index => new ContextPackItemDto(
+                        $"memory-{index}",
+                        $"Memory {index}",
+                        new string('x', 1_400),
+                        "Public",
+                        ["project"]))
+                    .ToArray())
+        };
+        var tool = new GetContextPackTool(client);
+        using var args = JsonDocument.Parse("""{"maxItems":3,"maxTokens":600}""");
+
+        var result = Assert.IsType<ContextPackDto>(await tool.InvokeAsync(args.RootElement));
+
+        Assert.Single(result.Items);
+        Assert.Equal(3, client.LastMaxItems);
+    }
+
+    [Fact]
+    public async Task LightweightContextPackFailsOpenOnTimeoutAndServiceError()
+    {
+        var timeoutClient = new FakeLuthnClient
+        {
+            ContextPackDelay = TimeSpan.FromSeconds(1)
+        };
+        var timeoutTool = new GetContextPackTool(timeoutClient);
+        using var timeoutArgs = JsonDocument.Parse(
+            """{"timeoutMs":20,"failOpen":true,"maxItems":3,"maxTokens":600}""");
+
+        var timeoutResult = Assert.IsType<ContextPackDto>(
+            await timeoutTool.InvokeAsync(timeoutArgs.RootElement));
+        Assert.Empty(timeoutResult.Items);
+
+        var errorClient = new FakeLuthnClient
+        {
+            ContextPackException = new HttpRequestException("unavailable")
+        };
+        var errorTool = new GetContextPackTool(errorClient);
+        using var errorArgs = JsonDocument.Parse("""{"failOpen":true}""");
+
+        var errorResult = Assert.IsType<ContextPackDto>(
+            await errorTool.InvokeAsync(errorArgs.RootElement));
+        Assert.Empty(errorResult.Items);
+    }
+
+    [Fact]
+    public async Task ManualContextPackStillReportsServiceErrors()
+    {
+        var client = new FakeLuthnClient
+        {
+            ContextPackException = new HttpRequestException("unavailable")
+        };
+        var tool = new GetContextPackTool(client);
+        using var args = JsonDocument.Parse("{}");
+
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => tool.InvokeAsync(args.RootElement));
+    }
+
+    [Fact]
     public async Task SafeSearchToolCallsConnectorWithQueryAndCoreTags()
     {
         var client = new FakeLuthnClient();
@@ -147,6 +239,11 @@ public sealed class McpToolBoundaryTests
             .First(item => item.GetProperty("name").GetString() == "get_context_pack");
         Assert.Equal("object", tool.GetProperty("inputSchema").GetProperty("type").GetString());
         Assert.True(tool.GetProperty("inputSchema").TryGetProperty("properties", out _));
+        var properties = tool.GetProperty("inputSchema").GetProperty("properties");
+        Assert.Equal(4_000, properties.GetProperty("maxTokens").GetProperty("maximum").GetInt32());
+        Assert.Equal(5_000, properties.GetProperty("timeoutMs").GetProperty("maximum").GetInt32());
+        Assert.Equal(3_600, properties.GetProperty("cacheTtlSeconds").GetProperty("maximum").GetInt32());
+        Assert.Equal("boolean", properties.GetProperty("failOpen").GetProperty("type").GetString());
     }
 
     [Fact]
@@ -182,17 +279,30 @@ public sealed class McpToolBoundaryTests
         public CreateSharedMemoryItemRequestDto? LastCreateMemoryRequest { get; private set; }
         public SharedMemoryQueryRequestDto? LastMemoryQueryRequest { get; private set; }
         public string? LastMemoryItemId { get; private set; }
+        public int ContextPackCallCount { get; private set; }
+        public ContextPackDto ContextPackResult { get; init; } = new([], []);
+        public TimeSpan ContextPackDelay { get; init; }
+        public Exception? ContextPackException { get; init; }
 
-        public Task<ContextPackDto> GetContextPackAsync(
+        public async Task<ContextPackDto> GetContextPackAsync(
             IReadOnlyList<string> coreTags,
             int maxItems = 20,
             string? query = null,
             CancellationToken cancellationToken = default)
         {
+            ContextPackCallCount++;
             LastCoreTags = coreTags;
             LastMaxItems = maxItems;
             LastContextPackQuery = query;
-            return Task.FromResult(new ContextPackDto(coreTags, []));
+            if (ContextPackDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(ContextPackDelay, cancellationToken);
+            }
+            if (ContextPackException is not null)
+            {
+                throw ContextPackException;
+            }
+            return ContextPackResult with { CoreTags = coreTags };
         }
 
         public Task<SafeSearchResponseDto> SearchAsync(
@@ -326,4 +436,9 @@ public sealed class McpToolBoundaryTests
                 true,
                 DateTimeOffset.UnixEpoch);
     }
+
+    private static ContextPackDto ContextPack(string id, string summary) =>
+        new(
+            ["project"],
+            [new ContextPackItemDto(id, "Project memory", summary, "Public", ["project"])]);
 }

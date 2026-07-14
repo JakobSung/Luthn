@@ -125,6 +125,13 @@ Codex는 한 명령으로 연결합니다.
 luthn connect codex
 ```
 
+새 작업이나 주제가 시작될 때 작은 context pack을 한 번만 조회하려면
+`--auto-recall`을 추가합니다.
+
+```bash
+luthn connect codex --auto-recall
+```
+
 명령이 안내하는 순서대로 Codex를 재시작하고 `/hooks`에서
 `Stop > luthn.agent-connector.v1`을 열어 **Trust**를 선택해야 연결이 완료됩니다.
 한 턴을 마친 뒤 `automatic-ingestion`이 `Active`인지 확인합니다. 연결 상태 확인과
