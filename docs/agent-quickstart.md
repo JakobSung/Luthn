@@ -41,6 +41,20 @@ Run:
 luthn connect codex
 ```
 
+To also enable lightweight automatic recall:
+
+```bash
+luthn connect codex --auto-recall
+```
+
+The opt-in recall instruction asks Codex for one `get_context_pack` lookup at a
+new task or material topic change. It reuses the returned context during the
+same task and refreshes after 10 minutes. Automatic lookup is limited to 3
+items and an estimated 600 tokens, uses a 200 ms deadline, and continues
+without memory on timeout or service failure. It does not query on every turn.
+Use `search_safe_context` or `query_shared_memory` explicitly when deeper recall
+is needed.
+
 The command configures both channels, then prints the required one-time Codex
 security steps. Setup is not complete until you restart Codex, enter `/hooks`,
 open `Stop > luthn.agent-connector.v1`, choose **Trust**, and complete one Codex
@@ -67,6 +81,9 @@ Disconnect with:
 ```bash
 luthn disconnect codex
 ```
+
+Disconnect removes only the Luthn-managed recall block from Codex instructions
+and preserves unrelated user instructions.
 
 The operator console displays connection observations but does not install,
 change, or remove agent configuration.

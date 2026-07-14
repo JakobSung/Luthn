@@ -22,9 +22,33 @@ from urllib import error, request
 
 
 HOOK_MARKER = "luthn.agent-connector.v1"
+INSTRUCTION_START_MARKER = "<!-- luthn:auto-recall:start -->"
+INSTRUCTION_END_MARKER = "<!-- luthn:auto-recall:end -->"
 MAX_HOOK_INPUT_BYTES = 256 * 1024
+MAX_INSTRUCTION_BYTES = 1024 * 1024
 MAX_TURN_CAPSULE_CHARS = 3900
 HTTP_TIMEOUT_SECONDS = 4
+
+AUTO_RECALL_INSTRUCTION = f"""{INSTRUCTION_START_MARKER}
+# Luthn lightweight recall
+
+For a new task or a material topic change, call the Luthn MCP
+`get_context_pack` tool once before substantial work. Use a short task query
+and non-sensitive project/task cache key with these bounds:
+
+- `maxItems`: 3
+- `maxTokens`: 600
+- `timeoutMs`: 200
+- `cacheKey`: a stable non-sensitive project/task key
+- `cacheTtlSeconds`: 600
+- `failOpen`: true
+
+For continued work on the same task, reuse the context already returned in the
+conversation instead of calling the tool again. Refresh only after a material
+topic change or cache expiry. If lightweight recall returns no context, times
+out, or fails, continue without memory. Use deeper Luthn MCP search tools only
+when the bounded context pack is insufficient.
+{INSTRUCTION_END_MARKER}"""
 
 _PRIVATE_KEY_PATTERN = re.compile(
     r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?"
@@ -99,6 +123,83 @@ def _write_hooks(path: Path, document: dict[str, Any]) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def _read_instructions(path: Path) -> str:
+    if not path.exists():
+        return ""
+    if path.stat().st_size > MAX_INSTRUCTION_BYTES:
+        raise ValueError("Codex instructions file exceeds the supported size")
+    return path.read_text(encoding="utf-8")
+
+
+def _write_instructions(path: Path, content: str) -> None:
+    destination = path.resolve(strict=True) if path.is_symlink() else path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(destination.stat().st_mode) if destination.exists() else 0o600
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", dir=destination.parent, text=True
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary_name, mode)
+        os.replace(temporary_name, destination)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _without_auto_recall_instruction(content: str) -> str:
+    start_count = content.count(INSTRUCTION_START_MARKER)
+    end_count = content.count(INSTRUCTION_END_MARKER)
+    if start_count == 0 and end_count == 0:
+        return content
+    if start_count != 1 or end_count != 1:
+        raise ValueError("Codex instructions contain malformed Luthn markers")
+
+    start = content.index(INSTRUCTION_START_MARKER)
+    end = content.index(INSTRUCTION_END_MARKER, start)
+    before = content[:start].rstrip("\n")
+    after = content[end + len(INSTRUCTION_END_MARKER) :].lstrip("\n")
+    remaining = "\n\n".join(part for part in (before, after) if part)
+    return f"{remaining}\n" if remaining else ""
+
+
+def install_auto_recall_instruction(path: Path) -> None:
+    content = _without_auto_recall_instruction(_read_instructions(path))
+    prefix = content.rstrip("\n")
+    updated = (
+        f"{prefix}\n\n{AUTO_RECALL_INSTRUCTION}\n"
+        if prefix
+        else f"{AUTO_RECALL_INSTRUCTION}\n"
+    )
+    _write_instructions(path, updated)
+
+
+def remove_auto_recall_instruction(path: Path) -> None:
+    if not path.exists():
+        return
+    content = _read_instructions(path)
+    updated = _without_auto_recall_instruction(content)
+    if updated != content:
+        _write_instructions(path, updated)
+
+
+def auto_recall_instruction_is_installed(path: Path) -> bool:
+    if not path.exists():
+        return False
+    content = _read_instructions(path)
+    return (
+        content.count(INSTRUCTION_START_MARKER) == 1
+        and content.count(INSTRUCTION_END_MARKER) == 1
+        and AUTO_RECALL_INSTRUCTION in content
+    )
 
 
 def _stop_groups(document: dict[str, Any], create: bool) -> list[Any] | None:
@@ -469,6 +570,10 @@ def build_parser() -> argparse.ArgumentParser:
     hooks.add_argument("--path", type=Path, required=True)
     hooks.add_argument("--command", dest="hook_command")
 
+    instructions = subparsers.add_parser("instructions")
+    instructions.add_argument("action", choices=["install", "remove", "check"])
+    instructions.add_argument("--path", type=Path, required=True)
+
     report = subparsers.add_parser("report")
     report.add_argument("--base-url", required=True)
     report.add_argument("--token-file", type=Path, required=True)
@@ -507,6 +612,15 @@ def main() -> int:
             remove_hook(arguments.path)
             return 0
         return 0 if hook_is_installed(arguments.path, arguments.hook_command) else 1
+
+    if arguments.operation == "instructions":
+        if arguments.action == "install":
+            install_auto_recall_instruction(arguments.path)
+            return 0
+        if arguments.action == "remove":
+            remove_auto_recall_instruction(arguments.path)
+            return 0
+        return 0 if auto_recall_instruction_is_installed(arguments.path) else 1
 
     if arguments.operation == "report":
         token = _read_token(arguments.token_file)

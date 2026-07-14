@@ -154,6 +154,61 @@ class CodexHookConfigurationTests(unittest.TestCase):
             self.assertEqual("Stop", marker.read_text(encoding="utf-8"))
 
 
+class CodexInstructionConfigurationTests(unittest.TestCase):
+    def test_install_is_idempotent_and_remove_preserves_user_instructions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instructions_path = Path(directory) / "AGENTS.md"
+            original = "# User instructions\n\nKeep this text.\n"
+            instructions_path.write_text(original, encoding="utf-8")
+
+            CONNECTOR.install_auto_recall_instruction(instructions_path)
+            CONNECTOR.install_auto_recall_instruction(instructions_path)
+            installed = instructions_path.read_text(encoding="utf-8")
+
+            self.assertEqual(1, installed.count(CONNECTOR.INSTRUCTION_START_MARKER))
+            self.assertEqual(1, installed.count(CONNECTOR.INSTRUCTION_END_MARKER))
+            self.assertIn("`maxItems`: 3", installed)
+            self.assertIn("`maxTokens`: 600", installed)
+            self.assertIn("`timeoutMs`: 200", installed)
+            self.assertIn("`cacheTtlSeconds`: 600", installed)
+            self.assertTrue(
+                CONNECTOR.auto_recall_instruction_is_installed(instructions_path)
+            )
+
+            CONNECTOR.remove_auto_recall_instruction(instructions_path)
+
+            self.assertEqual(original, instructions_path.read_text(encoding="utf-8"))
+            self.assertFalse(
+                CONNECTOR.auto_recall_instruction_is_installed(instructions_path)
+            )
+
+    def test_malformed_markers_fail_without_rewriting_user_instructions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instructions_path = Path(directory) / "AGENTS.md"
+            original = f"# User instructions\n{CONNECTOR.INSTRUCTION_START_MARKER}\n"
+            instructions_path.write_text(original, encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                CONNECTOR.install_auto_recall_instruction(instructions_path)
+
+            self.assertEqual(original, instructions_path.read_text(encoding="utf-8"))
+
+    def test_install_preserves_instruction_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "shared-agents.md"
+            target.write_text("# Shared instructions\n", encoding="utf-8")
+            instructions_path = root / "AGENTS.md"
+            instructions_path.symlink_to(target)
+
+            CONNECTOR.install_auto_recall_instruction(instructions_path)
+
+            self.assertTrue(instructions_path.is_symlink())
+            self.assertTrue(
+                CONNECTOR.auto_recall_instruction_is_installed(instructions_path)
+            )
+
+
 class TurnCapsuleTests(unittest.TestCase):
     def test_turn_capsule_is_bounded_deterministic_and_excludes_host_paths(self):
         hook_input = {

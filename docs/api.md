@@ -334,6 +334,11 @@ deterministic in-process ranking. The endpoint returns only public wiki
 proposals and public shared-memory records where agent context is explicitly
 allowed.
 
+The MCP `get_context_pack` tool also accepts optional lightweight-recall
+controls: `maxTokens`, `timeoutMs`, `cacheKey`, `cacheTtlSeconds`, and
+`failOpen`. These controls bound and cache the already safe API response inside
+the MCP process; they do not widen the API corpus or expose private records.
+
 ## Agent safe search
 
 ```http

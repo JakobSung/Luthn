@@ -130,6 +130,19 @@ Connect Codex with one host command:
 luthn connect codex
 ```
 
+Enable lightweight automatic recall explicitly when wanted:
+
+```bash
+luthn connect codex --auto-recall
+```
+
+The opt-in adds a marked Luthn block to
+`${CODEX_HOME:-~/.codex}/AGENTS.md` without replacing existing instructions.
+It requests one `get_context_pack` lookup for a new task or material topic
+change with 3 items, an estimated 600-token budget, a 200 ms fail-open
+deadline, and a 10-minute in-process cache. Continued work reuses the context
+already in the conversation instead of searching every turn.
+
 The command verifies Luthn and Codex prerequisites, merges one Luthn-owned
 `Stop` hook into `~/.codex/hooks.json`, registers `luthn mcp`, probes the MCP
 tools, and reports metadata-only channel state to Luthn. Repeated runs are
@@ -147,7 +160,8 @@ luthn disconnect codex
 ```
 
 Disconnect removes only the Luthn-marked hook, matching `luthn mcp`
-registration, and non-secret connector state. A normal Luthn uninstall also
+registration, marked automatic-recall instruction block, and non-secret
+connector state. A normal Luthn uninstall also
 performs this ownership-aware cleanup before removing the runtime. Uninstall
 stops without removing the CLI when connector cleanup fails, avoiding a stale
 Codex hook that points to a missing command.

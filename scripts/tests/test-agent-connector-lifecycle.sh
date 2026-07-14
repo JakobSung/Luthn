@@ -183,6 +183,11 @@ cat >"$codex_home/hooks.json" <<'EOF'
   }
 }
 EOF
+cat >"$codex_home/AGENTS.md" <<'EOF'
+# User instructions
+
+Preserve this text.
+EOF
 
 run_luthn() {
   env \
@@ -281,6 +286,20 @@ echo "[2/17] repeated connect is idempotent"
 run_luthn connect codex >/dev/null
 assert_hook_counts 1 1
 
+echo "[2a/17] opt-in lightweight recall is idempotent and reported"
+run_luthn connect codex --auto-recall >/dev/null
+run_luthn connect codex --auto-recall >/dev/null
+[[ "$(grep -c '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md")" -eq 1 ]]
+[[ "$(grep -c '<!-- luthn:auto-recall:end -->' "$codex_home/AGENTS.md")" -eq 1 ]]
+grep -q '^AUTO_RECALL=true$' "$state_dir/connectors/codex.env"
+grep -q '^INSTRUCTIONS_FILE=' "$state_dir/connectors/codex.env"
+grep -q '`maxItems`: 3' "$codex_home/AGENTS.md"
+grep -q '`maxTokens`: 600' "$codex_home/AGENTS.md"
+grep -q '`timeoutMs`: 200' "$codex_home/AGENTS.md"
+grep -q '`cacheTtlSeconds`: 600' "$codex_home/AGENTS.md"
+status_output="$(run_luthn connection status codex)"
+grep -q '^  lightweight-recall: enabled$' <<<"$status_output"
+
 cp "$state_dir/connectors/codex.env" \
   "$state_dir/connectors/codex.disconnect.pending.env"
 : >"$report_log"
@@ -302,6 +321,7 @@ fi
 [[ -f "$mcp_state" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
 assert_hook_counts 1 1
+grep -q '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md"
 
 echo "[5/17] failed disconnect observation is retried after API recovery"
 : >"$report_log"
@@ -310,6 +330,9 @@ FAKE_REPORT_FAIL=true run_luthn disconnect codex >/dev/null
 [[ ! -f "$state_dir/connectors/codex.env" ]]
 [[ -f "$state_dir/connectors/codex.disconnect.pending.env" ]]
 assert_hook_counts 0 1
+grep -q '^# User instructions$' "$codex_home/AGENTS.md"
+grep -q '^Preserve this text\.$' "$codex_home/AGENTS.md"
+! grep -q '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md"
 grep -q -- '--channel automatic-ingestion:false:Unknown:Unknown:' "$report_log"
 run_luthn connection status codex >/dev/null
 [[ ! -f "$state_dir/connectors/codex.disconnect.pending.env" ]]
