@@ -75,7 +75,7 @@ agents open the original store or read the full source text directly.
 
 ## Quick Start
 
-### Recommended: Docker
+### Recommended: Docker on macOS or Linux
 
 Install Docker with Docker Compose.
 
@@ -85,6 +85,20 @@ curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/instal
 
 This one command installs Luthn and configures the Codex connector. The final
 Codex restart and `/hooks` Trust step is an intentional user security review.
+
+### Docker Desktop on Windows
+
+Use Windows 11, PowerShell 7.4 or later, and Docker Desktop in Linux-container
+mode. Run in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 | iex
+luthn connect codex
+```
+
+The Windows host CLI manages the same Linux Compose runtime. Codex is connected
+to its Docker-backed stdio MCP server; automatic hooks are not installed on
+Windows in this release.
 
 ### Optional: Ask an agent
 
@@ -112,6 +126,10 @@ luthn uninstall --purge-data --yes
 migrates. `reset` deletes the database and operator volumes. A normal
 `uninstall` preserves persistent data, configuration, and backups; purge removes
 them only when both destructive flags are present.
+
+The full lifecycle table below currently applies to macOS and Linux. On
+Windows, this release supports `status`, `connect codex`, `disconnect codex`,
+and data-preserving `uninstall`; `update`, `reset`, and purge are deferred.
 
 | Command | PostgreSQL and operator volumes | Config and token | Backups | CLI/runtime |
 |---|---|---|---|---|
@@ -150,6 +168,9 @@ provides model-triggered safe reads and explicit shared-memory writes. It
 preserves unrelated Codex hooks and MCP registrations, and the token stays in
 Luthn's private configuration. The operator console only displays read-only
 connection status.
+
+On Windows, `luthn connect codex` configures only the MCP channel. It does not
+modify Codex hooks or automatic-recall instructions.
 
 Codex is the current host connector. A Claude Code connector using the same
 lifecycle contract and a separate Hermes integration using its official memory

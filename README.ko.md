@@ -72,7 +72,7 @@ Luthn은 이 문제를 나누어 다룹니다.
 
 ## 빠른 시작
 
-### [권장] Docker 설치
+### [권장] macOS·Linux Docker 설치
 
 Docker Compose를 포함한 Docker가 필요합니다.
 
@@ -82,6 +82,20 @@ curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/instal
 
 이 한 명령이 Luthn 설치와 Codex connector 등록을 진행합니다. 마지막에 출력되는
 Codex 재시작 및 `/hooks` Trust 단계는 사용자 확인이 필요한 보안 절차입니다.
+
+### Windows Docker Desktop 설치
+
+Windows 11, PowerShell 7.4 이상, Linux container mode로 실행 중인 Docker
+Desktop이 필요합니다. PowerShell에서 실행합니다.
+
+```powershell
+irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 | iex
+luthn connect codex
+```
+
+Windows host CLI가 기존 Linux Compose runtime을 관리합니다. Codex에는
+Docker-backed stdio MCP를 등록하며, 이번 버전에서는 Windows 자동 hook을 설치하지
+않습니다.
 
 ### [선택] 에이전트에게 시키기
 
@@ -109,6 +123,10 @@ luthn uninstall --purge-data --yes
 migration을 수행합니다. `reset`은 database와 operator volume을 삭제합니다.
 일반 `uninstall`은 data, config, backup을 보존하고, 두 개의 파괴적 flag를
 모두 지정한 purge만 전부 삭제합니다.
+
+아래 전체 lifecycle 표는 현재 macOS와 Linux에 적용됩니다. Windows에서는 이번
+버전에 `status`, `connect codex`, `disconnect codex`, data-preserving
+`uninstall`을 지원하며 `update`, `reset`, purge는 다음 단계로 미룹니다.
 
 | 명령 | PostgreSQL·operator volume | 설정·토큰 | 백업 | CLI·runtime |
 |---|---|---|---|---|
@@ -147,6 +165,9 @@ luthn disconnect codex
 판단하는 안전한 조회와 명시적 shared-memory write를 담당합니다. 기존의 다른
 Codex hook과 MCP 등록은 보존하며 token은 Luthn private config에만 남습니다. 운영
 콘솔은 에이전트 연결 상태만 읽기 전용으로 표시합니다.
+
+Windows의 `luthn connect codex`는 MCP channel만 설정합니다. Codex hook이나
+automatic-recall instruction은 수정하지 않습니다.
 
 현재 Host Connector는 Codex만 지원합니다. 같은 수명주기 계약을 사용하는 Claude
 Code Connector와 공식 MemoryProvider를 사용하는 별도 Hermes 통합은 예정 기능이며

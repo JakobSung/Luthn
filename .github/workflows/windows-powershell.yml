@@ -1,0 +1,34 @@
+name: Windows PowerShell
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-powershell.yml"
+      - "deploy/compose.yaml"
+      - "scripts/install.ps1"
+      - "scripts/luthn.ps1"
+      - "scripts/tests/test-windows-lifecycle.ps1"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-powershell.yml"
+      - "deploy/compose.yaml"
+      - "scripts/install.ps1"
+      - "scripts/luthn.ps1"
+      - "scripts/tests/test-windows-lifecycle.ps1"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-lifecycle:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show PowerShell version
+        shell: pwsh
+        run: $PSVersionTable.PSVersion
+      - name: Test Windows install and lifecycle
+        shell: pwsh
+        run: ./scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD
