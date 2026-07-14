@@ -567,6 +567,8 @@ function Connect-Codex {
             throw "Codex already has an unrelated MCP registration named 'luthn'; no configuration was changed."
         }
         if (-not (Test-McpProbe)) { throw "Codex MCP probe failed; the existing registration was preserved." }
+        Write-ConnectorState -Path $script:CodexStateFile -State "configured" -CommandPath $docker.FilePath -Arguments $mcpArguments
+        if ([IO.File]::Exists($script:CodexPendingStateFile)) { [IO.File]::Delete($script:CodexPendingStateFile) }
         Write-Host "Codex MCP is already configured for the Windows Docker runtime."
         return
     }
@@ -649,7 +651,14 @@ function Uninstall-Luthn {
         Invoke-ComposeVisible @("down", "--remove-orphans")
     }
     if ([IO.Directory]::Exists($script:DataDir)) { [IO.Directory]::Delete($script:DataDir, $true) }
-    if ([IO.Directory]::Exists($script:BinDir)) { [IO.Directory]::Delete($script:BinDir, $true) }
+    foreach ($ownedCliPath in @((Join-Path $script:BinDir "luthn.ps1"), (Join-Path $script:BinDir "luthn.cmd"))) {
+        if ([IO.File]::Exists($ownedCliPath)) { [IO.File]::Delete($ownedCliPath) }
+    }
+    $defaultBinDir = [IO.Path]::GetFullPath((Join-Path $script:RootDir "bin")).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $actualBinDir = [IO.Path]::GetFullPath($script:BinDir).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if ($actualBinDir -ieq $defaultBinDir -and [IO.Directory]::Exists($script:BinDir) -and [IO.Directory]::GetFileSystemEntries($script:BinDir).Count -eq 0) {
+        [IO.Directory]::Delete($script:BinDir)
+    }
     Write-Host "Luthn services and Windows runtime were removed. Data volumes, configuration, and backups were preserved."
 }
 

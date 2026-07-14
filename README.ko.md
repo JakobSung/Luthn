@@ -143,14 +143,14 @@ Codex는 한 명령으로 연결합니다.
 luthn connect codex
 ```
 
-새 작업이나 주제가 시작될 때 작은 context pack을 한 번만 조회하려면
-`--auto-recall`을 추가합니다.
+macOS나 Linux에서 새 작업이나 주제가 시작될 때 작은 context pack을 한 번만
+조회하려면 `--auto-recall`을 추가합니다.
 
 ```bash
 luthn connect codex --auto-recall
 ```
 
-명령이 안내하는 순서대로 Codex를 재시작하고 `/hooks`에서
+macOS나 Linux에서는 명령이 안내하는 순서대로 Codex를 재시작하고 `/hooks`에서
 `Stop > luthn.agent-connector.v1`을 열어 **Trust**를 선택해야 연결이 완료됩니다.
 한 턴을 마친 뒤 `automatic-ingestion`이 `Active`인지 확인합니다. 연결 상태 확인과
 해제는 다음 명령을 사용합니다.
@@ -167,7 +167,8 @@ Codex hook과 MCP 등록은 보존하며 token은 Luthn private config에만 남
 콘솔은 에이전트 연결 상태만 읽기 전용으로 표시합니다.
 
 Windows의 `luthn connect codex`는 MCP channel만 설정합니다. Codex hook이나
-automatic-recall instruction은 수정하지 않습니다.
+automatic-recall instruction은 수정하지 않습니다. Codex를 재시작한 뒤 `/mcp`에서
+`luthn` server를 확인하고 `luthn disconnect codex`로 해제합니다.
 
 현재 Host Connector는 Codex만 지원합니다. 같은 수명주기 계약을 사용하는 Claude
 Code Connector와 공식 MemoryProvider를 사용하는 별도 Hermes 통합은 예정 기능이며

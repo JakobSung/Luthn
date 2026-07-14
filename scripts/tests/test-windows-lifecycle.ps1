@@ -43,7 +43,11 @@ $fakeCodexLog = Join-Path $testRoot "codex.log"
 $fakeCodexState = Join-Path $testRoot "codex-state.json"
 $fakeCodexTemplate = Join-Path $testRoot "codex-template.json"
 $invalidCli = Join-Path $testRoot "invalid.ps1"
-$installedCli = Join-Path $windowsRoot "bin/luthn.ps1"
+$failingCli = Join-Path $testRoot "failing.ps1"
+$sharedBinDir = Join-Path $testRoot "shared 도구 bin"
+$sharedBinSentinel = Join-Path $sharedBinDir "unrelated-tool.txt"
+$installedCli = Join-Path $sharedBinDir "luthn.ps1"
+$codexOwnershipState = Join-Path $windowsRoot "state/connectors/codex-windows.json"
 
 try {
     [void][IO.Directory]::CreateDirectory($testRoot)
@@ -166,6 +170,7 @@ esac
 
     $env:LOCALAPPDATA = Join-Path $testRoot "local app data"
     $env:LUTHN_WINDOWS_ROOT = $windowsRoot
+    $env:LUTHN_BIN_DIR = $sharedBinDir
     $env:LUTHN_TEST_NO_EXIT = "true"
     $env:LUTHN_DOCKER_COMMAND = $fakeDocker
     $env:LUTHN_INSTALLER_DOCKER_COMMAND = $fakeDocker
@@ -178,6 +183,8 @@ esac
     $env:FAKE_CODEX_LOG = $fakeCodexLog
     $env:FAKE_CODEX_STATE = $fakeCodexState
     $env:FAKE_CODEX_TEMPLATE = $fakeCodexTemplate
+    [void][IO.Directory]::CreateDirectory($sharedBinDir)
+    [IO.File]::WriteAllText($sharedBinSentinel, "preserve me", [Text.UTF8Encoding]::new($false))
 
     $expectedDockerCommand = $fakeDocker
     $expectedMcpArguments = @(
@@ -201,7 +208,14 @@ esac
     $install = Invoke-InstallerProcess $installerPath
     Assert-True ($install.ExitCode -eq 0) "bootstrap install should succeed: $($install.Output)"
     Assert-True ([IO.File]::Exists($installedCli)) "bootstrap should install luthn.ps1"
-    Assert-True ([IO.File]::Exists((Join-Path $windowsRoot "bin/luthn.cmd"))) "bootstrap should install luthn.cmd"
+    $installedShim = Join-Path $sharedBinDir "luthn.cmd"
+    Assert-True ([IO.File]::Exists($installedShim)) "bootstrap should install luthn.cmd"
+    Assert-True ([IO.File]::ReadAllText($installedShim).Contains('%~dp0luthn.ps1')) "shim should resolve the CLI relative to its own non-ASCII-safe path"
+    Assert-True (-not [IO.File]::ReadAllText($installedShim).Contains($windowsRoot)) "shim should not embed a potentially non-ASCII installation path"
+    if ($IsWindows) {
+        $shimHelp = & $installedShim help *>&1 | Out-String
+        Assert-True ($LASTEXITCODE -eq 0 -and $shimHelp -match "usage: luthn") "installed command shim should execute from a non-ASCII path"
+    }
     Assert-True ($install.Output -match "Luthn is ready") "install should report readiness"
 
     $configFile = Join-Path $windowsRoot "config/luthn.env"
@@ -233,6 +247,13 @@ esac
     $secondInstall = Invoke-InstallerProcess $installerPath
     Assert-True ($secondInstall.ExitCode -eq 0) "repeated install should be idempotent: $($secondInstall.Output)"
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "repeated install should preserve the validated CLI"
+
+    [IO.File]::WriteAllText($failingCli, '$script:LuthnWindowsCliVersion = "1"' + "`nexit 23`n", [Text.UTF8Encoding]::new($false))
+    $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $failingCli
+    $failedCliInstall = Invoke-InstallerProcess $installerPath
+    Assert-True ($failedCliInstall.ExitCode -ne 0) "a downloaded CLI runtime failure should return to the bootstrapper"
+    Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "a downloaded CLI runtime failure should restore the previous CLI"
+    $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = Join-Path $RepoRoot "scripts/luthn.ps1"
 
     [IO.File]::WriteAllText($invalidCli, "this is not PowerShell {", [Text.UTF8Encoding]::new($false))
     $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $invalidCli
@@ -293,6 +314,11 @@ esac
     $connectAgain = Invoke-LuthnProcess $installedCli @("connect", "codex")
     Assert-True ($connectAgain.ExitCode -eq 0) "Codex MCP connection should be idempotent: $($connectAgain.Output)"
 
+    [IO.File]::Delete($codexOwnershipState)
+    $recoverOwnership = Invoke-LuthnProcess $installedCli @("connect", "codex")
+    Assert-True ($recoverOwnership.ExitCode -eq 0) "matching Codex MCP registration should recover ownership state: $($recoverOwnership.Output)"
+    Assert-True ([IO.File]::Exists($codexOwnershipState)) "matching registration should restore ownership state for uninstall"
+
     $env:FAKE_CODEX_REMOVE_FAIL = "true"
     $blockedUninstall = Invoke-LuthnProcess $installedCli @("uninstall")
     Assert-True ($blockedUninstall.ExitCode -ne 0) "uninstall should stop when Codex cleanup fails"
@@ -305,6 +331,8 @@ esac
     Assert-True ([IO.File]::Exists($configFile)) "default uninstall should preserve config"
     Assert-True ([IO.File]::Exists($tokenFile)) "default uninstall should preserve token"
     Assert-True (-not [IO.File]::Exists($fakeCodexState)) "default uninstall should remove owned Codex registration"
+    Assert-True (-not [IO.File]::Exists($installedCli) -and -not [IO.File]::Exists($installedShim)) "default uninstall should remove only Luthn CLI files"
+    Assert-True ([IO.File]::Exists($sharedBinSentinel)) "default uninstall should preserve unrelated files in a shared bin directory"
 
     Write-Host "Windows lifecycle tests passed."
 } finally {
@@ -312,6 +340,7 @@ esac
     Remove-Item Env:FAKE_DOCKER_COMPOSE_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:FAKE_DOCKER_INFO_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:FAKE_MCP_PROBE_FAIL -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_BIN_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_INSTALLER_DOCKER_COMMAND -ErrorAction SilentlyContinue
     if ($env:LUTHN_KEEP_TEST_ROOT -cne "true" -and [IO.Directory]::Exists($testRoot)) { [IO.Directory]::Delete($testRoot, $true) }
 }

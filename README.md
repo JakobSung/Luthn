@@ -147,13 +147,13 @@ luthn connect codex
 ```
 
 Add `--auto-recall` to retrieve one small cached context pack when a new task or
-topic starts:
+topic starts on macOS or Linux:
 
 ```bash
 luthn connect codex --auto-recall
 ```
 
-Follow the command's required steps: restart Codex, open `/hooks`, trust
+On macOS or Linux, follow the command's required steps: restart Codex, open `/hooks`, trust
 `Stop > luthn.agent-connector.v1`, complete one turn, and confirm that
 `automatic-ingestion` reports `Active`. Then inspect or remove the connection with:
 
@@ -170,7 +170,8 @@ Luthn's private configuration. The operator console only displays read-only
 connection status.
 
 On Windows, `luthn connect codex` configures only the MCP channel. It does not
-modify Codex hooks or automatic-recall instructions.
+modify Codex hooks or automatic-recall instructions. Restart Codex, verify the
+`luthn` server with `/mcp`, and remove it with `luthn disconnect codex`.
 
 Codex is the current host connector. A Claude Code connector using the same
 lifecycle contract and a separate Hermes integration using its official memory

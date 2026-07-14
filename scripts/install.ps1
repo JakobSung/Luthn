@@ -96,11 +96,11 @@ try {
 
     $installArguments = @("install")
     if ($ConnectCodex) { $installArguments += "--connect-codex" }
-    & $cliPath @installArguments
+    $pwshPath = @(Get-Command pwsh -CommandType Application -ErrorAction Stop)[0].Source
+    & $pwshPath -NoProfile -File $cliPath @installArguments
     if ($LASTEXITCODE -ne 0) { throw "Luthn Windows installation failed with exit code $LASTEXITCODE" }
 
-    $pwshPath = @(Get-Command pwsh -CommandType Application -ErrorAction Stop)[0].Source
-    $shimContent = "@echo off`r`n`"$pwshPath`" -NoProfile -File `"$cliPath`" %*`r`n"
+    $shimContent = "@echo off`r`npwsh -NoProfile -File `"%~dp0luthn.ps1`" %*`r`n"
     [IO.File]::WriteAllText($shimPath, $shimContent, [Text.Encoding]::ASCII)
 
     if ($IsWindows) {
