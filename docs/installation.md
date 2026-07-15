@@ -28,19 +28,22 @@ An agent following this document should execute the work, not only repeat the
 commands to the user.
 
 1. Detect the host OS and use only the matching procedure below.
-2. Inspect the existing PowerShell, Docker, Luthn, and Codex state before
-   installing or replacing anything.
-3. Treat a stopped Docker daemon, a stale Docker context, a stale shell `PATH`,
+2. On macOS and Linux, keep using the existing `install.sh --connect-codex`
+   flow below. The Windows recovery steps and PowerShell changes do not apply
+   to those hosts.
+3. Inspect the existing host prerequisites, Docker, Luthn, and Codex state
+   before installing or replacing anything. PowerShell checks are Windows-only.
+4. Treat a stopped Docker daemon, a stale Docker context, a stale shell `PATH`,
    and an unusable Codex Desktop `WindowsApps` executable as recoverable errors.
-4. Preserve existing Docker volumes, Luthn configuration, Codex configuration,
+5. Preserve existing Docker volumes, Luthn configuration, Codex configuration,
    hooks, and unrelated MCP registrations.
-5. Never display `luthn.env`, `service-token`, a token value, or other
+6. Never display `luthn.env`, `service-token`, a token value, or other
    credential-bearing files. It is safe to report file paths and non-secret
    status.
-6. Ask the user only when installation requires an interactive Docker Desktop
+7. Ask the user only when installation requires an interactive Docker Desktop
    agreement, administrator approval, macOS privacy approval, or Codex hook
    trust. Continue automatically after the user completes that gate.
-7. Do not report success until all applicable completion checks pass.
+8. Do not report success until all applicable completion checks pass.
 
 Installation is complete only when:
 
@@ -87,48 +90,7 @@ docker compose version
 
 The first command must print `linux`. Windows containers are not supported.
 
-## Install On macOS Or Linux
-
-### 1. Verify The Host Tools
-
-Check the required commands before running the bootstrap:
-
-```bash
-command -v curl
-command -v python3
-command -v docker
-command -v codex
-docker compose version
-docker info
-```
-
-If Docker Desktop is installed but stopped on macOS, start it and wait until
-`docker info` succeeds:
-
-```bash
-open -a Docker
-until docker info >/dev/null 2>&1; do sleep 3; done
-```
-
-On Linux, start the Docker daemon using the service manager already used by the
-host. Starting a system service may require user approval or `sudo`. Do not
-replace an existing Docker installation merely because its daemon is stopped.
-For example, one of these may apply:
-
-```bash
-systemctl --user start docker-desktop
-sudo systemctl start docker
-```
-
-If Docker points at a missing or stale socket, inspect `docker context ls` and
-select an existing working context. Do not delete contexts or Docker volumes as
-part of installation.
-
-Install a missing `curl`, Python 3, or Codex CLI with the host's supported
-package manager before continuing. Keep the user's existing package manager and
-Codex authentication method.
-
-### 2. Install And Connect
+## Install on macOS or Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
@@ -142,28 +104,7 @@ With `--connect-codex`, the same bootstrap also configures the Codex hook and MC
 registration, then prints the required restart and `/hooks` Trust steps.
 
 If `~/.local/bin` is not already on `PATH`, use the export command printed by
-the installer and add it to the user's shell profile. For the current session:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-luthn status
-```
-
-Do not reinstall when only the shell `PATH` is stale. The direct diagnostic
-path is `~/.local/bin/luthn`.
-
-### 3. Complete Codex Trust And Verification
-
-Restart Codex, open `/hooks`, and trust `Stop > luthn.agent-connector.v1` when
-prompted. This is an intentional user security decision that an agent must not
-bypass. Complete one Codex turn and confirm that `automatic-ingestion` reports
-`Active`. Then verify:
-
-```bash
-luthn status
-luthn mcp --list-tools
-codex mcp get luthn
-```
+the installer and add it to your shell profile.
 
 Installed state uses stable locations independent of the current directory:
 
