@@ -1,8 +1,8 @@
 # Luthn Installation
 
-This is the source-free self-host installation path for users. It requires
-Docker and curl, not Git, a Luthn source checkout, or the .NET SDK. The optional
-one-command Codex connector also requires Python 3 on the host.
+This is the source-free self-host installation path for users. It uses the same
+Linux Compose runtime on macOS, Linux, and Windows; Git, a Luthn source checkout,
+and the .NET SDK are not required.
 
 ## Agent Prompt
 
@@ -20,6 +20,8 @@ service token.
 
 ## Requirements
 
+### macOS and Linux
+
 - Docker with Docker Compose
 - curl
 - a running Docker daemon, such as Docker Desktop or OrbStack
@@ -35,7 +37,23 @@ docker compose version
 If Docker points at a stale socket, select a working context with
 `docker context ls` and `docker context use <context-name>`.
 
-## Install
+### Windows
+
+- Windows 11
+- PowerShell 7.4 or later (`pwsh`)
+- Docker Desktop with Docker Compose, running in Linux-container mode
+- Codex CLI on `PATH` when connecting Codex
+
+Check the runtime from PowerShell:
+
+```powershell
+docker info --format '{{.OSType}}'
+docker compose version
+```
+
+The first command must print `linux`. Windows containers are not supported.
+
+## Install on macOS or Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
@@ -65,6 +83,36 @@ Installed state uses stable locations independent of the current directory:
 | PostgreSQL volume | `luthn-postgres` |
 | Operator configuration volume | `luthn-operator` |
 
+## Install on Windows
+
+Run in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 | iex
+luthn connect codex
+```
+
+The bootstrap validates Docker before replacing an existing CLI, installs a
+`luthn.cmd` shim, downloads the same Compose bundle used by macOS and Linux,
+creates a local service token, applies migrations, seeds demo data, and waits
+for health and readiness. It adds the CLI directory to the current user's
+`PATH`; open a new terminal if `luthn` is not immediately found.
+
+Windows state uses these stable locations by default:
+
+| Purpose | Default path |
+|---|---|
+| CLI and shim | `%LOCALAPPDATA%\Luthn\bin\` |
+| Compose runtime | `%LOCALAPPDATA%\Luthn\data\compose.yaml` |
+| Private configuration | `%LOCALAPPDATA%\Luthn\config\luthn.env` |
+| Service token secret | `%LOCALAPPDATA%\Luthn\config\service-token` |
+| Connector state and backups | `%LOCALAPPDATA%\Luthn\state\` |
+| PostgreSQL volume | `luthn-postgres` |
+| Operator configuration volume | `luthn-operator` |
+
+The token and configuration files are written as UTF-8 without BOM and receive
+an inheritance-disabled, current-user-only NTFS ACL.
+
 ## Status And Console
 
 ```bash
@@ -78,6 +126,8 @@ Open the operator console at <http://127.0.0.1:8080/>. PostgreSQL is kept on the
 internal Compose network and the console/API port is loopback-bound by default.
 
 ## Lifecycle Commands
+
+The following full lifecycle is currently available on macOS and Linux:
 
 ```bash
 luthn update
@@ -97,6 +147,30 @@ luthn uninstall --purge-data --yes
 deleted by uninstall only when `--purge-data` and `--yes` are both present.
 When a managed Codex connector exists, reset and update re-report its current
 metadata-only channel state after the API becomes ready.
+
+Windows currently supports:
+
+```powershell
+luthn status
+luthn connect codex
+luthn disconnect codex
+luthn uninstall
+```
+
+Windows `uninstall` removes the owned Codex MCP registration, Compose services,
+CLI, and downloaded runtime while preserving Docker volumes, configuration,
+token, connector-independent state, and backups. It stops without removing the
+runtime if Codex cleanup fails. Windows `update`, `reset`, purge uninstall, and
+automatic hook installation are deferred.
+
+### Windows release smoke
+
+The repository's Windows CI injects fake Docker and Codex commands to verify
+failure handling without requiring a privileged Docker Desktop runner. Before a
+Windows release, run the documented bootstrap on Windows 11 with Docker Desktop
+in Linux-container mode, then verify `luthn status`, `codex mcp get luthn`, an
+MCP `get_context_pack` probe, default uninstall, reinstall, and preservation of
+the two named Docker volumes and `%LOCALAPPDATA%\Luthn\config`.
 
 ### Update Behavior
 
@@ -129,6 +203,15 @@ Connect Codex with one host command:
 ```bash
 luthn connect codex
 ```
+
+On Windows this registers Codex directly to the Docker Compose stdio MCP
+service. It verifies the registration and probes `get_context_pack`; the bearer
+token remains in Luthn's private configuration and is not copied into Codex
+arguments or configuration. Repeated setup is idempotent, unrelated MCP
+registrations are preserved, and automatic hooks are not installed.
+
+The remaining hook and automatic-recall instructions in this section apply to
+macOS and Linux.
 
 Enable lightweight automatic recall explicitly when wanted:
 
@@ -246,6 +329,10 @@ Do not print or commit `~/.config/luthn/luthn.env`,
 credential-bearing operator configuration. The API receives only the token
 digest; adapter and MCP containers receive the original token as a mounted
 Compose secret file at runtime.
+
+On Windows, the corresponding private files are
+`%LOCALAPPDATA%\Luthn\config\luthn.env` and
+`%LOCALAPPDATA%\Luthn\config\service-token`.
 
 Contributors who need source builds, in-memory mode, or local migration tooling
 should use [Local Development](local-development.md).
