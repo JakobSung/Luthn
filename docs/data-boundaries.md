@@ -1,6 +1,31 @@
 # Data Boundaries Reference
 
-Canonical data-boundary rules live in `docs/project-context.md`.
+Luthn separates private source data from the safe projections that agents can
+retrieve. Agent visibility never implies access to the original record or
+permission to publish it externally.
+
+Canonical repository rules live in `docs/project-context.md`. This document
+provides the operator-facing model and concrete classification examples.
+
+## Boundary Model
+
+```text
+raw intake
+  -> classify and apply policy
+  -> private or sensitive record stays behind the storage boundary
+  -> approved safe projection becomes available to agent APIs and MCP
+  -> separately approved public projection may enter the publication outbox
+```
+
+- Raw intake may be inspected by the configured classifier, so provider choice
+  is part of the data boundary.
+- Storage classification and agent visibility are separate decisions. A stored
+  record is not automatically agent-visible.
+- Agent-facing reads return safe projections, not unrestricted source bodies.
+- External publication requires a separate explicit approval even when a
+  projection is already visible to agents.
+- Revocation or expiry removes eligibility without copying the private source
+  into audit or sync records.
 
 Use this file for concrete classification examples.
 
