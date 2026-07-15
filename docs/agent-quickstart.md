@@ -32,10 +32,10 @@ and agent-safe projection boundaries. See [Data boundaries](data-boundaries.md).
 | Host | MCP safe reads/writes | Automatic turn hook | Optional auto-recall |
 |---|---|---|---|
 | macOS and Linux | Supported | Supported after user Trust | Supported |
-| Windows | Supported | Not installed in this release | Not installed in this release |
+| Windows | Supported | Supported after user Trust | Supported |
 
-The existing macOS/Linux connector behavior is unchanged. The Windows
-connector configures only the Docker-backed stdio MCP server.
+The existing macOS/Linux connector behavior is unchanged. Windows uses a
+PowerShell-native connector with the same ownership and data-boundary contract.
 
 ## Connect Codex
 
@@ -49,7 +49,7 @@ The command preserves unrelated Codex hooks, instructions, and MCP
 registrations. The bearer token remains in Luthn's private configuration and is
 not copied into Codex configuration.
 
-### Complete Setup On macOS Or Linux
+### Complete Hook Trust On Any Host
 
 The connection command installs the Luthn-owned Stop hook and registers MCP.
 Codex requires a one-time security decision before it will run the hook:
@@ -67,17 +67,13 @@ luthn connection status codex
 The operator console reports connection observations but does not install,
 change, trust, or remove agent configuration.
 
-### Complete Setup On Windows
-
-Windows registers the Luthn MCP server but does not modify Codex hooks or
-auto-recall instructions. Restart Codex and use `/mcp` to verify that the
-`luthn` server is present.
+### Windows Codex Recovery
 
 If Codex CLI discovery fails, follow the Windows recovery section in the
 [installation guide](installation.md). Do not copy an executable from
 `WindowsApps` or change its ACLs.
 
-## Enable Lightweight Auto-Recall On macOS Or Linux
+## Enable Lightweight Auto-Recall
 
 Auto-recall is opt-in:
 
@@ -96,13 +92,13 @@ unrelated user instructions. That block asks Codex to:
 - avoid automatic lookup on every turn.
 
 Use `search_safe_context` or `query_shared_memory` explicitly when a task needs
-deeper recall. Auto-recall is not installed on Windows in this release.
+deeper recall.
 
 ## What The Hook Captures
 
-The macOS/Linux Stop hook sends only a bounded capsule derived from the final
-assistant response, together with hashed stable identifiers needed for
-idempotent delivery.
+The Stop hook sends only a bounded capsule derived from the final assistant
+response, together with hashed stable identifiers needed for idempotent
+delivery.
 
 It does not read or upload:
 
@@ -144,7 +140,7 @@ luthn status
 luthn mcp --list-tools
 ```
 
-On macOS/Linux, inspect both connector channels with:
+Inspect the connector channels on every host with:
 
 ```bash
 luthn connection status codex
@@ -156,10 +152,9 @@ Disconnect with:
 luthn disconnect codex
 ```
 
-Disconnect removes only Luthn-owned configuration. On macOS/Linux that includes
-the hook and Luthn-managed auto-recall block; unrelated hooks, instructions, and
-MCP registrations are preserved. On Windows it removes only the Luthn-owned MCP
-registration.
+Disconnect removes only the Luthn-owned hook, optional Luthn-managed
+auto-recall block, matching MCP registration, and non-secret ownership state.
+Unrelated hooks, instructions, and MCP registrations are preserved.
 
 ## Custom Agent Adapter
 

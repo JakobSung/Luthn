@@ -31,28 +31,62 @@ $script:TokenFile = if ($env:LUTHN_SERVICE_TOKEN_FILE) { $env:LUTHN_SERVICE_TOKE
 $script:ConnectorStateDir = if ($env:LUTHN_CONNECTOR_STATE_DIR) { $env:LUTHN_CONNECTOR_STATE_DIR } else { Join-Path $script:StateDir "connectors" }
 $script:CodexStateFile = if ($env:LUTHN_CODEX_STATE_FILE) { $env:LUTHN_CODEX_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.json" }
 $script:CodexPendingStateFile = if ($env:LUTHN_CODEX_PENDING_STATE_FILE) { $env:LUTHN_CODEX_PENDING_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.pending.json" }
+$script:CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } elseif ($env:USERPROFILE) { Join-Path $env:USERPROFILE ".codex" } else { throw "USERPROFILE or CODEX_HOME is required." }
+$script:CodexHooksFile = if ($env:LUTHN_CODEX_HOOKS_FILE) { $env:LUTHN_CODEX_HOOKS_FILE } else { Join-Path $script:CodexHome "hooks.json" }
+$script:CodexInstructionsFile = if ($env:LUTHN_CODEX_INSTRUCTIONS_FILE) { $env:LUTHN_CODEX_INSTRUCTIONS_FILE } else { Join-Path $script:CodexHome "AGENTS.md" }
 $script:UpdateStateFile = if ($env:LUTHN_UPDATE_STATE_FILE) { $env:LUTHN_UPDATE_STATE_FILE } else { Join-Path $script:StateDir "update-windows.json" }
 $script:DistributionRef = if ($env:LUTHN_DISTRIBUTION_REF) { $env:LUTHN_DISTRIBUTION_REF } else { "main" }
 $script:SourceBaseUrl = if ($env:LUTHN_SOURCE_BASE_URL) { $env:LUTHN_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/JakobSung/Luthn/$($script:DistributionRef)" }
 $script:DefaultImage = "ghcr.io/jakobsung/luthn:main"
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$script:StrictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+$script:CodexHookMarker = "luthn.agent-connector.v1"
+$script:AutoRecallStartMarker = "<!-- luthn:auto-recall:start -->"
+$script:AutoRecallEndMarker = "<!-- luthn:auto-recall:end -->"
+$script:MaxCodexHookInputBytes = 256 * 1024
+$script:MaxCodexInstructionsBytes = 1024 * 1024
+$script:MaxTurnCapsuleCharacters = 3900
+$script:CodexHttpTimeoutSeconds = 4
+$script:AutoRecallInstruction = @"
+<!-- luthn:auto-recall:start -->
+# Luthn lightweight recall
+
+For a new task or a material topic change, call the Luthn MCP
+``get_context_pack`` tool once before substantial work. Use a short task query
+and non-sensitive project/task cache key with these bounds:
+
+- ``maxItems``: 3
+- ``maxTokens``: 600
+- ``timeoutMs``: 200
+- ``cacheKey``: a stable non-sensitive project/task key
+- ``cacheTtlSeconds``: 600
+- ``failOpen``: true
+
+For continued work on the same task, reuse the context already returned in the
+conversation instead of calling the tool again. Refresh only after a material
+topic change or cache expiry. If lightweight recall returns no context, times
+out, or fails, continue without memory. Use deeper Luthn MCP search tools only
+when the bounded context pack is insufficient.
+<!-- luthn:auto-recall:end -->
+"@
 
 function Show-Usage {
     @"
 usage: luthn <command> [options]
 
 commands:
-  install [--connect-codex]  Install Luthn and optionally register Codex MCP.
+  install [--connect-codex]  Install Luthn and optionally connect Codex.
   status                     Show services, readiness, console, and image.
   update [image]             Back up, pull, migrate, restart, and verify.
-  connect codex              Register the Docker-backed Codex MCP server.
-  disconnect codex           Remove only a Luthn-owned Codex MCP registration.
+  connect codex [--auto-recall]
+                             Configure the Codex hook and MCP; recall is opt-in.
+  connection status codex    Show local and server Codex connection state.
+  disconnect codex           Remove only Luthn-owned Codex configuration.
   mcp [--list-tools]         Run the Docker-backed MCP stdio server.
   uninstall                  Remove services and runtime; preserve data/config.
   help                       Show this help.
 
-Windows reset, purge uninstall, and the automatic Codex hook are not available
-in this release.
+Windows reset and purge uninstall are not available in this release.
 "@
 }
 
@@ -842,6 +876,418 @@ function Get-McpDockerArguments {
     return Get-ComposeArguments @("--profile", "tools", "run", "--rm", "--no-deps", "-T", "mcp")
 }
 
+function Get-CodexManagedTarget {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($item) {
+        if ($item.LinkType) {
+            $target = $item.ResolveLinkTarget($true)
+            if (-not $target) { throw "Codex configuration link could not be resolved: $Path" }
+            return $target.FullName
+        }
+        return $item.FullName
+    }
+    return [IO.Path]::GetFullPath($Path)
+}
+
+function Write-CodexManagedText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [AllowEmptyString()][Parameter(Mandatory = $true)][string]$Content
+    )
+    Write-Utf8File -Path (Get-CodexManagedTarget $Path) -Content $Content
+}
+
+function Get-CodexFileSnapshot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$MaximumBytes = $script:MaxCodexInstructionsBytes
+    )
+    $target = Get-CodexManagedTarget $Path
+    $fileInfo = if ([IO.File]::Exists($target)) { [IO.FileInfo]::new($target) } else { $null }
+    if ($fileInfo -and $fileInfo.Length -gt $MaximumBytes) {
+        throw "Codex configuration exceeds the supported size: $Path"
+    }
+    return [pscustomobject]@{
+        Path = $Path
+        Target = $target
+        Existed = $null -ne $fileInfo
+        Bytes = if ($fileInfo) { [IO.File]::ReadAllBytes($target) } else { $null }
+    }
+}
+
+function Restore-CodexFileSnapshot {
+    param([Parameter(Mandatory = $true)]$Snapshot)
+    if ($Snapshot.Existed) {
+        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Snapshot.Target))
+        [IO.File]::WriteAllBytes($Snapshot.Target, $Snapshot.Bytes)
+    } elseif ([IO.File]::Exists($Snapshot.Target)) {
+        [IO.File]::Delete($Snapshot.Target)
+    }
+}
+
+function Read-CodexManagedText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$MaximumBytes = $script:MaxCodexInstructionsBytes
+    )
+    $target = Get-CodexManagedTarget $Path
+    if (-not [IO.File]::Exists($target)) { return "" }
+    if ([IO.FileInfo]::new($target).Length -gt $MaximumBytes) {
+        throw "Codex configuration exceeds the supported size: $Path"
+    }
+    return [IO.File]::ReadAllText($target)
+}
+
+function Get-CodexHooksDocument {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $content = Read-CodexManagedText -Path $Path
+    if (-not $content) { return [ordered]@{} }
+    try {
+        $document = $content | ConvertFrom-Json -AsHashtable
+    } catch {
+        throw "Codex hooks configuration is not valid JSON: $Path"
+    }
+    if ($document -isnot [Collections.IDictionary]) {
+        throw "Codex hooks configuration must be a JSON object: $Path"
+    }
+    if ($document.Contains("hooks") -and $document["hooks"] -isnot [Collections.IDictionary]) {
+        throw "Codex hooks configuration 'hooks' must be an object: $Path"
+    }
+    return $document
+}
+
+function Get-CodexStopGroups {
+    param(
+        [Parameter(Mandatory = $true)][Collections.IDictionary]$Document,
+        [switch]$Create
+    )
+    if (-not $Document.Contains("hooks")) {
+        if (-not $Create) { return $null }
+        $Document["hooks"] = [ordered]@{}
+    }
+    $hooks = $Document["hooks"]
+    if (-not $hooks.Contains("Stop")) {
+        if (-not $Create) { return $null }
+        $hooks["Stop"] = @()
+    }
+    if ($hooks["Stop"] -isnot [Collections.IList]) {
+        throw "Codex hooks configuration 'hooks.Stop' must be an array."
+    }
+    return @($hooks["Stop"])
+}
+
+function Test-CodexHookInstalled {
+    param([string]$Path = $script:CodexHooksFile, [string]$Command = (Get-CodexHookCommand))
+    if (-not [IO.File]::Exists((Get-CodexManagedTarget $Path))) { return $false }
+    $document = Get-CodexHooksDocument $Path
+    $groups = @(Get-CodexStopGroups -Document $document)
+    $matches = @($groups | Where-Object { $_ -is [Collections.IDictionary] -and $_["matcher"] -ceq $script:CodexHookMarker })
+    if ($matches.Count -ne 1) { return $false }
+    $handlers = $matches[0]["hooks"]
+    return $handlers -is [Collections.IList] -and $handlers.Count -eq 1 -and
+        $handlers[0] -is [Collections.IDictionary] -and $handlers[0]["type"] -ceq "command" -and
+        $handlers[0]["command"] -ceq $Command -and
+        (-not $handlers[0].Contains("commandWindows") -or $handlers[0]["commandWindows"] -ceq $Command) -and
+        (-not $handlers[0].Contains("command_windows") -or $handlers[0]["command_windows"] -ceq $Command) -and
+        -not $handlers[0].Contains("async")
+}
+
+function Install-CodexHook {
+    param([string]$Path = $script:CodexHooksFile, [string]$Command = (Get-CodexHookCommand))
+    if (Test-CodexHookInstalled -Path $Path -Command $Command) { return $false }
+    $document = Get-CodexHooksDocument $Path
+    $groups = @(Get-CodexStopGroups -Document $document -Create)
+    $remaining = @($groups | Where-Object { $_ -isnot [Collections.IDictionary] -or $_["matcher"] -cne $script:CodexHookMarker })
+    $managed = [ordered]@{
+        matcher = $script:CodexHookMarker
+        hooks = @([ordered]@{
+            type = "command"
+            command = $Command
+            commandWindows = $Command
+            timeout = $script:CodexHttpTimeoutSeconds + 1
+            statusMessage = "Syncing Luthn memory"
+        })
+    }
+    $document["hooks"]["Stop"] = @($remaining) + @($managed)
+    Write-CodexManagedText -Path $Path -Content (($document | ConvertTo-Json -Depth 20) + "`n")
+    return $true
+}
+
+function Remove-CodexHook {
+    param([string]$Path = $script:CodexHooksFile, [switch]$DeleteIfEmpty)
+    if (-not [IO.File]::Exists((Get-CodexManagedTarget $Path))) { return $false }
+    $document = Get-CodexHooksDocument $Path
+    $groups = @(Get-CodexStopGroups -Document $document)
+    if ($null -eq $groups) { return $false }
+    $remaining = @($groups | Where-Object { $_ -isnot [Collections.IDictionary] -or $_["matcher"] -cne $script:CodexHookMarker })
+    if ($remaining.Count -eq $groups.Count) { return $false }
+    $document["hooks"]["Stop"] = $remaining
+    if ($DeleteIfEmpty -and $document.Count -eq 1 -and $document["hooks"].Count -eq 1 -and $remaining.Count -eq 0) {
+        $target = Get-CodexManagedTarget $Path
+        if ([IO.File]::Exists($target)) { [IO.File]::Delete($target) }
+        return $true
+    }
+    Write-CodexManagedText -Path $Path -Content (($document | ConvertTo-Json -Depth 20) + "`n")
+    return $true
+}
+
+function Get-ContentWithoutAutoRecall {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content)
+    $startCount = ([regex]::Matches($Content, [regex]::Escape($script:AutoRecallStartMarker))).Count
+    $endCount = ([regex]::Matches($Content, [regex]::Escape($script:AutoRecallEndMarker))).Count
+    if ($startCount -eq 0 -and $endCount -eq 0) { return $Content }
+    if ($startCount -ne 1 -or $endCount -ne 1) {
+        throw "Codex instructions contain malformed Luthn auto-recall markers."
+    }
+    $start = $Content.IndexOf($script:AutoRecallStartMarker, [StringComparison]::Ordinal)
+    $end = $Content.IndexOf($script:AutoRecallEndMarker, $start, [StringComparison]::Ordinal)
+    if ($end -lt $start) { throw "Codex instructions contain malformed Luthn auto-recall markers." }
+    $before = $Content.Substring(0, $start).TrimEnd([char[]]"`r`n")
+    $afterStart = $end + $script:AutoRecallEndMarker.Length
+    $after = $Content.Substring($afterStart).TrimStart([char[]]"`r`n")
+    $parts = @(@($before, $after) | Where-Object { $_ })
+    if ($parts.Count -eq 0) { return "" }
+    return (($parts -join "`r`n`r`n").TrimEnd([char[]]"`r`n") + "`r`n")
+}
+
+function Test-CodexAutoRecallInstalled {
+    param([string]$Path = $script:CodexInstructionsFile)
+    $content = Read-CodexManagedText -Path $Path
+    $startCount = ([regex]::Matches($content, [regex]::Escape($script:AutoRecallStartMarker))).Count
+    $endCount = ([regex]::Matches($content, [regex]::Escape($script:AutoRecallEndMarker))).Count
+    if ($startCount -eq 0 -and $endCount -eq 0) { return $false }
+    if ($startCount -ne 1 -or $endCount -ne 1) {
+        throw "Codex instructions contain malformed Luthn auto-recall markers."
+    }
+    return $content.Contains($script:AutoRecallInstruction.TrimEnd([char[]]"`r`n"), [StringComparison]::Ordinal)
+}
+
+function Install-CodexAutoRecall {
+    param([string]$Path = $script:CodexInstructionsFile)
+    if (Test-CodexAutoRecallInstalled -Path $Path) { return $false }
+    $content = Get-ContentWithoutAutoRecall (Read-CodexManagedText -Path $Path)
+    $prefix = $content.TrimEnd([char[]]"`r`n")
+    $instruction = $script:AutoRecallInstruction.TrimEnd([char[]]"`r`n")
+    $updated = if ($prefix) { "$prefix`r`n`r`n$instruction`r`n" } else { "$instruction`r`n" }
+    Write-CodexManagedText -Path $Path -Content $updated
+    return $true
+}
+
+function Remove-CodexAutoRecall {
+    param([string]$Path = $script:CodexInstructionsFile, [switch]$PreserveEmpty)
+    $content = Read-CodexManagedText -Path $Path
+    $updated = Get-ContentWithoutAutoRecall $content
+    if ($updated -ceq $content) { return $false }
+    if ($updated -or $PreserveEmpty) {
+        Write-CodexManagedText -Path $Path -Content $updated
+    } else {
+        $target = Get-CodexManagedTarget $Path
+        if ([IO.File]::Exists($target)) { [IO.File]::Delete($target) }
+    }
+    return $true
+}
+
+function Get-CodexHookCommand {
+    if ($env:LUTHN_CODEX_HOOK_COMMAND) { return $env:LUTHN_CODEX_HOOK_COMMAND }
+    $pwsh = Get-PwshPath
+    $cli = Join-Path $script:BinDir "luthn.ps1"
+    if (-not [IO.File]::Exists($cli)) { $cli = $PSCommandPath }
+    if ($pwsh.Contains('"') -or $cli.Contains('"')) { throw "Codex hook command paths cannot contain a quote." }
+    return "`"$pwsh`" -NoProfile -NonInteractive -File `"$cli`" codex-hook"
+}
+
+function Read-BoundedStandardInput {
+    param([Parameter(Mandatory = $true)][int]$MaximumBytes)
+    $stream = [Console]::OpenStandardInput()
+    $memory = [IO.MemoryStream]::new()
+    try {
+        $buffer = [byte[]]::new(8192)
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            if ($memory.Length + $read -gt $MaximumBytes) { throw "Codex hook input exceeded the bounded payload limit." }
+            $memory.Write($buffer, 0, $read)
+        }
+        return $script:StrictUtf8.GetString($memory.ToArray()).TrimStart([char]0xFEFF)
+    } finally {
+        $memory.Dispose()
+    }
+}
+
+function Get-StableCodexId {
+    param([Parameter(Mandatory = $true)][string]$Prefix, [Parameter(Mandatory = $true)][string]$Value)
+    $hash = [Security.Cryptography.SHA256]::HashData($script:Utf8NoBom.GetBytes($Value))
+    return "$Prefix-$(([Convert]::ToHexString($hash).ToLowerInvariant()).Substring(0, 32))"
+}
+
+function Test-CodexMessageContainsCredentials {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    $patterns = @(
+        '(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----',
+        '\b(?:sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|AKIA[A-Z0-9]{16})\b',
+        '(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}',
+        '(?i)\b(?:Authorization\s*[:=]\s*)?Basic\s+[A-Za-z0-9+/]{8,}={0,2}',
+        '\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b',
+        '(?i)\b[A-Za-z][A-Za-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@',
+        '(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|token|password|passwd|secret|private[_-]?key|database[_-]?url|connection[_-]?string)\s*[:=]\s*\S'
+    )
+    foreach ($pattern in $patterns) {
+        if ([regex]::IsMatch($Value, $pattern)) { return $true }
+    }
+    return $false
+}
+
+function New-CodexTurnCapsule {
+    param([Parameter(Mandatory = $true)][string]$HookJson)
+    $inputObject = $HookJson | ConvertFrom-Json
+    if ($inputObject.hook_event_name -cne "Stop") { throw "expected Codex Stop hook input" }
+    $sessionId = [string]$inputObject.session_id
+    $turnId = [string]$inputObject.turn_id
+    if (-not $sessionId.Trim()) { throw "Codex Stop hook input is missing session_id" }
+    if (-not $turnId.Trim()) { throw "Codex Stop hook input is missing turn_id" }
+    if ($null -eq $inputObject.last_assistant_message) { return $null }
+    if ($inputObject.last_assistant_message -isnot [string]) { throw "Codex Stop hook last_assistant_message must be text" }
+    $summary = $inputObject.last_assistant_message.Trim()
+    if (-not $summary -or (Test-CodexMessageContainsCredentials $summary)) { return $null }
+    $serviceTokenFile = Read-ConfigValue "LUTHN_SERVICE_TOKEN_FILE" $script:TokenFile
+    if ([IO.File]::Exists($serviceTokenFile)) {
+        $serviceToken = [IO.File]::ReadAllText($serviceTokenFile).Trim()
+        if ($serviceToken -and $summary.Contains($serviceToken, [StringComparison]::Ordinal)) { return $null }
+    }
+    if ($summary.Length -gt $script:MaxTurnCapsuleCharacters) {
+        $summary = $summary.Substring(0, $script:MaxTurnCapsuleCharacters).TrimEnd()
+    }
+    $summaryHash = [Security.Cryptography.SHA256]::HashData($script:Utf8NoBom.GetBytes($summary))
+    return [ordered]@{
+        sessionId = Get-StableCodexId "codex-session" $sessionId.Trim()
+        turnId = Get-StableCodexId "codex-turn" $turnId.Trim()
+        sourceAgent = "codex"
+        summary = $summary
+        coreTags = @("codex", "conversation")
+        contentDigest = "sha256:$([Convert]::ToHexString($summaryHash).ToLowerInvariant())"
+        idempotencyKey = Get-StableCodexId "codex-capsule" "$($sessionId.Trim()):$($turnId.Trim())"
+        title = "Codex turn capsule"
+    }
+}
+
+function Invoke-LuthnApiRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Token,
+        [AllowNull()]$Payload = $null
+    )
+    $client = [Net.Http.HttpClient]::new()
+    $client.Timeout = [TimeSpan]::FromSeconds($script:CodexHttpTimeoutSeconds)
+    $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::new($Method), $Url)
+    $response = $null
+    $request.Headers.Authorization = [Net.Http.Headers.AuthenticationHeaderValue]::new("Bearer", $Token)
+    if ($null -ne $Payload) {
+        $json = $Payload | ConvertTo-Json -Depth 12 -Compress
+        $request.Content = [Net.Http.StringContent]::new($json, $script:Utf8NoBom, "application/json")
+    }
+    try {
+        $response = $client.SendAsync($request).GetAwaiter().GetResult()
+        $content = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) { throw "Luthn API returned HTTP $([int]$response.StatusCode)." }
+        if (-not $content) { return $null }
+        return $content | ConvertFrom-Json -AsHashtable
+    } finally {
+        $request.Dispose()
+        if ($null -ne $response) { $response.Dispose() }
+        $client.Dispose()
+    }
+}
+
+function Get-CodexApiCredentials {
+    $tokenFile = Read-ConfigValue "LUTHN_SERVICE_TOKEN_FILE" $script:TokenFile
+    if (-not [IO.File]::Exists($tokenFile)) { throw "Luthn service token is missing." }
+    $token = [IO.File]::ReadAllText($tokenFile).Trim()
+    if (-not $token -or $token.Length -gt 4096) { throw "Luthn service token is invalid." }
+    return [pscustomobject]@{
+        BaseUrl = (Read-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:8080").TrimEnd("/")
+        Token = $token
+    }
+}
+
+function Send-CodexObservation {
+    param([Parameter(Mandatory = $true)][object[]]$Channels)
+    if ($env:LUTHN_CODEX_SKIP_OBSERVATION -ceq "true") { return }
+    $credentials = Get-CodexApiCredentials
+    $payload = [ordered]@{
+        agentName = "Codex"
+        integrationKind = "host-hook-mcp"
+        connectorVersion = $script:LuthnWindowsCliVersion
+        channels = $Channels
+    }
+    [void](Invoke-LuthnApiRequest -Method "POST" -Url "$($credentials.BaseUrl)/api/agent-connections/codex/observations" -Token $credentials.Token -Payload $payload)
+}
+
+function Invoke-CodexHookUploadPayload {
+    param([Parameter(Mandatory = $true)][string]$PayloadJson)
+    try {
+        if ($env:LUTHN_CODEX_HOOK_CAPTURE_FILE) {
+            Write-Utf8File -Path $env:LUTHN_CODEX_HOOK_CAPTURE_FILE -Content ($PayloadJson.TrimEnd() + "`n")
+            return
+        }
+        $capsule = $PayloadJson | ConvertFrom-Json -AsHashtable
+        $credentials = Get-CodexApiCredentials
+        [void](Invoke-LuthnApiRequest -Method "POST" -Url "$($credentials.BaseUrl)/api/agent/turn-summaries" -Token $credentials.Token -Payload $capsule)
+        try {
+            Send-CodexObservation @([ordered]@{ channel = "automatic-ingestion"; configured = $true; verificationState = "Verified"; activityState = "Succeeded"; failureCode = $null })
+        } catch {}
+    } catch {
+        try {
+            Send-CodexObservation @([ordered]@{ channel = "automatic-ingestion"; configured = $true; verificationState = "Verified"; activityState = "Failed"; failureCode = "delivery.failed" })
+        } catch {}
+    }
+}
+
+function Start-CodexHookUpload {
+    param([Parameter(Mandatory = $true)][string]$PayloadJson)
+    if ($env:LUTHN_CODEX_HOOK_SYNCHRONOUS -ceq "true") {
+        Invoke-CodexHookUploadPayload $PayloadJson
+        return
+    }
+    $cli = Join-Path $script:BinDir "luthn.ps1"
+    if (-not [IO.File]::Exists($cli)) { $cli = $PSCommandPath }
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = Get-PwshPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    foreach ($argument in @("-NoProfile", "-NonInteractive", "-File", $cli, "codex-hook-upload")) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) { return }
+        $process.StandardInput.Write($PayloadJson)
+        $process.StandardInput.Close()
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Run-CodexHook {
+    try {
+        $hookJson = Read-BoundedStandardInput $script:MaxCodexHookInputBytes
+        $capsule = New-CodexTurnCapsule $hookJson
+        if ($null -ne $capsule) { Start-CodexHookUpload ($capsule | ConvertTo-Json -Depth 8 -Compress) }
+    } catch {
+        if ($env:LUTHN_CODEX_HOOK_TEST_THROW -ceq "true") { throw }
+    }
+}
+
+function Run-CodexHookUpload {
+    try {
+        Invoke-CodexHookUploadPayload (Read-BoundedStandardInput 32768)
+    } catch {
+        if ($env:LUTHN_CODEX_HOOK_TEST_THROW -ceq "true") { throw }
+    }
+}
+
 function Test-StringArrayEqual {
     param([object[]]$Left, [object[]]$Right)
     if ($Left.Count -ne $Right.Count) { return $false }
@@ -862,15 +1308,32 @@ function Get-CodexRegistration {
 }
 
 function Write-ConnectorState {
-    param([string]$Path, [string]$State, [string]$CommandPath, [string[]]$Arguments)
+    param(
+        [string]$Path,
+        [string]$State,
+        [string]$CommandPath,
+        [string[]]$Arguments,
+        [string]$HookCommand,
+        [bool]$HookInstalled,
+        [bool]$AutoRecall,
+        [bool]$HooksExisted,
+        [bool]$InstructionsExisted
+    )
     Ensure-Directories
     $content = [ordered]@{
-        version = 1
-        integration = "windows-docker-mcp"
+        version = 2
+        integration = "host-hook-mcp"
         setupState = $State
         mcpName = "luthn"
         command = $CommandPath
         arguments = $Arguments
+        hooksFile = $script:CodexHooksFile
+        hookCommand = $HookCommand
+        hookInstalled = $HookInstalled
+        hooksExistedBeforeConnect = $HooksExisted
+        instructionsFile = $script:CodexInstructionsFile
+        autoRecall = $AutoRecall
+        instructionsExistedBeforeConnect = $InstructionsExisted
         updatedAt = [DateTimeOffset]::UtcNow.ToString("O")
     } | ConvertTo-Json -Depth 5
     Write-Utf8File -Path $Path -Content ($content + "`n")
@@ -890,74 +1353,193 @@ function Test-McpProbe {
 }
 
 function Connect-Codex {
+    param([string[]]$Arguments = @())
+    $autoRecallRequested = $false
+    foreach ($argument in $Arguments) {
+        if ($argument -ceq "--auto-recall" -and -not $autoRecallRequested) { $autoRecallRequested = $true }
+        else { throw "usage: luthn connect codex [--auto-recall]" }
+    }
     Require-Installation
     Test-DockerPreflight
     $docker = Get-DockerTool
     $codex = Get-CodexTool
     $mcpArguments = @($docker.PrefixArguments) + @(Get-McpDockerArguments)
     $existing = Get-CodexRegistration $codex
-
-    if ($existing) {
-        if (-not (Test-RegistrationMatches $existing $docker.FilePath $mcpArguments)) {
-            throw "Codex already has an unrelated MCP registration named 'luthn'; no configuration was changed."
-        }
-        if (-not (Test-McpProbe)) { throw "Codex MCP probe failed; the existing registration was preserved." }
-        Write-ConnectorState -Path $script:CodexStateFile -State "configured" -CommandPath $docker.FilePath -Arguments $mcpArguments
-        if ([IO.File]::Exists($script:CodexPendingStateFile)) { [IO.File]::Delete($script:CodexPendingStateFile) }
-        Write-Host "Codex MCP is already configured for the Windows Docker runtime."
-        return
+    if ($existing -and -not (Test-RegistrationMatches $existing $docker.FilePath $mcpArguments)) {
+        throw "Codex already has an unrelated MCP registration named 'luthn'; no configuration was changed."
     }
-
-    Write-ConnectorState -Path $script:CodexPendingStateFile -State "pending" -CommandPath $docker.FilePath -Arguments $mcpArguments
+    $hookCommand = Get-CodexHookCommand
+    $hookSnapshot = Get-CodexFileSnapshot $script:CodexHooksFile
+    $instructionsSnapshot = Get-CodexFileSnapshot $script:CodexInstructionsFile
+    $hooksExistedBeforeConnect = $hookSnapshot.Existed
+    $instructionsExistedBeforeConnect = $instructionsSnapshot.Existed
+    if ([IO.File]::Exists($script:CodexStateFile)) {
+        try {
+            $previousState = [IO.File]::ReadAllText($script:CodexStateFile) | ConvertFrom-Json -AsHashtable
+            if ([int]$previousState["version"] -ge 2) {
+                if ($previousState.Contains("hooksExistedBeforeConnect")) { $hooksExistedBeforeConnect = [bool]$previousState["hooksExistedBeforeConnect"] }
+                if ($previousState.Contains("instructionsExistedBeforeConnect")) { $instructionsExistedBeforeConnect = [bool]$previousState["instructionsExistedBeforeConnect"] }
+            }
+        } catch {}
+    }
+    $preexistingRecall = Test-CodexAutoRecallInstalled
+    Write-ConnectorState -Path $script:CodexPendingStateFile -State "pending" -CommandPath $docker.FilePath -Arguments $mcpArguments -HookCommand $hookCommand -HookInstalled $false -AutoRecall $preexistingRecall -HooksExisted $hooksExistedBeforeConnect -InstructionsExisted $instructionsExistedBeforeConnect
     $added = $false
     try {
-        $addResult = Invoke-ToolCapture -Tool $codex -Arguments (@("mcp", "add", "luthn", "--", $docker.FilePath) + $mcpArguments)
-        Assert-ToolSuccess $addResult "Codex MCP registration"
-        $added = $true
+        [void](Install-CodexHook -Command $hookCommand)
+        if (-not $existing) {
+            $addResult = Invoke-ToolCapture -Tool $codex -Arguments (@("mcp", "add", "luthn", "--", $docker.FilePath) + $mcpArguments)
+            Assert-ToolSuccess $addResult "Codex MCP registration"
+            $added = $true
+        }
         if (-not (Test-McpProbe)) { throw "Codex MCP probe failed." }
-        Write-ConnectorState -Path $script:CodexStateFile -State "configured" -CommandPath $docker.FilePath -Arguments $mcpArguments
+        if ($autoRecallRequested) { [void](Install-CodexAutoRecall) }
+        $autoRecallEnabled = Test-CodexAutoRecallInstalled
+        Write-ConnectorState -Path $script:CodexStateFile -State "configured" -CommandPath $docker.FilePath -Arguments $mcpArguments -HookCommand $hookCommand -HookInstalled $true -AutoRecall $autoRecallEnabled -HooksExisted $hooksExistedBeforeConnect -InstructionsExisted $instructionsExistedBeforeConnect
         [IO.File]::Delete($script:CodexPendingStateFile)
     } catch {
+        $originalError = $_.Exception.Message
+        $rollbackError = ""
+        try {
+            Restore-CodexFileSnapshot $hookSnapshot
+            Restore-CodexFileSnapshot $instructionsSnapshot
+        } catch { $rollbackError = $_.Exception.Message }
+        $mcpCleanupError = ""
         if ($added) {
             $removeResult = Invoke-ToolCapture -Tool $codex -Arguments @("mcp", "remove", "luthn")
-            if ($removeResult.ExitCode -eq 0) {
-                [IO.File]::Delete($script:CodexPendingStateFile)
-            } else {
-                Write-ConnectorState -Path $script:CodexPendingStateFile -State "cleanup-required" -CommandPath $docker.FilePath -Arguments $mcpArguments
-                throw "$($_.Exception.Message) Codex cleanup also failed; ownership state was preserved."
-            }
-        } else {
-            [IO.File]::Delete($script:CodexPendingStateFile)
+            if ($removeResult.ExitCode -ne 0) { $mcpCleanupError = "Codex MCP cleanup also failed" }
         }
-        throw
+        if (-not $rollbackError -and -not $mcpCleanupError) {
+            [IO.File]::Delete($script:CodexPendingStateFile)
+        } else {
+            $hookOwned = $true
+            $recallOwned = $preexistingRecall
+            try { $hookOwned = Test-CodexHookInstalled -Command $hookCommand } catch {}
+            try { $recallOwned = Test-CodexAutoRecallInstalled } catch {}
+            Write-ConnectorState -Path $script:CodexPendingStateFile -State "cleanup-required" -CommandPath $docker.FilePath -Arguments $mcpArguments -HookCommand $hookCommand -HookInstalled $hookOwned -AutoRecall $recallOwned -HooksExisted $hooksExistedBeforeConnect -InstructionsExisted $instructionsExistedBeforeConnect
+            $details = @($mcpCleanupError, $(if ($rollbackError) { "Codex configuration rollback also failed: $rollbackError" })) | Where-Object { $_ }
+            throw "$originalError $($details -join '. '); ownership state was preserved."
+        }
+        throw $originalError
     }
+    try {
+        Send-CodexObservation @(
+            [ordered]@{ channel = "automatic-ingestion"; configured = $true; verificationState = "Unknown"; activityState = "Unknown"; failureCode = $null },
+            [ordered]@{ channel = "mcp"; configured = $true; verificationState = "Verified"; activityState = "Succeeded"; failureCode = $null }
+        )
+    } catch { Write-Warning "Codex is configured, but the initial server observation could not be recorded." }
+    $recallStatus = if (Test-CodexAutoRecallInstalled) { "enabled" } else { "disabled" }
+    Write-Host "Codex connector files are configured, but automatic memory capture is not ready yet."
+    Write-Host "  automatic ingestion: waiting for Codex hook trust"
+    Write-Host "  MCP: configured and verified"
+    Write-Host "  lightweight recall: $recallStatus"
+    Write-Host ""
+    Write-Host "Required one-time Codex security steps:"
+    Write-Host "  1. Quit and reopen Codex."
+    Write-Host "  2. In a Codex message box, enter /hooks."
+    Write-Host "  3. Open Stop > $($script:CodexHookMarker) and choose Trust."
+    Write-Host "  4. Complete one Codex turn, then verify with:"
+    Write-Host "     luthn connection status codex"
+}
 
-    Write-Host "Codex MCP is configured for Luthn."
-    Write-Host "Restart Codex, then use /mcp to verify the luthn server."
-    Write-Host "The Windows automatic turn-capsule hook is not installed in this release."
+function Show-CodexConnectionStatus {
+    Require-Installation
+    $hookCommand = Get-CodexHookCommand
+    $hookConfigured = $false
+    $recallConfigured = $false
+    try { $hookConfigured = Test-CodexHookInstalled -Command $hookCommand } catch {}
+    try { $recallConfigured = Test-CodexAutoRecallInstalled } catch {}
+    $mcpConfigured = $false
+    try {
+        $docker = Get-DockerTool
+        $mcpArguments = @($docker.PrefixArguments) + @(Get-McpDockerArguments)
+        $mcpConfigured = Test-RegistrationMatches (Get-CodexRegistration (Get-CodexTool)) $docker.FilePath $mcpArguments
+    } catch {}
+    $localStatePath = if ([IO.File]::Exists($script:CodexPendingStateFile)) {
+        $script:CodexPendingStateFile
+    } elseif ([IO.File]::Exists($script:CodexStateFile)) {
+        $script:CodexStateFile
+    } else {
+        $null
+    }
+    $localStatus = "not configured"
+    if ($localStatePath) {
+        try {
+            $localState = [IO.File]::ReadAllText($localStatePath) | ConvertFrom-Json -AsHashtable
+            $localStatus = switch ([string]$localState["setupState"]) {
+                "configured" { "configured"; break }
+                "pending" { "pending"; break }
+                "cleanup-required" { "cleanup-required"; break }
+                default { "state-invalid"; break }
+            }
+        } catch {
+            $localStatus = "state-invalid"
+        }
+    }
+    Write-Host "Local connector: $localStatus"
+    Write-Host "  automatic-ingestion: $(if ($hookConfigured) { 'configured' } else { 'missing' })"
+    Write-Host "  mcp: $(if ($mcpConfigured) { 'configured' } else { 'missing or changed' })"
+    Write-Host "  lightweight-recall: $(if ($recallConfigured) { 'enabled' } else { 'disabled' })"
+    try {
+        if ($env:LUTHN_CODEX_SKIP_OBSERVATION -ceq "true") { throw "observation disabled" }
+        $credentials = Get-CodexApiCredentials
+        $response = Invoke-LuthnApiRequest -Method "GET" -Url "$($credentials.BaseUrl)/api/agent-connections" -Token $credentials.Token
+        $connection = @($response["connections"] | Where-Object { $_["agentId"] -ceq "codex" }) | Select-Object -First 1
+        if (-not $connection) { Write-Host "Server observation: unknown"; return }
+        Write-Host "Server observation: $($connection['state'])"
+        foreach ($channel in @($connection["channels"])) {
+            $detail = [string]$channel["state"]
+            if ($channel["failureCode"]) { $detail += " ($($channel['failureCode']))" }
+            Write-Host "  $($channel['channel']): $detail"
+        }
+    } catch { Write-Host "Server observation: unavailable" }
 }
 
 function Disconnect-Codex {
     $statePath = if ([IO.File]::Exists($script:CodexStateFile)) { $script:CodexStateFile } elseif ([IO.File]::Exists($script:CodexPendingStateFile)) { $script:CodexPendingStateFile } else { $null }
     if (-not $statePath) {
-        Write-Host "No Luthn-owned Windows Codex MCP registration was recorded."
+        Write-Host "No Luthn-owned Windows Codex configuration was recorded."
         return
     }
 
-    $state = [IO.File]::ReadAllText($statePath) | ConvertFrom-Json
+    $state = [IO.File]::ReadAllText($statePath) | ConvertFrom-Json -AsHashtable
+    $stateVersion = if ($state.Contains("version")) { [int]$state["version"] } else { 1 }
+    $hooksFile = if ($stateVersion -ge 2 -and $state["hooksFile"]) { [string]$state["hooksFile"] } else { $script:CodexHooksFile }
+    $instructionsFile = if ($stateVersion -ge 2 -and $state["instructionsFile"]) { [string]$state["instructionsFile"] } else { $script:CodexInstructionsFile }
+    $hookSnapshot = Get-CodexFileSnapshot $hooksFile
+    $instructionsSnapshot = Get-CodexFileSnapshot $instructionsFile
     $codex = Get-CodexTool
     $existing = Get-CodexRegistration $codex
-    if ($existing) {
-        if (-not (Test-RegistrationMatches $existing ([string]$state.command) @($state.arguments))) {
-            throw "The 'luthn' MCP registration changed after setup and was preserved."
+    try {
+        $deleteEmptyHooks = $stateVersion -ge 2 -and $state.Contains("hooksExistedBeforeConnect") -and -not $state["hooksExistedBeforeConnect"]
+        $preserveEmptyInstructions = $stateVersion -ge 2 -and $state.Contains("instructionsExistedBeforeConnect") -and $state["instructionsExistedBeforeConnect"]
+        if ($stateVersion -ge 2 -and $state["hookInstalled"]) { [void](Remove-CodexHook -Path $hooksFile -DeleteIfEmpty:$deleteEmptyHooks) }
+        if ($stateVersion -ge 2 -and $state["autoRecall"]) { [void](Remove-CodexAutoRecall -Path $instructionsFile -PreserveEmpty:$preserveEmptyInstructions) }
+        if ($existing) {
+            if (-not (Test-RegistrationMatches $existing ([string]$state["command"]) @($state["arguments"]))) {
+                throw "The 'luthn' MCP registration changed after setup and was preserved."
+            }
+            $removeResult = Invoke-ToolCapture -Tool $codex -Arguments @("mcp", "remove", "luthn")
+            Assert-ToolSuccess $removeResult "Codex MCP cleanup"
         }
-        $removeResult = Invoke-ToolCapture -Tool $codex -Arguments @("mcp", "remove", "luthn")
-        Assert-ToolSuccess $removeResult "Codex MCP cleanup"
+    } catch {
+        $originalError = $_.Exception.Message
+        try {
+            Restore-CodexFileSnapshot $hookSnapshot
+            Restore-CodexFileSnapshot $instructionsSnapshot
+        } catch { throw "$originalError Codex configuration rollback also failed: $($_.Exception.Message)" }
+        throw $originalError
     }
     foreach ($path in @($script:CodexStateFile, $script:CodexPendingStateFile)) {
-        if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) }
+        try { if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) } } catch {}
     }
-    Write-Host "Luthn-owned Codex MCP configuration was removed."
+    try {
+        Send-CodexObservation @(
+            [ordered]@{ channel = "automatic-ingestion"; configured = $false; verificationState = "Unknown"; activityState = "Unknown"; failureCode = $null },
+            [ordered]@{ channel = "mcp"; configured = $false; verificationState = "Unknown"; activityState = "Unknown"; failureCode = $null }
+        )
+    } catch {}
+    Write-Host "Luthn-owned Codex connector configuration was removed."
 }
 
 function Run-Mcp {
@@ -979,7 +1561,7 @@ function Uninstall-Luthn {
         try {
             Disconnect-Codex
         } catch {
-            throw "Uninstall stopped because Codex MCP cleanup did not complete. $($_.Exception.Message)"
+            throw "Uninstall stopped because Codex connector cleanup did not complete. $($_.Exception.Message)"
         }
     }
     if ([IO.File]::Exists($script:ComposeFile) -and [IO.File]::Exists($script:ConfigFile)) {
@@ -1003,14 +1585,26 @@ try {
         "status" { Show-Status }
         "update" { Update-Luthn $CommandArguments }
         "connect" {
-            if ($CommandArguments.Count -ne 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn connect codex" }
-            Connect-Codex
+            if ($CommandArguments.Count -lt 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn connect codex [--auto-recall]" }
+            Connect-Codex @($CommandArguments | Select-Object -Skip 1)
+        }
+        "connection" {
+            if ($CommandArguments.Count -ne 2 -or $CommandArguments[0] -cne "status" -or $CommandArguments[1] -cne "codex") { throw "usage: luthn connection status codex" }
+            Show-CodexConnectionStatus
         }
         "disconnect" {
             if ($CommandArguments.Count -ne 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn disconnect codex" }
             Disconnect-Codex
         }
         "mcp" { Run-Mcp $CommandArguments }
+        "codex-hook" {
+            if ($CommandArguments.Count -ne 0) { throw "usage: luthn codex-hook" }
+            Run-CodexHook
+        }
+        "codex-hook-upload" {
+            if ($CommandArguments.Count -ne 0) { throw "usage: luthn codex-hook-upload" }
+            Run-CodexHookUpload
+        }
         "uninstall" { Uninstall-Luthn $CommandArguments }
         "help" { Show-Usage }
         "-h" { Show-Usage }
