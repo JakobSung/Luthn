@@ -22,17 +22,34 @@ $cliPath = Join-Path $binDir "luthn.ps1"
 $shimPath = Join-Path $binDir "luthn.cmd"
 $utf8NoBom = [Text.UTF8Encoding]::new($false)
 
+function Get-PwshPath {
+    $pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $pwsh) { throw "PowerShell 7.4 or later is required. Install it, then run this installer with pwsh." }
+    return $pwsh.Source
+}
+
+function New-InstallerToolSpec {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $resolved = Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue
+    if (-not $resolved) { throw "required command path does not exist: $Path" }
+    $resolvedPath = $resolved.Path
+    if ([IO.Path]::GetExtension($resolvedPath) -ieq ".ps1") {
+        return [pscustomobject]@{ FilePath = Get-PwshPath; PrefixArguments = @("-NoProfile", "-File", $resolvedPath) }
+    }
+    if ([IO.Path]::GetExtension($resolvedPath) -in @(".cmd", ".bat")) {
+        $commandProcessor = if ($env:ComSpec) { $env:ComSpec } else { Join-Path $env:SystemRoot "System32\cmd.exe" }
+        return [pscustomobject]@{ FilePath = $commandProcessor; PrefixArguments = @("/d", "/s", "/c", "call", $resolvedPath) }
+    }
+    return [pscustomobject]@{ FilePath = $resolvedPath; PrefixArguments = @() }
+}
+
 function Get-InstallerToolSpec {
     $override = $env:LUTHN_INSTALLER_DOCKER_COMMAND
     if ($override) {
-        $resolvedOverride = (Resolve-Path -LiteralPath $override).Path
-        if ([IO.Path]::GetExtension($resolvedOverride) -ieq ".ps1") {
-            $pwsh = @(Get-Command pwsh -CommandType Application -ErrorAction Stop)[0].Source
-            return [pscustomobject]@{ FilePath = $pwsh; PrefixArguments = @("-NoProfile", "-File", $resolvedOverride) }
-        }
-        return [pscustomobject]@{ FilePath = $resolvedOverride; PrefixArguments = @() }
+        return New-InstallerToolSpec -Path $override
     }
-    $docker = @(Get-Command docker -CommandType Application -ErrorAction SilentlyContinue)[0]
+    $docker = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $docker) { throw "Docker Desktop with Docker Compose is required." }
     return [pscustomobject]@{ FilePath = $docker.Source; PrefixArguments = @() }
 }
@@ -54,14 +71,60 @@ function Invoke-CapturedCommand {
     return [pscustomobject]@{ ExitCode = $process.ExitCode; StdOut = $stdout; StdErr = $stderr }
 }
 
+function Get-DockerDesktopToolSpec {
+    if ($env:LUTHN_DOCKER_DESKTOP_COMMAND) {
+        return New-InstallerToolSpec -Path $env:LUTHN_DOCKER_DESKTOP_COMMAND
+    }
+    if ($env:LUTHN_INSTALLER_DOCKER_COMMAND) { return $null }
+    if (-not $env:ProgramFiles) { return $null }
+    $desktopPath = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+    if (-not [IO.File]::Exists($desktopPath)) { return $null }
+    return [pscustomobject]@{ FilePath = $desktopPath; PrefixArguments = @() }
+}
+
+function Start-DetachedTool {
+    param([Parameter(Mandatory = $true)]$Tool)
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Tool.FilePath
+    $startInfo.UseShellExecute = $true
+    $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    foreach ($argument in $Tool.PrefixArguments) { [void]$startInfo.ArgumentList.Add([string]$argument) }
+    $process = [Diagnostics.Process]::Start($startInfo)
+    if (-not $process) { throw "failed to start Docker Desktop: $($Tool.FilePath)" }
+}
+
+function Start-DockerDesktopAndWait {
+    param([Parameter(Mandatory = $true)]$Docker)
+
+    $desktop = Get-DockerDesktopToolSpec
+    if (-not $desktop) { return $null }
+
+    Write-Host "Docker Desktop is not reachable. Starting it and waiting for the Linux engine..."
+    Start-DetachedTool -Tool $desktop
+    $lastResult = $null
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        $lastResult = Invoke-CapturedCommand $Docker @("info", "--format", "{{.OSType}}")
+        if ($lastResult.ExitCode -eq 0) { return $lastResult }
+        Start-Sleep -Seconds 2
+    }
+    return $lastResult
+}
+
 function Assert-WindowsPreflight {
     if ($PSVersionTable.PSVersion -lt [Version]"7.4") { throw "PowerShell 7.4 or later is required." }
     $docker = Get-InstallerToolSpec
     $compose = Invoke-CapturedCommand $docker @("compose", "version")
     if ($compose.ExitCode -ne 0) { throw "Docker Compose is unavailable: $($compose.StdErr.Trim())" }
     $info = Invoke-CapturedCommand $docker @("info", "--format", "{{.OSType}}")
-    if ($info.ExitCode -ne 0) { throw "Docker Desktop is not reachable: $($info.StdErr.Trim())" }
-    if ($info.StdOut.Trim() -cne "linux") { throw "Docker Desktop must be running in Linux-container mode." }
+    if ($info.ExitCode -ne 0) { $info = Start-DockerDesktopAndWait -Docker $docker }
+    if (-not $info -or $info.ExitCode -ne 0) {
+        $detail = if ($info) { $info.StdErr.Trim() } else { "Docker Desktop could not be started automatically." }
+        throw "Docker Desktop is not reachable. Start Docker Desktop, wait for the engine, and retry. $detail"
+    }
+    if ($info.StdOut.Trim() -cne "linux") {
+        throw "Docker Desktop is running Windows containers. Switch to Linux containers from the Docker Desktop menu and retry."
+    }
 }
 
 Assert-WindowsPreflight
@@ -96,7 +159,7 @@ try {
 
     $installArguments = @("install")
     if ($ConnectCodex) { $installArguments += "--connect-codex" }
-    $pwshPath = @(Get-Command pwsh -CommandType Application -ErrorAction Stop)[0].Source
+    $pwshPath = Get-PwshPath
     & $pwshPath -NoProfile -File $cliPath @installArguments
     if ($LASTEXITCODE -ne 0) { throw "Luthn Windows installation failed with exit code $LASTEXITCODE" }
 

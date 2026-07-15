@@ -92,8 +92,14 @@ Use Windows 11, PowerShell 7.4 or later, and Docker Desktop in Linux-container
 mode. Run in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 | iex
-luthn connect codex
+$installer = Join-Path ([IO.Path]::GetTempPath()) "luthn-install.ps1"
+try {
+    irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 -OutFile $installer
+    pwsh -NoProfile -File $installer -ConnectCodex
+    if ($LASTEXITCODE -ne 0) { throw "Luthn installation failed with exit code $LASTEXITCODE" }
+} finally {
+    Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue
+}
 ```
 
 The Windows host CLI manages the same Linux Compose runtime. Codex is connected
@@ -108,8 +114,13 @@ Give Codex or another coding agent this prompt:
 Install Luthn with Docker by following:
 https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 
-Verify the installation, show the operator console URL, and connect Codex to
-Luthn with `luthn connect codex`. Do not print the service token.
+Detect whether this host is macOS, Linux, or Windows and follow the matching
+procedure. Inspect prerequisites and repair recoverable PowerShell, PATH,
+Docker daemon, Docker context, and Codex CLI discovery problems. Verify health
+and readiness, show the operator console URL, and connect Codex to Luthn with
+`luthn connect codex`. Do not print the service token. Stop only when a user
+must complete an interactive license, privilege, restart, or trust decision,
+and tell me the exact action required.
 ```
 
 ### Manage

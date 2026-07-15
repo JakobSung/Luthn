@@ -89,8 +89,14 @@ Windows 11, PowerShell 7.4 이상, Linux container mode로 실행 중인 Docker
 Desktop이 필요합니다. PowerShell에서 실행합니다.
 
 ```powershell
-irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 | iex
-luthn connect codex
+$installer = Join-Path ([IO.Path]::GetTempPath()) "luthn-install.ps1"
+try {
+    irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 -OutFile $installer
+    pwsh -NoProfile -File $installer -ConnectCodex
+    if ($LASTEXITCODE -ne 0) { throw "Luthn installation failed with exit code $LASTEXITCODE" }
+} finally {
+    Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue
+}
 ```
 
 Windows host CLI가 기존 Linux Compose runtime을 관리합니다. Codex에는
@@ -105,8 +111,12 @@ Codex나 다른 코딩 에이전트에 아래 프롬프트를 전달하세요.
 다음 문서에 따라 Docker 방식으로 Luthn을 설치하세요.
 https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 
-설치 상태를 검증하고 운영 콘솔 URL을 보여준 뒤 `luthn connect codex`로 Codex를
-연결하세요. 서비스 토큰은 출력하지 마세요.
+현재 host가 macOS, Linux, Windows 중 무엇인지 판별하고 해당 절차를 따르세요.
+PowerShell, PATH, Docker daemon, Docker context, Codex CLI 탐색 문제는 복구한 뒤
+설치를 끝까지 진행하세요. health와 readiness를 검증하고 운영 콘솔 URL을 보여준 뒤
+`luthn connect codex`로 Codex를 연결하세요. 서비스 토큰은 출력하지 마세요. 사용자만
+처리할 수 있는 license, 권한, 재시작, trust 단계에서만 멈추고 필요한 동작을 정확히
+알려주세요.
 ```
 
 ### 관리

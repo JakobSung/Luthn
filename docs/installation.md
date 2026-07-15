@@ -4,7 +4,7 @@ This is the source-free self-host installation path for users. It uses the same
 Linux Compose runtime on macOS, Linux, and Windows; Git, a Luthn source checkout,
 and the .NET SDK are not required.
 
-## Agent Prompt
+## Give This To An Agent
 
 Give this prompt to Codex or another coding agent:
 
@@ -12,11 +12,44 @@ Give this prompt to Codex or another coding agent:
 Install and configure Luthn locally by following the instructions here:
 https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 
-Use the Docker self-host path. Install Luthn without cloning the source or
-installing the .NET SDK, verify health and readiness, show me the operator
-console URL, and run `luthn connect codex`. Do not print or commit the generated
-service token.
+Detect whether this host is macOS, Linux, or Windows and follow the matching
+Docker self-host procedure. Do not clone the source or install the .NET SDK.
+Inspect prerequisites, repair recoverable PowerShell, PATH, Docker daemon,
+Docker context, and Codex CLI discovery problems, then finish the installation.
+Verify health and readiness, show me the operator console URL, and connect Codex
+with `luthn connect codex`. Never print, copy, or commit the generated service
+token. Stop only for a user-owned UI, license, privilege, or trust decision and
+tell me the exact action required.
 ```
+
+## Agent Execution Contract
+
+An agent following this document should execute the work, not only repeat the
+commands to the user.
+
+1. Detect the host OS and use only the matching procedure below.
+2. Inspect the existing PowerShell, Docker, Luthn, and Codex state before
+   installing or replacing anything.
+3. Treat a stopped Docker daemon, a stale Docker context, a stale shell `PATH`,
+   and an unusable Codex Desktop `WindowsApps` executable as recoverable errors.
+4. Preserve existing Docker volumes, Luthn configuration, Codex configuration,
+   hooks, and unrelated MCP registrations.
+5. Never display `luthn.env`, `service-token`, a token value, or other
+   credential-bearing files. It is safe to report file paths and non-secret
+   status.
+6. Ask the user only when installation requires an interactive Docker Desktop
+   agreement, administrator approval, macOS privacy approval, or Codex hook
+   trust. Continue automatically after the user completes that gate.
+7. Do not report success until all applicable completion checks pass.
+
+Installation is complete only when:
+
+- `luthn status` reports both health and readiness as `ready`;
+- the operator console URL is reported without opening secret files;
+- `luthn mcp --list-tools` includes `get_context_pack`;
+- Codex MCP registration is present;
+- any remaining user-owned Codex restart or hook trust step is reported
+  explicitly.
 
 ## Requirements
 
@@ -42,7 +75,8 @@ If Docker points at a stale socket, select a working context with
 - Windows 11
 - PowerShell 7.4 or later (`pwsh`)
 - Docker Desktop with Docker Compose, running in Linux-container mode
-- Codex CLI on `PATH` when connecting Codex
+- a runnable Codex CLI when connecting Codex; the Windows recovery procedure
+  below also checks the Codex Desktop runtime location when `PATH` is unusable
 
 Check the runtime from PowerShell:
 
@@ -53,7 +87,48 @@ docker compose version
 
 The first command must print `linux`. Windows containers are not supported.
 
-## Install on macOS or Linux
+## Install On macOS Or Linux
+
+### 1. Verify The Host Tools
+
+Check the required commands before running the bootstrap:
+
+```bash
+command -v curl
+command -v python3
+command -v docker
+command -v codex
+docker compose version
+docker info
+```
+
+If Docker Desktop is installed but stopped on macOS, start it and wait until
+`docker info` succeeds:
+
+```bash
+open -a Docker
+until docker info >/dev/null 2>&1; do sleep 3; done
+```
+
+On Linux, start the Docker daemon using the service manager already used by the
+host. Starting a system service may require user approval or `sudo`. Do not
+replace an existing Docker installation merely because its daemon is stopped.
+For example, one of these may apply:
+
+```bash
+systemctl --user start docker-desktop
+sudo systemctl start docker
+```
+
+If Docker points at a missing or stale socket, inspect `docker context ls` and
+select an existing working context. Do not delete contexts or Docker volumes as
+part of installation.
+
+Install a missing `curl`, Python 3, or Codex CLI with the host's supported
+package manager before continuing. Keep the user's existing package manager and
+Codex authentication method.
+
+### 2. Install And Connect
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
@@ -67,7 +142,28 @@ With `--connect-codex`, the same bootstrap also configures the Codex hook and MC
 registration, then prints the required restart and `/hooks` Trust steps.
 
 If `~/.local/bin` is not already on `PATH`, use the export command printed by
-the installer and add it to your shell profile.
+the installer and add it to the user's shell profile. For the current session:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+luthn status
+```
+
+Do not reinstall when only the shell `PATH` is stale. The direct diagnostic
+path is `~/.local/bin/luthn`.
+
+### 3. Complete Codex Trust And Verification
+
+Restart Codex, open `/hooks`, and trust `Stop > luthn.agent-connector.v1` when
+prompted. This is an intentional user security decision that an agent must not
+bypass. Complete one Codex turn and confirm that `automatic-ingestion` reports
+`Active`. Then verify:
+
+```bash
+luthn status
+luthn mcp --list-tools
+codex mcp get luthn
+```
 
 Installed state uses stable locations independent of the current directory:
 
@@ -83,20 +179,118 @@ Installed state uses stable locations independent of the current directory:
 | PostgreSQL volume | `luthn-postgres` |
 | Operator configuration volume | `luthn-operator` |
 
-## Install on Windows
+## Install On Windows
 
-Run in PowerShell:
+### 1. Select PowerShell 7
+
+Check PowerShell 7 from any terminal:
 
 ```powershell
-irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 | iex
-luthn connect codex
+pwsh -NoProfile -Command '$PSVersionTable.PSVersion'
+```
+
+If `pwsh` is missing or older than 7.4, install or upgrade the stable release
+with WinGet:
+
+```powershell
+winget install --id Microsoft.PowerShell --source winget
+# If WinGet reports that PowerShell is already installed but outdated:
+winget upgrade --id Microsoft.PowerShell --source winget
+```
+
+Installing PowerShell 7 does not convert an already-open Windows PowerShell 5.1
+session. Start `pwsh` or use the explicit `pwsh -NoProfile` command below. Do
+not retry the bootstrap in `powershell.exe` after receiving
+`PowerShell 7.4 or later is required`.
+
+### 2. Check Docker Desktop
+
+Docker being installed is not enough; its Linux engine must be running. Check:
+
+```powershell
+docker context show
+docker info --format '{{.OSType}}'
+docker compose version
+```
+
+The installer starts Docker Desktop automatically from its standard install
+location when the engine is unreachable, then waits up to two minutes for it.
+If Docker Desktop is missing, install it and complete its interactive agreement
+or administrator step before continuing. If Docker reports `windows`, use the
+Docker Desktop menu to switch to Linux containers. If the active context is
+stale, inspect `docker context ls` and select the working Desktop context,
+normally `docker context use desktop-linux`.
+
+### 3. Install And Connect In One Run
+
+Run this from PowerShell. It explicitly uses PowerShell 7, installs Luthn, waits
+for Docker, verifies the service, and connects Codex before returning:
+
+```powershell
+$installer = Join-Path ([IO.Path]::GetTempPath()) "luthn-install.ps1"
+try {
+    irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 -OutFile $installer
+    pwsh -NoProfile -File $installer -ConnectCodex
+    if ($LASTEXITCODE -ne 0) { throw "Luthn installation failed with exit code $LASTEXITCODE" }
+} finally {
+    Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue
+}
 ```
 
 The bootstrap validates Docker before replacing an existing CLI, installs a
 `luthn.cmd` shim, downloads the same Compose bundle used by macOS and Linux,
 creates a local service token, applies migrations, seeds demo data, and waits
 for health and readiness. It adds the CLI directory to the current user's
-`PATH`; open a new terminal if `luthn` is not immediately found.
+`PATH`.
+
+An already-open parent terminal cannot receive a child process's updated
+`PATH`. Do not reinstall Luthn. Open a new terminal or repair only the current
+session:
+
+```powershell
+$env:Path = "$env:LOCALAPPDATA\Luthn\bin;$env:Path"
+luthn status
+```
+
+The CLI can always be invoked directly while diagnosing `PATH`:
+
+```powershell
+& "$env:LOCALAPPDATA\Luthn\bin\luthn.ps1" status
+```
+
+### 4. Codex CLI Recovery
+
+The Windows CLI checks, in order, `LUTHN_CODEX_COMMAND`, `CODEX_CLI_PATH`, the
+Codex Desktop runtime under `%LOCALAPPDATA%\OpenAI\Codex\bin`, and then `PATH`.
+Each candidate must successfully run `codex --version` before it is used. This
+avoids the inaccessible executable sometimes exposed under
+`C:\Program Files\WindowsApps`.
+
+If no runnable candidate is found, install or repair the Codex CLI, restart the
+terminal, or point Luthn at a known runnable executable for this operation:
+
+```powershell
+$env:LUTHN_CODEX_COMMAND = 'C:\path\to\codex.exe'
+& "$env:LOCALAPPDATA\Luthn\bin\luthn.ps1" connect codex
+```
+
+Do not copy executables out of `WindowsApps` or change WindowsApps ACLs.
+
+### 5. Windows Failure Map
+
+| Symptom | Agent action |
+|---|---|
+| `PowerShell 7.4 or later is required` | Install/upgrade PowerShell, then invoke the bootstrap through `pwsh`. |
+| `dockerDesktopLinuxEngine` pipe not found | Let the installer start Docker Desktop, or start it manually and wait for `docker info`. |
+| Docker reports `windows` | Ask the user to switch Docker Desktop to Linux containers, then retry. |
+| `luthn` is not recognized | Refresh the current `PATH` or use the direct CLI path; do not reinstall. |
+| `Index was outside the bounds of the array` | Rerun the current bootstrap to replace the older CLI; the current CLI reports a specific missing-command error. |
+| `SeSecurityPrivilege` during a repeated install | Rerun the current bootstrap; the current CLI updates access rules without resetting file ownership. |
+| `No runnable Codex CLI was found` | Repair Codex CLI discovery or set `LUTHN_CODEX_COMMAND` to a tested executable. |
+
+After registration, restart Codex and use `/mcp` to verify the `luthn` server.
+On Windows this release installs MCP only; it does not install the automatic
+turn-capsule hook.
 
 Windows state uses these stable locations by default:
 
