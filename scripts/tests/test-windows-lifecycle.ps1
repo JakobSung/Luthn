@@ -79,6 +79,7 @@ $sharedBinDir = Join-Path $testRoot "shared 도구 bin"
 $sharedBinSentinel = Join-Path $sharedBinDir "unrelated-tool.txt"
 $installedCli = Join-Path $sharedBinDir "luthn.ps1"
 $codexOwnershipState = Join-Path $windowsRoot "state/connectors/codex-windows.json"
+$codexPendingState = Join-Path $windowsRoot "state/connectors/codex-windows.pending.json"
 $codexHome = Join-Path $testRoot "codex home"
 $codexHooksFile = Join-Path $codexHome "hooks.json"
 $codexInstructionsFile = Join-Path $codexHome "AGENTS.md"
@@ -512,6 +513,14 @@ esac
     Assert-True (-not [IO.File]::Exists($fakeCodexState)) "malformed auto-recall instructions should not register MCP"
     [IO.File]::WriteAllText($codexInstructionsFile, $validInstructionsBeforeMalformedTest, [Text.UTF8Encoding]::new($false))
 
+    $oversizedInstructions = "x" * (1024 * 1024 + 1)
+    [IO.File]::WriteAllText($codexInstructionsFile, $oversizedInstructions, [Text.UTF8Encoding]::new($false))
+    $oversizedInstructionsConnect = Invoke-LuthnProcess $installedCli @("connect", "codex")
+    Assert-True ($oversizedInstructionsConnect.ExitCode -ne 0) "oversized Codex instructions should stop setup"
+    Assert-True ($oversizedInstructionsConnect.Output -match "exceeds the supported size") "oversized Codex instructions should report the size limit"
+    Assert-True (-not [IO.File]::Exists($fakeCodexState)) "oversized Codex instructions should not register MCP"
+    [IO.File]::WriteAllText($codexInstructionsFile, $validInstructionsBeforeMalformedTest, [Text.UTF8Encoding]::new($false))
+
     $env:FAKE_MCP_PROBE_FAIL = "true"
     $hooksBeforeFailedProbe = [IO.File]::ReadAllText($codexHooksFile)
     $instructionsBeforeFailedProbe = [IO.File]::ReadAllText($codexInstructionsFile)
@@ -559,6 +568,10 @@ esac
 
     $connectionStatus = Invoke-LuthnProcess $installedCli @("connection", "status", "codex")
     Assert-True ($connectionStatus.ExitCode -eq 0) "Windows Codex connection status should succeed: $($connectionStatus.Output)"
+    [IO.File]::WriteAllText($codexPendingState, '{"version":2,"setupState":"cleanup-required"}', [Text.UTF8Encoding]::new($false))
+    $pendingConnectionStatus = Invoke-LuthnProcess $installedCli @("connection", "status", "codex")
+    Assert-True ($pendingConnectionStatus.Output -match "Local connector: cleanup-required") "connection status should expose pending cleanup state"
+    [IO.File]::Delete($codexPendingState)
     Assert-True ($connectionStatus.Output -match "automatic-ingestion: configured") "connection status should report the hook"
     Assert-True ($connectionStatus.Output -match "lightweight-recall: enabled") "connection status should report auto-recall"
 

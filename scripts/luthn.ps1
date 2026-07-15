@@ -900,13 +900,20 @@ function Write-CodexManagedText {
 }
 
 function Get-CodexFileSnapshot {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$MaximumBytes = $script:MaxCodexInstructionsBytes
+    )
     $target = Get-CodexManagedTarget $Path
+    $fileInfo = if ([IO.File]::Exists($target)) { [IO.FileInfo]::new($target) } else { $null }
+    if ($fileInfo -and $fileInfo.Length -gt $MaximumBytes) {
+        throw "Codex configuration exceeds the supported size: $Path"
+    }
     return [pscustomobject]@{
         Path = $Path
         Target = $target
-        Existed = [IO.File]::Exists($target)
-        Bytes = if ([IO.File]::Exists($target)) { [IO.File]::ReadAllBytes($target) } else { $null }
+        Existed = $null -ne $fileInfo
+        Bytes = if ($fileInfo) { [IO.File]::ReadAllBytes($target) } else { $null }
     }
 }
 
@@ -1448,7 +1455,28 @@ function Show-CodexConnectionStatus {
         $mcpArguments = @($docker.PrefixArguments) + @(Get-McpDockerArguments)
         $mcpConfigured = Test-RegistrationMatches (Get-CodexRegistration (Get-CodexTool)) $docker.FilePath $mcpArguments
     } catch {}
-    Write-Host "Local connector: $(if ([IO.File]::Exists($script:CodexStateFile)) { 'configured' } else { 'not configured' })"
+    $localStatePath = if ([IO.File]::Exists($script:CodexPendingStateFile)) {
+        $script:CodexPendingStateFile
+    } elseif ([IO.File]::Exists($script:CodexStateFile)) {
+        $script:CodexStateFile
+    } else {
+        $null
+    }
+    $localStatus = "not configured"
+    if ($localStatePath) {
+        try {
+            $localState = [IO.File]::ReadAllText($localStatePath) | ConvertFrom-Json -AsHashtable
+            $localStatus = switch ([string]$localState["setupState"]) {
+                "configured" { "configured"; break }
+                "pending" { "pending"; break }
+                "cleanup-required" { "cleanup-required"; break }
+                default { "state-invalid"; break }
+            }
+        } catch {
+            $localStatus = "state-invalid"
+        }
+    }
+    Write-Host "Local connector: $localStatus"
     Write-Host "  automatic-ingestion: $(if ($hookConfigured) { 'configured' } else { 'missing' })"
     Write-Host "  mcp: $(if ($mcpConfigured) { 'configured' } else { 'missing or changed' })"
     Write-Host "  lightweight-recall: $(if ($recallConfigured) { 'enabled' } else { 'disabled' })"
