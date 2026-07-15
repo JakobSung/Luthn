@@ -388,14 +388,18 @@ esac
     Assert-True ($recoverOwnership.ExitCode -eq 0) "matching Codex MCP registration should recover ownership state: $($recoverOwnership.Output)"
     Assert-True ([IO.File]::Exists($codexOwnershipState)) "matching registration should restore ownership state for uninstall"
 
+    Remove-Item Env:LUTHN_CODEX_COMMAND
+    $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
+    $env:Path = $pwshDirectory
     $env:FAKE_CODEX_REMOVE_FAIL = "true"
     $blockedUninstall = Invoke-LuthnProcess $installedCli @("uninstall")
     Assert-True ($blockedUninstall.ExitCode -ne 0) "uninstall should stop when Codex cleanup fails"
+    Assert-True ($blockedUninstall.Output -notmatch "Index was outside") "uninstall should not expose an array bounds exception"
     Assert-True ([IO.Directory]::Exists((Join-Path $windowsRoot "data"))) "blocked uninstall should preserve runtime"
     $env:FAKE_CODEX_REMOVE_FAIL = "false"
 
     $uninstall = Invoke-LuthnProcess $installedCli @("uninstall")
-    Assert-True ($uninstall.ExitCode -eq 0) "default uninstall should succeed: $($uninstall.Output)"
+    Assert-True ($uninstall.ExitCode -eq 0) "default uninstall should discover Codex Desktop and succeed: $($uninstall.Output)"
     Assert-True (-not [IO.Directory]::Exists((Join-Path $windowsRoot "data"))) "default uninstall should remove runtime data"
     Assert-True ([IO.File]::Exists($configFile)) "default uninstall should preserve config"
     Assert-True ([IO.File]::Exists($tokenFile)) "default uninstall should preserve token"
