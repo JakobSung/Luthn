@@ -25,10 +25,10 @@ raw private data part of the model's default context.
 
 ## How The Memory Loop Works
 
-On macOS and Linux, a trusted Codex hook can submit a bounded capsule of the
-final assistant response after a turn. Luthn redacts and classifies that capsule
-before anything becomes agent-visible. MCP provides safe reads and explicit
-shared-memory writes.
+On macOS, Linux, and Windows, a trusted Codex hook can submit a bounded capsule
+of the final assistant response after a turn. Luthn redacts and classifies that
+capsule before anything becomes agent-visible. MCP provides safe reads and
+explicit shared-memory writes.
 
 Optional lightweight auto-recall can fetch one small context pack when a new
 task or material topic begins. It reuses that context during the task instead
@@ -39,10 +39,8 @@ completed turn -> bounded capsule -> classify and store safe context
 new task       -> auto-recall or MCP -> reuse relevant context
 ```
 
-Windows currently connects the MCP channel only; the automatic hook and
-auto-recall instructions are not installed there. See
-[Codex connection and memory](docs/agent-quickstart.md) for setup, trust steps,
-privacy guarantees, recall limits, and platform differences.
+See [Codex connection and memory](docs/agent-quickstart.md) for setup, the
+one-time hook Trust step, privacy guarantees, and opt-in recall limits.
 
 ## Recommended Installation
 

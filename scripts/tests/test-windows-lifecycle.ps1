@@ -37,6 +37,30 @@ function Invoke-InstallerProcess {
     }
 }
 
+function Invoke-CodexHookProcess {
+    param([string]$CliPath, [string]$HookJson)
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @("-NoProfile", "-File", $CliPath, "codex-hook")) { [void]$startInfo.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        [void]$process.Start()
+        $process.StandardInput.Write($HookJson)
+        $process.StandardInput.Close()
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = "$stdout$stderr" }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "Luthn Windows 한글 $([Guid]::NewGuid().ToString('N'))"
 $windowsRoot = Join-Path $testRoot "installed root"
 $fakeDocker = Join-Path $testRoot $(if ($IsWindows) { "fake-docker.ps1" } else { "fake-docker" })
@@ -55,6 +79,10 @@ $sharedBinDir = Join-Path $testRoot "shared 도구 bin"
 $sharedBinSentinel = Join-Path $sharedBinDir "unrelated-tool.txt"
 $installedCli = Join-Path $sharedBinDir "luthn.ps1"
 $codexOwnershipState = Join-Path $windowsRoot "state/connectors/codex-windows.json"
+$codexHome = Join-Path $testRoot "codex home"
+$codexHooksFile = Join-Path $codexHome "hooks.json"
+$codexInstructionsFile = Join-Path $codexHome "AGENTS.md"
+$codexHookCapture = Join-Path $testRoot "hook-capsule.json"
 $originalPath = $env:Path
 
 try {
@@ -209,6 +237,9 @@ esac
     $env:LUTHN_DOCKER_COMMAND = $fakeDocker
     $env:LUTHN_INSTALLER_DOCKER_COMMAND = $fakeDocker
     $env:LUTHN_CODEX_COMMAND = $fakeCodex
+    $env:LUTHN_CODEX_HOOKS_FILE = $codexHooksFile
+    $env:LUTHN_CODEX_INSTRUCTIONS_FILE = $codexInstructionsFile
+    $env:LUTHN_CODEX_SKIP_OBSERVATION = "true"
     $env:LUTHN_HTTP_CHECK_COMMAND = $fakeHealth
     $env:LUTHN_COMPOSE_SOURCE_FILE = Join-Path $RepoRoot "deploy/compose.yaml"
     $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = Join-Path $RepoRoot "scripts/luthn.ps1"
@@ -219,7 +250,20 @@ esac
     $env:FAKE_CODEX_TEMPLATE = $fakeCodexTemplate
     $env:FAKE_DOCKER_READY_MARKER = $fakeDockerReadyMarker
     [void][IO.Directory]::CreateDirectory($sharedBinDir)
+    [void][IO.Directory]::CreateDirectory($codexHome)
     [IO.File]::WriteAllText($sharedBinSentinel, "preserve me", [Text.UTF8Encoding]::new($false))
+    $unrelatedHooks = [ordered]@{
+        hooks = [ordered]@{
+            SessionStart = @()
+            Stop = @([ordered]@{
+                matcher = "other.owner"
+                hooks = @([ordered]@{ type = "command"; command = "other-tool" })
+            })
+        }
+    } | ConvertTo-Json -Depth 8
+    [IO.File]::WriteAllText($codexHooksFile, ($unrelatedHooks + "`n"), [Text.UTF8Encoding]::new($false))
+    $originalInstructions = "# User instructions`r`n`r`nPreserve this text.`r`n"
+    [IO.File]::WriteAllText($codexInstructionsFile, $originalInstructions, [Text.UTF8Encoding]::new($false))
 
     $expectedDockerCommand = $fakeDocker
     $expectedMcpArguments = @(
@@ -242,7 +286,7 @@ esac
     $installerPath = Join-Path $RepoRoot "scripts/install.ps1"
     $install = Invoke-InstallerProcess $installerPath -ConnectCodex
     Assert-True ($install.ExitCode -eq 0) "bootstrap install and Codex connection should succeed: $($install.Output)"
-    Assert-True ($install.Output -match "Codex MCP is configured") "one-step bootstrap should connect Codex"
+    Assert-True ($install.Output -match "Codex connector files are configured") "one-step bootstrap should connect Codex"
     Assert-True ([IO.File]::Exists($installedCli)) "bootstrap should install luthn.ps1"
     $installedShim = Join-Path $sharedBinDir "luthn.cmd"
     Assert-True ([IO.File]::Exists($installedShim)) "bootstrap should install luthn.cmd"
@@ -265,6 +309,17 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "Luthn__Auth__Tokens__0__Sha256Digest=sha256:[0-9a-f]{64}") "config should preserve the token-digest sha256 prefix"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "one-step Codex registration should not contain the token"
+    $installedHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
+    $luthnHook = @($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
+    Assert-True ($luthnHook.Count -eq 1) "one-step setup should install one Luthn Stop hook"
+    Assert-True ($luthnHook[0].hooks[0].commandWindows -ceq $luthnHook[0].hooks[0].command) "Windows hook should include a matching commandWindows entry"
+    Assert-True (@($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "one-step setup should preserve unrelated hooks"
+    Assert-True (-not ([IO.File]::ReadAllText($codexHooksFile).Contains($token))) "Codex hooks should not contain the token"
+    Assert-True (-not ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start"))) "auto-recall should remain opt-in"
+    $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
+    Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
+    Assert-True ($connectorState.hookInstalled -and -not $connectorState.autoRecall) "connector state should record hook and default recall state"
+    Assert-True (-not ([IO.File]::ReadAllText($codexOwnershipState).Contains($token))) "connector ownership state should not contain the token"
     if ($IsWindows) {
         $tokenAcl = Get-Acl -LiteralPath $tokenFile
         Assert-True ($tokenAcl.AreAccessRulesProtected) "token ACL inheritance should be disabled"
@@ -282,6 +337,10 @@ esac
 
     $initialDisconnect = Invoke-LuthnProcess $installedCli @("disconnect", "codex")
     Assert-True ($initialDisconnect.ExitCode -eq 0) "one-step Codex registration should disconnect cleanly: $($initialDisconnect.Output)"
+    $disconnectedHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
+    Assert-True (@($disconnectedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" }).Count -eq 0) "disconnect should remove the Luthn Stop hook"
+    Assert-True (@($disconnectedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "disconnect should preserve unrelated hooks"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $originalInstructions) "disconnect should preserve unrelated instructions"
 
     $firstHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
     $secondInstall = Invoke-InstallerProcess $installerPath
@@ -435,10 +494,32 @@ esac
     Assert-True (([IO.File]::ReadAllText($fakeCodexState) | ConvertFrom-Json).transport.command -ceq "unrelated-tool") "an unrelated registration should be preserved"
     [IO.File]::Delete($fakeCodexState)
 
+    $validHooksBeforeMalformedTest = [IO.File]::ReadAllText($codexHooksFile)
+    [IO.File]::WriteAllText($codexHooksFile, '{"hooks":{"Stop":{}}}', [Text.UTF8Encoding]::new($false))
+    $malformedHooksBefore = [IO.File]::ReadAllText($codexHooksFile)
+    $malformedHooksConnect = Invoke-LuthnProcess $installedCli @("connect", "codex")
+    Assert-True ($malformedHooksConnect.ExitCode -ne 0) "malformed hooks configuration should stop setup"
+    Assert-True ([IO.File]::ReadAllText($codexHooksFile) -ceq $malformedHooksBefore) "malformed hooks configuration should remain byte-for-byte unchanged"
+    Assert-True (-not [IO.File]::Exists($fakeCodexState)) "malformed hooks configuration should not register MCP"
+    [IO.File]::WriteAllText($codexHooksFile, $validHooksBeforeMalformedTest, [Text.UTF8Encoding]::new($false))
+
+    $validInstructionsBeforeMalformedTest = [IO.File]::ReadAllText($codexInstructionsFile)
+    $malformedInstructions = "$validInstructionsBeforeMalformedTest`r`n<!-- luthn:auto-recall:start -->`r`n"
+    [IO.File]::WriteAllText($codexInstructionsFile, $malformedInstructions, [Text.UTF8Encoding]::new($false))
+    $malformedRecallConnect = Invoke-LuthnProcess $installedCli @("connect", "codex", "--auto-recall")
+    Assert-True ($malformedRecallConnect.ExitCode -ne 0) "malformed auto-recall markers should stop setup"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $malformedInstructions) "malformed auto-recall instructions should remain unchanged"
+    Assert-True (-not [IO.File]::Exists($fakeCodexState)) "malformed auto-recall instructions should not register MCP"
+    [IO.File]::WriteAllText($codexInstructionsFile, $validInstructionsBeforeMalformedTest, [Text.UTF8Encoding]::new($false))
+
     $env:FAKE_MCP_PROBE_FAIL = "true"
+    $hooksBeforeFailedProbe = [IO.File]::ReadAllText($codexHooksFile)
+    $instructionsBeforeFailedProbe = [IO.File]::ReadAllText($codexInstructionsFile)
     $failedProbe = Invoke-LuthnProcess $installedCli @("connect", "codex")
     Assert-True ($failedProbe.ExitCode -ne 0) "MCP probe failure should fail setup"
     Assert-True (-not [IO.File]::Exists($fakeCodexState)) "MCP probe failure should roll back the Codex registration"
+    Assert-True ([IO.File]::ReadAllText($codexHooksFile) -ceq $hooksBeforeFailedProbe) "MCP probe failure should restore hooks exactly"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $instructionsBeforeFailedProbe) "MCP probe failure should preserve instructions"
     $env:FAKE_MCP_PROBE_FAIL = "false"
 
     $desktopCodexDir = Join-Path $env:LOCALAPPDATA "OpenAI/Codex/bin/test-runtime"
@@ -460,13 +541,73 @@ esac
     Assert-True (@($registration.transport.args) -ccontains "mcp") "Codex registration should invoke the mcp service"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "Codex registration should not contain the token"
 
+    $hookHashBeforeRepeat = (Get-FileHash -LiteralPath $codexHooksFile -Algorithm SHA256).Hash
     $connectAgain = Invoke-LuthnProcess $installedCli @("connect", "codex")
     Assert-True ($connectAgain.ExitCode -eq 0) "Codex MCP connection should be idempotent: $($connectAgain.Output)"
+    Assert-True ((Get-FileHash -LiteralPath $codexHooksFile -Algorithm SHA256).Hash -eq $hookHashBeforeRepeat) "repeated connect should not rewrite the trusted hook"
+
+    $enableRecall = Invoke-LuthnProcess $installedCli @("connect", "codex", "--auto-recall")
+    Assert-True ($enableRecall.ExitCode -eq 0) "opt-in auto-recall should succeed: $($enableRecall.Output)"
+    $recallHash = (Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash
+    $enableRecallAgain = Invoke-LuthnProcess $installedCli @("connect", "codex", "--auto-recall")
+    Assert-True ($enableRecallAgain.ExitCode -eq 0) "opt-in auto-recall should be idempotent: $($enableRecallAgain.Output)"
+    Assert-True ((Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash -eq $recallHash) "repeated auto-recall setup should not rewrite instructions"
+    $instructionText = [IO.File]::ReadAllText($codexInstructionsFile)
+    Assert-True (([regex]::Matches($instructionText, [regex]::Escape("<!-- luthn:auto-recall:start -->"))).Count -eq 1) "auto-recall should install one managed block"
+    Assert-True ($instructionText.Contains("Preserve this text.")) "auto-recall should preserve user instructions"
+    Assert-True ($instructionText.Contains("``maxItems``: 3") -and $instructionText.Contains("``maxTokens``: 600")) "auto-recall should install bounded recall instructions"
+
+    $connectionStatus = Invoke-LuthnProcess $installedCli @("connection", "status", "codex")
+    Assert-True ($connectionStatus.ExitCode -eq 0) "Windows Codex connection status should succeed: $($connectionStatus.Output)"
+    Assert-True ($connectionStatus.Output -match "automatic-ingestion: configured") "connection status should report the hook"
+    Assert-True ($connectionStatus.Output -match "lightweight-recall: enabled") "connection status should report auto-recall"
+
+    $env:LUTHN_CODEX_HOOK_SYNCHRONOUS = "true"
+    $env:LUTHN_CODEX_HOOK_CAPTURE_FILE = $codexHookCapture
+    $validHookEvent = [ordered]@{
+        hook_event_name = "Stop"
+        session_id = "private-session-id"
+        turn_id = "private-turn-id"
+        last_assistant_message = "Implemented the Windows connector safely."
+        transcript_path = "C:\private\transcript.jsonl"
+        cwd = "C:\private\workspace"
+    } | ConvertTo-Json -Compress
+    $env:LUTHN_CODEX_HOOK_TEST_THROW = "true"
+    $hookResult = Invoke-CodexHookProcess $installedCli $validHookEvent
+    Remove-Item Env:LUTHN_CODEX_HOOK_TEST_THROW
+    Assert-True ($hookResult.ExitCode -eq 0 -and [IO.File]::Exists($codexHookCapture)) "the Windows Stop hook should capture a bounded capsule: $($hookResult.Output)"
+    $capturedCapsule = [IO.File]::ReadAllText($codexHookCapture) | ConvertFrom-Json
+    Assert-True ($capturedCapsule.summary -ceq "Implemented the Windows connector safely.") "the hook should capture only the final assistant summary"
+    $capturedText = [IO.File]::ReadAllText($codexHookCapture)
+    Assert-True (-not $capturedText.Contains("private-session-id") -and -not $capturedText.Contains("private-turn-id")) "the hook should hash stable identifiers"
+    Assert-True (-not $capturedText.Contains("transcript.jsonl") -and -not $capturedText.Contains("private\\workspace")) "the hook should ignore transcript and working-directory fields"
+    $captureHash = (Get-FileHash -LiteralPath $codexHookCapture -Algorithm SHA256).Hash
+    $secretHookEvent = [ordered]@{
+        hook_event_name = "Stop"
+        session_id = "secret-session"
+        turn_id = "secret-turn"
+        last_assistant_message = "api_key=sk-1234567890abcdefghijklmnop"
+    } | ConvertTo-Json -Compress
+    $secretHook = Invoke-CodexHookProcess $installedCli $secretHookEvent
+    Assert-True ($secretHook.ExitCode -eq 0) "a secret-bearing hook payload should fail open"
+    Assert-True ((Get-FileHash -LiteralPath $codexHookCapture -Algorithm SHA256).Hash -eq $captureHash) "a secret-bearing response should not be captured"
+    $oversizedHook = "{`"hook_event_name`":`"Stop`",`"session_id`":`"s`",`"turn_id`":`"t`",`"last_assistant_message`":`"$(`"x`" * 270000)`"}"
+    $oversizedResult = Invoke-CodexHookProcess $installedCli $oversizedHook
+    Assert-True ($oversizedResult.ExitCode -eq 0) "oversized hook input should fail open"
+    Assert-True ((Get-FileHash -LiteralPath $codexHookCapture -Algorithm SHA256).Hash -eq $captureHash) "oversized hook input should not be captured"
+
+    Remove-Item Env:LUTHN_CODEX_HOOK_SYNCHRONOUS
+    [IO.File]::Delete($codexHookCapture)
+    $asyncHook = Invoke-CodexHookProcess $installedCli $validHookEvent
+    for ($attempt = 0; $attempt -lt 50 -and -not [IO.File]::Exists($codexHookCapture); $attempt++) { Start-Sleep -Milliseconds 100 }
+    Assert-True ($asyncHook.ExitCode -eq 0 -and [IO.File]::Exists($codexHookCapture)) "the detached Windows hook uploader should complete after the hook returns"
+    Remove-Item Env:LUTHN_CODEX_HOOK_CAPTURE_FILE
 
     [IO.File]::Delete($codexOwnershipState)
     $recoverOwnership = Invoke-LuthnProcess $installedCli @("connect", "codex")
     Assert-True ($recoverOwnership.ExitCode -eq 0) "matching Codex MCP registration should recover ownership state: $($recoverOwnership.Output)"
     Assert-True ([IO.File]::Exists($codexOwnershipState)) "matching registration should restore ownership state for uninstall"
+    Assert-True (([IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json).autoRecall) "ownership recovery should retain the managed auto-recall state"
 
     Remove-Item Env:LUTHN_CODEX_COMMAND
     $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
@@ -476,6 +617,8 @@ esac
     Assert-True ($blockedUninstall.ExitCode -ne 0) "uninstall should stop when Codex cleanup fails"
     Assert-True ($blockedUninstall.Output -notmatch "Index was outside") "uninstall should not expose an array bounds exception"
     Assert-True ([IO.Directory]::Exists((Join-Path $windowsRoot "data"))) "blocked uninstall should preserve runtime"
+    Assert-True ([IO.File]::ReadAllText($codexHooksFile).Contains("luthn.agent-connector.v1")) "blocked uninstall should restore the Luthn hook"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start")) "blocked uninstall should restore auto-recall instructions"
     $env:FAKE_CODEX_REMOVE_FAIL = "false"
 
     $uninstall = Invoke-LuthnProcess $installedCli @("uninstall")
@@ -484,6 +627,10 @@ esac
     Assert-True ([IO.File]::Exists($configFile)) "default uninstall should preserve config"
     Assert-True ([IO.File]::Exists($tokenFile)) "default uninstall should preserve token"
     Assert-True (-not [IO.File]::Exists($fakeCodexState)) "default uninstall should remove owned Codex registration"
+    $finalHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
+    Assert-True (@($finalHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" }).Count -eq 0) "uninstall should remove the Luthn hook"
+    Assert-True (@($finalHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "uninstall should preserve unrelated hooks"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $originalInstructions) "uninstall should remove only the managed auto-recall block"
     Assert-True (-not [IO.File]::Exists($installedCli) -and -not [IO.File]::Exists($installedShim)) "default uninstall should remove only Luthn CLI files"
     Assert-True ([IO.File]::Exists($sharedBinSentinel)) "default uninstall should preserve unrelated files in a shared bin directory"
 
@@ -499,6 +646,13 @@ esac
     Remove-Item Env:FAKE_MCP_PROBE_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:CODEX_CLI_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_BIN_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CODEX_HOOK_CAPTURE_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CODEX_HOOK_TEST_THROW -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CODEX_HOOK_INSTRUCTIONS_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CODEX_HOOK_SYNCHRONOUS -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CODEX_HOOKS_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CODEX_INSTRUCTIONS_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CODEX_SKIP_OBSERVATION -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_DOCKER_DESKTOP_COMMAND -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_INSTALLER_DOCKER_COMMAND -ErrorAction SilentlyContinue
     if ($originalPath) { $env:Path = $originalPath }

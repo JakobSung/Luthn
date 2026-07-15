@@ -29,6 +29,25 @@ raw intake
 
 Use this file for concrete classification examples.
 
+## Codex Capture And Recall Boundary
+
+On macOS, Linux, and Windows, the trusted Codex Stop hook accepts a bounded
+host event and constructs a capsule from the final assistant response only. It
+does not read or upload the transcript, user prompts, working-directory path,
+or transcript path. Session and turn identifiers are hashed before delivery,
+the summary is capped below the API limit, and recognized credential patterns
+cause the entire capsule to be dropped locally.
+
+The service token remains in Luthn's protected configuration. It is not copied
+into Codex hook configuration, MCP registration, connector state, or
+auto-recall instructions. Hook delivery is asynchronous and fail-open, so an
+unavailable Luthn service does not block completion of a Codex turn.
+
+Optional auto-recall does not expose the private store. It asks the scoped MCP
+surface for one small agent-safe context pack at a new task or material topic
+change. The same classification, policy, and safe-projection rules apply to
+automatic recall and explicit MCP reads.
+
 ## Public-Safe Knowledge May Contain
 
 - product names intended for team/public use
