@@ -44,31 +44,12 @@ auto-recall instructions are not installed there. See
 [Codex connection and memory](docs/agent-quickstart.md) for setup, trust steps,
 privacy guarantees, recall limits, and platform differences.
 
-## Recommended Installation: Give This To An Agent
+## Recommended Installation
 
-Copy the following prompt into Codex or another coding agent. The installation
-guide is written as an execution and recovery guide, not just a command list.
-
-```text
-Install and configure Luthn by following this document:
-https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
-
-Detect whether this host is macOS, Linux, or Windows and use only the matching
-Docker self-host procedure. Inspect existing prerequisites and preserve Docker
-volumes, Luthn configuration, Codex configuration, hooks, and unrelated MCP
-registrations. Repair recoverable PowerShell, PATH, Docker daemon/context, and
-Codex CLI discovery problems, then finish the installation.
-
-Connect Codex, verify health and readiness, confirm that the MCP tool list
-contains get_context_pack, and show the operator console URL. On macOS or Linux,
-explain the optional --auto-recall mode but do not enable it unless I request
-it. Never print or copy the service token or credential-bearing files. Stop
-only for a user-owned license, privilege, restart, or trust decision and tell
-me the exact action required.
-```
-
-For manual commands, prerequisites, Windows recovery, lifecycle behavior, and
-uninstallation, use the [installation guide](docs/installation.md).
+Give Codex or another coding agent the
+[installation guide](docs/installation.md). It contains the complete agent
+prompt, OS-specific procedure, recovery rules, verification, update, and
+uninstallation instructions.
 
 ## Verify
 
