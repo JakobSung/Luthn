@@ -50,6 +50,7 @@ $fakeCodexState = Join-Path $testRoot "codex-state.json"
 $fakeCodexTemplate = Join-Path $testRoot "codex-template.json"
 $invalidCli = Join-Path $testRoot "invalid.ps1"
 $failingCli = Join-Path $testRoot "failing.ps1"
+$updatedCli = Join-Path $testRoot "updated.ps1"
 $sharedBinDir = Join-Path $testRoot "shared 도구 bin"
 $sharedBinSentinel = Join-Path $sharedBinDir "unrelated-tool.txt"
 $installedCli = Join-Path $sharedBinDir "luthn.ps1"
@@ -70,7 +71,7 @@ if ($args.Count -ge 1 -and $args[0] -ceq "info") {
     if ($env:FAKE_INSTALLER_DOCKER_OS) { $env:FAKE_INSTALLER_DOCKER_OS } else { "linux" }
     exit 0
 }
-if ($args.Count -ge 1 -and $args[0] -ceq "pull") { "pulled"; exit 0 }
+if ($args.Count -ge 1 -and $args[0] -ceq "pull") { if ($env:FAKE_DOCKER_PULL_FAIL -ceq "true") { exit 16 }; "pulled"; exit 0 }
 if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
     if ($joined -match "org.opencontainers.image.revision") { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
     elseif ($joined -match "RepoDigests") { "ghcr.io/jakobsung/luthn@sha256:fake" }
@@ -79,9 +80,14 @@ if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
 }
 if ($args.Count -ge 1 -and $args[0] -ceq "inspect") { "sha256:fake"; exit 0 }
 if ($args.Count -ge 1 -and $args[0] -ceq "run") { "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; exit 0 }
+if ($args.Count -ge 1 -and $args[0] -ceq "ps") { exit 0 }
+if ($args.Count -ge 1 -and $args[0] -in @("stop", "kill")) { exit 0 }
 if ($args.Count -ge 1 -and $args[0] -ceq "compose") {
     if ($args -ccontains "--list-tools") { if ($env:FAKE_MCP_PROBE_FAIL -ceq "true") { exit 14 }; "get_context_pack"; "search_safe_context"; exit 0 }
     if ($args -ccontains "pg_isready") { exit 0 }
+    if ($args -ccontains "pg_dump") { if ($env:FAKE_DOCKER_BACKUP_FAIL -ceq "true") { [Console]::Error.WriteLine("backup failed"); exit 17 }; "fake-postgres-backup"; exit 0 }
+    if ($args -ccontains "migrate" -and $env:FAKE_DOCKER_MIGRATE_FAIL -ceq "true") { exit 18 }
+    if ($joined -match " up -d api$" -and $env:FAKE_DOCKER_API_START_FAIL -ceq "true") { exit 19 }
     if ($args -ccontains "ps") { if ($args -ccontains "-q") { "fake-api-container" } else { "api running"; "postgres running" }; exit 0 }
     exit 0
 }
@@ -97,7 +103,7 @@ if [ "$1" = "info" ]; then
   if [ "${FAKE_DOCKER_INFO_FAIL:-false}" = "true" ] && [ ! -f "$FAKE_DOCKER_READY_MARKER" ]; then exit 13; fi
   echo "${FAKE_INSTALLER_DOCKER_OS:-linux}"; exit 0
 fi
-if [ "$1" = "pull" ]; then echo "pulled"; exit 0; fi
+if [ "$1" = "pull" ]; then [ "${FAKE_DOCKER_PULL_FAIL:-false}" = "true" ] && exit 16; echo "pulled"; exit 0; fi
 if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
   case "$joined" in
     *org.opencontainers.image.revision*) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
@@ -108,10 +114,15 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
 fi
 if [ "$1" = "inspect" ]; then echo "sha256:fake"; exit 0; fi
 if [ "$1" = "run" ]; then echo "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; exit 0; fi
+if [ "$1" = "ps" ]; then exit 0; fi
+if [ "$1" = "stop" ] || [ "$1" = "kill" ]; then exit 0; fi
 if [ "$1" = "compose" ]; then
   case "$joined" in
     *--list-tools*) [ "${FAKE_MCP_PROBE_FAIL:-false}" = "true" ] && exit 14; printf 'get_context_pack\nsearch_safe_context\n'; exit 0 ;;
     *pg_isready*) exit 0 ;;
+    *pg_dump*) [ "${FAKE_DOCKER_BACKUP_FAIL:-false}" = "true" ] && { echo "backup failed" >&2; exit 17; }; echo "fake-postgres-backup"; exit 0 ;;
+    *migrate*) [ "${FAKE_DOCKER_MIGRATE_FAIL:-false}" = "true" ] && exit 18; exit 0 ;;
+    *" up -d api") [ "${FAKE_DOCKER_API_START_FAIL:-false}" = "true" ] && exit 19; exit 0 ;;
     *" ps -q api"*) echo "fake-api-container"; exit 0 ;;
     *" ps"*) printf 'api running\npostgres running\n'; exit 0 ;;
     *) exit 0 ;;
@@ -334,6 +345,75 @@ esac
     Assert-True ($status.Output -match "Readiness: ready") "status should report readiness"
     Assert-True ($status.Output -match "Image ID: sha256:fake") "status should report image identity"
 
+    $updatedCliContent = [IO.File]::ReadAllText((Join-Path $RepoRoot "scripts/luthn.ps1")) + "`n# windows-update-test-fixture`n"
+    [IO.File]::WriteAllText($updatedCli, $updatedCliContent, [Text.UTF8Encoding]::new($false))
+    $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $updatedCli
+    $targetImage = "ghcr.io/jakobsung/luthn:sha-$('b' * 40)"
+    $updateLogStart = [IO.File]::ReadAllLines($fakeDockerLog).Count
+    $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
+    Assert-True ($update.Output -match "Luthn update completed") "successful update should report completion"
+    Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
+    $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
+    Assert-True ($backupFiles.Count -eq 1 -and $backupFiles[0].Length -gt 0) "update should create a non-empty PostgreSQL backup"
+    $updateStateFile = Join-Path $windowsRoot "state/update-windows.json"
+    $updateState = [IO.File]::ReadAllText($updateStateFile) | ConvertFrom-Json
+    Assert-True ($updateState.status -ceq "ready") "successful update should record ready state"
+    Assert-True ($updateState.targetImage -ceq $targetImage) "update state should record the target image"
+    Assert-True ([IO.File]::Exists($updateState.backupPath)) "update state should record the backup path"
+
+    $updateLog = @([IO.File]::ReadAllLines($fakeDockerLog) | Select-Object -Skip $updateLogStart)
+    $stopIndex = -1
+    $backupIndex = -1
+    $migrationIndex = -1
+    $apiStartIndex = -1
+    for ($index = 0; $index -lt $updateLog.Count; $index++) {
+        if ($stopIndex -lt 0 -and $updateLog[$index] -match " stop api$") { $stopIndex = $index }
+        if ($backupIndex -lt 0 -and $updateLog[$index] -match " pg_dump ") { $backupIndex = $index }
+        if ($migrationIndex -lt 0 -and $updateLog[$index] -match " run --rm --no-deps migrate$") { $migrationIndex = $index }
+        if ($apiStartIndex -lt 0 -and $updateLog[$index] -match " up -d api$") { $apiStartIndex = $index }
+    }
+    Assert-True ($stopIndex -ge 0 -and $stopIndex -lt $backupIndex) "update should stop API writes before backup"
+    Assert-True ($backupIndex -lt $migrationIndex -and $migrationIndex -lt $apiStartIndex) "update should back up before migration and start API afterward"
+
+    $updatedHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
+    $env:FAKE_DOCKER_PULL_FAIL = "true"
+    $pullFailure = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:pull-failure")
+    Assert-True ($pullFailure.ExitCode -ne 0) "pull failure should stop update"
+    Assert-True ($pullFailure.Output -match "running API and previous image were preserved") "pull failure should report preservation"
+    Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $updatedHash) "pull failure should preserve the installed CLI"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "pull failure should preserve the selected image"
+    $env:FAKE_DOCKER_PULL_FAIL = "false"
+
+    $backupCountBeforeFailure = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump").Count
+    $env:FAKE_DOCKER_BACKUP_FAIL = "true"
+    $backupFailure = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:backup-failure")
+    Assert-True ($backupFailure.ExitCode -ne 0) "backup failure should stop update"
+    Assert-True ($backupFailure.Output -match "previous API was restarted") "backup failure should restart the previous API"
+    Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump").Count -eq $backupCountBeforeFailure) "failed backup should remove its partial file"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "backup failure should preserve the previous image reference"
+    $env:FAKE_DOCKER_BACKUP_FAIL = "false"
+
+    $env:FAKE_DOCKER_MIGRATE_FAIL = "true"
+    $migrationFailure = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:migration-failure")
+    Assert-True ($migrationFailure.ExitCode -ne 0) "migration failure should stop update"
+    Assert-True ($migrationFailure.Output -match "API remains stopped") "migration failure should leave API stopped for explicit recovery"
+    $failedUpdateState = [IO.File]::ReadAllText($updateStateFile) | ConvertFrom-Json
+    Assert-True ($failedUpdateState.status -ceq "failed" -and [IO.File]::Exists($failedUpdateState.backupPath)) "migration failure should preserve and record its backup"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=sha256:fake$") "migration failure should record the previous immutable image ID for recovery"
+    $env:FAKE_DOCKER_MIGRATE_FAIL = "false"
+
+    $env:FAKE_DOCKER_API_START_FAIL = "true"
+    $apiStartFailure = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($apiStartFailure.ExitCode -ne 0) "API startup failure should stop update"
+    Assert-True ($apiStartFailure.Output -match "API remains stopped") "API startup failure should fail closed"
+    $env:FAKE_DOCKER_API_START_FAIL = "false"
+
+    $recoveryUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($recoveryUpdate.ExitCode -eq 0) "a corrected update should recover after migration failure: $($recoveryUpdate.Output)"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "recovery update should restore the requested image"
+
     Remove-Item Env:LUTHN_CODEX_COMMAND
     Remove-Item Env:CODEX_CLI_PATH -ErrorAction SilentlyContinue
     $env:Path = $pwshDirectory
@@ -410,8 +490,12 @@ esac
     Write-Host "Windows lifecycle tests passed."
 } finally {
     Remove-Item Env:FAKE_CODEX_REMOVE_FAIL -ErrorAction SilentlyContinue
+    Remove-Item Env:FAKE_DOCKER_API_START_FAIL -ErrorAction SilentlyContinue
+    Remove-Item Env:FAKE_DOCKER_BACKUP_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:FAKE_DOCKER_COMPOSE_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:FAKE_DOCKER_INFO_FAIL -ErrorAction SilentlyContinue
+    Remove-Item Env:FAKE_DOCKER_MIGRATE_FAIL -ErrorAction SilentlyContinue
+    Remove-Item Env:FAKE_DOCKER_PULL_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:FAKE_MCP_PROBE_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:CODEX_CLI_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_BIN_DIR -ErrorAction SilentlyContinue

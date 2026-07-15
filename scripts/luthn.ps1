@@ -31,6 +31,7 @@ $script:TokenFile = if ($env:LUTHN_SERVICE_TOKEN_FILE) { $env:LUTHN_SERVICE_TOKE
 $script:ConnectorStateDir = if ($env:LUTHN_CONNECTOR_STATE_DIR) { $env:LUTHN_CONNECTOR_STATE_DIR } else { Join-Path $script:StateDir "connectors" }
 $script:CodexStateFile = if ($env:LUTHN_CODEX_STATE_FILE) { $env:LUTHN_CODEX_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.json" }
 $script:CodexPendingStateFile = if ($env:LUTHN_CODEX_PENDING_STATE_FILE) { $env:LUTHN_CODEX_PENDING_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.pending.json" }
+$script:UpdateStateFile = if ($env:LUTHN_UPDATE_STATE_FILE) { $env:LUTHN_UPDATE_STATE_FILE } else { Join-Path $script:StateDir "update-windows.json" }
 $script:DistributionRef = if ($env:LUTHN_DISTRIBUTION_REF) { $env:LUTHN_DISTRIBUTION_REF } else { "main" }
 $script:SourceBaseUrl = if ($env:LUTHN_SOURCE_BASE_URL) { $env:LUTHN_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/JakobSung/Luthn/$($script:DistributionRef)" }
 $script:DefaultImage = "ghcr.io/jakobsung/luthn:main"
@@ -43,14 +44,15 @@ usage: luthn <command> [options]
 commands:
   install [--connect-codex]  Install Luthn and optionally register Codex MCP.
   status                     Show services, readiness, console, and image.
+  update [image]             Back up, pull, migrate, restart, and verify.
   connect codex              Register the Docker-backed Codex MCP server.
   disconnect codex           Remove only a Luthn-owned Codex MCP registration.
   mcp [--list-tools]         Run the Docker-backed MCP stdio server.
   uninstall                  Remove services and runtime; preserve data/config.
   help                       Show this help.
 
-Windows update, reset, purge uninstall, and the automatic Codex hook are not
-available in this release.
+Windows reset, purge uninstall, and the automatic Codex hook are not available
+in this release.
 "@
 }
 
@@ -342,17 +344,84 @@ function Get-RuntimeSource {
     return $script:SourceBaseUrl
 }
 
+function Test-WindowsCliFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $tokens = $null
+    $parseErrors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count -gt 0) { throw "downloaded Windows CLI did not pass PowerShell syntax validation" }
+    if ([IO.File]::ReadAllText($Path) -notmatch '\$script:LuthnWindowsCliVersion\s*=\s*"1"') {
+        throw "downloaded Windows CLI did not match the Luthn distribution contract"
+    }
+}
+
+function Invoke-ToolToFile {
+    param(
+        [Parameter(Mandatory = $true)]$Tool,
+        [string[]]$Arguments = @(),
+        [Parameter(Mandatory = $true)][string]$OutputPath
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Tool.FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @($Tool.PrefixArguments) + $Arguments) {
+        [void]$startInfo.ArgumentList.Add([string]$argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { throw "failed to start command: $($Tool.FilePath)" }
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    try {
+        $output = [IO.File]::Open($OutputPath, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $process.StandardOutput.BaseStream.CopyTo($output)
+        } finally {
+            $output.Dispose()
+        }
+        $process.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StdErr = $stderrTask.GetAwaiter().GetResult()
+        }
+    } finally {
+        if (-not $process.HasExited) { $process.Kill($true) }
+        $process.Dispose()
+    }
+}
+
 function Install-ComposeRuntime {
-    param([Parameter(Mandatory = $true)][string]$RuntimeSource)
+    param(
+        [Parameter(Mandatory = $true)][string]$RuntimeSource,
+        [switch]$IncludeCli
+    )
     Ensure-Directories
     $temporaryCompose = Join-Path $script:DataDir "compose.$([Guid]::NewGuid().ToString('N')).tmp.yaml"
     $temporaryEnvironment = Join-Path $script:DataDir "validate.$([Guid]::NewGuid().ToString('N')).env"
     $temporaryToken = Join-Path $script:DataDir "validate.$([Guid]::NewGuid().ToString('N')).token"
+    $temporaryCli = Join-Path $script:BinDir "luthn.$([Guid]::NewGuid().ToString('N')).tmp.ps1"
+    $installedCli = Join-Path $script:BinDir "luthn.ps1"
+    $previousCompose = if ([IO.File]::Exists($script:ComposeFile)) { [IO.File]::ReadAllBytes($script:ComposeFile) } else { $null }
+    $previousCli = if ($IncludeCli -and [IO.File]::Exists($installedCli)) { [IO.File]::ReadAllBytes($installedCli) } else { $null }
+    $composeReplaced = $false
+    $cliReplaced = $false
     try {
         if ($env:LUTHN_COMPOSE_SOURCE_FILE) {
             [IO.File]::Copy($env:LUTHN_COMPOSE_SOURCE_FILE, $temporaryCompose, $true)
         } else {
             Invoke-WebRequest -Uri "$RuntimeSource/deploy/compose.yaml" -OutFile $temporaryCompose
+        }
+        if ($IncludeCli) {
+            if ($env:LUTHN_WINDOWS_CLI_SOURCE_FILE) {
+                [IO.File]::Copy($env:LUTHN_WINDOWS_CLI_SOURCE_FILE, $temporaryCli, $true)
+            } else {
+                Invoke-WebRequest -Uri "$RuntimeSource/scripts/luthn.ps1" -OutFile $temporaryCli
+            }
+            Test-WindowsCliFile -Path $temporaryCli
         }
         $content = [IO.File]::ReadAllText($temporaryCompose)
         if ($content -notmatch "(?m)^name:\s*luthn\s*$" -or $content -notmatch "(?m)^\s{2}mcp:\s*$") {
@@ -375,8 +444,23 @@ Luthn__Auth__Tokens__0__Sha256Digest=validation
 
         $runtimeContent = [IO.File]::ReadAllText($temporaryCompose)
         Write-Utf8File -Path $script:ComposeFile -Content $runtimeContent
+        $composeReplaced = $true
+        if ($IncludeCli) {
+            Write-Utf8File -Path $installedCli -Content ([IO.File]::ReadAllText($temporaryCli))
+            $cliReplaced = $true
+        }
+    } catch {
+        if ($cliReplaced) {
+            if ($null -ne $previousCli) { [IO.File]::WriteAllBytes($installedCli, $previousCli) }
+            elseif ([IO.File]::Exists($installedCli)) { [IO.File]::Delete($installedCli) }
+        }
+        if ($composeReplaced) {
+            if ($null -ne $previousCompose) { [IO.File]::WriteAllBytes($script:ComposeFile, $previousCompose) }
+            elseif ([IO.File]::Exists($script:ComposeFile)) { [IO.File]::Delete($script:ComposeFile) }
+        }
+        throw
     } finally {
-        foreach ($path in @($temporaryCompose, $temporaryEnvironment, $temporaryToken)) {
+        foreach ($path in @($temporaryCompose, $temporaryEnvironment, $temporaryToken, $temporaryCli)) {
             if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) }
         }
     }
@@ -568,6 +652,192 @@ function Show-Status {
     Write-Host "Digest: $(if ($digest) { $digest } else { 'unavailable' })"
 }
 
+function Get-ApiImageId {
+    $docker = Get-DockerTool
+    $container = Invoke-ComposeCapture @("ps", "-q", "api")
+    if ($container.ExitCode -ne 0 -or -not $container.StdOut.Trim()) { return "" }
+    $image = Invoke-ToolCapture -Tool $docker -Arguments @("inspect", "--format", "{{.Image}}", $container.StdOut.Trim())
+    if ($image.ExitCode -ne 0) { return "" }
+    return $image.StdOut.Trim()
+}
+
+function Write-UpdateState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][string]$TargetImage,
+        [string]$TargetImageId = "",
+        [string]$PreviousImageRef = "",
+        [string]$PreviousImageId = "",
+        [string]$BackupPath = ""
+    )
+
+    Ensure-Directories
+    $state = [ordered]@{
+        version = 1
+        status = $Status
+        targetImage = $TargetImage
+        targetImageId = $TargetImageId
+        previousImageRef = $PreviousImageRef
+        previousImageId = $PreviousImageId
+        backupPath = $BackupPath
+        updatedAt = [DateTimeOffset]::UtcNow.ToString("O")
+    } | ConvertTo-Json -Depth 4
+    Write-Utf8File -Path $script:UpdateStateFile -Content ($state + "`n")
+    Protect-SecretFile $script:UpdateStateFile
+}
+
+function Stop-WritePaths {
+    $docker = Get-DockerTool
+    $apiStop = Invoke-ComposeCapture @("stop", "api")
+    if ($apiStop.ExitCode -ne 0) {
+        $apiContainer = Invoke-ComposeCapture @("ps", "-q", "api")
+        if ($apiContainer.ExitCode -ne 0) { throw "API stop failed and its container could not be inspected." }
+        $apiContainerId = $apiContainer.StdOut.Trim()
+        if ($apiContainerId) {
+            $stop = Invoke-ToolCapture -Tool $docker -Arguments @("stop", $apiContainerId)
+            if ($stop.ExitCode -ne 0) {
+                $kill = Invoke-ToolCapture -Tool $docker -Arguments @("kill", $apiContainerId)
+                Assert-ToolSuccess $kill "API fail-closed stop"
+            }
+        }
+    }
+
+    foreach ($service in @("mcp", "adapter")) {
+        $running = Invoke-ToolCapture -Tool $docker -Arguments @(
+            "ps", "-q",
+            "--filter", "label=com.docker.compose.project=$($script:ProjectName)",
+            "--filter", "label=com.docker.compose.service=$service")
+        Assert-ToolSuccess $running "$service write-path inspection"
+        $containerIds = @($running.StdOut -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if ($containerIds.Count -gt 0) {
+            $stopped = Invoke-ToolCapture -Tool $docker -Arguments (@("stop") + $containerIds)
+            Assert-ToolSuccess $stopped "$service write-path stop"
+        }
+    }
+}
+
+function Write-PostgresBackup {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $arguments = Get-ComposeArguments @(
+        "exec", "-T", "postgres", "pg_dump",
+        "-U", (Read-ConfigValue "POSTGRES_USER" "luthn"),
+        "-d", (Read-ConfigValue "POSTGRES_DB" "luthn"),
+        "-Fc")
+    $result = Invoke-ToolToFile -Tool (Get-DockerTool) -Arguments $arguments -OutputPath $Path
+    if ($result.ExitCode -ne 0) {
+        if ([IO.File]::Exists($Path)) { [IO.File]::Delete($Path) }
+        $detail = $result.StdErr.Trim()
+        throw "PostgreSQL backup failed with exit code $($result.ExitCode): $detail"
+    }
+    Protect-SecretFile $Path
+}
+
+function Update-Luthn {
+    param([string[]]$Arguments)
+    if ($Arguments.Count -gt 1) { throw "usage: luthn update [image]" }
+
+    Require-Installation
+    Test-DockerPreflight
+    $docker = Get-DockerTool
+    $targetImage = if ($Arguments.Count -eq 1) { $Arguments[0] } else { Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage }
+    if (-not $targetImage) { throw "usage: luthn update [image]" }
+    $previousImageRef = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+    $previousImageId = Get-ApiImageId
+
+    Ensure-Directories
+    Write-Host "Pulling $targetImage..."
+    $pull = if ($env:LUTHN_SKIP_PULL -ceq "true") {
+        Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", $targetImage)
+    } else {
+        Invoke-ToolCapture -Tool $docker -Arguments @("pull", $targetImage)
+    }
+    if ($pull.ExitCode -ne 0) {
+        Write-UpdateState -Status "failed" -TargetImage $targetImage -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId
+        throw "Update failed while pulling the target image. The running API and previous image were preserved."
+    }
+
+    $targetIdResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{.Id}}", $targetImage)
+    Assert-ToolSuccess $targetIdResult "target image inspection"
+    $targetImageId = $targetIdResult.StdOut.Trim()
+    $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $targetImage)
+    $targetRevision = if ($revisionResult.ExitCode -eq 0) { $revisionResult.StdOut.Trim() } else { "" }
+
+    Write-Host "Refreshing Windows CLI and Compose runtime..."
+    try {
+        Install-ComposeRuntime -RuntimeSource (Get-RuntimeSource -Image $targetImage -Revision $targetRevision) -IncludeCli
+    } catch {
+        Write-UpdateState -Status "failed" -TargetImage $targetImage -TargetImageId $targetImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId
+        throw "Update failed while refreshing the Windows lifecycle runtime. The running API and previous image were preserved. $($_.Exception.Message)"
+    }
+
+    $postgres = Invoke-ComposeCapture @("up", "-d", "postgres")
+    Assert-ToolSuccess $postgres "PostgreSQL startup"
+    Wait-ForPostgres
+
+    Write-Host "Stopping API and MCP write paths..."
+    try {
+        Stop-WritePaths
+        if ($env:LUTHN_UPDATE_AFTER_STOP_HOOK) {
+            Invoke-ToolVisible -Tool (New-ToolSpecFromPath -Path $env:LUTHN_UPDATE_AFTER_STOP_HOOK)
+        }
+    } catch {
+        Write-UpdateState -Status "failed" -TargetImage $targetImage -TargetImageId $targetImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId
+        $restart = Invoke-ComposeCapture @("up", "-d", "api")
+        if ($restart.ExitCode -ne 0) { throw "Update stopped before backup and the previous API could not be restarted. $($_.Exception.Message)" }
+        throw "Update stopped before backup. The previous API was restarted. $($_.Exception.Message)"
+    }
+
+    $backupPath = Join-Path (Join-Path $script:StateDir "backups") "luthn-$([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')).dump"
+    Write-Host "Backing up PostgreSQL to $backupPath..."
+    try {
+        Write-PostgresBackup -Path $backupPath
+    } catch {
+        Set-ConfigValue -Key "LUTHN_IMAGE" -Value $previousImageRef
+        Write-UpdateState -Status "failed" -TargetImage $targetImage -TargetImageId $targetImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId
+        $restart = Invoke-ComposeCapture @("up", "-d", "api")
+        if ($restart.ExitCode -ne 0) { throw "Update failed while backing up PostgreSQL, and the previous API could not be restarted. $($_.Exception.Message)" }
+        throw "Update failed while backing up PostgreSQL. The previous API was restarted. $($_.Exception.Message)"
+    }
+
+    Write-UpdateState -Status "updating" -TargetImage $targetImage -TargetImageId $targetImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId -BackupPath $backupPath
+    Set-ConfigValue -Key "LUTHN_IMAGE" -Value $targetImage
+    Write-Host "Applying target-image migrations..."
+    $migration = Invoke-ComposeCapture @("run", "--rm", "--no-deps", "migrate")
+    if ($migration.ExitCode -ne 0) {
+        $recoveryImage = if ($previousImageId) { $previousImageId } else { $previousImageRef }
+        Set-ConfigValue -Key "LUTHN_IMAGE" -Value $recoveryImage
+        Write-UpdateState -Status "failed" -TargetImage $targetImage -TargetImageId $targetImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId -BackupPath $backupPath
+        throw "Update failed during migration. API remains stopped; use the recorded backup and previous image for recovery."
+    }
+
+    $apiStart = Invoke-ComposeCapture @("up", "-d", "api")
+    if ($apiStart.ExitCode -ne 0) {
+        $stopError = ""
+        try { Stop-WritePaths } catch { $stopError = $_.Exception.Message }
+        $recoveryImage = if ($previousImageId) { $previousImageId } else { $previousImageRef }
+        Set-ConfigValue -Key "LUTHN_IMAGE" -Value $recoveryImage
+        Write-UpdateState -Status "failed" -TargetImage $targetImage -TargetImageId $targetImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId -BackupPath $backupPath
+        if ($stopError) { throw "Update failed while starting the target API and its write paths could not be confirmed stopped: $stopError" }
+        throw "Update failed while starting the target API. API remains stopped; the backup and previous image are recorded."
+    }
+    try {
+        Wait-ForApi
+    } catch {
+        $stopError = ""
+        try { Stop-WritePaths } catch { $stopError = $_.Exception.Message }
+        $recoveryImage = if ($previousImageId) { $previousImageId } else { $previousImageRef }
+        Set-ConfigValue -Key "LUTHN_IMAGE" -Value $recoveryImage
+        Write-UpdateState -Status "failed" -TargetImage $targetImage -TargetImageId $targetImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId -BackupPath $backupPath
+        if ($stopError) { throw "Update failed readiness and its write paths could not be confirmed stopped: $stopError" }
+        throw "Update failed readiness. API is stopped; the backup and previous image are recorded."
+    }
+
+    $currentImageId = Get-ApiImageId
+    Write-UpdateState -Status "ready" -TargetImage $targetImage -TargetImageId $currentImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId -BackupPath $backupPath
+    Write-Host "Luthn update completed: $targetImage"
+}
+
 function Get-McpDockerArguments {
     return Get-ComposeArguments @("--profile", "tools", "run", "--rm", "--no-deps", "-T", "mcp")
 }
@@ -731,6 +1001,7 @@ try {
     switch -CaseSensitive ($Command.ToLowerInvariant()) {
         "install" { Install-Luthn $CommandArguments }
         "status" { Show-Status }
+        "update" { Update-Luthn $CommandArguments }
         "connect" {
             if ($CommandArguments.Count -ne 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn connect codex" }
             Connect-Codex

@@ -12,14 +12,19 @@ Give this prompt to Codex or another coding agent:
 Install and configure Luthn locally by following the instructions here:
 https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 
-Detect whether this host is macOS, Linux, or Windows and follow the matching
+Detect whether this host is macOS, Linux, or Windows and use only the matching
 Docker self-host procedure. Do not clone the source or install the .NET SDK.
-Inspect prerequisites, repair recoverable PowerShell, PATH, Docker daemon,
-Docker context, and Codex CLI discovery problems, then finish the installation.
-Verify health and readiness, show me the operator console URL, and connect Codex
-with `luthn connect codex`. Never print, copy, or commit the generated service
-token. Stop only for a user-owned UI, license, privilege, or trust decision and
-tell me the exact action required.
+Inspect existing prerequisites and preserve Docker volumes, Luthn
+configuration, Codex configuration, hooks, and unrelated MCP registrations.
+Repair recoverable PowerShell, PATH, Docker daemon/context, and Codex CLI
+discovery problems, then finish the installation.
+
+Connect Codex, verify health and readiness, confirm that `luthn mcp
+--list-tools` includes `get_context_pack`, and show me the operator console URL.
+On macOS or Linux, explain the optional `--auto-recall` mode but do not enable
+it unless I request it. Never print, copy, or commit the service token or other
+credential-bearing files. Stop only for a user-owned UI, license, privilege,
+restart, or trust decision and tell me the exact action required.
 ```
 
 ## Agent Execution Contract
@@ -241,7 +246,8 @@ Windows state uses these stable locations by default:
 | Compose runtime | `%LOCALAPPDATA%\Luthn\data\compose.yaml` |
 | Private configuration | `%LOCALAPPDATA%\Luthn\config\luthn.env` |
 | Service token secret | `%LOCALAPPDATA%\Luthn\config\service-token` |
-| Connector state and backups | `%LOCALAPPDATA%\Luthn\state\` |
+| Connector state | `%LOCALAPPDATA%\Luthn\state\connectors\` |
+| Update state and backups | `%LOCALAPPDATA%\Luthn\state\update-windows.json`, `%LOCALAPPDATA%\Luthn\state\backups\` |
 | PostgreSQL volume | `luthn-postgres` |
 | Operator configuration volume | `luthn-operator` |
 
@@ -287,25 +293,29 @@ Windows currently supports:
 
 ```powershell
 luthn status
+luthn update
 luthn connect codex
 luthn disconnect codex
 luthn uninstall
 ```
 
+Windows `update [image]` follows the backup, migration, restart, and readiness
+contract below and refreshes both the PowerShell CLI and Compose runtime.
 Windows `uninstall` removes the owned Codex MCP registration, Compose services,
 CLI, and downloaded runtime while preserving Docker volumes, configuration,
 token, connector-independent state, and backups. It stops without removing the
-runtime if Codex cleanup fails. Windows `update`, `reset`, purge uninstall, and
-automatic hook installation are deferred.
+runtime if Codex cleanup fails. Windows `reset`, purge uninstall, and automatic
+hook installation are deferred.
 
 ### Windows release smoke
 
 The repository's Windows CI injects fake Docker and Codex commands to verify
 failure handling without requiring a privileged Docker Desktop runner. Before a
 Windows release, run the documented bootstrap on Windows 11 with Docker Desktop
-in Linux-container mode, then verify `luthn status`, `codex mcp get luthn`, an
-MCP `get_context_pack` probe, default uninstall, reinstall, and preservation of
-the two named Docker volumes and `%LOCALAPPDATA%\Luthn\config`.
+in Linux-container mode, then verify `luthn status`, a successful `luthn
+update`, update failure recovery, `codex mcp get luthn`, an MCP
+`get_context_pack` probe, default uninstall, reinstall, and preservation of the
+two named Docker volumes and `%LOCALAPPDATA%\Luthn\config`.
 
 ### Update Behavior
 
@@ -326,10 +336,12 @@ luthn update ghcr.io/jakobsung/luthn:sha-<full-commit-sha>
 ```
 
 Migration or readiness failure leaves the API stopped, preserves the backup,
-and records the previous image ID in
-`~/.local/state/luthn/install-state.env`. Luthn does not automatically restore
-or downgrade the database because a schema rollback can destroy retained data.
-Use [Operations](operations.md) for restore and rollback procedure.
+and records the previous image ID. macOS/Linux records update state in
+`~/.local/state/luthn/install-state.env`; Windows records it in
+`%LOCALAPPDATA%\Luthn\state\update-windows.json`. Luthn does not automatically
+restore or downgrade the database because a schema rollback can destroy
+retained data. Use [Operations](operations.md) for restore and rollback
+procedure.
 
 ## Agent Connections
 
