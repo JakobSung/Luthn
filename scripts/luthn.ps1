@@ -54,6 +54,28 @@ available in this release.
 "@
 }
 
+function Get-PwshPath {
+    $pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $pwsh) { throw "PowerShell 7.4 or later is required. Install it and retry from pwsh." }
+    return $pwsh.Source
+}
+
+function New-ToolSpecFromPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $resolved = Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue
+    if (-not $resolved) { throw "required command path does not exist: $Path" }
+    $resolvedPath = $resolved.Path
+    if ([IO.Path]::GetExtension($resolvedPath) -ieq ".ps1") {
+        return [pscustomobject]@{ FilePath = Get-PwshPath; PrefixArguments = @("-NoProfile", "-File", $resolvedPath) }
+    }
+    if ([IO.Path]::GetExtension($resolvedPath) -in @(".cmd", ".bat")) {
+        $commandProcessor = if ($env:ComSpec) { $env:ComSpec } else { Join-Path $env:SystemRoot "System32\cmd.exe" }
+        return [pscustomobject]@{ FilePath = $commandProcessor; PrefixArguments = @("/d", "/s", "/c", "call", $resolvedPath) }
+    }
+    return [pscustomobject]@{ FilePath = $resolvedPath; PrefixArguments = @() }
+}
+
 function Get-ToolSpec {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -62,15 +84,10 @@ function Get-ToolSpec {
 
     $override = [Environment]::GetEnvironmentVariable($OverrideVariable)
     if ($override) {
-        $resolvedOverride = (Resolve-Path -LiteralPath $override).Path
-        if ([IO.Path]::GetExtension($resolvedOverride) -ieq ".ps1") {
-            $pwsh = @(Get-Command pwsh -CommandType Application -ErrorAction Stop)[0].Source
-            return [pscustomobject]@{ FilePath = $pwsh; PrefixArguments = @("-NoProfile", "-File", $resolvedOverride) }
-        }
-        return [pscustomobject]@{ FilePath = $resolvedOverride; PrefixArguments = @() }
+        return New-ToolSpecFromPath -Path $override
     }
 
-    $commandInfo = @(Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue)[0]
+    $commandInfo = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $commandInfo) {
         throw "missing required command: $Name"
     }
@@ -78,7 +95,6 @@ function Get-ToolSpec {
 }
 
 function Get-DockerTool { Get-ToolSpec -Name "docker" -OverrideVariable "LUTHN_DOCKER_COMMAND" }
-function Get-CodexTool { Get-ToolSpec -Name "codex" -OverrideVariable "LUTHN_CODEX_COMMAND" }
 
 function Invoke-ToolCapture {
     param(
@@ -114,6 +130,42 @@ function Invoke-ToolCapture {
         StdOut = $stdout
         StdErr = $stderr
     }
+}
+
+function Get-CodexTool {
+    if ($env:LUTHN_CODEX_COMMAND) {
+        return Get-ToolSpec -Name "codex" -OverrideVariable "LUTHN_CODEX_COMMAND"
+    }
+
+    $candidatePaths = [Collections.Generic.List[string]]::new()
+    if ($env:CODEX_CLI_PATH) { $candidatePaths.Add($env:CODEX_CLI_PATH) }
+    if ($env:LOCALAPPDATA) {
+        $desktopBinRoot = Join-Path $env:LOCALAPPDATA "OpenAI\Codex\bin"
+        if ([IO.Directory]::Exists($desktopBinRoot)) {
+            Get-ChildItem -Path (Join-Path $desktopBinRoot "*\codex.*") -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -in @(".exe", ".cmd", ".bat", ".ps1") } |
+                Sort-Object LastWriteTime -Descending |
+                ForEach-Object { $candidatePaths.Add($_.FullName) }
+        }
+    }
+    Get-Command codex -CommandType Application -All -ErrorAction SilentlyContinue |
+        ForEach-Object { $candidatePaths.Add($_.Source) }
+
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($candidatePath in $candidatePaths) {
+        if (-not $candidatePath -or -not $seen.Add($candidatePath)) { continue }
+        try {
+            $candidate = New-ToolSpecFromPath -Path $candidatePath
+            $version = Invoke-ToolCapture -Tool $candidate -Arguments @("--version")
+            if ($version.ExitCode -eq 0 -and ($version.StdOut + $version.StdErr).Trim() -match '^codex-cli\s+') {
+                return $candidate
+            }
+        } catch {
+            continue
+        }
+    }
+
+    throw "No runnable Codex CLI was found. Install the Codex CLI, restart the terminal, or set LUTHN_CODEX_COMMAND to a runnable codex executable."
 }
 
 function Assert-ToolSuccess {
@@ -166,9 +218,13 @@ function Test-DockerPreflight {
     Assert-ToolSuccess $composeVersion "Docker Compose check"
 
     $dockerInfo = Invoke-ToolCapture -Tool $docker -Arguments @("info", "--format", "{{.OSType}}")
-    Assert-ToolSuccess $dockerInfo "Docker daemon check"
+    if ($dockerInfo.ExitCode -ne 0) {
+        $detail = $dockerInfo.StdErr.Trim()
+        if (-not $detail) { $detail = $dockerInfo.StdOut.Trim() }
+        throw "Docker Desktop is not reachable. Start Docker Desktop, wait for the Linux engine, and retry. $detail"
+    }
     if ($dockerInfo.StdOut.Trim() -cne "linux") {
-        throw "Docker Desktop must be running in Linux-container mode."
+        throw "Docker Desktop is running Windows containers. Switch to Linux containers from the Docker Desktop menu and retry."
     }
 }
 
@@ -205,15 +261,24 @@ function Protect-SecretFile {
 
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $userSid = $identity.User
-    $acl = [Security.AccessControl.FileSecurity]::new()
-    $acl.SetOwner($userSid)
+    $fileInfo = [IO.FileInfo]::new($Path)
+    $acl = [IO.FileSystemAclExtensions]::GetAccessControl(
+        $fileInfo,
+        [Security.AccessControl.AccessControlSections]::Access)
     $acl.SetAccessRuleProtection($true, $false)
+    $existingRules = $acl.GetAccessRules(
+        $true,
+        $true,
+        [Security.Principal.SecurityIdentifier])
+    foreach ($existingRule in $existingRules) {
+        [void]$acl.RemoveAccessRuleSpecific($existingRule)
+    }
     $rule = [Security.AccessControl.FileSystemAccessRule]::new(
         $userSid,
         [Security.AccessControl.FileSystemRights]::FullControl,
         [Security.AccessControl.AccessControlType]::Allow)
     [void]$acl.AddAccessRule($rule)
-    Set-Acl -LiteralPath $Path -AclObject $acl
+    [IO.FileSystemAclExtensions]::SetAccessControl($fileInfo, $acl)
 }
 
 function Read-ConfigValue {

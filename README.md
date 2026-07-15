@@ -3,232 +3,107 @@
 </p>
 
 <p align="center">
-  <strong>A shared memory space for AI agents that you can run yourself.</strong>
+  <strong>Self-hosted shared memory for AI agents, with a clear data boundary.</strong>
 </p>
 
 <p align="center">
   <a href="README.ko.md">한국어</a> ·
   <a href="docs/installation.md">Installation</a> ·
-  <a href="docs/api.md">API</a> ·
-  <a href="docs/agent-quickstart.md">Agent Quickstart</a> ·
-  <a href="docs/local-development.md">Local Development</a> ·
-  <a href="docs/licensing.md">License</a>
+  <a href="docs/agent-quickstart.md">Codex connection and memory</a> ·
+  <a href="docs/data-boundaries.md">Data boundaries</a> ·
+  <a href="docs/local-development.md">Development</a>
 </p>
 
 # Luthn
 
-Luthn is a shared memory space for AI agents.
+Luthn gives multiple AI agents a shared, reusable project memory without making
+raw private data part of the model's default context.
 
-It lets several agents look at the same useful context without treating every
-source document or private note as something the model should remember by
-default.
+- Run it in infrastructure you manage with Docker and PostgreSQL.
+- Classify and redact intake before exposing agent-safe summaries and context.
+- Audit what was stored, shared, and retrieved.
 
-The default setup is meant to be run by you. You keep the data in local storage
-or PostgreSQL, define rules for classification, redact sensitive parts, keep a
-usage history, and let agents fetch only the context they need.
+## How The Memory Loop Works
 
-## Luthn Philosophy
+On macOS and Linux, a trusted Codex hook can submit a bounded capsule of the
+final assistant response after a turn. Luthn redacts and classifies that capsule
+before anything becomes agent-visible. MCP provides safe reads and explicit
+shared-memory writes.
 
-Shared memory should actually help.
-You should be able to check later what information it was based on.
-And there should be a clear line between what an agent can see and what it
-cannot.
-
-Agents should only receive information they are allowed to use. Sensitive
-originals, private records, credentials, and run history should stay behind
-clear protection rules.
-
-## Why Luthn
-
-AI agents are more useful when they can remember the shape of a project and
-reuse that context later.
-
-But if private source data is copied into many agents and sessions, the risk
-grows with it.
-
-Luthn splits that problem up:
-
-- raw sources and private records stay out of default agent memory;
-- agents get only the summaries, references, and context packs that are allowed
-  to be shared;
-- the system keeps a record of what was used and what access was allowed;
-- the boundary runs inside infrastructure you manage.
-
-## How It Works
-
-<p align="center">
-  <img src="docs/assets/luthn-flow-diagram.png" alt="Luthn data flow from sources through classification, private storage, approval, safe shared memory, and agent access." width="920">
-</p>
+Optional lightweight auto-recall can fetch one small context pack when a new
+task or material topic begins. It reuses that context during the task instead
+of querying on every turn.
 
 ```text
-Sources
-  -> intake
-  -> classification and policy
-  -> redact sensitive parts and review
-  -> create shared memory, wiki Markdown, and context packs
-  -> serve through agent APIs and MCP tools
+completed turn -> bounded capsule -> classify and store safe context
+new task       -> auto-recall or MCP -> reuse relevant context
 ```
 
-What agents see by default is cleaned-up context. Luthn can keep and use
-sensitive records internally, but the default API and MCP paths do not let
-agents open the original store or read the full source text directly.
+Windows currently connects the MCP channel only; the automatic hook and
+auto-recall instructions are not installed there. See
+[Codex connection and memory](docs/agent-quickstart.md) for setup, trust steps,
+privacy guarantees, recall limits, and platform differences.
 
-## Quick Start
+## Recommended Installation: Give This To An Agent
 
-### Recommended: Docker on macOS or Linux
-
-Install Docker with Docker Compose.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
-```
-
-This one command installs Luthn and configures the Codex connector. The final
-Codex restart and `/hooks` Trust step is an intentional user security review.
-
-### Docker Desktop on Windows
-
-Use Windows 11, PowerShell 7.4 or later, and Docker Desktop in Linux-container
-mode. Run in PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 | iex
-luthn connect codex
-```
-
-The Windows host CLI manages the same Linux Compose runtime. Codex is connected
-to its Docker-backed stdio MCP server; automatic hooks are not installed on
-Windows in this release.
-
-### Optional: Ask an agent
-
-Give Codex or another coding agent this prompt:
+Copy the following prompt into Codex or another coding agent. The installation
+guide is written as an execution and recovery guide, not just a command list.
 
 ```text
-Install Luthn with Docker by following:
+Install and configure Luthn by following this document:
 https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 
-Verify the installation, show the operator console URL, and connect Codex to
-Luthn with `luthn connect codex`. Do not print the service token.
+Detect whether this host is macOS, Linux, or Windows and use only the matching
+Docker self-host procedure. Inspect existing prerequisites and preserve Docker
+volumes, Luthn configuration, Codex configuration, hooks, and unrelated MCP
+registrations. Repair recoverable PowerShell, PATH, Docker daemon/context, and
+Codex CLI discovery problems, then finish the installation.
+
+Connect Codex, verify health and readiness, confirm that the MCP tool list
+contains get_context_pack, and show the operator console URL. On macOS or Linux,
+explain the optional --auto-recall mode but do not enable it unless I request
+it. Never print or copy the service token or credential-bearing files. Stop
+only for a user-owned license, privilege, restart, or trust decision and tell
+me the exact action required.
 ```
 
-### Manage
+For manual commands, prerequisites, Windows recovery, lifecycle behavior, and
+uninstallation, use the [installation guide](docs/installation.md).
+
+## Verify
 
 ```bash
 luthn status
-luthn update
-luthn reset --yes
-luthn uninstall
-luthn uninstall --purge-data --yes
+luthn mcp --list-tools
 ```
 
-`update` pulls the target runtime, stops write paths, backs up PostgreSQL, and
-migrates. `reset` deletes the database and operator volumes. A normal
-`uninstall` preserves persistent data, configuration, and backups; purge removes
-them only when both destructive flags are present.
-
-The full lifecycle table below currently applies to macOS and Linux. On
-Windows, this release supports `status`, `connect codex`, `disconnect codex`,
-and data-preserving `uninstall`; `update`, `reset`, and purge are deferred.
-
-| Command | PostgreSQL and operator volumes | Config and token | Backups | CLI/runtime |
-|---|---|---|---|---|
-| `luthn update` | Preserved | Preserved | New backup added | Refreshed |
-| `luthn reset --yes` | Deleted and recreated | Preserved | Preserved | Preserved |
-| `luthn uninstall` | Preserved | Preserved | Preserved | Removed |
-| `luthn uninstall --purge-data --yes` | Deleted | Deleted | Deleted | Removed |
-
-### Connect agents
-
-Connect Codex with one command:
-
-```bash
-luthn connect codex
-```
-
-Add `--auto-recall` to retrieve one small cached context pack when a new task or
-topic starts on macOS or Linux:
-
-```bash
-luthn connect codex --auto-recall
-```
-
-On macOS or Linux, follow the command's required steps: restart Codex, open `/hooks`, trust
-`Stop > luthn.agent-connector.v1`, complete one turn, and confirm that
-`automatic-ingestion` reports `Active`. Then inspect or remove the connection with:
-
-```bash
-luthn connection status codex
-luthn disconnect codex
-```
-
-The single setup command preserves two internal channels: a Codex hook sends a
-bounded final-response capsule through classified HTTP intake, while MCP
-provides model-triggered safe reads and explicit shared-memory writes. It
-preserves unrelated Codex hooks and MCP registrations, and the token stays in
-Luthn's private configuration. The operator console only displays read-only
-connection status.
-
-On Windows, `luthn connect codex` configures only the MCP channel. It does not
-modify Codex hooks or automatic-recall instructions. Restart Codex, verify the
-`luthn` server with `/mcp`, and remove it with `luthn disconnect codex`.
-
-Codex is the current host connector. A Claude Code connector using the same
-lifecycle contract and a separate Hermes integration using its official memory
-provider interface are planned, not currently installed by this command.
-
-Source builds, in-memory mode, and contributor commands remain in
-[Local Development](docs/local-development.md).
+Health and readiness should report `ready`, and the MCP tool list should include
+`get_context_pack`. The operator console is available at
+<http://127.0.0.1:8080/> by default.
 
 ## Data Boundary
 
-Agent-safe shared memory may include:
+Raw customer records, private messages, credentials, and unredacted operational
+data stay behind the private boundary. Agents receive only policy-approved safe
+projections such as reviewed summaries, redacted references, and approved
+project context. External publication is a separate, explicit approval path.
 
-- reviewed summaries;
-- redacted source references;
-- runbooks and implementation notes that do not contain secrets;
-- policy-approved project metadata;
-- safe conversation conclusions.
-
-Sensitive storage is for:
-
-- raw customer or user originals;
-- private emails, messages, contracts, quotes, finance, or payment records;
-- credentials and credential-bearing operational material;
-- unredacted incident logs;
-- policy-private records.
-
-Sensitive records can inform reviewed summaries, but they are not default shared
-memory for agents.
+Read [Data boundaries](docs/data-boundaries.md) for classification examples,
+provider-transfer implications, agent visibility, and publication rules.
 
 ## Documentation
 
-- [Installation and lifecycle](docs/installation.md)
-- [API](docs/api.md)
-- [Agent quickstart](docs/agent-quickstart.md)
-- [Local development](docs/local-development.md)
-- [Operations and recovery](docs/operations.md)
+- [Installation, recovery, and lifecycle](docs/installation.md)
+- [Codex connection, hook, MCP, and recall](docs/agent-quickstart.md)
 - [Data boundaries](docs/data-boundaries.md)
-- [Licensing model](docs/licensing.md)
+- [Operations and recovery](docs/operations.md)
+- [API](docs/api.md)
+- [Architecture](docs/architecture.md)
+- [Local development](docs/local-development.md)
+- [Licensing](docs/licensing.md)
 
-## License
+## License And Contributing
 
-Luthn uses a component-based licensing model.
-
-| Component | License |
-|---|---|
-| Core and self-host runtime | AGPL-3.0-only |
-| SDKs, HTTP connectors, and public plugin templates | Apache-2.0 |
-
-See [docs/licensing.md](docs/licensing.md) for the full package boundary.
-
-## Contributing
-
-Public bug reports and feature requests are welcome through GitHub Issues.
-Pull request creation is temporarily restricted to invited collaborators; if
-you are not a collaborator, open an issue instead. Read
-[CONTRIBUTING.md](CONTRIBUTING.md) for the current policy.
-
-Keep the repository public-safe. Do not commit credentials, private source
-records, customer originals, local agent artifacts, run evidence, or local
-planning state.
+The self-host runtime is AGPL-3.0-only; SDKs, HTTP connectors, and public plugin
+templates are Apache-2.0. See [Licensing](docs/licensing.md) for the package
+boundary and [CONTRIBUTING.md](CONTRIBUTING.md) before proposing changes.

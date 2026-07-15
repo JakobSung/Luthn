@@ -24,9 +24,13 @@ function Invoke-LuthnProcess {
 }
 
 function Invoke-InstallerProcess {
-    param([string]$InstallerPath, [string[]]$Arguments = @())
+    param([string]$InstallerPath, [switch]$ConnectCodex)
     try {
-        $output = & $InstallerPath @Arguments *>&1 | Out-String
+        $output = if ($ConnectCodex) {
+            & $InstallerPath -ConnectCodex *>&1 | Out-String
+        } else {
+            & $InstallerPath *>&1 | Out-String
+        }
         return [pscustomobject]@{ ExitCode = 0; Output = $output }
     } catch {
         return [pscustomobject]@{ ExitCode = 1; Output = ($_ | Out-String) }
@@ -38,8 +42,10 @@ $windowsRoot = Join-Path $testRoot "installed root"
 $fakeDocker = Join-Path $testRoot $(if ($IsWindows) { "fake-docker.ps1" } else { "fake-docker" })
 $fakeCodex = Join-Path $testRoot $(if ($IsWindows) { "fake-codex.ps1" } else { "fake-codex" })
 $fakeHealth = Join-Path $testRoot $(if ($IsWindows) { "fake-health.ps1" } else { "fake-health" })
+$fakeDockerDesktop = Join-Path $testRoot $(if ($IsWindows) { "fake-docker-desktop.ps1" } else { "fake-docker-desktop" })
 $fakeDockerLog = Join-Path $testRoot "docker.log"
 $fakeCodexLog = Join-Path $testRoot "codex.log"
+$fakeDockerReadyMarker = Join-Path $testRoot "docker-ready"
 $fakeCodexState = Join-Path $testRoot "codex-state.json"
 $fakeCodexTemplate = Join-Path $testRoot "codex-template.json"
 $invalidCli = Join-Path $testRoot "invalid.ps1"
@@ -48,6 +54,7 @@ $sharedBinDir = Join-Path $testRoot "shared 도구 bin"
 $sharedBinSentinel = Join-Path $sharedBinDir "unrelated-tool.txt"
 $installedCli = Join-Path $sharedBinDir "luthn.ps1"
 $codexOwnershipState = Join-Path $windowsRoot "state/connectors/codex-windows.json"
+$originalPath = $env:Path
 
 try {
     [void][IO.Directory]::CreateDirectory($testRoot)
@@ -58,7 +65,11 @@ $ErrorActionPreference = "Stop"
 [IO.File]::AppendAllText($env:FAKE_DOCKER_LOG, (($args -join " ") + "`n"))
 $joined = $args -join " "
 if ($args.Count -ge 2 -and $args[0] -ceq "compose" -and $args[1] -ceq "version") { if ($env:FAKE_DOCKER_COMPOSE_FAIL -ceq "true") { exit 12 }; "Docker Compose version v2.fake"; exit 0 }
-if ($args.Count -ge 1 -and $args[0] -ceq "info") { if ($env:FAKE_DOCKER_INFO_FAIL -ceq "true") { exit 13 }; if ($env:FAKE_INSTALLER_DOCKER_OS) { $env:FAKE_INSTALLER_DOCKER_OS } else { "linux" }; exit 0 }
+if ($args.Count -ge 1 -and $args[0] -ceq "info") {
+    if ($env:FAKE_DOCKER_INFO_FAIL -ceq "true" -and -not [IO.File]::Exists($env:FAKE_DOCKER_READY_MARKER)) { exit 13 }
+    if ($env:FAKE_INSTALLER_DOCKER_OS) { $env:FAKE_INSTALLER_DOCKER_OS } else { "linux" }
+    exit 0
+}
 if ($args.Count -ge 1 -and $args[0] -ceq "pull") { "pulled"; exit 0 }
 if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
     if ($joined -match "org.opencontainers.image.revision") { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
@@ -82,7 +93,10 @@ exit 1
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 joined="$*"
 if [ "$1" = "compose" ] && [ "$2" = "version" ]; then [ "${FAKE_DOCKER_COMPOSE_FAIL:-false}" = "true" ] && exit 12; echo "Docker Compose version v2.fake"; exit 0; fi
-if [ "$1" = "info" ]; then [ "${FAKE_DOCKER_INFO_FAIL:-false}" = "true" ] && exit 13; echo "${FAKE_INSTALLER_DOCKER_OS:-linux}"; exit 0; fi
+if [ "$1" = "info" ]; then
+  if [ "${FAKE_DOCKER_INFO_FAIL:-false}" = "true" ] && [ ! -f "$FAKE_DOCKER_READY_MARKER" ]; then exit 13; fi
+  echo "${FAKE_INSTALLER_DOCKER_OS:-linux}"; exit 0
+fi
 if [ "$1" = "pull" ]; then echo "pulled"; exit 0; fi
 if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
   case "$joined" in
@@ -111,6 +125,7 @@ exit 1
         [IO.File]::WriteAllText($fakeCodex, @'
 $ErrorActionPreference = "Stop"
 [IO.File]::AppendAllText($env:FAKE_CODEX_LOG, (($args -join " ") + "`n"))
+if ($args.Count -eq 1 -and $args[0] -ceq "--version") { "codex-cli 0.test"; exit 0 }
 if ($args.Count -lt 2 -or $args[0] -cne "mcp") { exit 2 }
 switch ($args[1]) {
     "get" {
@@ -133,6 +148,7 @@ exit 2
         [IO.File]::WriteAllText($fakeCodex, @'
 #!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_CODEX_LOG"
+if [ "$1" = "--version" ]; then echo "codex-cli 0.test"; exit 0; fi
 if [ "$1" != "mcp" ]; then exit 2; fi
 case "$2" in
   get)
@@ -154,6 +170,9 @@ exit 2
 if ($args.Count -ne 1 -or $args[0] -notmatch "/(healthz|readyz)$") { exit 1 }
 exit 0
 '@, [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($fakeDockerDesktop, @'
+[IO.File]::WriteAllText($env:FAKE_DOCKER_READY_MARKER, "ready")
+'@, [Text.UTF8Encoding]::new($false))
     } else {
         [IO.File]::WriteAllText($fakeHealth, @'
 #!/bin/sh
@@ -162,9 +181,13 @@ case "$1" in
   *) exit 1 ;;
 esac
 '@, [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($fakeDockerDesktop, @'
+#!/bin/sh
+: > "$FAKE_DOCKER_READY_MARKER"
+'@, [Text.UTF8Encoding]::new($false))
     }
     if (-not $IsWindows) {
-        & chmod +x $fakeDocker $fakeCodex $fakeHealth
+        & chmod +x $fakeDocker $fakeCodex $fakeHealth $fakeDockerDesktop
         if ($LASTEXITCODE -ne 0) { throw "failed to make fake tools executable" }
     }
 
@@ -183,6 +206,7 @@ esac
     $env:FAKE_CODEX_LOG = $fakeCodexLog
     $env:FAKE_CODEX_STATE = $fakeCodexState
     $env:FAKE_CODEX_TEMPLATE = $fakeCodexTemplate
+    $env:FAKE_DOCKER_READY_MARKER = $fakeDockerReadyMarker
     [void][IO.Directory]::CreateDirectory($sharedBinDir)
     [IO.File]::WriteAllText($sharedBinSentinel, "preserve me", [Text.UTF8Encoding]::new($false))
 
@@ -205,8 +229,9 @@ esac
     [IO.File]::WriteAllText($fakeCodexTemplate, (($template | ConvertTo-Json -Depth 6) + "`n"), [Text.UTF8Encoding]::new($false))
 
     $installerPath = Join-Path $RepoRoot "scripts/install.ps1"
-    $install = Invoke-InstallerProcess $installerPath
-    Assert-True ($install.ExitCode -eq 0) "bootstrap install should succeed: $($install.Output)"
+    $install = Invoke-InstallerProcess $installerPath -ConnectCodex
+    Assert-True ($install.ExitCode -eq 0) "bootstrap install and Codex connection should succeed: $($install.Output)"
+    Assert-True ($install.Output -match "Codex MCP is configured") "one-step bootstrap should connect Codex"
     Assert-True ([IO.File]::Exists($installedCli)) "bootstrap should install luthn.ps1"
     $installedShim = Join-Path $sharedBinDir "luthn.cmd"
     Assert-True ([IO.File]::Exists($installedShim)) "bootstrap should install luthn.cmd"
@@ -228,6 +253,7 @@ esac
     Assert-True (-not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF)) "config should be UTF-8 without BOM"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "Luthn__Auth__Tokens__0__Sha256Digest=sha256:[0-9a-f]{64}") "config should preserve the token-digest sha256 prefix"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
+    Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "one-step Codex registration should not contain the token"
     if ($IsWindows) {
         $tokenAcl = Get-Acl -LiteralPath $tokenFile
         Assert-True ($tokenAcl.AreAccessRulesProtected) "token ACL inheritance should be disabled"
@@ -242,6 +268,9 @@ esac
         })
         Assert-True ($unexpectedAllowRule.Count -eq 0) "token ACL should not grant access to unrelated identities"
     }
+
+    $initialDisconnect = Invoke-LuthnProcess $installedCli @("disconnect", "codex")
+    Assert-True ($initialDisconnect.ExitCode -eq 0) "one-step Codex registration should disconnect cleanly: $($initialDisconnect.Output)"
 
     $firstHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
     $secondInstall = Invoke-InstallerProcess $installerPath
@@ -262,6 +291,16 @@ esac
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "invalid download should preserve the installed CLI"
     $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = Join-Path $RepoRoot "scripts/luthn.ps1"
 
+    $pwshDirectory = Split-Path -Parent (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    Remove-Item Env:LUTHN_INSTALLER_DOCKER_COMMAND
+    $env:Path = $pwshDirectory
+    $missingDocker = Invoke-InstallerProcess $installerPath
+    Assert-True ($missingDocker.ExitCode -ne 0) "missing Docker CLI should fail preflight"
+    Assert-True ($missingDocker.Output -match "Docker Desktop with Docker Compose is required") "missing Docker should provide an actionable error"
+    Assert-True ($missingDocker.Output -notmatch "Index was outside") "missing Docker should not expose an array bounds exception"
+    $env:Path = $originalPath
+    $env:LUTHN_INSTALLER_DOCKER_COMMAND = $fakeDocker
+
     $env:FAKE_DOCKER_COMPOSE_FAIL = "true"
     $composeUnavailable = Invoke-InstallerProcess $installerPath
     Assert-True ($composeUnavailable.ExitCode -ne 0) "missing Docker Compose should fail preflight"
@@ -269,14 +308,23 @@ esac
     $env:FAKE_DOCKER_COMPOSE_FAIL = "false"
 
     $env:FAKE_DOCKER_INFO_FAIL = "true"
+    $env:LUTHN_DOCKER_DESKTOP_COMMAND = $fakeDockerDesktop
+    $daemonAutoStart = Invoke-InstallerProcess $installerPath
+    Assert-True ($daemonAutoStart.ExitCode -eq 0) "the bootstrap should start Docker Desktop and wait for its engine: $($daemonAutoStart.Output)"
+    Assert-True ($daemonAutoStart.Output -match "Starting it and waiting") "automatic Docker Desktop startup should be reported"
+    Remove-Item Env:LUTHN_DOCKER_DESKTOP_COMMAND
+    if ([IO.File]::Exists($fakeDockerReadyMarker)) { [IO.File]::Delete($fakeDockerReadyMarker) }
+
     $daemonUnavailable = Invoke-InstallerProcess $installerPath
     Assert-True ($daemonUnavailable.ExitCode -ne 0) "unreachable Docker daemon should fail preflight"
+    Assert-True ($daemonUnavailable.Output -match "Start Docker Desktop, wait for the engine, and retry") "daemon failure should explain the recovery action"
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "daemon preflight failure should preserve the installed CLI"
     $env:FAKE_DOCKER_INFO_FAIL = "false"
 
     $env:FAKE_INSTALLER_DOCKER_OS = "windows"
     $wrongMode = Invoke-InstallerProcess $installerPath
     Assert-True ($wrongMode.ExitCode -ne 0) "Windows-container mode should fail preflight"
+    Assert-True ($wrongMode.Output -match "Switch to Linux containers") "wrong container mode should explain the recovery action"
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "preflight failure should preserve the installed CLI"
     $env:FAKE_INSTALLER_DOCKER_OS = "linux"
 
@@ -285,6 +333,16 @@ esac
     Assert-True ($status.Output -match "Health: ready") "status should report health"
     Assert-True ($status.Output -match "Readiness: ready") "status should report readiness"
     Assert-True ($status.Output -match "Image ID: sha256:fake") "status should report image identity"
+
+    Remove-Item Env:LUTHN_CODEX_COMMAND
+    Remove-Item Env:CODEX_CLI_PATH -ErrorAction SilentlyContinue
+    $env:Path = $pwshDirectory
+    $missingCodex = Invoke-LuthnProcess $installedCli @("connect", "codex")
+    Assert-True ($missingCodex.ExitCode -ne 0) "missing Codex should fail without an array index error"
+    Assert-True ($missingCodex.Output -match "No runnable Codex CLI was found") "missing Codex should provide an actionable error"
+    Assert-True ($missingCodex.Output -notmatch "Index was outside") "missing Codex should not expose an array bounds exception"
+    $env:Path = $originalPath
+    $env:LUTHN_CODEX_COMMAND = $fakeCodex
 
     $unrelatedRegistration = [ordered]@{
         name = "luthn"
@@ -303,8 +361,19 @@ esac
     Assert-True (-not [IO.File]::Exists($fakeCodexState)) "MCP probe failure should roll back the Codex registration"
     $env:FAKE_MCP_PROBE_FAIL = "false"
 
+    $desktopCodexDir = Join-Path $env:LOCALAPPDATA "OpenAI/Codex/bin/test-runtime"
+    [void][IO.Directory]::CreateDirectory($desktopCodexDir)
+    $desktopCodexFixture = Join-Path $desktopCodexDir "codex-fixture.ps1"
+    [IO.File]::Copy($fakeCodex, $desktopCodexFixture, $true)
+    $desktopCodex = Join-Path $desktopCodexDir "codex.cmd"
+    [IO.File]::WriteAllText($desktopCodex, "@echo off`r`npwsh -NoProfile -File `"%~dp0codex-fixture.ps1`" %*`r`n", [Text.Encoding]::ASCII)
+    Remove-Item Env:LUTHN_CODEX_COMMAND
+    $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
     $connect = Invoke-LuthnProcess $installedCli @("connect", "codex")
-    Assert-True ($connect.ExitCode -eq 0) "Codex MCP connection should succeed: $($connect.Output)"
+    Assert-True ($connect.ExitCode -eq 0) "Codex Desktop CLI discovery should succeed: $($connect.Output)"
+    Assert-True ([IO.File]::ReadAllText($fakeCodexLog) -match "(?m)^--version$") "Codex discovery should verify that a candidate is runnable"
+    Remove-Item Env:CODEX_CLI_PATH
+    $env:LUTHN_CODEX_COMMAND = $fakeCodex
     Assert-True ([IO.File]::Exists($fakeCodexState)) "Codex MCP registration should exist"
     $registration = [IO.File]::ReadAllText($fakeCodexState) | ConvertFrom-Json
     Assert-True ($registration.transport.type -ceq "stdio") "Codex registration should be stdio"
@@ -319,14 +388,18 @@ esac
     Assert-True ($recoverOwnership.ExitCode -eq 0) "matching Codex MCP registration should recover ownership state: $($recoverOwnership.Output)"
     Assert-True ([IO.File]::Exists($codexOwnershipState)) "matching registration should restore ownership state for uninstall"
 
+    Remove-Item Env:LUTHN_CODEX_COMMAND
+    $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
+    $env:Path = $pwshDirectory
     $env:FAKE_CODEX_REMOVE_FAIL = "true"
     $blockedUninstall = Invoke-LuthnProcess $installedCli @("uninstall")
     Assert-True ($blockedUninstall.ExitCode -ne 0) "uninstall should stop when Codex cleanup fails"
+    Assert-True ($blockedUninstall.Output -notmatch "Index was outside") "uninstall should not expose an array bounds exception"
     Assert-True ([IO.Directory]::Exists((Join-Path $windowsRoot "data"))) "blocked uninstall should preserve runtime"
     $env:FAKE_CODEX_REMOVE_FAIL = "false"
 
     $uninstall = Invoke-LuthnProcess $installedCli @("uninstall")
-    Assert-True ($uninstall.ExitCode -eq 0) "default uninstall should succeed: $($uninstall.Output)"
+    Assert-True ($uninstall.ExitCode -eq 0) "default uninstall should discover Codex Desktop and succeed: $($uninstall.Output)"
     Assert-True (-not [IO.Directory]::Exists((Join-Path $windowsRoot "data"))) "default uninstall should remove runtime data"
     Assert-True ([IO.File]::Exists($configFile)) "default uninstall should preserve config"
     Assert-True ([IO.File]::Exists($tokenFile)) "default uninstall should preserve token"
@@ -340,7 +413,10 @@ esac
     Remove-Item Env:FAKE_DOCKER_COMPOSE_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:FAKE_DOCKER_INFO_FAIL -ErrorAction SilentlyContinue
     Remove-Item Env:FAKE_MCP_PROBE_FAIL -ErrorAction SilentlyContinue
+    Remove-Item Env:CODEX_CLI_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_BIN_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_DOCKER_DESKTOP_COMMAND -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_INSTALLER_DOCKER_COMMAND -ErrorAction SilentlyContinue
+    if ($originalPath) { $env:Path = $originalPath }
     if ($env:LUTHN_KEEP_TEST_ROOT -cne "true" -and [IO.Directory]::Exists($testRoot)) { [IO.Directory]::Delete($testRoot, $true) }
 }
