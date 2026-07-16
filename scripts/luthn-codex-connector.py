@@ -22,6 +22,7 @@ from urllib import error, request
 
 
 HOOK_MARKER = "luthn.agent-connector.v1"
+HOOK_STATUS_MESSAGE = "Luthn 메모리 저장 예약 중…"
 INSTRUCTION_START_MARKER = "<!-- luthn:auto-recall:start -->"
 INSTRUCTION_END_MARKER = "<!-- luthn:auto-recall:end -->"
 MAX_HOOK_INPUT_BYTES = 256 * 1024
@@ -48,6 +49,22 @@ conversation instead of calling the tool again. Refresh only after a material
 topic change or cache expiry. If lightweight recall returns no context, times
 out, or fails, continue without memory. Use deeper Luthn MCP search tools only
 when the bounded context pack is insufficient.
+
+After calling `get_context_pack`, use Codex commentary for recall status only
+under these rules:
+
+- If the response succeeds, parses correctly, and contains one or more actual
+  memory items, emit exactly one commentary line for the current user turn:
+  `Luthn 메모리 N개 참고`. Replace `N` with the number of actual memory items
+  returned.
+- Do not emit recall commentary when the response contains zero actual memory
+  items, times out, returns an error, cannot be parsed, or uses any fail-open path.
+- Do not emit recall commentary when `get_context_pack` was not called.
+- Emit the recall commentary at most once per user turn, even if recall is
+  refreshed or retried.
+- Never include memory titles, content, IDs, queries, scores, sources, or any
+  sensitive information in the commentary.
+- Do not put the recall status in a normal assistant response or final response.
 {INSTRUCTION_END_MARKER}"""
 
 _PRIVATE_KEY_PATTERN = re.compile(
@@ -240,7 +257,7 @@ def install_hook(path: Path, command: str) -> None:
                     "type": "command",
                     "command": command,
                     "timeout": HTTP_TIMEOUT_SECONDS + 1,
-                    "statusMessage": "Syncing Luthn memory",
+                    "statusMessage": HOOK_STATUS_MESSAGE,
                 }
             ],
         }
@@ -285,6 +302,7 @@ def hook_is_installed(path: Path, command: str | None) -> bool:
         and len(handlers) == 1
         and isinstance(handlers[0], dict)
         and handlers[0].get("command") == command
+        and handlers[0].get("statusMessage") == HOOK_STATUS_MESSAGE
         and "async" not in handlers[0]
     )
 

@@ -41,6 +41,7 @@ $script:DefaultImage = "ghcr.io/jakobsung/luthn:main"
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:StrictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
 $script:CodexHookMarker = "luthn.agent-connector.v1"
+$script:CodexHookStatusMessage = "Luthn 메모리 저장 예약 중…"
 $script:AutoRecallStartMarker = "<!-- luthn:auto-recall:start -->"
 $script:AutoRecallEndMarker = "<!-- luthn:auto-recall:end -->"
 $script:MaxCodexHookInputBytes = 256 * 1024
@@ -67,6 +68,22 @@ conversation instead of calling the tool again. Refresh only after a material
 topic change or cache expiry. If lightweight recall returns no context, times
 out, or fails, continue without memory. Use deeper Luthn MCP search tools only
 when the bounded context pack is insufficient.
+
+After calling ``get_context_pack``, use Codex commentary for recall status only
+under these rules:
+
+- If the response succeeds, parses correctly, and contains one or more actual
+  memory items, emit exactly one commentary line for the current user turn:
+  ``Luthn 메모리 N개 참고``. Replace ``N`` with the number of actual memory
+  items returned.
+- Do not emit recall commentary when the response contains zero actual memory
+  items, times out, returns an error, cannot be parsed, or uses any fail-open path.
+- Do not emit recall commentary when ``get_context_pack`` was not called.
+- Emit the recall commentary at most once per user turn, even if recall is
+  refreshed or retried.
+- Never include memory titles, content, IDs, queries, scores, sources, or any
+  sensitive information in the commentary.
+- Do not put the recall status in a normal assistant response or final response.
 <!-- luthn:auto-recall:end -->
 "@
 
@@ -1014,6 +1031,7 @@ function Test-CodexHookInstalled {
         $handlers[0]["command"] -ceq $Command -and
         (-not $handlers[0].Contains("commandWindows") -or $handlers[0]["commandWindows"] -ceq $Command) -and
         (-not $handlers[0].Contains("command_windows") -or $handlers[0]["command_windows"] -ceq $Command) -and
+        $handlers[0]["statusMessage"] -ceq $script:CodexHookStatusMessage -and
         -not $handlers[0].Contains("async")
 }
 
@@ -1030,7 +1048,7 @@ function Install-CodexHook {
             command = $Command
             commandWindows = $Command
             timeout = $script:CodexHttpTimeoutSeconds + 1
-            statusMessage = "Syncing Luthn memory"
+            statusMessage = $script:CodexHookStatusMessage
         })
     }
     $document["hooks"]["Stop"] = @($remaining) + @($managed)
