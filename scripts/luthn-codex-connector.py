@@ -189,6 +189,8 @@ def _without_auto_recall_instruction(content: str) -> str:
 
 
 def install_auto_recall_instruction(path: Path) -> None:
+    if auto_recall_instruction_is_installed(path):
+        return
     content = _without_auto_recall_instruction(_read_instructions(path))
     prefix = content.rstrip("\n")
     updated = (
@@ -241,6 +243,8 @@ def _stop_groups(document: dict[str, Any], create: bool) -> list[Any] | None:
 
 
 def install_hook(path: Path, command: str) -> None:
+    if hook_is_installed(path, command):
+        return
     document = _load_hooks(path)
     groups = _stop_groups(document, create=True)
     assert groups is not None

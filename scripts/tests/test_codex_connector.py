@@ -71,6 +71,9 @@ class CodexHookConfigurationTests(unittest.TestCase):
                     hooks_path, "'/tmp/luthn path' codex-hook"
                 )
             )
+            with mock.patch.object(CONNECTOR, "_write_hooks") as write_hooks:
+                CONNECTOR.install_hook(hooks_path, "'/tmp/luthn path' codex-hook")
+                write_hooks.assert_not_called()
 
             CONNECTOR.remove_hook(hooks_path)
             document = json.loads(hooks_path.read_text(encoding="utf-8"))
@@ -171,7 +174,11 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             instructions_path.write_text(original, encoding="utf-8")
 
             CONNECTOR.install_auto_recall_instruction(instructions_path)
-            CONNECTOR.install_auto_recall_instruction(instructions_path)
+            with mock.patch.object(
+                CONNECTOR, "_write_instructions"
+            ) as write_instructions:
+                CONNECTOR.install_auto_recall_instruction(instructions_path)
+                write_instructions.assert_not_called()
             installed = instructions_path.read_text(encoding="utf-8")
 
             self.assertEqual(1, installed.count(CONNECTOR.INSTRUCTION_START_MARKER))
