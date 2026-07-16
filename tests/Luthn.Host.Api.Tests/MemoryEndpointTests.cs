@@ -48,6 +48,7 @@ public sealed class MemoryEndpointTests
         var queryResult = await MemoryEndpoints.QueryMemoryItems(
             new MemoryQueryRequest("deployment", ["release"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
             CancellationToken.None);
         var queryOk = Assert.IsType<Ok<MemoryQueryResponse>>(queryResult.Result);
@@ -115,6 +116,7 @@ public sealed class MemoryEndpointTests
         var query = await MemoryEndpoints.QueryMemoryItems(
             new MemoryQueryRequest("credential", ["security"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
             CancellationToken.None);
 
@@ -228,6 +230,7 @@ public sealed class MemoryEndpointTests
         var query = await MemoryEndpoints.QueryMemoryItems(
             new MemoryQueryRequest(CoreTags: ["runbook", "private"], MaxItems: 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
             CancellationToken.None);
 
@@ -270,6 +273,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.QueryMemoryItems(
             new MemoryQueryRequest(new string('q', 501), ["runbook"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
             CancellationToken.None);
 
@@ -313,6 +317,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.QueryMemoryItems(
             new MemoryQueryRequest("needle", ["needle"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
             CancellationToken.None);
 

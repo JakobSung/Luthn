@@ -1,0 +1,181 @@
+using System.Linq.Expressions;
+using Luthn.Core.Classification;
+using Luthn.Core.Context;
+using Luthn.Core.Memory;
+using Luthn.Core.Persistence;
+using Luthn.Core.Search;
+using Microsoft.EntityFrameworkCore;
+
+namespace Luthn.Host.Api;
+
+public static class RetrievalCandidateLimits
+{
+    public const int MaxCandidatesPerCorpus = 512;
+    public const int MaxCombinedCandidates = MaxCandidatesPerCorpus * 2;
+}
+
+public interface IRetrievalCandidateSelector
+{
+    Task<IReadOnlyList<ContextPackCandidate>> SelectAgentContextAsync(
+        SafeSearchRequest request,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<ContextPackCandidate>> SelectSharedMemoryAsync(
+        SafeSearchRequest request,
+        CancellationToken cancellationToken);
+}
+
+public sealed class DbBackedRetrievalCandidateSelector(
+    LuthnDbContext db,
+    TimeProvider timeProvider) : IRetrievalCandidateSelector
+{
+    public async Task<IReadOnlyList<ContextPackCandidate>> SelectAgentContextAsync(
+        SafeSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var normalizedRequest = new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems);
+        var wikiCandidates = await SelectWikiAsync(normalizedRequest, cancellationToken);
+        var memoryCandidates = await SelectMemoryAsync(normalizedRequest, cancellationToken);
+
+        LuthnHostMetrics.SafeSearchCandidateCount.Record(
+            wikiCandidates.Length,
+            new KeyValuePair<string, object?>("source", "wiki_proposals"));
+        LuthnHostMetrics.SafeSearchCandidateCount.Record(
+            memoryCandidates.Length,
+            new KeyValuePair<string, object?>("source", "shared_memory_items"));
+
+        return wikiCandidates.Concat(memoryCandidates).ToArray();
+    }
+
+    public async Task<IReadOnlyList<ContextPackCandidate>> SelectSharedMemoryAsync(
+        SafeSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var candidates = await SelectMemoryAsync(
+            new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems),
+            cancellationToken);
+        LuthnHostMetrics.SafeSearchCandidateCount.Record(
+            candidates.Length,
+            new KeyValuePair<string, object?>("source", "shared_memory_items"));
+        return candidates;
+    }
+
+    private async Task<ContextPackCandidate[]> SelectWikiAsync(
+        SafeSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        var query = db.WikiProposals
+            .AsNoTracking()
+            .Where(record => record.AllowsAgentContext &&
+                record.Sensitivity == SensitivityLevel.Public);
+
+        query = ApplySearchFilters(query, request);
+
+        return await query
+            .OrderBy(record => record.Title.ToLower())
+            .ThenBy(record => record.Id)
+            .Take(RetrievalCandidateLimits.MaxCandidatesPerCorpus)
+            .Select(record => new ContextPackCandidate(
+                record.Id,
+                record.Title,
+                record.SafeSummary,
+                record.Sensitivity,
+                record.CoreTags,
+                record.AllowsAgentContext))
+            .ToArrayAsync(cancellationToken);
+    }
+
+    private async Task<ContextPackCandidate[]> SelectMemoryAsync(
+        SafeSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var query = db.SharedMemoryItems
+            .AsNoTracking()
+            .Where(record => record.AllowsAgentContext &&
+                record.Sensitivity == SensitivityLevel.Public &&
+                (record.Visibility == MemoryVisibility.PublicSafe ||
+                    record.Visibility == MemoryVisibility.SharedAcrossAgents) &&
+                (record.ExpiresAt == null || record.ExpiresAt > now));
+
+        query = ApplySearchFilters(query, request);
+
+        return await query
+            .OrderBy(record => record.Title.ToLower())
+            .ThenBy(record => record.Id)
+            .Take(RetrievalCandidateLimits.MaxCandidatesPerCorpus)
+            .Select(record => new ContextPackCandidate(
+                record.Id,
+                record.Title,
+                record.SafeSummary,
+                record.Sensitivity,
+                record.CoreTags,
+                record.AllowsAgentContext))
+            .ToArrayAsync(cancellationToken);
+    }
+
+    private IQueryable<WikiProposalRecord> ApplySearchFilters(
+        IQueryable<WikiProposalRecord> query,
+        SafeSearchRequest request)
+    {
+        var tagMarkers = request.CoreTags
+            .Select(SafeSearchText.BuildTagKey)
+            .Select(SafeSearchText.ToIndexMarker)
+            .ToArray();
+        var queryTerms = SafeSearchText.Tokenize(request.Query).ToArray();
+
+        if (tagMarkers.Length > 0)
+        {
+            query = WhereContainsAny(query, record => record.SearchTagKeys, tagMarkers);
+        }
+
+        if (queryTerms.Length > 0)
+        {
+            query = WhereContainsAny(query, record => record.SearchTerms, queryTerms);
+        }
+
+        return query;
+    }
+
+    private IQueryable<SharedMemoryItemRecord> ApplySearchFilters(
+        IQueryable<SharedMemoryItemRecord> query,
+        SafeSearchRequest request)
+    {
+        var tagMarkers = request.CoreTags
+            .Select(SafeSearchText.BuildTagKey)
+            .Select(SafeSearchText.ToIndexMarker)
+            .ToArray();
+        var queryTerms = SafeSearchText.Tokenize(request.Query).ToArray();
+
+        if (tagMarkers.Length > 0)
+        {
+            query = WhereContainsAny(query, record => record.SearchTagKeys, tagMarkers);
+        }
+
+        if (queryTerms.Length > 0)
+        {
+            query = WhereContainsAny(query, record => record.SearchTerms, queryTerms);
+        }
+
+        return query;
+    }
+
+    private static IQueryable<T> WhereContainsAny<T>(
+        IQueryable<T> query,
+        Expression<Func<T, string>> indexSelector,
+        IReadOnlyList<string> markers)
+    {
+        var contains = typeof(string).GetMethod(nameof(string.Contains), [typeof(string)])!;
+        var body = markers
+            .Select(marker => (Expression)Expression.Call(
+                indexSelector.Body,
+                contains,
+                Expression.Constant(marker)))
+            .Aggregate(Expression.OrElse);
+        return query.Where(Expression.Lambda<Func<T, bool>>(body, indexSelector.Parameters));
+    }
+}
