@@ -549,6 +549,13 @@ esac
     Assert-True ($registration.transport.type -ceq "stdio") "Codex registration should be stdio"
     Assert-True (@($registration.transport.args) -ccontains "mcp") "Codex registration should invoke the mcp service"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "Codex registration should not contain the token"
+    $installedHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
+    $installedLuthnHook = @($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
+    Assert-True ($installedLuthnHook.Count -eq 1) "the Windows hook command check should find one Luthn hook"
+    $installedHookCommand = [string]$installedLuthnHook[0].hooks[0].commandWindows
+    Assert-True ($installedHookCommand.StartsWith('& "', [StringComparison]::Ordinal)) "the Windows hook command should invoke its quoted executable with PowerShell's call operator"
+    $hookSyntaxCheck = [ScriptBlock]::Create($installedHookCommand)
+    Assert-True ($null -ne $hookSyntaxCheck) "the registered Windows hook command should parse in PowerShell"
 
     $hookHashBeforeRepeat = (Get-FileHash -LiteralPath $codexHooksFile -Algorithm SHA256).Hash
     $connectAgain = Invoke-LuthnProcess $installedCli @("connect", "codex")
