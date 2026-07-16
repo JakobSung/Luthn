@@ -1,6 +1,7 @@
 using Luthn.Core.Classification;
 using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
+using Luthn.Core.Search;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -102,9 +103,21 @@ public sealed class PersistenceContractTests
 
         Assert.Equal(1, await db.SourceEvents.CountAsync());
         Assert.Equal(1, await db.ClassificationResults.CountAsync());
-        Assert.Equal(["runbook"], (await db.WikiProposals.SingleAsync()).CoreTags);
+        var proposal = await db.WikiProposals.SingleAsync();
+        Assert.Equal(["runbook"], proposal.CoreTags);
+        Assert.Contains(SafeSearchText.ToIndexMarker("release"), proposal.SearchTerms, StringComparison.Ordinal);
+        Assert.Contains(
+            SafeSearchText.ToIndexMarker(SafeSearchText.BuildTagKey("runbook")),
+            proposal.SearchTagKeys,
+            StringComparison.Ordinal);
         Assert.Equal(1, await db.SensitiveRecordReferences.CountAsync());
-        Assert.Equal(["runbook"], (await db.SharedMemoryItems.SingleAsync()).CoreTags);
+        var memory = await db.SharedMemoryItems.SingleAsync();
+        Assert.Equal(["runbook"], memory.CoreTags);
+        Assert.Contains(SafeSearchText.ToIndexMarker("memory"), memory.SearchTerms, StringComparison.Ordinal);
+        Assert.Contains(
+            SafeSearchText.ToIndexMarker(SafeSearchText.BuildTagKey("runbook")),
+            memory.SearchTagKeys,
+            StringComparison.Ordinal);
         Assert.Equal("mcp", (await db.AgentConnectionChannels.SingleAsync()).Channel);
         Assert.Equal(AuditEventPayloadVersions.Current, (await db.AuditEvents.SingleAsync()).PayloadVersion);
         Assert.DoesNotContain(
@@ -168,6 +181,10 @@ public sealed class PersistenceContractTests
         Assert.Contains("safe_projection_sync_checkpoints", script, StringComparison.Ordinal);
         Assert.Contains("ExternalPublicationState", script, StringComparison.Ordinal);
         Assert.Contains("\"CoreTags\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"SearchTerms\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"SearchTagKeys\"", script, StringComparison.Ordinal);
+        Assert.Contains("regexp_split_to_table", script, StringComparison.Ordinal);
+        Assert.Contains("jsonb_array_elements_text", script, StringComparison.Ordinal);
         Assert.Contains("IX_wiki_proposals_AllowsAgentContext_Sensitivity_CreatedAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_sensitive_access_requests_Status_UpdatedAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_audit_events_SubjectId_OccurredAt", script, StringComparison.Ordinal);

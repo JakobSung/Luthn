@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Luthn.Core.Memory;
+using Luthn.Core.Search;
 
 namespace Luthn.Core.Persistence;
 
@@ -55,6 +56,8 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.SafeSummary).HasMaxLength(4000).IsRequired();
             entity.Property(record => record.Sensitivity).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.CoreTags).HasColumnType("jsonb");
+            entity.Property(record => record.SearchTerms).HasColumnType("text").HasDefaultValue("||");
+            entity.Property(record => record.SearchTagKeys).HasColumnType("text").HasDefaultValue("||");
             entity.HasIndex(record => new
             {
                 record.AllowsAgentContext,
@@ -126,6 +129,8 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.SafeSummary).HasMaxLength(4000).IsRequired();
             entity.Property(record => record.Sensitivity).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.CoreTags).HasColumnType("jsonb");
+            entity.Property(record => record.SearchTerms).HasColumnType("text").HasDefaultValue("||");
+            entity.Property(record => record.SearchTagKeys).HasColumnType("text").HasDefaultValue("||");
             entity.Property(record => record.Visibility).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.RetentionKind).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.SourceSessionId).HasMaxLength(128);
@@ -218,5 +223,40 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.RedactionState).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new { record.SubjectId, record.OccurredAt });
         });
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        UpdateSearchIndexes();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        UpdateSearchIndexes();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void UpdateSearchIndexes()
+    {
+        foreach (var entry in ChangeTracker.Entries<WikiProposalRecord>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.SearchTerms = SafeSearchText.BuildTokenIndex(
+                [entry.Entity.Title, entry.Entity.SafeSummary],
+                entry.Entity.CoreTags);
+            entry.Entity.SearchTagKeys = SafeSearchText.BuildTagKeyIndex(entry.Entity.CoreTags);
+        }
+
+        foreach (var entry in ChangeTracker.Entries<SharedMemoryItemRecord>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.SearchTerms = SafeSearchText.BuildTokenIndex(
+                [entry.Entity.Title, entry.Entity.SafeSummary],
+                entry.Entity.CoreTags);
+            entry.Entity.SearchTagKeys = SafeSearchText.BuildTagKeyIndex(entry.Entity.CoreTags);
+        }
     }
 }

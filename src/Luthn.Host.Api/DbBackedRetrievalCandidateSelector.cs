@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Luthn.Core.Classification;
 using Luthn.Core.Context;
 using Luthn.Core.Memory;
@@ -72,28 +73,6 @@ public sealed class DbBackedRetrievalCandidateSelector(
             .Where(record => record.AllowsAgentContext &&
                 record.Sensitivity == SensitivityLevel.Public);
 
-        if (!db.Database.IsNpgsql())
-        {
-            var records = await query.ToArrayAsync(cancellationToken);
-            return records
-                .Where(record => MatchesInMemory(
-                    record.Title,
-                    record.SafeSummary,
-                    record.CoreTags,
-                    request))
-                .OrderBy(record => record.Title, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(record => record.Id, StringComparer.OrdinalIgnoreCase)
-                .Take(RetrievalCandidateLimits.MaxCandidatesPerCorpus)
-                .Select(record => new ContextPackCandidate(
-                    record.Id,
-                    record.Title,
-                    record.SafeSummary,
-                    record.Sensitivity,
-                    record.CoreTags,
-                    record.AllowsAgentContext))
-                .ToArray();
-        }
-
         query = ApplySearchFilters(query, request);
 
         return await query
@@ -123,28 +102,6 @@ public sealed class DbBackedRetrievalCandidateSelector(
                     record.Visibility == MemoryVisibility.SharedAcrossAgents) &&
                 (record.ExpiresAt == null || record.ExpiresAt > now));
 
-        if (!db.Database.IsNpgsql())
-        {
-            var records = await query.ToArrayAsync(cancellationToken);
-            return records
-                .Where(record => MatchesInMemory(
-                    record.Title,
-                    record.SafeSummary,
-                    record.CoreTags,
-                    request))
-                .OrderBy(record => record.Title, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(record => record.Id, StringComparer.OrdinalIgnoreCase)
-                .Take(RetrievalCandidateLimits.MaxCandidatesPerCorpus)
-                .Select(record => new ContextPackCandidate(
-                    record.Id,
-                    record.Title,
-                    record.SafeSummary,
-                    record.Sensitivity,
-                    record.CoreTags,
-                    record.AllowsAgentContext))
-                .ToArray();
-        }
-
         query = ApplySearchFilters(query, request);
 
         return await query
@@ -165,24 +122,20 @@ public sealed class DbBackedRetrievalCandidateSelector(
         IQueryable<WikiProposalRecord> query,
         SafeSearchRequest request)
     {
-        var normalizedTags = request.CoreTags
-            .Select(tag => tag.ToLowerInvariant())
+        var tagMarkers = request.CoreTags
+            .Select(SafeSearchText.BuildTagKey)
+            .Select(SafeSearchText.ToIndexMarker)
             .ToArray();
-        var tokens = SafeSearchText.Tokenize(request.Query).ToArray();
+        var queryTerms = SafeSearchText.Tokenize(request.Query).ToArray();
 
-        if (normalizedTags.Length > 0)
+        if (tagMarkers.Length > 0)
         {
-            query = query.Where(record =>
-                record.CoreTags.Any(tag => normalizedTags.Contains(tag.ToLower())));
+            query = WhereContainsAny(query, record => record.SearchTagKeys, tagMarkers);
         }
 
-        if (tokens.Length > 0)
+        if (queryTerms.Length > 0)
         {
-            var patterns = tokens.Select(token => $"%{token}%").ToArray();
-            query = query.Where(record => patterns.Any(pattern =>
-                EF.Functions.ILike(record.Title, pattern) ||
-                EF.Functions.ILike(record.SafeSummary, pattern) ||
-                record.CoreTags.Any(tag => EF.Functions.ILike(tag, pattern))));
+            query = WhereContainsAny(query, record => record.SearchTerms, queryTerms);
         }
 
         return query;
@@ -192,45 +145,37 @@ public sealed class DbBackedRetrievalCandidateSelector(
         IQueryable<SharedMemoryItemRecord> query,
         SafeSearchRequest request)
     {
-        var normalizedTags = request.CoreTags
-            .Select(tag => tag.ToLowerInvariant())
+        var tagMarkers = request.CoreTags
+            .Select(SafeSearchText.BuildTagKey)
+            .Select(SafeSearchText.ToIndexMarker)
             .ToArray();
-        var tokens = SafeSearchText.Tokenize(request.Query).ToArray();
+        var queryTerms = SafeSearchText.Tokenize(request.Query).ToArray();
 
-        if (normalizedTags.Length > 0)
+        if (tagMarkers.Length > 0)
         {
-            query = query.Where(record =>
-                record.CoreTags.Any(tag => normalizedTags.Contains(tag.ToLower())));
+            query = WhereContainsAny(query, record => record.SearchTagKeys, tagMarkers);
         }
 
-        if (tokens.Length > 0)
+        if (queryTerms.Length > 0)
         {
-            var patterns = tokens.Select(token => $"%{token}%").ToArray();
-            query = query.Where(record => patterns.Any(pattern =>
-                EF.Functions.ILike(record.Title, pattern) ||
-                EF.Functions.ILike(record.SafeSummary, pattern) ||
-                record.CoreTags.Any(tag => EF.Functions.ILike(tag, pattern))));
+            query = WhereContainsAny(query, record => record.SearchTerms, queryTerms);
         }
 
         return query;
     }
 
-    private static bool MatchesInMemory(
-        string title,
-        string safeSummary,
-        IReadOnlyList<string> coreTags,
-        SafeSearchRequest request)
+    private static IQueryable<T> WhereContainsAny<T>(
+        IQueryable<T> query,
+        Expression<Func<T, string>> indexSelector,
+        IReadOnlyList<string> markers)
     {
-        if (request.CoreTags.Count > 0 &&
-            !coreTags.Any(tag => request.CoreTags.Contains(tag, StringComparer.OrdinalIgnoreCase)))
-        {
-            return false;
-        }
-
-        var tokens = SafeSearchText.Tokenize(request.Query);
-        return tokens.Count == 0 || tokens.Any(token =>
-            title.Contains(token, StringComparison.OrdinalIgnoreCase) ||
-            safeSummary.Contains(token, StringComparison.OrdinalIgnoreCase) ||
-            coreTags.Any(tag => tag.Contains(token, StringComparison.OrdinalIgnoreCase)));
+        var contains = typeof(string).GetMethod(nameof(string.Contains), [typeof(string)])!;
+        var body = markers
+            .Select(marker => (Expression)Expression.Call(
+                indexSelector.Body,
+                contains,
+                Expression.Constant(marker)))
+            .Aggregate(Expression.OrElse);
+        return query.Where(Expression.Lambda<Func<T, bool>>(body, indexSelector.Parameters));
     }
 }

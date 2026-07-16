@@ -78,40 +78,55 @@ public sealed class RetrievalCandidateSelectorTests
         Assert.Equal(["wiki-safe", "memory-safe"], candidates.Select(candidate => candidate.Id).ToArray());
     }
 
+    [Fact]
+    public async Task CandidateSelectionPreservesSubstringQueryMatching()
+    {
+        await using var db = CreateDbContext();
+        db.WikiProposals.Add(Wiki("wiki-needle", SensitivityLevel.Public, allowsAgentContext: true));
+        await db.SaveChangesAsync();
+
+        var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
+        var candidates = await selector.SelectAgentContextAsync(
+            new SafeSearchRequest("need", [], 20),
+            CancellationToken.None);
+
+        Assert.Equal(["wiki-needle"], candidates.Select(candidate => candidate.Id).ToArray());
+    }
+
     private static WikiProposalRecord Wiki(
         string id,
         SensitivityLevel sensitivity,
         bool allowsAgentContext) => new()
-    {
-        Id = id,
-        SourceEventId = $"source-{id}",
-        Title = "Needle wiki",
-        SafeSummary = "Needle public-safe projection.",
-        Sensitivity = sensitivity,
-        CoreTags = ["needle"],
-        AllowsAgentContext = allowsAgentContext,
-        CreatedAt = DateTimeOffset.UtcNow
-    };
+        {
+            Id = id,
+            SourceEventId = $"source-{id}",
+            Title = "Needle wiki",
+            SafeSummary = "Needle public-safe projection.",
+            Sensitivity = sensitivity,
+            CoreTags = ["needle"],
+            AllowsAgentContext = allowsAgentContext,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
 
     private static SharedMemoryItemRecord Memory(
         string id,
         MemoryVisibility visibility,
         DateTimeOffset expiresAt,
         bool allowsAgentContext) => new()
-    {
-        Id = id,
-        Title = "Needle memory",
-        SafeSummary = "Needle public-safe memory.",
-        Sensitivity = SensitivityLevel.Public,
-        CoreTags = ["needle"],
-        Visibility = visibility,
-        RetentionKind = MemoryRetentionKind.Session,
-        ExpiresAt = expiresAt,
-        AllowsAgentContext = allowsAgentContext,
-        CreatedAt = DateTimeOffset.UtcNow,
-        UpdatedAt = DateTimeOffset.UtcNow,
-        CreatedBy = "test"
-    };
+        {
+            Id = id,
+            Title = "Needle memory",
+            SafeSummary = "Needle public-safe memory.",
+            Sensitivity = SensitivityLevel.Public,
+            CoreTags = ["needle"],
+            Visibility = visibility,
+            RetentionKind = MemoryRetentionKind.Session,
+            ExpiresAt = expiresAt,
+            AllowsAgentContext = allowsAgentContext,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = "test"
+        };
 
     private static LuthnDbContext CreateDbContext()
     {

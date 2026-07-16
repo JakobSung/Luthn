@@ -104,6 +104,8 @@ public sealed class SafeSearchIndex
 
 public static class SafeSearchText
 {
+    private const string IndexDelimiter = "|";
+
     public static IReadOnlySet<string> Tokenize(string? value) =>
         TokenizeNormalized(Normalize(value));
 
@@ -144,4 +146,28 @@ public static class SafeSearchText
 
         return builder.ToString();
     }
+
+    public static string BuildTokenIndex(params IEnumerable<string?>[] values)
+    {
+        var tokens = values
+            .SelectMany(value => value)
+            .SelectMany(Tokenize)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal);
+        return BuildIndex(tokens);
+    }
+
+    public static string BuildTagKey(string value) =>
+        Convert.ToBase64String(Encoding.UTF8.GetBytes(value.Trim().ToLowerInvariant()));
+
+    public static string BuildTagKeyIndex(IEnumerable<string> coreTags) =>
+        BuildIndex(coreTags
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(BuildTagKey)
+            .Distinct(StringComparer.Ordinal));
+
+    public static string ToIndexMarker(string value) => $"{IndexDelimiter}{value}{IndexDelimiter}";
+
+    private static string BuildIndex(IEnumerable<string> values) =>
+        $"{IndexDelimiter}{string.Join(IndexDelimiter, values)}{IndexDelimiter}";
 }
