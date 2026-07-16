@@ -666,14 +666,23 @@ function Show-Status {
     $containerId = if ($containerResult.ExitCode -eq 0) { $containerResult.StdOut.Trim() } else { "" }
     $imageId = ""
     $digest = ""
+    $runningRevision = ""
+    $selectedImageId = ""
+    $selectedRevision = ""
     if ($containerId) {
         $imageResult = Invoke-ToolCapture -Tool $docker -Arguments @("inspect", "--format", "{{.Image}}", $containerId)
         if ($imageResult.ExitCode -eq 0) { $imageId = $imageResult.StdOut.Trim() }
         if ($imageId) {
             $digestResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{join .RepoDigests `", `"}}", $imageId)
             if ($digestResult.ExitCode -eq 0) { $digest = $digestResult.StdOut.Trim() }
+            $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $imageId)
+            if ($revisionResult.ExitCode -eq 0) { $runningRevision = $revisionResult.StdOut.Trim() }
         }
     }
+    $selectedIdResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{.Id}}", $imageRef)
+    if ($selectedIdResult.ExitCode -eq 0) { $selectedImageId = $selectedIdResult.StdOut.Trim() }
+    $selectedRevisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $imageRef)
+    if ($selectedRevisionResult.ExitCode -eq 0) { $selectedRevision = $selectedRevisionResult.StdOut.Trim() }
 
     Write-Host "Luthn services:"
     Invoke-ComposeVisible @("ps")
@@ -684,6 +693,11 @@ function Show-Status {
     Write-Host "Image: $imageRef"
     Write-Host "Image ID: $(if ($imageId) { $imageId } else { 'unavailable' })"
     Write-Host "Digest: $(if ($digest) { $digest } else { 'unavailable' })"
+    Write-Host "Running revision: $(if ($runningRevision) { $runningRevision } else { 'unavailable' })"
+    Write-Host "Selected revision: $(if ($selectedRevision) { $selectedRevision } else { 'unavailable' })"
+    if ($imageId -and $selectedImageId -and $imageId -cne $selectedImageId) {
+        Write-Host "Runtime drift: a locally selected image is not running; run 'luthn update'."
+    }
 }
 
 function Get-ApiImageId {
@@ -778,6 +792,11 @@ function Update-Luthn {
     if (-not $targetImage) { throw "usage: luthn update [image]" }
     $previousImageRef = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
     $previousImageId = Get-ApiImageId
+    $previousRevision = ""
+    if ($previousImageId) {
+        $previousRevisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $previousImageId)
+        if ($previousRevisionResult.ExitCode -eq 0) { $previousRevision = $previousRevisionResult.StdOut.Trim() }
+    }
 
     Ensure-Directories
     Write-Host "Pulling $targetImage..."
@@ -870,6 +889,10 @@ function Update-Luthn {
     $currentImageId = Get-ApiImageId
     Write-UpdateState -Status "ready" -TargetImage $targetImage -TargetImageId $currentImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId -BackupPath $backupPath
     Write-Host "Luthn update completed: $targetImage"
+    Write-Host "Revision: $(if ($previousRevision) { $previousRevision } else { 'unavailable' }) -> $(if ($targetRevision) { $targetRevision } else { 'unavailable' })"
+    if ([IO.File]::Exists($script:CodexStateFile) -or [IO.File]::Exists($script:CodexPendingStateFile)) {
+        Write-Host "Restart Codex to reload the Luthn MCP transport and tool schema."
+    }
 }
 
 function Get-McpDockerArguments {
