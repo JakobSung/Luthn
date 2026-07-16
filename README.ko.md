@@ -8,10 +8,10 @@
 
 <p align="center">
   <a href="README.md">English</a> ·
-  <a href="docs/installation.md">설치</a> ·
-  <a href="docs/agent-quickstart.md">Codex 연결과 기억</a> ·
-  <a href="docs/data-boundaries.md">데이터 경계</a> ·
-  <a href="docs/local-development.md">개발</a>
+  <a href="docs/installation.ko.md">설치</a> ·
+  <a href="docs/agent-quickstart.ko.md">Codex 연결과 기억</a> ·
+  <a href="docs/data-boundaries.ko.md">데이터 경계</a> ·
+  <a href="docs/local-development.ko.md">개발</a>
 </p>
 
 # Luthn
@@ -40,7 +40,7 @@ macOS, Linux와 Windows에서는 사용자가 신뢰한 Codex hook이 한 턴의
 ```
 
 설정, 최초 한 번의 hook Trust 단계, 전송 범위와 회상 제한은
-[Codex 연결과 기억](docs/agent-quickstart.md)을 참고하세요.
+[Codex 연결과 기억](docs/agent-quickstart.ko.md)을 참고하세요.
 
 ## 권장 설치
 
@@ -52,7 +52,7 @@ https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installat
 ```
 
 필수 조건, 직접 설치, Windows 설정, 수명주기 명령, 에이전트 연결 방법은
-[상세 설치 문서](docs/installation.md)를 참고하세요.
+[상세 설치 문서](docs/installation.ko.md)를 참고하세요.
 
 ## 데이터 경계
 
@@ -61,21 +61,24 @@ https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installat
 통과한 안전한 투영만 제공합니다. 외부 공개는 별도의 명시적 승인 경로입니다.
 
 분류 예시, 외부 provider 전송 범위, 에이전트 가시성, 외부 공개 규칙은
-[데이터 경계](docs/data-boundaries.md)를 참고하세요.
+[데이터 경계](docs/data-boundaries.ko.md)를 참고하세요.
 
 ## 문서
 
-- [설치, 복구와 수명주기](docs/installation.md)
-- [Codex 연결, hook, MCP와 자동 회상](docs/agent-quickstart.md)
-- [데이터 경계](docs/data-boundaries.md)
-- [운영과 복구](docs/operations.md)
-- [API](docs/api.md)
-- [아키텍처](docs/architecture.md)
-- [로컬 개발](docs/local-development.md)
-- [라이선스](docs/licensing.md)
+- [설치, 복구와 수명주기](docs/installation.ko.md)
+- [Codex 연결, hook, MCP와 자동 회상](docs/agent-quickstart.ko.md)
+- [데이터 경계](docs/data-boundaries.ko.md)
+- [운영과 복구](docs/operations.ko.md)
+- [API](docs/api.ko.md)
+- [구조](docs/architecture.ko.md)
+- [로컬 개발](docs/local-development.ko.md)
+- [프로젝트 맥락](docs/project-context.ko.md)
+- [프로젝트 구조](docs/project-structure.ko.md)
+- [원본 참조](docs/source-references.ko.md)
+- [라이선스](docs/licensing.ko.md)
 
 ## 라이선스와 기여
 
 직접 호스팅 runtime은 AGPL-3.0-only이고 SDK, HTTP connector, 공개 plugin template은
-Apache-2.0입니다. 패키지 경계는 [라이선스](docs/licensing.md), 변경 제안 전 정책은
+Apache-2.0입니다. 패키지 경계는 [라이선스](docs/licensing.ko.md), 변경 제안 전 정책은
 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요.

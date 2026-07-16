@@ -1,5 +1,7 @@
 # Local Development
 
+[한국어](local-development.ko.md)
+
 ## Prerequisites
 
 - .NET SDK matching the solution target framework
@@ -131,6 +133,7 @@ Luthn__Auth__Tokens__0__ExpiresAt=2026-12-31T23:59:59Z
 
 Supported scopes include `agent.read`, `agent.write.summary`,
 `agent.connection.read`, `agent.connection.write`, `classification.preview`,
+`config.write`,
 `external-publication.read`, `external-publication.write`, `source.write`,
 `memory.read`, `memory.write`, `access.request`,
 `access.decide`, `audit.read`, and `*` for operator-controlled admin use. Local

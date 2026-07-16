@@ -1,5 +1,7 @@
 # Source References
 
+[한국어](source-references.ko.md)
+
 Source references connect safe knowledge records back to private source records without exposing raw content by default.
 
 ## Repository rule
