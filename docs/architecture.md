@@ -1,5 +1,7 @@
 # Architecture Reference
 
+[한국어](architecture.ko.md)
+
 Canonical project direction, runtime boundaries, default agent surfaces, and
 review focus live in `docs/project-context.md`.
 
@@ -134,9 +136,8 @@ redacted summaries, metadata-only events, or binary digest-only payloads, but it
 does not persist raw content in public records or bypass classification, policy,
 Vault, source references, or audit.
 
-## Future Questions
+## Open Design Questions
 
-- Exact production auth/token model.
 - Whether `Luthn.McpServer` can be permissively licensed after legal review.
 - First production retrieval/indexing upgrade path.
 - Whether `Luthn.Tools` remains long-term after API/MCP coverage matures.

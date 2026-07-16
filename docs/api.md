@@ -1,5 +1,7 @@
 # API
 
+[한국어](api.ko.md)
+
 ## Naming note
 
 The public API should use `coreTags` for Core-filtered context selection and
@@ -236,6 +238,39 @@ Request:
 ```
 
 The response returns classification metadata and a storage decision. It does not expose Vault raw content.
+
+## Operator classification provider
+
+```http
+GET  /api/operator/classification-provider
+PUT  /api/operator/classification-provider
+POST /api/operator/classification-provider/test
+```
+
+These operator-only endpoints read, save, and test the active classification
+provider configuration. All three require the `config.write` service-token
+scope. Supported provider values are `Mock`, `ExternalHttp`, `OpenAi`,
+`Anthropic`, `GoogleAi`, and `OpenRouter`.
+
+Save request:
+
+```json
+{
+  "provider": "ExternalHttp",
+  "model": "",
+  "endpoint": "https://provider.example/classify",
+  "authHeaderName": "Authorization",
+  "apiKey": "operator-supplied-secret",
+  "clearApiKey": false
+}
+```
+
+Responses include `provider`, `model`, `endpoint`, `authHeaderName`,
+`payloadClass`, `redactionState`, and `hasApiKey`. They never return the API key.
+The test endpoint accepts optional `content` and `sourceType`, runs the current
+provider and policy engine, and returns the safe configuration view,
+classification, and storage decision. Save and test operations write
+metadata-only audit events.
 
 ## Source intake
 
@@ -573,6 +608,7 @@ Supported scopes:
 - `agent.connection.read`
 - `agent.connection.write`
 - `classification.preview`
+- `config.write`
 - `source.write`
 - `memory.write`
 - `memory.read`

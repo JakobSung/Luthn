@@ -1,5 +1,7 @@
 # Luthn Installation
 
+[한국어](installation.ko.md)
+
 This is the source-free self-host installation path for users. It uses the same
 Linux Compose runtime on macOS, Linux, and Windows; Git, a Luthn source checkout,
 and the .NET SDK are not required.

@@ -1,5 +1,7 @@
 # Licensing Model
 
+[한국어](licensing.ko.md)
+
 ## Repository License Scope
 
 Luthn uses a component-based licensing model.

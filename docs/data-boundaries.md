@@ -1,5 +1,7 @@
 # Data Boundaries Reference
 
+[한국어](data-boundaries.ko.md)
+
 Luthn separates private source data from the safe projections that agents can
 retrieve. Agent visibility never implies access to the original record or
 permission to publish it externally.

@@ -1,5 +1,7 @@
 # Codex Connection And Memory
 
+[한국어](agent-quickstart.ko.md)
+
 This guide explains how Codex connects to an installed self-hosted Luthn, how
 completed work becomes reusable memory, and how later tasks retrieve it.
 

@@ -1,5 +1,7 @@
 # Operations
 
+[한국어](operations.ko.md)
+
 This document defines the self-host operational model for schema migration,
 backup, restore, and search adoption decisions. Keep it public-safe: do not add
 environment-specific secrets, private source records, customer originals, or

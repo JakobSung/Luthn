@@ -1,5 +1,7 @@
 # Luthn Project Context
 
+[한국어](project-context.ko.md)
+
 This is the minimal committed architecture and safety context for contributors
 and reviewers. Keep it public-safe and stable. Do not record development
 status, private planning, analysis notes, run evidence, PR metadata, or
