@@ -1,12 +1,10 @@
-using System.Net;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Luthn.Core.Classification;
 using Luthn.Core.Persistence;
 using Luthn.Core.Search;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api.Tests;
 
@@ -47,6 +45,22 @@ public sealed class PostgresIntegrationSmokeTests
         Assert.Empty(pending);
 
         var now = DateTimeOffset.UtcNow;
+        db.SourceEvents.Add(new SourceEventRecord
+        {
+            Id = "source-old-db-match",
+            SourceSystem = "test",
+            SourceType = "postgres-smoke",
+            ReceivedAt = now.AddDays(-2),
+            ContentDigest = "sha256:old-db-match"
+        });
+        db.SourceEvents.AddRange(Enumerable.Range(0, 1001).Select(index => new SourceEventRecord
+        {
+            Id = $"source-newer-db-nonmatch-{index}",
+            SourceSystem = "test",
+            SourceType = "postgres-smoke",
+            ReceivedAt = now.AddMinutes(index),
+            ContentDigest = $"sha256:newer-db-nonmatch-{index}"
+        }));
         db.WikiProposals.Add(new WikiProposalRecord
         {
             Id = "wiki-old-db-match",
@@ -78,23 +92,18 @@ public sealed class PostgresIntegrationSmokeTests
         var candidate = Assert.Single(candidates);
         Assert.Equal("wiki-old-db-match", candidate.Id);
 
-        using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.UseEnvironment("Development");
-                builder.UseSetting("ConnectionStrings:LuthnDb", connectionString);
-                builder.UseSetting("Luthn:Database:EnableRetries", "false");
-                builder.UseSetting(
-                    "Luthn:OperatorConfig:Directory",
-                    Path.Combine(Path.GetTempPath(), "luthn-postgres-smoke", Guid.NewGuid().ToString("N")));
-            });
-        using var client = factory.CreateClient();
-        using var response = await client.GetAsync("/readyz");
-        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var readiness = await ClassificationEndpoints.CheckReadiness(
+            db,
+            new FakeHostEnvironment("Development"),
+            Options.Create(new LuthnAuthOptions()),
+            Options.Create(new LuthnHostOperationalOptions()),
+            new StaticSettingsStore(new OperatorClassificationProviderSettings()),
+            CancellationToken.None);
+        var ready = Assert.IsType<Ok<ReadinessResponse>>(readiness);
+        var response = Assert.IsType<ReadinessResponse>(ready.Value);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("ready", body.RootElement.GetProperty("status").GetString());
-        Assert.Equal("database", body.RootElement.GetProperty("dependency").GetString());
+        Assert.Equal("ready", response.Status);
+        Assert.Equal("database", response.Dependency);
     }
 
     private static bool IsDisposableTestDatabase(string connectionString) =>
@@ -102,4 +111,19 @@ public sealed class PostgresIntegrationSmokeTests
             connectionString,
             @"(^|;)\s*(Database|Db)\s*=\s*luthn_test[\w-]*\s*(;|$)",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private sealed class StaticSettingsStore(
+        OperatorClassificationProviderSettings settings) : IOperatorClassificationSettingsStore
+    {
+        public OperatorClassificationProviderSettings Current => settings;
+
+        public ValueTask<OperatorClassificationProviderSettings> ReadAsync(
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(settings);
+
+        public ValueTask<OperatorClassificationProviderSettings> SaveAsync(
+            SaveClassificationProviderConfigurationRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
 }
