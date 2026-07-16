@@ -533,9 +533,15 @@ show_status() {
   image_ref="$(read_config LUTHN_IMAGE "$default_image")"
   image_id="$(image_id_for_container)"
   image_digest=""
+  running_revision=""
+  selected_id=""
+  selected_revision=""
   if [[ -n "$image_id" ]]; then
     image_digest="$(docker image inspect --format '{{join .RepoDigests ", "}}' "$image_id" 2>/dev/null || true)"
+    running_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image_id" 2>/dev/null || true)"
   fi
+  selected_id="$(docker image inspect --format '{{.Id}}' "$image_ref" 2>/dev/null || true)"
+  selected_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image_ref" 2>/dev/null || true)"
 
   echo "Luthn services:"
   compose_cmd ps
@@ -554,6 +560,11 @@ show_status() {
   echo "Image: $image_ref"
   echo "Image ID: ${image_id:-unavailable}"
   echo "Digest: ${image_digest:-unavailable}"
+  echo "Running revision: ${running_revision:-unavailable}"
+  echo "Selected revision: ${selected_revision:-unavailable}"
+  if [[ -n "$image_id" && -n "$selected_id" && "$image_id" != "$selected_id" ]]; then
+    echo "Runtime drift: a locally selected image is not running; run 'luthn update'."
+  fi
   refresh_codex_connection_observation || \
     echo "warning: Codex connector status could not be reported" >&2
 }
@@ -1143,6 +1154,10 @@ update_luthn() {
   target_image="${1:-$(read_config LUTHN_IMAGE "$default_image")}"
   previous_ref="$(read_config LUTHN_IMAGE "$default_image")"
   previous_id="$(image_id_for_container)"
+  previous_revision=""
+  if [[ -n "$previous_id" ]]; then
+    previous_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$previous_id" 2>/dev/null || true)"
+  fi
 
   ensure_directories
   backup_path="$state_dir/backups/luthn-$(date -u +%Y%m%dT%H%M%SZ).dump"
@@ -1220,6 +1235,10 @@ update_luthn() {
   refresh_codex_connection_observation || \
     echo "warning: updated Codex connector status could not be reported" >&2
   echo "Luthn update completed: $target_image"
+  echo "Revision: ${previous_revision:-unavailable} -> ${target_revision:-unavailable}"
+  if has_codex_connector_state; then
+    echo "Restart Codex to reload the Luthn MCP transport and tool schema."
+  fi
 }
 
 reset_luthn() {

@@ -404,6 +404,8 @@ esac
     Assert-True ($status.Output -match "Health: ready") "status should report health"
     Assert-True ($status.Output -match "Readiness: ready") "status should report readiness"
     Assert-True ($status.Output -match "Image ID: sha256:fake") "status should report image identity"
+    Assert-True ($status.Output -match "Running revision: a{40}") "status should report the running image revision"
+    Assert-True ($status.Output -match "Selected revision: a{40}") "status should report the selected image revision"
 
     $updatedCliContent = [IO.File]::ReadAllText((Join-Path $RepoRoot "scripts/luthn.ps1")) + "`n# windows-update-test-fixture`n"
     [IO.File]::WriteAllText($updatedCli, $updatedCliContent, [Text.UTF8Encoding]::new($false))
@@ -413,6 +415,7 @@ esac
     $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
     Assert-True ($update.Output -match "Luthn update completed") "successful update should report completion"
+    Assert-True ($update.Output -match "Revision: a{40} -> a{40}") "successful update should report the revision transition"
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
