@@ -316,10 +316,10 @@ esac
     Assert-True ($luthnHook[0].hooks[0].commandWindows -ceq $luthnHook[0].hooks[0].command) "Windows hook should include a matching commandWindows entry"
     Assert-True (@($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "one-step setup should preserve unrelated hooks"
     Assert-True (-not ([IO.File]::ReadAllText($codexHooksFile).Contains($token))) "Codex hooks should not contain the token"
-    Assert-True (-not ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start"))) "auto-recall should remain opt-in"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start")) "one-step setup should enable auto-recall by default"
     $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
-    Assert-True ($connectorState.hookInstalled -and -not $connectorState.autoRecall) "connector state should record hook and default recall state"
+    Assert-True ($connectorState.hookInstalled -and $connectorState.autoRecall) "connector state should record default auto-recall"
     Assert-True (-not ([IO.File]::ReadAllText($codexOwnershipState).Contains($token))) "connector ownership state should not contain the token"
     if ($IsWindows) {
         $tokenAcl = Get-Acl -LiteralPath $tokenFile
@@ -556,10 +556,10 @@ esac
     Assert-True ((Get-FileHash -LiteralPath $codexHooksFile -Algorithm SHA256).Hash -eq $hookHashBeforeRepeat) "repeated connect should not rewrite the trusted hook"
 
     $enableRecall = Invoke-LuthnProcess $installedCli @("connect", "codex", "--auto-recall")
-    Assert-True ($enableRecall.ExitCode -eq 0) "opt-in auto-recall should succeed: $($enableRecall.Output)"
+    Assert-True ($enableRecall.ExitCode -eq 0) "explicit auto-recall compatibility should succeed: $($enableRecall.Output)"
     $recallHash = (Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash
     $enableRecallAgain = Invoke-LuthnProcess $installedCli @("connect", "codex", "--auto-recall")
-    Assert-True ($enableRecallAgain.ExitCode -eq 0) "opt-in auto-recall should be idempotent: $($enableRecallAgain.Output)"
+    Assert-True ($enableRecallAgain.ExitCode -eq 0) "explicit auto-recall compatibility should be idempotent: $($enableRecallAgain.Output)"
     Assert-True ((Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash -eq $recallHash) "repeated auto-recall setup should not rewrite instructions"
     $instructionText = [IO.File]::ReadAllText($codexInstructionsFile)
     Assert-True (([regex]::Matches($instructionText, [regex]::Escape("<!-- luthn:auto-recall:start -->"))).Count -eq 1) "auto-recall should install one managed block"
@@ -574,6 +574,14 @@ esac
     [IO.File]::Delete($codexPendingState)
     Assert-True ($connectionStatus.Output -match "automatic-ingestion: configured") "connection status should report the hook"
     Assert-True ($connectionStatus.Output -match "lightweight-recall: enabled") "connection status should report auto-recall"
+
+    $disableRecall = Invoke-LuthnProcess $installedCli @("connect", "codex", "--no-auto-recall")
+    Assert-True ($disableRecall.ExitCode -eq 0) "explicit auto-recall opt-out should succeed: $($disableRecall.Output)"
+    Assert-True (-not ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start"))) "opt-out should remove only the managed recall block"
+    Assert-True (-not ([IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json).autoRecall) "opt-out should update connector ownership state"
+    $restoreDefaultRecall = Invoke-LuthnProcess $installedCli @("connect", "codex")
+    Assert-True ($restoreDefaultRecall.ExitCode -eq 0) "default reconnect should restore auto-recall: $($restoreDefaultRecall.Output)"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start")) "default reconnect should restore the managed recall block"
 
     $env:LUTHN_CODEX_HOOK_SYNCHRONOUS = "true"
     $env:LUTHN_CODEX_HOOK_CAPTURE_FILE = $codexHookCapture

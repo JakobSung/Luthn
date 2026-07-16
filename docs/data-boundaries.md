@@ -43,7 +43,7 @@ into Codex hook configuration, MCP registration, connector state, or
 auto-recall instructions. Hook delivery is asynchronous and fail-open, so an
 unavailable Luthn service does not block completion of a Codex turn.
 
-Optional auto-recall does not expose the private store. It asks the scoped MCP
+Default auto-recall does not expose the private store. It asks the scoped MCP
 surface for one small agent-safe context pack at a new task or material topic
 change. The same classification, policy, and safe-projection rules apply to
 automatic recall and explicit MCP reads.

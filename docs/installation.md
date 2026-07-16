@@ -21,8 +21,8 @@ discovery problems, then finish the installation.
 
 Connect Codex, verify health and readiness, confirm that `luthn mcp
 --list-tools` includes `get_context_pack`, and show me the operator console URL.
-Explain the optional `--auto-recall` mode but do not enable it unless I request
-it. Never print, copy, or commit the service token or other
+Keep the default lightweight auto-recall enabled unless I explicitly request
+`--no-auto-recall`. Never print, copy, or commit the service token or other
 credential-bearing files. Stop only for a user-owned UI, license, privilege,
 restart, or trust decision and tell me the exact action required.
 ```
@@ -105,8 +105,9 @@ The bootstrap installs the CLI at `~/.local/bin/luthn`. It downloads the
 source-free Compose bundle, pulls `ghcr.io/jakobsung/luthn:main`, creates a
 local service token, starts PostgreSQL, applies migrations before API startup,
 seeds public-safe demo data, and waits for health and readiness.
-With `--connect-codex`, the same bootstrap also configures the Codex hook and MCP
-registration, then prints the required restart and `/hooks` Trust steps.
+With `--connect-codex`, the same bootstrap also configures the Codex hook, MCP
+registration, and default auto-recall, then prints the required restart and
+`/hooks` Trust steps.
 
 If `~/.local/bin` is not already on `PATH`, use the export command printed by
 the installer and add it to your shell profile.
@@ -298,6 +299,7 @@ luthn status
 luthn update
 luthn connect codex
 luthn connect codex --auto-recall
+luthn connect codex --no-auto-recall
 luthn connection status codex
 luthn disconnect codex
 luthn uninstall
@@ -305,7 +307,7 @@ luthn uninstall
 
 Windows `update [image]` follows the backup, migration, restart, and readiness
 contract below and refreshes both the PowerShell CLI and Compose runtime.
-Windows `uninstall` removes the owned Codex hook, optional auto-recall block,
+Windows `uninstall` removes the owned Codex hook, managed auto-recall block when present,
 matching MCP registration, Compose services, CLI, and downloaded runtime while
 preserving unrelated Codex configuration, Docker volumes, Luthn configuration,
 token, connector-independent state, and backups. It stops without removing the
@@ -319,8 +321,9 @@ failure handling without requiring a privileged Docker Desktop runner. Before a
 Windows release, run the documented bootstrap on Windows 11 with Docker Desktop
 in Linux-container mode, then verify `luthn status`, a successful `luthn
 update`, update failure recovery, `codex mcp get luthn`, an MCP
-`get_context_pack` probe, hook Trust and one completed turn, optional
-auto-recall, connector status, default uninstall, reinstall, and preservation
+`get_context_pack` probe, hook Trust and one completed turn, default
+auto-recall and its explicit opt-out, connector status, default uninstall,
+reinstall, and preservation
 of unrelated Codex configuration, the two named Docker volumes, and
 `%LOCALAPPDATA%\Luthn\config`.
 
@@ -366,13 +369,13 @@ token remains in Luthn's private configuration and is not copied into Codex
 arguments, hook configuration, or instructions. Repeated setup is idempotent,
 and unrelated hooks, instructions, and MCP registrations are preserved.
 
-Enable lightweight automatic recall explicitly when wanted:
+Lightweight automatic recall is enabled by default:
 
 ```bash
-luthn connect codex --auto-recall
+luthn connect codex
 ```
 
-The opt-in adds a marked Luthn block to the global Codex `AGENTS.md` under
+The connection adds a marked Luthn block to the global Codex `AGENTS.md` under
 `CODEX_HOME` (default `~/.codex/AGENTS.md` on Unix and
 `%USERPROFILE%\.codex\AGENTS.md` on Windows) without replacing existing
 instructions.
@@ -380,6 +383,13 @@ It requests one `get_context_pack` lookup for a new task or material topic
 change with 3 items, an estimated 600-token budget, a 200 ms fail-open
 deadline, and a 10-minute in-process cache. Continued work reuses the context
 already in the conversation instead of searching every turn.
+
+Disable automatic recall explicitly while keeping the Stop hook and MCP
+connection:
+
+```bash
+luthn connect codex --no-auto-recall
+```
 
 The command verifies Luthn and Codex prerequisites, merges one Luthn-owned
 `Stop` hook into the global Codex `hooks.json`, registers `luthn mcp`, probes
