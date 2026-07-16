@@ -1095,7 +1095,10 @@ function Get-CodexHookCommand {
     $cli = Join-Path $script:BinDir "luthn.ps1"
     if (-not [IO.File]::Exists($cli)) { $cli = $PSCommandPath }
     if ($pwsh.Contains('"') -or $cli.Contains('"')) { throw "Codex hook command paths cannot contain a quote." }
-    return "`"$pwsh`" -NoProfile -NonInteractive -File `"$cli`" codex-hook"
+    # Codex runs Windows hook command strings through PowerShell. A quoted
+    # executable path is only a string expression there unless it is invoked
+    # with the call operator.
+    return "& `"$pwsh`" -NoProfile -NonInteractive -File `"$cli`" codex-hook"
 }
 
 function Read-BoundedStandardInput {
