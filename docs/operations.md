@@ -142,9 +142,17 @@ record.
 
 ## Search Adoption Model
 
-The default search implementation remains deterministic in-process safe search
-over public, agent-allowed wiki records. It is the correct default while the
-dataset is small and the safety boundary is more important than recall.
+The default search implementation uses database-backed candidate selection over
+public, agent-allowed wiki and shared-memory records, followed by deterministic
+in-process final ranking. Query tokens, requested Core tags, visibility, policy,
+and expiry filters run before candidate materialization. Each corpus contributes
+at most 512 candidates, so combined agent search and context-pack ranking is
+bounded at 1,024 candidates; shared-memory-only queries are bounded at 512.
+
+The database prefilter is a recall-safe superset of the deterministic token and
+tag matcher. The fixed cap is the scale boundary for the default backend; use a
+separately approved vector-provider slice when a larger matching corpus needs
+semantic or approximate candidate selection.
 
 Retrieval backends share a single safe corpus boundary:
 `public-agent-allowed-safe-projections`. Deterministic ranking is the default

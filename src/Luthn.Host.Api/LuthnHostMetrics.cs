@@ -24,5 +24,5 @@ internal static class LuthnHostMetrics
     public static readonly Histogram<long> SafeSearchCandidateCount =
         Meter.CreateHistogram<long>(
             "luthn.safe_search.candidates",
-            description: "Number of public agent-safe candidates loaded for a deterministic search request.");
+            description: "Number of public agent-safe candidates selected by database filters for deterministic final ranking.");
 }

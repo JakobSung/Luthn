@@ -51,7 +51,7 @@ public sealed class RetrievalEndpointTests
         var result = await ClassificationEndpoints.SearchAgentContext(
             new SafeSearchRequest("billing outage", ["runbook"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
-            db,
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             CancellationToken.None);
 
         var ok = Assert.IsType<Ok<SafeSearchResponse>>(result.Result);
@@ -95,7 +95,7 @@ public sealed class RetrievalEndpointTests
         var result = await ClassificationEndpoints.SearchAgentContext(
             new SafeSearchRequest("needle", ["needle"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
-            db,
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             CancellationToken.None);
 
         var ok = Assert.IsType<Ok<SafeSearchResponse>>(result.Result);

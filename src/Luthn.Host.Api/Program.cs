@@ -46,6 +46,7 @@ builder.Services.AddSingleton<IPolicyEngine, PolicyEngine>();
 builder.Services.AddScoped<ClassificationPreviewService>();
 builder.Services.AddSingleton<SafeSearchIndex>();
 builder.Services.AddSingleton<IRetrievalBackend, DeterministicRetrievalBackend>();
+builder.Services.AddScoped<IRetrievalCandidateSelector, DbBackedRetrievalCandidateSelector>();
 builder.Services.AddSingleton<ContextPackBuilder>();
 builder.Services.AddSingleton<WikiMarkdownRenderer>();
 builder.Services.AddSingleton(TimeProvider.System);

@@ -1,7 +1,9 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Luthn.Core.Classification;
 using Luthn.Core.Persistence;
+using Luthn.Core.Search;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -43,6 +45,38 @@ public sealed class PostgresIntegrationSmokeTests
 
         var pending = await db.Database.GetPendingMigrationsAsync();
         Assert.Empty(pending);
+
+        var now = DateTimeOffset.UtcNow;
+        db.WikiProposals.Add(new WikiProposalRecord
+        {
+            Id = "wiki-old-db-match",
+            SourceEventId = "source-old-db-match",
+            Title = "Needle recovery runbook",
+            SafeSummary = "Public-safe database recovery steps.",
+            Sensitivity = SensitivityLevel.Public,
+            CoreTags = ["needle"],
+            AllowsAgentContext = true,
+            CreatedAt = now.AddDays(-2)
+        });
+        db.WikiProposals.AddRange(Enumerable.Range(0, 1001).Select(index => new WikiProposalRecord
+        {
+            Id = $"wiki-newer-db-nonmatch-{index}",
+            SourceEventId = $"source-newer-db-nonmatch-{index}",
+            Title = $"General database release {index}",
+            SafeSummary = "Public-safe unmatched projection.",
+            Sensitivity = SensitivityLevel.Public,
+            CoreTags = ["release"],
+            AllowsAgentContext = true,
+            CreatedAt = now.AddMinutes(index)
+        }));
+        await db.SaveChangesAsync();
+
+        var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
+        var candidates = await selector.SelectAgentContextAsync(
+            new SafeSearchRequest("needle", ["needle"], 10),
+            CancellationToken.None);
+        var candidate = Assert.Single(candidates);
+        Assert.Equal("wiki-old-db-match", candidate.Id);
 
         using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>

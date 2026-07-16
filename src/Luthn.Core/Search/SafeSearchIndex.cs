@@ -15,8 +15,8 @@ public sealed class SafeSearchIndex
 
         var normalizedRequest = new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems);
         var requestedTags = normalizedRequest.CoreTags.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var normalizedQuery = NormalizeText(normalizedRequest.Query);
-        var queryTokens = Tokenize(normalizedRequest.Query);
+        var normalizedQuery = SafeSearchText.Normalize(normalizedRequest.Query);
+        var queryTokens = SafeSearchText.Tokenize(normalizedRequest.Query);
         var maxItems = SafeSearchLimits.ClampMaxItems(normalizedRequest.MaxItems);
 
         var results = candidates
@@ -75,7 +75,7 @@ public sealed class SafeSearchIndex
         int phraseScore,
         int tokenScore)
     {
-        var normalizedValue = NormalizeText(value);
+        var normalizedValue = SafeSearchText.Normalize(value);
         if (normalizedValue.Length == 0)
         {
             return 0;
@@ -94,21 +94,26 @@ public sealed class SafeSearchIndex
             }
         }
 
-        var valueTokens = TokenizeNormalized(normalizedValue);
+        var valueTokens = SafeSearchText.TokenizeNormalized(normalizedValue);
         score += queryTokens.Count(valueTokens.Contains) * tokenScore;
         return score;
     }
 
-    private static IReadOnlySet<string> Tokenize(string? value) =>
-        TokenizeNormalized(NormalizeText(value));
+    private sealed record RankedCandidate(ContextPackCandidate Candidate, int Score, int QueryScore);
+}
 
-    private static IReadOnlySet<string> TokenizeNormalized(string normalizedValue) =>
+public static class SafeSearchText
+{
+    public static IReadOnlySet<string> Tokenize(string? value) =>
+        TokenizeNormalized(Normalize(value));
+
+    public static IReadOnlySet<string> TokenizeNormalized(string normalizedValue) =>
         normalizedValue
             .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.Ordinal)
             .ToHashSet(StringComparer.Ordinal);
 
-    private static string NormalizeText(string? value)
+    public static string Normalize(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -139,6 +144,4 @@ public sealed class SafeSearchIndex
 
         return builder.ToString();
     }
-
-    private sealed record RankedCandidate(ContextPackCandidate Candidate, int Score, int QueryScore);
 }

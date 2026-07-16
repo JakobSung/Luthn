@@ -148,6 +148,7 @@ public static class MemoryEndpoints
     public static async Task<Results<Ok<MemoryQueryResponse>, BadRequest<ProblemDetails>>> QueryMemoryItems(
         MemoryQueryRequest request,
         IRetrievalBackend retrievalBackend,
+        IRetrievalCandidateSelector candidateSelector,
         LuthnDbContext db,
         CancellationToken cancellationToken)
     {
@@ -157,21 +158,20 @@ public static class MemoryEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var records = await ReadAgentSafeMemoryItems(db, now).ToArrayAsync(cancellationToken);
-        LuthnHostMetrics.SafeSearchCandidateCount.Record(
-            records.Length,
-            new KeyValuePair<string, object?>("source", "shared_memory_items"));
-        var candidates = records.Select(record => new ContextPackCandidate(
-            record.Id,
-            record.Title,
-            record.SafeSummary,
-            record.Sensitivity,
-            record.CoreTags,
-            record.AllowsAgentContext));
+        var searchRequest = new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems);
+        var candidates = await candidateSelector.SelectSharedMemoryAsync(
+            searchRequest,
+            cancellationToken);
         var search = retrievalBackend.Search(
-            new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems),
+            searchRequest,
             candidates);
+        var resultIds = search.Results.Select(result => result.Id).ToArray();
+        var now = DateTimeOffset.UtcNow;
+        var records = resultIds.Length == 0
+            ? []
+            : await ReadAgentSafeMemoryItems(db, now)
+                .Where(record => resultIds.Contains(record.Id))
+                .ToArrayAsync(cancellationToken);
         var recordsById = records.ToDictionary(record => record.Id, StringComparer.Ordinal);
         var items = search.Results
             .Where(result => recordsById.ContainsKey(result.Id))

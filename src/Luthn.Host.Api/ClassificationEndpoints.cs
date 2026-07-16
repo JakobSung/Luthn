@@ -216,7 +216,7 @@ public static class ClassificationEndpoints
     public static async Task<Results<Ok<ContextPack>, BadRequest<ProblemDetails>>> CreateContextPack(
         ContextPackRequest request,
         ContextPackBuilder builder,
-        LuthnDbContext db,
+        IRetrievalCandidateSelector candidateSelector,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateSafeSearchRequest(
@@ -228,7 +228,9 @@ public static class ClassificationEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
-        var candidates = await ReadAgentSafeCandidatesAsync(db, cancellationToken);
+        var candidates = await candidateSelector.SelectAgentContextAsync(
+            new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems),
+            cancellationToken);
 
         return TypedResults.Ok(builder.Build(request, candidates));
     }
@@ -236,7 +238,7 @@ public static class ClassificationEndpoints
     public static async Task<Results<Ok<SafeSearchResponse>, BadRequest<ProblemDetails>>> SearchAgentContext(
         SafeSearchRequest request,
         IRetrievalBackend retrievalBackend,
-        LuthnDbContext db,
+        IRetrievalCandidateSelector candidateSelector,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateSafeSearchRequest(
@@ -248,7 +250,7 @@ public static class ClassificationEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
-        var candidates = await ReadAgentSafeCandidatesAsync(db, cancellationToken);
+        var candidates = await candidateSelector.SelectAgentContextAsync(request, cancellationToken);
 
         return TypedResults.Ok(retrievalBackend.Search(request, candidates));
     }
@@ -287,47 +289,6 @@ public static class ClassificationEndpoints
         }
 
         return TypedResults.Content(renderer.Render(proposal), "text/markdown");
-    }
-
-    private static async Task<ContextPackCandidate[]> ReadAgentSafeCandidatesAsync(
-        LuthnDbContext db,
-        CancellationToken cancellationToken)
-    {
-        var wikiCandidates = await db.WikiProposals
-            .AsNoTracking()
-            .Where(record => record.AllowsAgentContext &&
-                record.Sensitivity == SensitivityLevel.Public)
-            .Select(record => new ContextPackCandidate(
-                record.Id,
-                record.Title,
-                record.SafeSummary,
-                record.Sensitivity,
-                record.CoreTags,
-                record.AllowsAgentContext))
-            .ToArrayAsync(cancellationToken);
-        var now = DateTimeOffset.UtcNow;
-        var memoryCandidates = await db.SharedMemoryItems
-            .AsNoTracking()
-            .Where(record => record.AllowsAgentContext &&
-                record.Sensitivity == SensitivityLevel.Public &&
-                (record.Visibility == MemoryVisibility.PublicSafe ||
-                    record.Visibility == MemoryVisibility.SharedAcrossAgents) &&
-                (record.ExpiresAt == null || record.ExpiresAt > now))
-            .Select(record => new ContextPackCandidate(
-                record.Id,
-                record.Title,
-                record.SafeSummary,
-                record.Sensitivity,
-                record.CoreTags,
-                record.AllowsAgentContext))
-            .ToArrayAsync(cancellationToken);
-        LuthnHostMetrics.SafeSearchCandidateCount.Record(
-            wikiCandidates.Length,
-            new KeyValuePair<string, object?>("source", "wiki_proposals"));
-        LuthnHostMetrics.SafeSearchCandidateCount.Record(
-            memoryCandidates.Length,
-            new KeyValuePair<string, object?>("source", "shared_memory_items"));
-        return wikiCandidates.Concat(memoryCandidates).ToArray();
     }
 
     private static ProblemDetails? ValidateSafeSearchRequest(
