@@ -314,6 +314,7 @@ esac
     $luthnHook = @($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
     Assert-True ($luthnHook.Count -eq 1) "one-step setup should install one Luthn Stop hook"
     Assert-True ($luthnHook[0].hooks[0].commandWindows -ceq $luthnHook[0].hooks[0].command) "Windows hook should include a matching commandWindows entry"
+    Assert-True ($luthnHook[0].hooks[0].statusMessage -ceq "Luthn 메모리 저장 예약 중…") "one-step setup should describe the upload as scheduled"
     Assert-True (@($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "one-step setup should preserve unrelated hooks"
     Assert-True (-not ([IO.File]::ReadAllText($codexHooksFile).Contains($token))) "Codex hooks should not contain the token"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start")) "one-step setup should enable auto-recall by default"
@@ -560,10 +561,36 @@ esac
     $hookSyntaxCheck = [ScriptBlock]::Create($installedHookCommand)
     Assert-True ($null -ne $hookSyntaxCheck) "the registered Windows hook command should parse in PowerShell"
 
+    $legacyHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
+    $legacyLuthnHook = @($legacyHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
+    $legacyLuthnHook[0].hooks[0].statusMessage = "Syncing Luthn memory"
+    [IO.File]::WriteAllText($codexHooksFile, (($legacyHooks | ConvertTo-Json -Depth 20) + "`n"), [Text.UTF8Encoding]::new($false))
+    $legacyInstructions = [IO.File]::ReadAllText($codexInstructionsFile)
+    $recallStartMarker = "<!-- luthn:auto-recall:start -->"
+    $recallEndMarker = "<!-- luthn:auto-recall:end -->"
+    $recallStart = $legacyInstructions.IndexOf($recallStartMarker, [StringComparison]::Ordinal)
+    $recallEnd = $legacyInstructions.IndexOf($recallEndMarker, $recallStart, [StringComparison]::Ordinal) + $recallEndMarker.Length
+    $legacyRecallBlock = "$recallStartMarker`r`n# Luthn lightweight recall`r`n`r`nLegacy managed instructions.`r`n$recallEndMarker"
+    $legacyInstructions = $legacyInstructions.Substring(0, $recallStart) + $legacyRecallBlock + $legacyInstructions.Substring($recallEnd)
+    [IO.File]::WriteAllText($codexInstructionsFile, $legacyInstructions, [Text.UTF8Encoding]::new($false))
+
+    $upgradeConnect = Invoke-LuthnProcess $installedCli @("connect", "codex")
+    Assert-True ($upgradeConnect.ExitCode -eq 0) "reconnect should upgrade legacy Luthn-managed configuration: $($upgradeConnect.Output)"
+    $upgradedHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
+    $upgradedLuthnHook = @($upgradedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
+    Assert-True ($upgradedLuthnHook.Count -eq 1) "upgrade should retain exactly one managed Stop hook"
+    Assert-True ($upgradedLuthnHook[0].hooks[0].statusMessage -ceq "Luthn 메모리 저장 예약 중…") "upgrade should replace the legacy Stop status message"
+    Assert-True (@($upgradedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "upgrade should preserve unrelated hooks"
+    $upgradedInstructions = [IO.File]::ReadAllText($codexInstructionsFile)
+    Assert-True (-not $upgradedInstructions.Contains("Legacy managed instructions.")) "upgrade should replace the previous managed recall block"
+    Assert-True ($upgradedInstructions.Contains("Preserve this text.")) "upgrade should preserve user instructions"
+
     $hookHashBeforeRepeat = (Get-FileHash -LiteralPath $codexHooksFile -Algorithm SHA256).Hash
+    $instructionsHashBeforeRepeat = (Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash
     $connectAgain = Invoke-LuthnProcess $installedCli @("connect", "codex")
     Assert-True ($connectAgain.ExitCode -eq 0) "Codex MCP connection should be idempotent: $($connectAgain.Output)"
     Assert-True ((Get-FileHash -LiteralPath $codexHooksFile -Algorithm SHA256).Hash -eq $hookHashBeforeRepeat) "repeated connect should not rewrite the trusted hook"
+    Assert-True ((Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash -eq $instructionsHashBeforeRepeat) "repeated connect should not rewrite managed instructions"
 
     $enableRecall = Invoke-LuthnProcess $installedCli @("connect", "codex", "--auto-recall")
     Assert-True ($enableRecall.ExitCode -eq 0) "explicit auto-recall compatibility should succeed: $($enableRecall.Output)"
@@ -575,6 +602,11 @@ esac
     Assert-True (([regex]::Matches($instructionText, [regex]::Escape("<!-- luthn:auto-recall:start -->"))).Count -eq 1) "auto-recall should install one managed block"
     Assert-True ($instructionText.Contains("Preserve this text.")) "auto-recall should preserve user instructions"
     Assert-True ($instructionText.Contains("``maxItems``: 3") -and $instructionText.Contains("``maxTokens``: 600")) "auto-recall should install bounded recall instructions"
+    Assert-True ($instructionText.Contains("``timeoutMs``: 200") -and $instructionText.Contains("``cacheTtlSeconds``: 600") -and $instructionText.Contains("``failOpen``: true")) "auto-recall should preserve timeout, cache, and fail-open bounds"
+    Assert-True ($instructionText.Contains("exactly one commentary line") -and $instructionText.Contains("``Luthn 메모리 N개 참고``")) "auto-recall should describe the single positive recall commentary"
+    Assert-True ($instructionText.Contains("zero actual memory") -and $instructionText.Contains("times out, returns an error, cannot be parsed") -and $instructionText.Contains("uses any fail-open path")) "auto-recall should suppress commentary for empty and failed recall"
+    Assert-True ($instructionText.Contains("when ``get_context_pack`` was not called") -and $instructionText.Contains("at most once per user turn")) "auto-recall should suppress uncalled recall and duplicate commentary"
+    Assert-True ($instructionText.Contains("memory titles, content, IDs, queries, scores, sources") -and $instructionText.Contains("normal assistant response or final response")) "auto-recall should protect memory details and response channels"
 
     $connectionStatus = Invoke-LuthnProcess $installedCli @("connection", "status", "codex")
     Assert-True ($connectionStatus.ExitCode -eq 0) "Windows Codex connection status should succeed: $($connectionStatus.Output)"

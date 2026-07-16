@@ -122,7 +122,7 @@ try {
                     type = "command"
                     command = $hookCommand
                     timeout = 5
-                    statusMessage = "Syncing Luthn memory"
+                    statusMessage = "Luthn 메모리 저장 예약 중…"
                 })
             })
         }
@@ -134,7 +134,7 @@ try {
     $tomlCommand = $hookCommand.Replace("\", "\\").Replace('"', '\"')
     $configToml = @"
 [hooks]
-stop = [{ matcher = "luthn.agent-connector.v1", hooks = [{ type = "command", command = "$tomlCommand", command_windows = "$tomlCommand", timeout = 5, status_message = "Syncing Luthn memory" }] }]
+stop = [{ matcher = "luthn.agent-connector.v1", hooks = [{ type = "command", command = "$tomlCommand", command_windows = "$tomlCommand", timeout = 5, status_message = "Luthn 메모리 저장 예약 중…" }] }]
 "@
     [IO.File]::WriteAllText((Join-Path $codexHome "config.toml"), $configToml, [Text.UTF8Encoding]::new($false))
 

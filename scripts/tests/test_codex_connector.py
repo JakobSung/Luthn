@@ -46,6 +46,11 @@ class CodexHookConfigurationTests(unittest.TestCase):
             )
 
             CONNECTOR.install_hook(hooks_path, "'/tmp/luthn path' codex-hook")
+            legacy = json.loads(hooks_path.read_text(encoding="utf-8"))
+            legacy["hooks"]["Stop"][-1]["hooks"][0][
+                "statusMessage"
+            ] = "Syncing Luthn memory"
+            hooks_path.write_text(json.dumps(legacy), encoding="utf-8")
             CONNECTOR.install_hook(hooks_path, "'/tmp/luthn path' codex-hook")
             document = json.loads(hooks_path.read_text(encoding="utf-8"))
 
@@ -57,11 +62,18 @@ class CodexHookConfigurationTests(unittest.TestCase):
             self.assertEqual("other.owner", groups[0]["matcher"])
             self.assertEqual(CONNECTOR.HOOK_MARKER, groups[1]["matcher"])
             self.assertNotIn("async", groups[1]["hooks"][0])
+            self.assertEqual(
+                CONNECTOR.HOOK_STATUS_MESSAGE,
+                groups[1]["hooks"][0]["statusMessage"],
+            )
             self.assertTrue(
                 CONNECTOR.hook_is_installed(
                     hooks_path, "'/tmp/luthn path' codex-hook"
                 )
             )
+            with mock.patch.object(CONNECTOR, "_write_hooks") as write_hooks:
+                CONNECTOR.install_hook(hooks_path, "'/tmp/luthn path' codex-hook")
+                write_hooks.assert_not_called()
 
             CONNECTOR.remove_hook(hooks_path)
             document = json.loads(hooks_path.read_text(encoding="utf-8"))
@@ -162,7 +174,11 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             instructions_path.write_text(original, encoding="utf-8")
 
             CONNECTOR.install_auto_recall_instruction(instructions_path)
-            CONNECTOR.install_auto_recall_instruction(instructions_path)
+            with mock.patch.object(
+                CONNECTOR, "_write_instructions"
+            ) as write_instructions:
+                CONNECTOR.install_auto_recall_instruction(instructions_path)
+                write_instructions.assert_not_called()
             installed = instructions_path.read_text(encoding="utf-8")
 
             self.assertEqual(1, installed.count(CONNECTOR.INSTRUCTION_START_MARKER))
@@ -171,6 +187,18 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             self.assertIn("`maxTokens`: 600", installed)
             self.assertIn("`timeoutMs`: 200", installed)
             self.assertIn("`cacheTtlSeconds`: 600", installed)
+            self.assertIn("`failOpen`: true", installed)
+            self.assertIn("exactly one commentary line", installed)
+            self.assertIn("`Luthn 메모리 N개 참고`", installed)
+            self.assertIn("zero actual memory", installed)
+            self.assertIn("times out, returns an error, cannot be parsed", installed)
+            self.assertIn("uses any fail-open path", installed)
+            self.assertIn("when `get_context_pack` was not called", installed)
+            self.assertIn("at most once per user turn", installed)
+            self.assertIn(
+                "memory titles, content, IDs, queries, scores, sources", installed
+            )
+            self.assertIn("normal assistant response or final response", installed)
             self.assertTrue(
                 CONNECTOR.auto_recall_instruction_is_installed(instructions_path)
             )

@@ -255,6 +255,7 @@ for group in groups:
     if group.get("matcher") == "luthn.agent-connector.v1":
         handler = group["hooks"][0]
         assert "async" not in handler, handler
+        assert handler["statusMessage"] == "Luthn 메모리 저장 예약 중…", handler
 PY
 }
 
@@ -284,10 +285,47 @@ grep -q '^Server observation: test$' <<<"$status_output"
 grep -q '^Automatic memory capture is not active yet.$' <<<"$status_output"
 grep -q 'Restart Codex, enter /hooks' <<<"$status_output"
 
-echo "[2/17] repeated default connect is idempotent"
+echo "[2/17] reconnect upgrades only legacy Luthn-managed configuration"
+python3 - "$codex_home/hooks.json" "$codex_home/AGENTS.md" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+hooks_path = Path(sys.argv[1])
+document = json.loads(hooks_path.read_text(encoding="utf-8"))
+for group in document["hooks"]["Stop"]:
+    if group.get("matcher") == "luthn.agent-connector.v1":
+        group["hooks"][0]["statusMessage"] = "Syncing Luthn memory"
+hooks_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+instructions_path = Path(sys.argv[2])
+content = instructions_path.read_text(encoding="utf-8")
+start_marker = "<!-- luthn:auto-recall:start -->"
+end_marker = "<!-- luthn:auto-recall:end -->"
+start = content.index(start_marker)
+end = content.index(end_marker, start) + len(end_marker)
+legacy = f"{start_marker}\n# Luthn lightweight recall\n\nLegacy managed instructions.\n{end_marker}"
+instructions_path.write_text(content[:start] + legacy + content[end:], encoding="utf-8")
+PY
+run_luthn connect codex >/dev/null
+assert_hook_counts 1 1
+grep -q '^# User instructions$' "$codex_home/AGENTS.md"
+grep -q '^Preserve this text\.$' "$codex_home/AGENTS.md"
+! grep -q 'Legacy managed instructions' "$codex_home/AGENTS.md"
+grep -q 'exactly one commentary line' "$codex_home/AGENTS.md"
+grep -q 'Luthn 메모리 N개 참고' "$codex_home/AGENTS.md"
+grep -q 'zero actual memory' "$codex_home/AGENTS.md"
+grep -q 'times out, returns an error, cannot be parsed' "$codex_home/AGENTS.md"
+grep -q 'uses any fail-open path' "$codex_home/AGENTS.md"
+grep -q 'when `get_context_pack` was not called' "$codex_home/AGENTS.md"
+grep -q 'at most once per user turn' "$codex_home/AGENTS.md"
+grep -q 'memory titles, content, IDs, queries, scores, sources' "$codex_home/AGENTS.md"
+grep -q 'normal assistant response or final response' "$codex_home/AGENTS.md"
+hook_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
 recall_hash="$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')"
 run_luthn connect codex >/dev/null
 assert_hook_counts 1 1
+[[ "$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')" == "$hook_hash" ]]
 [[ "$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')" == "$recall_hash" ]]
 
 echo "[2a/17] explicit recall compatibility and opt-out are supported"

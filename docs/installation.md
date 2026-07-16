@@ -402,6 +402,18 @@ Restart Codex after setup. Codex requires the operator to review and trust a
 new hook; open `/hooks` and approve the Luthn hook when prompted. Luthn does not
 bypass that host trust decision.
 
+For a short Codex Desktop smoke test:
+
+1. Start a turn where `get_context_pack` returns one or more memories. Confirm
+   that commentary shows `Luthn 메모리 N개 참고` exactly once.
+2. Start a turn where recall returns zero memories, times out, or fails. Confirm
+   that no Luthn recall commentary appears.
+3. End a conversation and confirm that the transient Stop-hook status shows
+   `Luthn 메모리 저장 예약 중…` without claiming that storage completed.
+
+Treat the commentary and statusMessage visual styling as manual UI evidence;
+do not automate or customize Codex's rendering for this smoke test.
+
 Inspect or remove the connector:
 
 ```bash
