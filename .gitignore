@@ -2,6 +2,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.vs/
+*.csproj.user
 bin/
 obj/
 .[e]nv

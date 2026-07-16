@@ -30,9 +30,9 @@ of the final assistant response after a turn. Luthn redacts and classifies that
 capsule before anything becomes agent-visible. MCP provides safe reads and
 explicit shared-memory writes.
 
-Optional lightweight auto-recall can fetch one small context pack when a new
-task or material topic begins. It reuses that context during the task instead
-of querying on every turn.
+Lightweight auto-recall fetches one small context pack when a new task or
+material topic begins. It is enabled by default when Codex is connected and
+reuses that context during the task instead of querying on every turn.
 
 ```text
 completed turn -> bounded capsule -> classify and store safe context
@@ -40,7 +40,7 @@ new task       -> auto-recall or MCP -> reuse relevant context
 ```
 
 See [Codex connection and memory](docs/agent-quickstart.md) for setup, the
-one-time hook Trust step, privacy guarantees, and opt-in recall limits.
+one-time hook Trust step, privacy guarantees, and recall limits.
 
 ## Recommended Installation
 

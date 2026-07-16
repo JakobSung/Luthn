@@ -78,8 +78,8 @@ commands:
   install [--connect-codex]  Install Luthn and optionally connect Codex.
   status                     Show services, readiness, console, and image.
   update [image]             Back up, pull, migrate, restart, and verify.
-  connect codex [--auto-recall]
-                             Configure the Codex hook and MCP; recall is opt-in.
+  connect codex [--no-auto-recall]
+                             Configure Codex; recall is enabled by default.
   connection status codex    Show local and server Codex connection state.
   disconnect codex           Remove only Luthn-owned Codex configuration.
   mcp [--list-tools]         Run the Docker-backed MCP stdio server.
@@ -1354,10 +1354,13 @@ function Test-McpProbe {
 
 function Connect-Codex {
     param([string[]]$Arguments = @())
-    $autoRecallRequested = $false
+    $autoRecallRequested = $true
+    $recallOptionSeen = $false
     foreach ($argument in $Arguments) {
-        if ($argument -ceq "--auto-recall" -and -not $autoRecallRequested) { $autoRecallRequested = $true }
-        else { throw "usage: luthn connect codex [--auto-recall]" }
+        if ($recallOptionSeen) { throw "usage: luthn connect codex [--no-auto-recall]" }
+        if ($argument -ceq "--auto-recall") { $autoRecallRequested = $true; $recallOptionSeen = $true }
+        elseif ($argument -ceq "--no-auto-recall") { $autoRecallRequested = $false; $recallOptionSeen = $true }
+        else { throw "usage: luthn connect codex [--no-auto-recall]" }
     }
     Require-Installation
     Test-DockerPreflight
@@ -1393,7 +1396,11 @@ function Connect-Codex {
             $added = $true
         }
         if (-not (Test-McpProbe)) { throw "Codex MCP probe failed." }
-        if ($autoRecallRequested) { [void](Install-CodexAutoRecall) }
+        if ($autoRecallRequested) {
+            [void](Install-CodexAutoRecall)
+        } else {
+            [void](Remove-CodexAutoRecall -PreserveEmpty:$instructionsExistedBeforeConnect)
+        }
         $autoRecallEnabled = Test-CodexAutoRecallInstalled
         Write-ConnectorState -Path $script:CodexStateFile -State "configured" -CommandPath $docker.FilePath -Arguments $mcpArguments -HookCommand $hookCommand -HookInstalled $true -AutoRecall $autoRecallEnabled -HooksExisted $hooksExistedBeforeConnect -InstructionsExisted $instructionsExistedBeforeConnect
         [IO.File]::Delete($script:CodexPendingStateFile)
@@ -1585,7 +1592,7 @@ try {
         "status" { Show-Status }
         "update" { Update-Luthn $CommandArguments }
         "connect" {
-            if ($CommandArguments.Count -lt 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn connect codex [--auto-recall]" }
+            if ($CommandArguments.Count -lt 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn connect codex [--no-auto-recall]" }
             Connect-Codex @($CommandArguments | Select-Object -Skip 1)
         }
         "connection" {

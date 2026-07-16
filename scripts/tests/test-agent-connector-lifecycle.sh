@@ -267,8 +267,10 @@ grep -q 'Setup is complete only when automatic-ingestion reports Active' <<<"$co
 [[ "$(cat "$mcp_state")" == "$cli" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
 grep -q '^SETUP_STATE=configured$' "$state_dir/connectors/codex.env"
+grep -q '^AUTO_RECALL=true$' "$state_dir/connectors/codex.env"
 ! grep -q 'test-token' "$state_dir/connectors/codex.env"
 ! grep -q 'test-token' "$codex_home/hooks.json"
+grep -q '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__5=custom.read$' "$config_dir/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__6=custom.write$' "$config_dir/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__7=agent.connection.read$' "$config_dir/luthn.env"
@@ -282,11 +284,13 @@ grep -q '^Server observation: test$' <<<"$status_output"
 grep -q '^Automatic memory capture is not active yet.$' <<<"$status_output"
 grep -q 'Restart Codex, enter /hooks' <<<"$status_output"
 
-echo "[2/17] repeated connect is idempotent"
+echo "[2/17] repeated default connect is idempotent"
+recall_hash="$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')"
 run_luthn connect codex >/dev/null
 assert_hook_counts 1 1
+[[ "$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')" == "$recall_hash" ]]
 
-echo "[2a/17] opt-in lightweight recall is idempotent and reported"
+echo "[2a/17] explicit recall compatibility and opt-out are supported"
 run_luthn connect codex --auto-recall >/dev/null
 run_luthn connect codex --auto-recall >/dev/null
 [[ "$(grep -c '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md")" -eq 1 ]]
@@ -299,6 +303,12 @@ grep -q '`timeoutMs`: 200' "$codex_home/AGENTS.md"
 grep -q '`cacheTtlSeconds`: 600' "$codex_home/AGENTS.md"
 status_output="$(run_luthn connection status codex)"
 grep -q '^  lightweight-recall: enabled$' <<<"$status_output"
+run_luthn connect codex --no-auto-recall >/dev/null
+! grep -q '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md"
+grep -q '^AUTO_RECALL=false$' "$state_dir/connectors/codex.env"
+run_luthn connect codex >/dev/null
+grep -q '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md"
+grep -q '^AUTO_RECALL=true$' "$state_dir/connectors/codex.env"
 
 cp "$state_dir/connectors/codex.env" \
   "$state_dir/connectors/codex.disconnect.pending.env"
@@ -346,6 +356,21 @@ run_luthn disconnect codex >/dev/null
 [[ ! -f "$state_dir/connectors/codex.pending.env" ]]
 [[ ! -f "$state_dir/connectors/codex.disconnect.pending.env" ]]
 assert_hook_counts 0 1
+
+echo "[6a/17] malformed default recall rolls connector setup back"
+instructions_before_malformed="$(cat "$codex_home/AGENTS.md")"
+printf '%s\n<!-- luthn:auto-recall:start -->\n' \
+  "$instructions_before_malformed" >"$codex_home/AGENTS.md"
+malformed_instructions="$(cat "$codex_home/AGENTS.md")"
+if run_luthn connect codex >/dev/null 2>&1; then
+  echo "expected malformed auto-recall instructions to fail setup" >&2
+  exit 1
+fi
+[[ ! -f "$mcp_state" ]]
+[[ ! -f "$state_dir/connectors/codex.env" ]]
+assert_hook_counts 0 1
+[[ "$(cat "$codex_home/AGENTS.md")" == "$malformed_instructions" ]]
+printf '%s\n' "$instructions_before_malformed" >"$codex_home/AGENTS.md"
 
 normal_config="$tmp_root/luthn-normal.env"
 awk '!/^Luthn__Auth__Tokens__0__Scopes__(7|8)=/' "$config_dir/luthn.env" >"$normal_config"

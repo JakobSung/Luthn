@@ -32,7 +32,8 @@ commands:
   reset --yes                     Delete data volumes and recreate the stack.
   uninstall                      Remove services and runtime; preserve data/config.
   uninstall --purge-data --yes   Remove services, data, config, backups, and CLI.
-  connect codex [--auto-recall]   Configure Codex; optionally enable lightweight recall.
+  connect codex [--no-auto-recall]
+                                   Configure Codex; recall is enabled by default.
   connection status codex        Show local and server Codex connection state.
   disconnect codex                Remove only Luthn-owned Codex configuration.
   adapter                         Upload a turn-summary JSON payload from stdin.
@@ -774,14 +775,42 @@ restore_connector_config_backup() {
   fi
 }
 
-connect_codex() {
-  auto_recall_requested=false
-  if [[ "${1:-}" == "--auto-recall" ]]; then
-    auto_recall_requested=true
-    shift
+rollback_codex_after_recall_failure() {
+  hooks_file="$1"
+  hooks_backup="$2"
+  hooks_existed="$3"
+  mcp_preexisting="$4"
+  config_backup="$5"
+  rollback_failed=false
+
+  if [[ "$connector_scopes_changed" == "true" ]]; then
+    if ! stop_api_fail_closed \
+      || ! restore_connector_config_backup "$config_backup" \
+      || ! compose_cmd up -d --force-recreate api >/dev/null \
+      || ! wait_for_api; then
+      rollback_failed=true
+    fi
   fi
+  if ! rollback_codex_registration \
+    "$hooks_file" "$hooks_backup" "$hooks_existed" "$mcp_preexisting"; then
+    rollback_failed=true
+  fi
+  rm -f "$hooks_backup"
+  if [[ "$rollback_failed" == "false" ]]; then
+    rm -f "$config_backup"
+    return 0
+  fi
+  return 1
+}
+
+connect_codex() {
+  auto_recall_requested=true
+  case "${1:-}" in
+    --auto-recall) shift ;; # Backward-compatible explicit enable.
+    --no-auto-recall) auto_recall_requested=false; shift ;;
+  esac
   if (( $# > 0 )); then
-    echo "usage: luthn connect codex [--auto-recall]" >&2
+    echo "usage: luthn connect codex [--no-auto-recall]" >&2
     return 2
   fi
 
@@ -910,26 +939,37 @@ connect_codex() {
       return 1
     fi
   fi
-  if ! record_codex_connector_state \
-    "$hooks_file" "$codex_pending_state_file" configured false false "$instructions_file" \
-    || ! mv "$codex_pending_state_file" "$codex_state_file"; then
-    echo "Codex is configured, but its pending ownership state could not be finalized. Run 'luthn disconnect codex' before uninstalling." >&2
-    return 1
-  fi
   auto_recall_enabled=false
   if python3 "$helper" instructions check --path "$instructions_file"; then
     auto_recall_enabled=true
   fi
+  recall_error=""
   if [[ "$auto_recall_requested" == "true" ]]; then
     if ! python3 "$helper" instructions install --path "$instructions_file"; then
-      echo "Codex connector is configured, but the lightweight recall instruction could not be installed." >&2
-      return 1
+      recall_error="the lightweight recall instruction could not be installed"
+    else
+      auto_recall_enabled=true
     fi
-    auto_recall_enabled=true
+  else
+    if ! python3 "$helper" instructions remove --path "$instructions_file"; then
+      recall_error="the lightweight recall instruction could not be removed"
+    else
+      auto_recall_enabled=false
+    fi
+  fi
+  if [[ -n "$recall_error" ]]; then
+    if rollback_codex_after_recall_failure \
+      "$hooks_file" "$hooks_backup" "$hooks_existed" "$mcp_preexisting" "$config_backup"; then
+      echo "Codex connector setup failed because $recall_error; Luthn restored the previous configuration." >&2
+    else
+      echo "Codex connector setup failed because $recall_error, and rollback was incomplete. Restore the previous configuration from: $config_backup" >&2
+    fi
+    return 1
   fi
   if ! record_codex_connector_state \
-    "$hooks_file" "$codex_state_file" configured false "$auto_recall_enabled" "$instructions_file"; then
-    echo "Codex connector is configured, but its recall ownership state could not be updated." >&2
+    "$hooks_file" "$codex_pending_state_file" configured false "$auto_recall_enabled" "$instructions_file" \
+    || ! mv "$codex_pending_state_file" "$codex_state_file"; then
+    echo "Codex is configured, but its pending ownership state could not be finalized. Run 'luthn disconnect codex' before uninstalling." >&2
     return 1
   fi
   rm -f "$config_backup"
@@ -1331,7 +1371,7 @@ case "$command" in
   uninstall) shift; uninstall_luthn "$@" ;;
   connect)
     shift
-    [[ "${1:-}" == "codex" ]] || { echo "usage: luthn connect codex [--auto-recall]" >&2; exit 2; }
+    [[ "${1:-}" == "codex" ]] || { echo "usage: luthn connect codex [--no-auto-recall]" >&2; exit 2; }
     shift
     connect_codex "$@"
     ;;

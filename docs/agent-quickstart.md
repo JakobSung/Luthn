@@ -19,7 +19,7 @@ Luthn keeps automatic capture separate from model-triggered access:
 ```
 
 The hook makes capture deterministic after a completed turn. MCP keeps reads
-and writes explicit and policy-controlled. Optional auto-recall adds a small,
+and writes explicit and policy-controlled. Default auto-recall adds a small,
 bounded lookup at the start of a new task or material topic instead of querying
 memory on every turn.
 
@@ -29,13 +29,14 @@ and agent-safe projection boundaries. See [Data boundaries](data-boundaries.md).
 
 ## Platform Support
 
-| Host | MCP safe reads/writes | Automatic turn hook | Optional auto-recall |
+| Host | MCP safe reads/writes | Automatic turn hook | Auto-recall |
 |---|---|---|---|
-| macOS and Linux | Supported | Supported after user Trust | Supported |
-| Windows | Supported | Supported after user Trust | Supported |
+| macOS and Linux | Supported | Supported after user Trust | Enabled by default |
+| Windows | Supported | Supported after user Trust | Enabled by default |
 
-The existing macOS/Linux connector behavior is unchanged. Windows uses a
-PowerShell-native connector with the same ownership and data-boundary contract.
+macOS and Linux use the shell/Python connector, while Windows uses a
+PowerShell-native connector with the same defaults, ownership, and
+data-boundary contract.
 
 ## Connect Codex
 
@@ -73,12 +74,20 @@ If Codex CLI discovery fails, follow the Windows recovery section in the
 [installation guide](installation.md). Do not copy an executable from
 `WindowsApps` or change its ACLs.
 
-## Enable Lightweight Auto-Recall
+## Lightweight Auto-Recall
 
-Auto-recall is opt-in:
+Auto-recall is enabled by default by `luthn connect codex` and by the
+`--connect-codex` installation flow. The older explicit-enable form remains
+accepted for compatibility:
 
 ```bash
 luthn connect codex --auto-recall
+```
+
+Disable it explicitly when needed:
+
+```bash
+luthn connect codex --no-auto-recall
 ```
 
 The command adds only a Luthn-managed block to Codex instructions and preserves
