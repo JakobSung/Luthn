@@ -44,21 +44,15 @@ one-time hook Trust step, privacy guarantees, and opt-in recall limits.
 
 ## Recommended Installation
 
-Give Codex or another coding agent the
-[installation guide](docs/installation.md). It contains the complete agent
-prompt, OS-specific procedure, recovery rules, verification, update, and
-uninstallation instructions.
+Give Codex or another coding agent this prompt:
 
-## Verify
-
-```bash
-luthn status
-luthn mcp --list-tools
+```text
+Install and configure Luthn locally by following the instructions here:
+https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 ```
 
-Health and readiness should report `ready`, and the MCP tool list should include
-`get_context_pack`. The operator console is available at
-<http://127.0.0.1:8080/> by default.
+For requirements, manual installation, Windows setup, lifecycle commands, and
+agent connections, see the [detailed installation guide](docs/installation.md).
 
 ## Data Boundary
 
