@@ -74,6 +74,7 @@ public sealed class SensitiveAccessRequestRecord
     public string RequestedBy { get; set; } = "";
     public string SessionId { get; set; } = "";
     public string RequestReason { get; set; } = "";
+    public string RedactedSummary { get; set; } = "";
     public SensitiveAccessRequestStatus Status { get; set; } = SensitiveAccessRequestStatus.Pending;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }

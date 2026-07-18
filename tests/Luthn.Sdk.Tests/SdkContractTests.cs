@@ -14,6 +14,32 @@ namespace Luthn.Sdk.Tests;
 public sealed class SdkContractTests
 {
     [Fact]
+    public void SensitiveAccessRequestPreservesLegacyConstructorAndDeconstructContract()
+    {
+        var request = new SensitiveAccessRequestDto(
+            "access-1",
+            "sensitive-ref-1",
+            "Pending",
+            "requester",
+            DateTimeOffset.UnixEpoch,
+            null,
+            null,
+            false,
+            "pending-approval")
+        {
+            SessionId = "session-1",
+            ExpiresAt = DateTimeOffset.UnixEpoch.AddMinutes(10)
+        };
+
+        var (_, _, _, _, _, _, _, outputAvailable, outputPolicy) = request;
+
+        Assert.False(outputAvailable);
+        Assert.Equal("pending-approval", outputPolicy);
+        Assert.Equal("session-1", request.SessionId);
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddMinutes(10), request.ExpiresAt);
+    }
+
+    [Fact]
     public void SafeProjectionSyncEnvelopeUsesVersionedPublicSafeContract()
     {
         var envelope = new SafeProjectionSyncEnvelopeDto(

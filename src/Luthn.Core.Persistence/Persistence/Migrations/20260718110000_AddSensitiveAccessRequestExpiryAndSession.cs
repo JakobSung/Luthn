@@ -27,6 +27,14 @@ public partial class AddSensitiveAccessRequestExpiryAndSession : Migration
             nullable: false,
             defaultValue: "legacy-session");
 
+        migrationBuilder.AddColumn<string>(
+            name: "RedactedSummary",
+            table: "sensitive_access_requests",
+            type: "character varying(4000)",
+            maxLength: 4000,
+            nullable: false,
+            defaultValue: "");
+
         migrationBuilder.DropIndex(
             name: "IX_sensitive_access_requests_Status_UpdatedAt",
             table: "sensitive_access_requests");
@@ -44,6 +52,7 @@ public partial class AddSensitiveAccessRequestExpiryAndSession : Migration
             table: "sensitive_access_requests");
 
         migrationBuilder.DropColumn(name: "ExpiresAt", table: "sensitive_access_requests");
+        migrationBuilder.DropColumn(name: "RedactedSummary", table: "sensitive_access_requests");
         migrationBuilder.DropColumn(name: "SessionId", table: "sensitive_access_requests");
 
         migrationBuilder.CreateIndex(

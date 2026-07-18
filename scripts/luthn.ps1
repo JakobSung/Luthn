@@ -382,7 +382,10 @@ function Ensure-ConfigValue {
 }
 
 function Ensure-ServiceTokenScope {
-    param([Parameter(Mandatory = $true)][string]$Scope)
+    param(
+        [Parameter(Mandatory = $true)][string]$Scope,
+        [switch]$Required
+    )
     for ($index = 0; $index -lt 16; $index++) {
         $value = Read-ConfigValue "Luthn__Auth__Tokens__0__Scopes__$index"
         if ($value -ceq "*" -or $value -ceq $Scope) { return }
@@ -394,7 +397,10 @@ function Ensure-ServiceTokenScope {
             return
         }
     }
-    throw "No free service-token scope slot is available for $Scope."
+    if ($Required) {
+        throw "No free service-token scope slot is available for $Scope."
+    }
+    Write-Warning "The custom service-token scope table is full; $Scope was not added."
 }
 
 function New-ServiceToken {
@@ -706,7 +712,10 @@ function Install-Luthn {
         for ($index = 0; $index -lt $scopes.Count; $index++) {
             Ensure-ConfigValue "Luthn__Auth__Tokens__0__Scopes__$index" $scopes[$index]
         }
-        Ensure-ServiceTokenScope "access.request"
+        $accessScopeRequired = $connectCodex -or
+            [IO.File]::Exists($script:CodexStateFile) -or
+            [IO.File]::Exists($script:CodexPendingStateFile)
+        Ensure-ServiceTokenScope "access.request" -Required:$accessScopeRequired
     }
 
     Write-Host "Starting Luthn..."
@@ -960,7 +969,7 @@ function Update-Luthn {
                 throw "Codex connector reconciliation failed: $detail"
             }
         }
-        Ensure-ServiceTokenScope "access.request"
+        Ensure-ServiceTokenScope "access.request" -Required:$connectorWasConfigured
     } catch {
         $restoreErrors = @()
         foreach ($snapshot in @($runtimeSnapshots) + @($connectorSnapshots)) {

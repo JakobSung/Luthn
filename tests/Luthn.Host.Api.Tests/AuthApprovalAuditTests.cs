@@ -246,6 +246,41 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         Assert.InRange(expiresAt - createdAt, TimeSpan.FromSeconds(599), TimeSpan.FromSeconds(601));
     }
 
+    [Theory]
+    [InlineData(0, HttpStatusCode.BadRequest)]
+    [InlineData(59, HttpStatusCode.BadRequest)]
+    [InlineData(60, HttpStatusCode.Created)]
+    [InlineData(3600, HttpStatusCode.Created)]
+    [InlineData(3601, HttpStatusCode.BadRequest)]
+    public async Task SensitiveAccessRequestValidatesExplicitExpiryBoundaries(
+        int expiresInSeconds,
+        HttpStatusCode expectedStatus)
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        client.SetBearer(RequestBearer);
+
+        using var response = await client.PostAsJsonAsync("/api/access-requests", new
+        {
+            sensitiveReferenceId = "sensitive-ref-1",
+            reason = "Verify the explicit request lifetime boundary.",
+            sessionId = $"session-expiry-{expiresInSeconds}",
+            expiresInSeconds
+        });
+
+        Assert.Equal(expectedStatus, response.StatusCode);
+        if (expectedStatus == HttpStatusCode.Created)
+        {
+            using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+            var createdAt = body.RootElement.GetProperty("createdAt").GetDateTimeOffset();
+            var expiresAt = body.RootElement.GetProperty("expiresAt").GetDateTimeOffset();
+            Assert.InRange(
+                expiresAt - createdAt,
+                TimeSpan.FromSeconds(expiresInSeconds - 1),
+                TimeSpan.FromSeconds(expiresInSeconds + 1));
+        }
+    }
+
     [Fact]
     public async Task ExpiredSensitiveAccessRequestTransitionsToExpiredWithMetadataOnlyAudit()
     {
@@ -552,9 +587,61 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var request = await db.SensitiveAccessRequests.SingleAsync(record => record.Id == requestId);
         var reference = await db.SensitiveRecordReferences
             .SingleAsync(record => record.Id == "sensitive-ref-without-safe-output");
-        Assert.Equal("Public-safe release steps.", reference.RedactedSummary);
+        Assert.Equal("Public-safe release steps.", request.RedactedSummary);
+        Assert.Equal("", reference.RedactedSummary);
+    }
+
+    [Fact]
+    public async Task RedactedResultsRemainImmutableAndScopedToTheirAccessRequest()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var firstRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
+        var secondRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
+
+        client.SetBearer(DeciderBearer);
+        using var firstApproval = await client.PostAsJsonAsync($"/api/access-requests/{firstRequestId}/approve", new
+        {
+            reason = "Approve the first request-specific projection.",
+            redactedSummary = "First public-safe result."
+        });
+        Assert.Equal(HttpStatusCode.OK, firstApproval.StatusCode);
+
+        client.SetBearer(RequestBearer);
+        using var pendingSecondResult = await client.GetAsync($"/api/access-requests/{secondRequestId}/result");
+        using var pendingSecondBody = await JsonDocument.ParseAsync(await pendingSecondResult.Content.ReadAsStreamAsync());
+        Assert.Equal("Pending", pendingSecondBody.RootElement.GetProperty("status").GetString());
+        Assert.False(pendingSecondBody.RootElement.GetProperty("redactedOutputAvailable").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, pendingSecondBody.RootElement.GetProperty("redactedOutput").ValueKind);
+
+        client.SetBearer(DeciderBearer);
+        using var secondApproval = await client.PostAsJsonAsync($"/api/access-requests/{secondRequestId}/approve", new
+        {
+            reason = "Approve a different request-specific projection.",
+            redactedSummary = "Second public-safe result."
+        });
+        Assert.Equal(HttpStatusCode.OK, secondApproval.StatusCode);
+
+        client.SetBearer(RequestBearer);
+        using var firstResult = await client.GetAsync($"/api/access-requests/{firstRequestId}/result");
+        using var firstBody = await JsonDocument.ParseAsync(await firstResult.Content.ReadAsStreamAsync());
+        using var secondResult = await client.GetAsync($"/api/access-requests/{secondRequestId}/result");
+        using var secondBody = await JsonDocument.ParseAsync(await secondResult.Content.ReadAsStreamAsync());
+
+        Assert.Equal("First public-safe result.", firstBody.RootElement.GetProperty("redactedOutput").GetString());
+        Assert.Equal("Second public-safe result.", secondBody.RootElement.GetProperty("redactedOutput").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(
+            "First public-safe result.",
+            (await db.SensitiveAccessRequests.SingleAsync(record => record.Id == firstRequestId)).RedactedSummary);
+        Assert.Equal(
+            "Second public-safe result.",
+            (await db.SensitiveAccessRequests.SingleAsync(record => record.Id == secondRequestId)).RedactedSummary);
     }
 
     [Fact]

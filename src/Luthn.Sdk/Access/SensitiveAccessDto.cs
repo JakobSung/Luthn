@@ -17,13 +17,18 @@ public sealed record SensitiveAccessRequestDto(
     [property: JsonPropertyName("sensitiveReferenceId")] string SensitiveReferenceId,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("requestedBy")] string RequestedBy,
-    [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
-    [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiresAt,
     [property: JsonPropertyName("decidedBy")] string? DecidedBy,
     [property: JsonPropertyName("decidedAt")] DateTimeOffset? DecidedAt,
     [property: JsonPropertyName("redactedOutputAvailable")] bool RedactedOutputAvailable,
-    [property: JsonPropertyName("outputPolicy")] string OutputPolicy);
+    [property: JsonPropertyName("outputPolicy")] string OutputPolicy)
+{
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; init; } = "";
+
+    [JsonPropertyName("expiresAt")]
+    public DateTimeOffset ExpiresAt { get; init; }
+}
 
 public sealed record SensitiveAccessResultDto(
     [property: JsonPropertyName("id")] string Id,

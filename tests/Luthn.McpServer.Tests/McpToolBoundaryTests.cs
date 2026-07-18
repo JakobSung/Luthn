@@ -502,13 +502,15 @@ public sealed class McpToolBoundaryTests
                 "sensitive-ref-1",
                 "Pending",
                 "agent-service",
-                request.SessionId,
                 DateTimeOffset.UnixEpoch,
-                DateTimeOffset.UnixEpoch.AddMinutes(10),
                 null,
                 null,
                 false,
-                "pending-approval"));
+                "pending-approval")
+            {
+                SessionId = request.SessionId,
+                ExpiresAt = DateTimeOffset.UnixEpoch.AddMinutes(10)
+            });
 
         public Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
             string id,
@@ -518,13 +520,15 @@ public sealed class McpToolBoundaryTests
                 "sensitive-ref-1",
                 "Pending",
                 "agent-service",
-                "session-1",
                 DateTimeOffset.UnixEpoch,
-                DateTimeOffset.UnixEpoch.AddMinutes(10),
                 null,
                 null,
                 false,
-                "pending-approval"));
+                "pending-approval")
+            {
+                SessionId = "session-1",
+                ExpiresAt = DateTimeOffset.UnixEpoch.AddMinutes(10)
+            });
 
         private static SharedMemoryItemDto MemoryItem() =>
             new(

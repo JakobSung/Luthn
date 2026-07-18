@@ -81,10 +81,7 @@ public static class SensitiveAccessEndpoints
             .Take(take)
             .Select(record => new SensitiveAccessRequestListItem(
                 record,
-                db.SensitiveRecordReferences
-                    .Where(reference => reference.Id == record.SensitiveRecordReferenceId)
-                    .Select(reference => reference.RedactedSummary != "")
-                    .SingleOrDefault()))
+                record.RedactedSummary != ""))
             .ToArrayAsync(cancellationToken);
 
         return TypedResults.Ok(new SensitiveAccessRequestsResponse(
@@ -121,9 +118,7 @@ public static class SensitiveAccessEndpoints
         var sessionId = string.IsNullOrWhiteSpace(request.SessionId)
             ? $"legacy-{Guid.NewGuid():N}"
             : request.SessionId.Trim();
-        var expiresInSeconds = request.ExpiresInSeconds == 0
-            ? DefaultExpirySeconds
-            : request.ExpiresInSeconds;
+        var expiresInSeconds = request.ExpiresInSeconds ?? DefaultExpirySeconds;
         var actor = ServiceTokenAuthorization.GetActor(httpContext);
         var accessRequest = new SensitiveAccessRequestRecord
         {
@@ -173,7 +168,7 @@ public static class SensitiveAccessEndpoints
         }
 
         var redactedOutputAvailable = await HasRedactedOutputAsync(
-            request.SensitiveRecordReferenceId,
+            request.Id,
             db,
             cancellationToken);
         return TypedResults.Ok(ToResponse(request, redactedOutputAvailable));
@@ -191,11 +186,7 @@ public static class SensitiveAccessEndpoints
 
         if (request is not null)
         {
-            var safeSummary = await db.SensitiveRecordReferences
-                .Where(reference => reference.Id == request.SensitiveRecordReferenceId)
-                .Select(reference => reference.RedactedSummary)
-                .SingleOrDefaultAsync(cancellationToken);
-            var response = ToResultResponse(request, safeSummary);
+            var response = ToResultResponse(request, request.RedactedSummary);
             var observedAt = DateTimeOffset.UtcNow;
             db.AuditEvents.Add(new AuditEventRecord
             {
@@ -347,25 +338,73 @@ public static class SensitiveAccessEndpoints
         }
 
         var observedAt = DateTimeOffset.UtcNow;
+        var decisionRecord = new SensitiveAccessDecisionRecord
+        {
+            Id = $"decision-{Guid.NewGuid():N}",
+            SensitiveAccessRequestId = accessRequest.Id,
+            Decision = decisionKind,
+            DecidedBy = actor,
+            DecisionReason = request.Reason?.Trim() ?? "",
+            DecidedAt = observedAt,
+            PayloadClass = "metadata-only",
+            RedactionState = redactionState
+        };
+        var auditRecord = new AuditEventRecord
+        {
+            Id = $"audit-{Guid.NewGuid():N}",
+            OccurredAt = observedAt,
+            Actor = actor,
+            Action = auditAction,
+            SubjectId = accessRequest.Id,
+            PayloadClass = "metadata-only",
+            RedactionState = redactionState
+        };
+        var transitioned = false;
         try
         {
-            await using IDbContextTransaction? transaction = isRelational
-                ? await db.Database.BeginTransactionAsync(cancellationToken)
-                : null;
-            var transitioned = false;
             if (isRelational)
             {
                 db.Entry(accessRequest).State = EntityState.Detached;
-                transitioned = await db.SensitiveAccessRequests
-                    .Where(record =>
-                        record.Id == id &&
-                        record.Status == SensitiveAccessRequestStatus.Pending &&
-                        record.ExpiresAt > observedAt)
-                    .ExecuteUpdateAsync(setters => setters
-                        .SetProperty(record => record.Status, status)
-                        .SetProperty(record => record.DecidedBy, actor)
-                        .SetProperty(record => record.DecidedAt, observedAt)
-                        .SetProperty(record => record.UpdatedAt, observedAt), cancellationToken) == 1;
+                var strategy = db.Database.CreateExecutionStrategy();
+                await strategy.ExecuteInTransactionAsync(
+                    async operationCancellationToken =>
+                    {
+                        if (db.Entry(decisionRecord).State == EntityState.Added)
+                        {
+                            db.Entry(decisionRecord).State = EntityState.Detached;
+                            db.Entry(auditRecord).State = EntityState.Detached;
+                        }
+                        transitioned = await db.SensitiveAccessRequests
+                            .Where(record =>
+                                record.Id == id &&
+                                record.Status == SensitiveAccessRequestStatus.Pending &&
+                                record.ExpiresAt > observedAt)
+                            .ExecuteUpdateAsync(setters => setters
+                                .SetProperty(record => record.Status, status)
+                                .SetProperty(record => record.DecidedBy, actor)
+                                .SetProperty(record => record.DecidedAt, observedAt)
+                                .SetProperty(record => record.RedactedSummary, redactedSummary.Value ?? "")
+                                .SetProperty(record => record.UpdatedAt, observedAt), operationCancellationToken) == 1;
+                        if (!transitioned)
+                        {
+                            transitioned = await db.SensitiveAccessDecisions
+                                .AsNoTracking()
+                                .AnyAsync(record => record.Id == decisionRecord.Id, operationCancellationToken);
+                            return;
+                        }
+
+                        if (db.Entry(decisionRecord).State == EntityState.Detached)
+                        {
+                            db.SensitiveAccessDecisions.Add(decisionRecord);
+                            db.AuditEvents.Add(auditRecord);
+                        }
+                        await db.SaveChangesAsync(acceptAllChangesOnSuccess: false, operationCancellationToken);
+                    },
+                    operationCancellationToken => db.SensitiveAccessDecisions
+                        .AsNoTracking()
+                        .AnyAsync(record => record.Id == decisionRecord.Id, operationCancellationToken),
+                    cancellationToken);
+                db.ChangeTracker.AcceptAllChanges();
             }
             else
             {
@@ -377,16 +416,19 @@ public static class SensitiveAccessEndpoints
                     accessRequest.Status = status;
                     accessRequest.DecidedBy = actor;
                     accessRequest.DecidedAt = observedAt;
+                    accessRequest.RedactedSummary = redactedSummary.Value ?? "";
                     accessRequest.UpdatedAt = observedAt;
+                }
+                if (transitioned)
+                {
+                    db.SensitiveAccessDecisions.Add(decisionRecord);
+                    db.AuditEvents.Add(auditRecord);
+                    await db.SaveChangesAsync(cancellationToken);
                 }
             }
 
             if (!transitioned)
             {
-                if (transaction is not null)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                }
                 await ExpirePendingRequestsAsync(db, id, cancellationToken);
                 return TypedResults.BadRequest(new ProblemDetails
                 {
@@ -395,39 +437,6 @@ public static class SensitiveAccessEndpoints
                 });
             }
 
-            db.SensitiveAccessDecisions.Add(new SensitiveAccessDecisionRecord
-            {
-                Id = $"decision-{Guid.NewGuid():N}",
-                SensitiveAccessRequestId = accessRequest.Id,
-                Decision = decisionKind,
-                DecidedBy = actor,
-                DecisionReason = request.Reason?.Trim() ?? "",
-                DecidedAt = observedAt,
-                PayloadClass = "metadata-only",
-                RedactionState = redactionState
-            });
-            if (redactedSummary.Value is not null)
-            {
-                var reference = await db.SensitiveRecordReferences
-                    .SingleAsync(record => record.Id == accessRequest.SensitiveRecordReferenceId, cancellationToken);
-                reference.RedactedSummary = redactedSummary.Value;
-            }
-            db.AuditEvents.Add(new AuditEventRecord
-            {
-                Id = $"audit-{Guid.NewGuid():N}",
-                OccurredAt = observedAt,
-                Actor = actor,
-                Action = auditAction,
-                SubjectId = accessRequest.Id,
-                PayloadClass = "metadata-only",
-                RedactionState = redactionState
-            });
-
-            await db.SaveChangesAsync(cancellationToken);
-            if (transaction is not null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
         }
         finally
         {
@@ -441,11 +450,12 @@ public static class SensitiveAccessEndpoints
         accessRequest.Status = status;
         accessRequest.DecidedBy = actor;
         accessRequest.DecidedAt = observedAt;
+        accessRequest.RedactedSummary = redactedSummary.Value ?? "";
         accessRequest.UpdatedAt = observedAt;
 
         var redactedOutputAvailable = status == SensitiveAccessRequestStatus.Approved &&
             await HasRedactedOutputAsync(
-                accessRequest.SensitiveRecordReferenceId,
+                accessRequest.Id,
                 db,
                 cancellationToken);
 
@@ -489,8 +499,8 @@ public static class SensitiveAccessEndpoints
             }
         }
 
-        if (request.ExpiresInSeconds != 0 &&
-            (request.ExpiresInSeconds < MinExpirySeconds || request.ExpiresInSeconds > MaxExpirySeconds))
+        if (request.ExpiresInSeconds is int expiresInSeconds &&
+            (expiresInSeconds < MinExpirySeconds || expiresInSeconds > MaxExpirySeconds))
         {
             return CreateValidationProblem($"expiresInSeconds must be between {MinExpirySeconds} and {MaxExpirySeconds}.");
         }
@@ -644,12 +654,12 @@ public static class SensitiveAccessEndpoints
     }
 
     private static Task<bool> HasRedactedOutputAsync(
-        string sensitiveReferenceId,
+        string requestId,
         LuthnDbContext db,
         CancellationToken cancellationToken) =>
-        db.SensitiveRecordReferences
-            .Where(reference => reference.Id == sensitiveReferenceId)
-            .Select(reference => reference.RedactedSummary != "")
+        db.SensitiveAccessRequests
+            .Where(request => request.Id == requestId)
+            .Select(request => request.RedactedSummary != "")
             .SingleOrDefaultAsync(cancellationToken);
 
     private static async Task ExpirePendingRequestsAsync(
@@ -671,40 +681,11 @@ public static class SensitiveAccessEndpoints
             return;
         }
 
-        await using IDbContextTransaction? transaction = db.Database.IsRelational()
-            ? await db.Database.BeginTransactionAsync(cancellationToken)
-            : null;
-
-        foreach (var candidateId in candidates)
+        if (db.Database.IsRelational())
         {
-            bool transitioned;
-            if (db.Database.IsRelational())
-            {
-                transitioned = await db.SensitiveAccessRequests
-                    .Where(request =>
-                        request.Id == candidateId &&
-                        request.Status == SensitiveAccessRequestStatus.Pending &&
-                        request.ExpiresAt <= observedAt)
-                    .ExecuteUpdateAsync(setters => setters
-                        .SetProperty(request => request.Status, SensitiveAccessRequestStatus.Expired)
-                        .SetProperty(request => request.UpdatedAt, observedAt), cancellationToken) == 1;
-            }
-            else
-            {
-                var request = await db.SensitiveAccessRequests
-                    .SingleAsync(record => record.Id == candidateId, cancellationToken);
-                transitioned = request.Status == SensitiveAccessRequestStatus.Pending &&
-                    request.ExpiresAt <= observedAt;
-                if (transitioned)
-                {
-                    request.Status = SensitiveAccessRequestStatus.Expired;
-                    request.UpdatedAt = observedAt;
-                }
-            }
-
-            if (transitioned)
-            {
-                db.AuditEvents.Add(new AuditEventRecord
+            var auditRecords = candidates.ToDictionary(
+                candidateId => candidateId,
+                candidateId => new AuditEventRecord
                 {
                     Id = $"audit-{Guid.NewGuid():N}",
                     OccurredAt = observedAt,
@@ -714,23 +695,91 @@ public static class SensitiveAccessEndpoints
                     PayloadClass = "metadata-only",
                     RedactionState = "expired-no-output"
                 });
-            }
+            var transitionedCandidateIds = new HashSet<string>(StringComparer.Ordinal);
+            var strategy = db.Database.CreateExecutionStrategy();
+            await strategy.ExecuteInTransactionAsync(
+                async operationCancellationToken =>
+                {
+                    foreach (var auditRecord in auditRecords.Values)
+                    {
+                        if (db.Entry(auditRecord).State == EntityState.Added)
+                        {
+                            db.Entry(auditRecord).State = EntityState.Detached;
+                        }
+                    }
+                    transitionedCandidateIds.Clear();
+                    foreach (var candidateId in candidates)
+                    {
+                        var transitioned = await db.SensitiveAccessRequests
+                            .Where(request =>
+                                request.Id == candidateId &&
+                                request.Status == SensitiveAccessRequestStatus.Pending &&
+                                request.ExpiresAt <= observedAt)
+                            .ExecuteUpdateAsync(setters => setters
+                                .SetProperty(request => request.Status, SensitiveAccessRequestStatus.Expired)
+                                .SetProperty(request => request.UpdatedAt, observedAt), operationCancellationToken) == 1;
+                        if (transitioned)
+                        {
+                            transitionedCandidateIds.Add(candidateId);
+                            var auditRecord = auditRecords[candidateId];
+                            if (db.Entry(auditRecord).State == EntityState.Detached)
+                            {
+                                db.AuditEvents.Add(auditRecord);
+                            }
+                        }
+                    }
+
+                    await db.SaveChangesAsync(acceptAllChangesOnSuccess: false, operationCancellationToken);
+                },
+                async operationCancellationToken =>
+                {
+                    if (transitionedCandidateIds.Count == 0)
+                    {
+                        return true;
+                    }
+
+                    var auditIds = transitionedCandidateIds
+                        .Select(candidateId => auditRecords[candidateId].Id)
+                        .ToArray();
+                    return await db.AuditEvents
+                        .AsNoTracking()
+                        .CountAsync(record => auditIds.Contains(record.Id), operationCancellationToken) == auditIds.Length;
+                },
+                cancellationToken);
+            db.ChangeTracker.AcceptAllChanges();
+            return;
         }
 
-        await db.SaveChangesAsync(cancellationToken);
-        if (transaction is not null)
+        foreach (var candidateId in candidates)
         {
-            await transaction.CommitAsync(cancellationToken);
+            var request = await db.SensitiveAccessRequests
+                .SingleAsync(record => record.Id == candidateId, cancellationToken);
+            var transitioned = request.Status == SensitiveAccessRequestStatus.Pending &&
+                request.ExpiresAt <= observedAt;
+            if (!transitioned)
+            {
+                continue;
+            }
+
+            request.Status = SensitiveAccessRequestStatus.Expired;
+            request.UpdatedAt = observedAt;
+            db.AuditEvents.Add(new AuditEventRecord
+            {
+                Id = $"audit-{Guid.NewGuid():N}",
+                OccurredAt = observedAt,
+                Actor = "local-expiry",
+                Action = "sensitive_access.expired",
+                SubjectId = candidateId,
+                PayloadClass = "metadata-only",
+                RedactionState = "expired-no-output"
+            });
         }
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private sealed record SensitiveAccessRequestListItem(
         SensitiveAccessRequestRecord Request,
         bool RedactedOutputAvailable);
-
-    private sealed record SensitiveAccessResultData(
-        SensitiveAccessRequestRecord Request,
-        string? RedactedOutput);
 
     private sealed record ValidatedRedactedSummary(
         string? Value,
@@ -742,7 +791,7 @@ public sealed record SensitiveAccessRequestCreateRequest
     public string SensitiveReferenceId { get; init; } = "";
     public string Reason { get; init; } = "";
     public string SessionId { get; init; } = "";
-    public int ExpiresInSeconds { get; init; }
+    public int? ExpiresInSeconds { get; init; }
 }
 
 public sealed record SensitiveAccessDecisionRequest

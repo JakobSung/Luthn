@@ -375,6 +375,11 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<string>("RedactedSummary")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
                     b.Property<string>("RequestedBy")
                         .IsRequired()
                         .HasMaxLength(128)

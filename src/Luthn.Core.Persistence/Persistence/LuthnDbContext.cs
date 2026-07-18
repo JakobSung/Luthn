@@ -95,6 +95,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.RequestedBy).HasMaxLength(128).IsRequired();
             entity.Property(record => record.SessionId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.RequestReason).HasMaxLength(1000).IsRequired();
+            entity.Property(record => record.RedactedSummary).HasMaxLength(4000).IsRequired();
             entity.Property(record => record.Status).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.DecidedBy).HasMaxLength(128);
             entity.HasIndex(record => new { record.Status, record.ExpiresAt, record.UpdatedAt });

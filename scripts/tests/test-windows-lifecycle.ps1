@@ -351,8 +351,20 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $originalInstructions) "disconnect should preserve unrelated instructions"
 
     $firstHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
+    $configBeforeFullScopeInstall = [IO.File]::ReadAllText($configFile)
+    $nonScopeConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object {
+        $_ -notmatch '^Luthn__Auth__Tokens__0__Scopes__\d+='
+    })
+    $fullCustomScopes = @(0..15 | ForEach-Object { "Luthn__Auth__Tokens__0__Scopes__$_=custom.scope.$_" })
+    [IO.File]::WriteAllText(
+        $configFile,
+        ((@($nonScopeConfig) + $fullCustomScopes) -join "`n") + "`n",
+        [Text.UTF8Encoding]::new($false))
     $secondInstall = Invoke-InstallerProcess $installerPath
     Assert-True ($secondInstall.ExitCode -eq 0) "repeated install should be idempotent: $($secondInstall.Output)"
+    Assert-True ($secondInstall.Output -match "scope table is full") "install should warn instead of failing for a full custom scope table without connector ownership"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^Luthn__Auth__Tokens__0__Scopes__15=custom\.scope\.15$") "install should preserve a full custom scope table"
+    [IO.File]::WriteAllText($configFile, $configBeforeFullScopeInstall, [Text.UTF8Encoding]::new($false))
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "repeated install should preserve the validated CLI"
 
     [IO.File]::WriteAllText($failingCli, '$script:LuthnWindowsCliVersion = "1"' + "`nexit 23`n", [Text.UTF8Encoding]::new($false))
@@ -453,6 +465,20 @@ esac
     }
     Assert-True ($stopIndex -ge 0 -and $stopIndex -lt $backupIndex) "update should stop API writes before backup"
     Assert-True ($backupIndex -lt $migrationIndex -and $migrationIndex -lt $apiStartIndex) "update should back up before migration and start API afterward"
+
+    $configBeforeFullScopeUpdate = [IO.File]::ReadAllText($configFile)
+    $nonScopeConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object {
+        $_ -notmatch '^Luthn__Auth__Tokens__0__Scopes__\d+='
+    })
+    [IO.File]::WriteAllText(
+        $configFile,
+        ((@($nonScopeConfig) + $fullCustomScopes) -join "`n") + "`n",
+        [Text.UTF8Encoding]::new($false))
+    $fullScopeUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($fullScopeUpdate.ExitCode -eq 0) "update should not fail for a full custom scope table without connector ownership: $($fullScopeUpdate.Output)"
+    Assert-True ($fullScopeUpdate.Output -match "scope table is full") "update should warn when it cannot add access.request to a full custom scope table"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^Luthn__Auth__Tokens__0__Scopes__15=custom\.scope\.15$") "update should preserve a full custom scope table"
+    [IO.File]::WriteAllText($configFile, $configBeforeFullScopeUpdate, [Text.UTF8Encoding]::new($false))
 
     $updatedHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
     $env:FAKE_DOCKER_PULL_FAIL = "true"
