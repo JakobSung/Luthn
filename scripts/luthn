@@ -267,6 +267,7 @@ install_runtime_file() {
 
 ensure_connector_scopes() {
   connector_scopes_changed=false
+  local check_only="${1:-false}"
   if ! ensure_directories; then
     return 1
   fi
@@ -303,6 +304,9 @@ ensure_connector_scopes() {
   if (( ${#empty_indices[@]} < required_slots )); then
     echo "No free service-token scope slots are available for the connector." >&2
     return 1
+  fi
+  if [[ "$check_only" == "--check-only" ]]; then
+    return 0
   fi
 
   local key1=""
@@ -504,6 +508,12 @@ install_luthn() {
 
   require_docker
   require_command curl
+
+  if [[ -f "$config_file" ]] && has_codex_connector_state \
+    && ! ensure_connector_scopes --check-only; then
+    echo "Install stopped because the active Codex connector scopes could not be configured." >&2
+    return 1
+  fi
 
   image="$(read_config LUTHN_IMAGE "${LUTHN_IMAGE:-$default_image}")"
   echo "Pulling $image..."
@@ -1394,6 +1404,11 @@ update_luthn() {
 
   target_id="$(docker image inspect --format '{{.Id}}' "$target_image")"
   target_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target_image" 2>/dev/null || true)"
+  if has_codex_connector_state && ! ensure_connector_scopes --check-only; then
+    record_state failed "$target_image" "$target_id" "$previous_id"
+    echo "Update stopped because the active Codex connector scopes could not be configured." >&2
+    return 1
+  fi
   runtime_rollback_dir="$(mktemp -d "$state_dir/runtime-update.XXXXXX")"
   cp -p "$compose_file" "$runtime_rollback_dir/compose.yaml"
   cp -p "$cli_path" "$runtime_rollback_dir/luthn"

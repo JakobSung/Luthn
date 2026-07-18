@@ -675,11 +675,20 @@ after_scope_hash="$(rg '^Luthn__Auth__Tokens__0__Scopes__' "$full_scope_config" 
 
 echo "[17/18] active connector update stops when scope setup fails"
 active_scope_config="$tmp_root/full-scope-active.env"
-cp "$full_scope_config" "$active_scope_config"
+printf 'LUTHN_IMAGE=test/luthn:old\n' >"$active_scope_config"
+printf 'Luthn__Auth__Tokens__0__Scopes__0=agent.connection.read\n' >>"$active_scope_config"
+printf 'Luthn__Auth__Tokens__0__Scopes__1=agent.connection.write\n' >>"$active_scope_config"
+for scope_index in {2..15}; do
+  printf 'Luthn__Auth__Tokens__0__Scopes__%s=custom.%s\n' \
+    "$scope_index" "$scope_index" >>"$active_scope_config"
+done
 active_scope_state="$tmp_root/full-scope-active-state"
 mkdir -p "$active_scope_state/connectors"
 touch "$active_scope_state/connectors/codex.env"
 compose_marker="$tmp_root/full-scope-active-compose-called"
+active_cli_hash="$(shasum -a 256 "$cli" | awk '{print $1}')"
+active_compose_hash="$(shasum -a 256 "$data_dir/compose.yaml" | awk '{print $1}')"
+active_helper_hash="$(shasum -a 256 "$data_dir/runtime/luthn-codex-connector.py" | awk '{print $1}')"
 if (
   export HOME="$home_dir"
   export PATH="$fake_bin:$PATH"
@@ -699,7 +708,11 @@ if (
   pull_image() { :; }
   ensure_directories() { mkdir -p "$state_dir/backups"; }
   image_id_for_container() { :; }
-  download_runtime() { :; }
+  download_runtime() {
+    printf 'replaced\n' >"$cli_path"
+    printf 'replaced\n' >"$compose_file"
+    printf 'replaced\n' >"$runtime_dir/luthn-codex-connector.py"
+  }
   reconcile_codex_managed_configuration() { :; }
   compose_cmd() { touch "$compose_marker"; }
   record_state() { :; }
@@ -710,6 +723,9 @@ if (
   exit 1
 fi
 [[ ! -e "$compose_marker" ]]
+[[ "$(shasum -a 256 "$cli" | awk '{print $1}')" == "$active_cli_hash" ]]
+[[ "$(shasum -a 256 "$data_dir/compose.yaml" | awk '{print $1}')" == "$active_compose_hash" ]]
+[[ "$(shasum -a 256 "$data_dir/runtime/luthn-codex-connector.py" | awk '{print $1}')" == "$active_helper_hash" ]]
 
 echo "[18/18] active connector update reconciles templates and rolls back probe failures"
 reconcile_root="$tmp_root/update-reconcile"

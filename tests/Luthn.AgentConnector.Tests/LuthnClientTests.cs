@@ -585,7 +585,7 @@ public sealed class LuthnClientTests
     }
 
     [Fact]
-    public void LegacyInterfaceRetainsAgentMemberDefinitionsForExplicitImplementations()
+    public async Task LegacyInterfaceRetainsAndDispatchesAgentMembersForExplicitImplementations()
     {
         var legacyMethodNames = typeof(ILuthnClient)
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
@@ -596,7 +596,10 @@ public sealed class LuthnClientTests
             .Select(method => method.Name);
 
         Assert.All(agentMethodNames, methodName => Assert.Contains(methodName, legacyMethodNames));
-        Assert.IsAssignableFrom<ILuthnClient>(new ExplicitLegacyClient());
+        var agentClient = Assert.IsAssignableFrom<ILuthnAgentClient>(new ExplicitLegacyClient());
+        var result = await agentClient.GetSensitiveAccessResultAsync("access-legacy");
+
+        Assert.IsType<SensitiveAccessResultDto>(result);
     }
 
     private sealed class ExplicitLegacyClient : ILuthnClient
@@ -628,7 +631,16 @@ public sealed class LuthnClientTests
         Task<SensitiveAccessResultDto> ILuthnClient.GetSensitiveAccessResultAsync(
             string id,
             CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+            Task.FromResult(new SensitiveAccessResultDto(
+                id,
+                "sensitive-ref-legacy",
+                "Approved",
+                "approved-redacted-output-available",
+                true,
+                "Public-safe legacy result.",
+                "redacted-output",
+                "approved-redacted-output-available",
+                []));
 
         Task<SensitiveAccessRequestDto> ILuthnClient.ApproveSensitiveAccessRequestAsync(
             string id,

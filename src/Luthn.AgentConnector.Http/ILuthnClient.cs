@@ -129,14 +129,29 @@ public interface ILuthnClient : ILuthnAgentClient
         ClassificationPreviewRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<TurnSummaryIntakeResponseDto> ILuthnAgentClient.IntakeTurnSummaryAsync(
+        TurnSummaryIntakeRequestDto request,
+        CancellationToken cancellationToken) =>
+        IntakeTurnSummaryAsync(request, cancellationToken);
+
     new Task<TurnSummaryIntakeResponseDto> IntakeTurnSummaryAsync(
         TurnSummaryIntakeRequestDto request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement turn summary intake.");
 
+    Task<AgentConnectionListDto> ILuthnAgentClient.ListAgentConnectionsAsync(
+        CancellationToken cancellationToken) =>
+        ListAgentConnectionsAsync(cancellationToken);
+
     new Task<AgentConnectionListDto> ListAgentConnectionsAsync(
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement agent connection status reads.");
+
+    Task<AgentConnectionDto> ILuthnAgentClient.ReportAgentConnectionObservationAsync(
+        string agentId,
+        AgentConnectionObservationRequestDto request,
+        CancellationToken cancellationToken) =>
+        ReportAgentConnectionObservationAsync(agentId, request, cancellationToken);
 
     new Task<AgentConnectionDto> ReportAgentConnectionObservationAsync(
         string agentId,
@@ -144,35 +159,70 @@ public interface ILuthnClient : ILuthnAgentClient
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement agent connection observations.");
 
+    Task<SourceIntakeResponseDto> ILuthnAgentClient.IntakeSourceAsync(
+        SourceIntakeRequestDto request,
+        CancellationToken cancellationToken) =>
+        IntakeSourceAsync(request, cancellationToken);
+
     new Task<SourceIntakeResponseDto> IntakeSourceAsync(
         SourceIntakeRequestDto request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement source intake.");
+
+    Task<SharedMemoryItemDto> ILuthnAgentClient.CreateSharedMemoryItemAsync(
+        CreateSharedMemoryItemRequestDto request,
+        CancellationToken cancellationToken) =>
+        CreateSharedMemoryItemAsync(request, cancellationToken);
 
     new Task<SharedMemoryItemDto> CreateSharedMemoryItemAsync(
         CreateSharedMemoryItemRequestDto request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement shared memory writes.");
 
+    Task<SharedMemoryItemDto> ILuthnAgentClient.GetSharedMemoryItemAsync(
+        string id,
+        CancellationToken cancellationToken) =>
+        GetSharedMemoryItemAsync(id, cancellationToken);
+
     new Task<SharedMemoryItemDto> GetSharedMemoryItemAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement shared memory reads.");
+
+    Task<SharedMemoryQueryResponseDto> ILuthnAgentClient.QuerySharedMemoryAsync(
+        SharedMemoryQueryRequestDto request,
+        CancellationToken cancellationToken) =>
+        QuerySharedMemoryAsync(request, cancellationToken);
 
     new Task<SharedMemoryQueryResponseDto> QuerySharedMemoryAsync(
         SharedMemoryQueryRequestDto request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement shared memory queries.");
 
+    Task<SensitiveAccessRequestDto> ILuthnAgentClient.CreateSensitiveAccessRequestAsync(
+        SensitiveAccessCreateRequestDto request,
+        CancellationToken cancellationToken) =>
+        CreateSensitiveAccessRequestAsync(request, cancellationToken);
+
     new Task<SensitiveAccessRequestDto> CreateSensitiveAccessRequestAsync(
         SensitiveAccessCreateRequestDto request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access requests.");
 
+    Task<SensitiveAccessRequestDto> ILuthnAgentClient.GetSensitiveAccessRequestAsync(
+        string id,
+        CancellationToken cancellationToken) =>
+        GetSensitiveAccessRequestAsync(id, cancellationToken);
+
     new Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access status reads.");
+
+    Task<SensitiveAccessResultDto> ILuthnAgentClient.GetSensitiveAccessResultAsync(
+        string id,
+        CancellationToken cancellationToken) =>
+        GetSensitiveAccessResultAsync(id, cancellationToken);
 
     new Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
         string id,
