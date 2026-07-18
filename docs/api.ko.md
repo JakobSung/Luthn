@@ -236,7 +236,7 @@ POST /api/access-requests/{id}/deny
 
 기존 민감 참조에 대한 메타데이터 전용 요청을 만들고 결정합니다. 원본 Vault/source payload는 반환하지 않습니다. 목록·결정에는 별도의 신뢰된 `access.decide`, 생성·조회에는 `access.request` scope가 필요합니다. MCP는 생성·상태·결과만 제공하며 승인·거절 도구를 노출하지 않습니다.
 
-생성 요청에는 `sessionId`와 60–3600초 범위의 `expiresInSeconds`가 필요합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한, 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은 메타데이터 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며 `pending-approval`, `expired-no-output`, `denied-no-output`, `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를 사용하고 원문은 반환하지 않습니다. 만료는 `sensitive_access.expired` 메타데이터 감사 사건으로 기록되며 결과 조회는 `sensitive_access.result_read` 감사 사건을 만듭니다.
+새 호출자는 `sessionId`와 60–3600초 범위의 `expiresInSeconds`를 보내야 합니다. 만료 필드 도입 전의 버전 없는 계약과 호환하기 위해 두 값을 생략한 기존 호출에는 서버가 `legacy-...` session id와 600초 만료를 부여합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한, 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은 메타데이터 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며 `pending-approval`, `expired-no-output`, `denied-no-output`, `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를 사용하고 원문은 반환하지 않습니다. 만료는 `sensitive_access.expired` 메타데이터 감사 사건으로 기록되며 결과 조회는 `sensitive_access.result_read` 감사 사건을 만듭니다.
 
 ## 감사 사건
 

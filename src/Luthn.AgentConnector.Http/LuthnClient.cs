@@ -252,6 +252,42 @@ public sealed class LuthnClient : ILuthnClient
         return await SendJsonAsync<SensitiveAccessResultDto>(request, cancellationToken);
     }
 
+    [Obsolete("Approval is an operator-only capability. Use the trusted access-decision API directly.")]
+    public Task<SensitiveAccessRequestDto> ApproveSensitiveAccessRequestAsync(
+        string id,
+        SensitiveAccessDecisionRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        SendSensitiveAccessDecisionAsync(id, "approve", request, cancellationToken);
+
+    [Obsolete("Denial is an operator-only capability. Use the trusted access-decision API directly.")]
+    public Task<SensitiveAccessRequestDto> DenySensitiveAccessRequestAsync(
+        string id,
+        SensitiveAccessDecisionRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        SendSensitiveAccessDecisionAsync(id, "deny", request, cancellationToken);
+
+    private async Task<SensitiveAccessRequestDto> SendSensitiveAccessDecisionAsync(
+        string id,
+        string decision,
+        SensitiveAccessDecisionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new ArgumentException("Sensitive access request id is required.", nameof(id));
+        }
+
+        ArgumentNullException.ThrowIfNull(request);
+        var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/access-requests/{Uri.EscapeDataString(id)}/{decision}")
+        {
+            Content = JsonContent.Create(request, options: JsonOptions)
+        };
+
+        return await SendJsonAsync<SensitiveAccessRequestDto>(httpRequest, cancellationToken);
+    }
+
 
     private async Task<T> SendJsonAsync<T>(
         HttpRequestMessage request,

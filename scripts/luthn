@@ -161,6 +161,7 @@ Luthn__Auth__Tokens__0__Scopes__3=memory.read
 Luthn__Auth__Tokens__0__Scopes__4=classification.preview
 Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read
 Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write
+Luthn__Auth__Tokens__0__Scopes__7=access.request
 EOF
   chmod 0600 "$config_file"
 }
@@ -272,6 +273,7 @@ ensure_connector_scopes() {
 
   local read_present=false
   local write_present=false
+  local access_request_present=false
   local wildcard_present=false
   local scope_value
   local scope_index
@@ -284,18 +286,20 @@ ensure_connector_scopes() {
       '*') wildcard_present=true ;;
       agent.connection.read) read_present=true ;;
       agent.connection.write) write_present=true ;;
+      access.request) access_request_present=true ;;
       '') empty_indices+=("$scope_index") ;;
     esac
   done
 
   if [[ "$wildcard_present" == "true" \
-    || ( "$read_present" == "true" && "$write_present" == "true" ) ]]; then
+    || ( "$read_present" == "true" && "$write_present" == "true" && "$access_request_present" == "true" ) ]]; then
     return 0
   fi
 
   local required_slots=0
   [[ "$read_present" == "true" ]] || required_slots=$((required_slots + 1))
   [[ "$write_present" == "true" ]] || required_slots=$((required_slots + 1))
+  [[ "$access_request_present" == "true" ]] || required_slots=$((required_slots + 1))
   if (( ${#empty_indices[@]} < required_slots )); then
     echo "No free service-token scope slots are available for the connector." >&2
     return 1
@@ -305,6 +309,8 @@ ensure_connector_scopes() {
   local value1=""
   local key2=""
   local value2=""
+  local key3=""
+  local value3=""
   local next_slot=0
   if [[ "$read_present" != "true" ]]; then
     key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
@@ -319,6 +325,19 @@ ensure_connector_scopes() {
       key2="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
       value2="agent.connection.write"
     fi
+    next_slot=$((next_slot + 1))
+  fi
+  if [[ "$access_request_present" != "true" ]]; then
+    if [[ -z "$key1" ]]; then
+      key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value1="access.request"
+    elif [[ -z "$key2" ]]; then
+      key2="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value2="access.request"
+    else
+      key3="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value3="access.request"
+    fi
   fi
 
   local input_file="$config_file"
@@ -327,14 +346,16 @@ ensure_connector_scopes() {
   if ! config_tmp="$(mktemp "${config_file}.connector-scopes.XXXXXX")"; then
     return 1
   fi
-  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" '
-    BEGIN { updated1 = 0; updated2 = 0 }
+  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" -v key3="$key3" -v value3="$value3" '
+    BEGIN { updated1 = 0; updated2 = 0; updated3 = 0 }
     key1 != "" && $1 == key1 { print key1 "=" value1; updated1 = 1; next }
     key2 != "" && $1 == key2 { print key2 "=" value2; updated2 = 1; next }
+    key3 != "" && $1 == key3 { print key3 "=" value3; updated3 = 1; next }
     { print }
     END {
       if (key1 != "" && !updated1) print key1 "=" value1
       if (key2 != "" && !updated2) print key2 "=" value2
+      if (key3 != "" && !updated3) print key3 "=" value3
     }
   ' "$input_file" >"$config_tmp"; then
     rm -f "$config_tmp"
@@ -345,6 +366,30 @@ ensure_connector_scopes() {
     return 1
   fi
   connector_scopes_changed=true
+}
+
+ensure_access_request_scope() {
+  connector_scopes_changed=false
+  local index key value
+  for index in $(seq 0 15); do
+    key="Luthn__Auth__Tokens__0__Scopes__${index}"
+    value="$(read_config "$key")"
+    if [[ "$value" == "*" || "$value" == "access.request" ]]; then
+      return 0
+    fi
+  done
+
+  for index in $(seq 0 15); do
+    key="Luthn__Auth__Tokens__0__Scopes__${index}"
+    if [[ -z "$(read_config "$key")" ]]; then
+      set_config "$key" access.request
+      connector_scopes_changed=true
+      return 0
+    fi
+  done
+
+  echo "No free service-token scope slot is available for access.request." >&2
+  return 1
 }
 
 require_installation() {
@@ -511,6 +556,8 @@ install_luthn() {
       echo "Install stopped because the active Codex connector scopes could not be configured." >&2
       return 1
     fi
+  elif ! ensure_access_request_scope; then
+    echo "warning: access.request could not be added because the custom service-token scope table is full" >&2
   fi
 
   echo "Starting Luthn..."
@@ -1406,6 +1453,8 @@ update_luthn() {
       echo "Update stopped because the active Codex connector scopes could not be configured." >&2
       return 1
     fi
+  elif ! ensure_access_request_scope; then
+    echo "warning: access.request could not be added because the custom service-token scope table is full" >&2
   fi
 
   compose_cmd up -d postgres

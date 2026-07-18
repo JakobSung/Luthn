@@ -3,7 +3,7 @@ using Luthn.AgentConnector.Http;
 
 namespace Luthn.McpServer.Tools;
 
-public sealed class GetSensitiveAccessResultTool(ILuthnClient client) : ILuthnMcpTool
+public sealed class GetSensitiveAccessResultTool(ILuthnAgentClient client) : ILuthnMcpTool
 {
     public string Name => "get_sensitive_access_result";
 

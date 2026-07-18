@@ -3,7 +3,7 @@ using Luthn.AgentConnector.Http;
 
 namespace Luthn.McpServer.Tools;
 
-public sealed class GetWikiProposalTool(ILuthnClient client) : ILuthnMcpTool
+public sealed class GetWikiProposalTool(ILuthnAgentClient client) : ILuthnMcpTool
 {
     public string Name => "get_wiki_proposal";
 

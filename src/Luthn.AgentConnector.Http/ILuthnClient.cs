@@ -9,7 +9,7 @@ using Luthn.Sdk.Wiki;
 
 namespace Luthn.AgentConnector.Http;
 
-public interface ILuthnClient
+public interface ILuthnAgentClient
 {
     Task<ContextPackDto> GetContextPackAsync(
         IReadOnlyList<string> coreTags,
@@ -68,13 +68,34 @@ public interface ILuthnClient
 
     Task<SensitiveAccessRequestDto> CreateSensitiveAccessRequestAsync(
         SensitiveAccessCreateRequestDto request,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement sensitive access requests.");
 
     Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
         string id,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement sensitive access status reads.");
 
     Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
         string id,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement sensitive access result reads.");
+
+}
+
+public interface ILuthnClient : ILuthnAgentClient
+{
+    [Obsolete("Approval is an operator-only capability. Use the trusted access-decision API directly.")]
+    Task<SensitiveAccessRequestDto> ApproveSensitiveAccessRequestAsync(
+        string id,
+        SensitiveAccessDecisionRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement sensitive access approvals.");
+
+    [Obsolete("Denial is an operator-only capability. Use the trusted access-decision API directly.")]
+    Task<SensitiveAccessRequestDto> DenySensitiveAccessRequestAsync(
+        string id,
+        SensitiveAccessDecisionRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement sensitive access denials.");
 }

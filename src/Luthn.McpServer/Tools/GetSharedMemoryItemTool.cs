@@ -3,7 +3,7 @@ using Luthn.AgentConnector.Http;
 
 namespace Luthn.McpServer.Tools;
 
-public sealed class GetSharedMemoryItemTool(ILuthnClient client) : ILuthnMcpTool
+public sealed class GetSharedMemoryItemTool(ILuthnAgentClient client) : ILuthnMcpTool
 {
     public string Name => "get_shared_memory_item";
 

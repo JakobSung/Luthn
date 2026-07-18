@@ -538,6 +538,11 @@ Create request:
 }
 ```
 
+New callers should send both `sessionId` and `expiresInSeconds`. For compatibility
+with the pre-expiry unversioned contract, omitted values receive a server-generated
+`legacy-...` session id and a 600-second lifetime. Explicit lifetimes must remain
+within 60–3600 seconds.
+
 Response shape includes request/decision metadata only:
 
 ```json
@@ -579,7 +584,7 @@ Result response:
 }
 ```
 
-`GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Request lifetime is bounded to 60–3600 seconds; expiry records a metadata-only `sensitive_access.expired` audit event. Result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy.
+`GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Explicit request lifetime is bounded to 60–3600 seconds; expiry records a metadata-only `sensitive_access.expired` audit event. Result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy.
 
 ## Audit events
 

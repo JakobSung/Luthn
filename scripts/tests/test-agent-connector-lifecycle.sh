@@ -295,6 +295,7 @@ grep -q '^Luthn__Auth__Tokens__0__Scopes__5=custom.read$' "$config_dir/luthn.env
 grep -q '^Luthn__Auth__Tokens__0__Scopes__6=custom.write$' "$config_dir/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__7=agent.connection.read$' "$config_dir/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__8=agent.connection.write$' "$config_dir/luthn.env"
+grep -q '^Luthn__Auth__Tokens__0__Scopes__9=access.request$' "$config_dir/luthn.env"
 assert_hook_counts 1 1
 status_output="$(run_luthn connection status codex)"
 grep -q '^Local connector: configured$' <<<"$status_output"
@@ -429,7 +430,7 @@ assert_hook_counts 0 1
 printf '%s\n' "$instructions_before_malformed" >"$codex_home/AGENTS.md"
 
 normal_config="$tmp_root/luthn-normal.env"
-awk '!/^Luthn__Auth__Tokens__0__Scopes__(7|8)=/' "$config_dir/luthn.env" >"$normal_config"
+awk '!/^Luthn__Auth__Tokens__0__Scopes__(7|8|9)=/' "$config_dir/luthn.env" >"$normal_config"
 cp "$normal_config" "$config_dir/luthn.env"
 
 echo "[7/18] partial scope failure rolls all connector changes back"

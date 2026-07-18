@@ -326,6 +326,28 @@ public sealed class McpToolBoundaryTests
         Assert.Equal(5_000, properties.GetProperty("timeoutMs").GetProperty("maximum").GetInt32());
         Assert.Equal(3_600, properties.GetProperty("cacheTtlSeconds").GetProperty("maximum").GetInt32());
         Assert.Equal("boolean", properties.GetProperty("failOpen").GetProperty("type").GetString());
+
+        var sensitiveAccessTool = toolsJson.RootElement
+            .GetProperty("result")
+            .GetProperty("tools")
+            .EnumerateArray()
+            .First(item => item.GetProperty("name").GetString() == "create_sensitive_access_request");
+        var expiry = sensitiveAccessTool
+            .GetProperty("inputSchema")
+            .GetProperty("properties")
+            .GetProperty("expiresInSeconds");
+        Assert.Equal(60, expiry.GetProperty("minimum").GetInt32());
+        Assert.Equal(3_600, expiry.GetProperty("maximum").GetInt32());
+    }
+
+    [Fact]
+    public void McpRegistryAcceptsOnlyAgentSafeConnectorContract()
+    {
+        var createDefault = typeof(LuthnMcpToolRegistry).GetMethod(nameof(LuthnMcpToolRegistry.CreateDefault));
+        var parameter = Assert.Single(createDefault!.GetParameters());
+
+        Assert.Equal(typeof(ILuthnAgentClient), parameter.ParameterType);
+        Assert.NotEqual(typeof(ILuthnClient), parameter.ParameterType);
     }
 
     [Fact]

@@ -3,7 +3,7 @@ using Luthn.AgentConnector.Http;
 
 namespace Luthn.McpServer.Tools;
 
-public sealed class SearchSafeContextTool(ILuthnClient client) : ILuthnMcpTool
+public sealed class SearchSafeContextTool(ILuthnAgentClient client) : ILuthnMcpTool
 {
     public string Name => "search_safe_context";
 

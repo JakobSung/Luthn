@@ -4,7 +4,7 @@ using Luthn.Sdk.Access;
 
 namespace Luthn.McpServer.Tools;
 
-public sealed class CreateSensitiveAccessRequestTool(ILuthnClient client) : ILuthnMcpTool
+public sealed class CreateSensitiveAccessRequestTool(ILuthnAgentClient client) : ILuthnMcpTool
 {
     public string Name => "create_sensitive_access_request";
 

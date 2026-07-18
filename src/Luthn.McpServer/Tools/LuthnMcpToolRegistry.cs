@@ -71,7 +71,7 @@ public static class LuthnMcpToolRegistry
                 StringProperty("sensitiveReferenceId", "Public sensitive record reference id."),
                 StringProperty("reason", "Bounded request purpose."),
                 StringProperty("sessionId", "Non-sensitive session correlation id."),
-                IntegerProperty("expiresInSeconds", "Bounded request lifetime in seconds.", 3_600)
+                IntegerProperty("expiresInSeconds", "Bounded request lifetime in seconds.", 3_600, 60)
             ], ["sensitiveReferenceId", "reason", "sessionId", "expiresInSeconds"])),
         new(
             "get_sensitive_access_request",
@@ -86,7 +86,7 @@ public static class LuthnMcpToolRegistry
     public static IReadOnlyList<string> AllowedToolNames { get; } =
         ToolDescriptors.Select(descriptor => descriptor.Name).ToArray();
 
-    public static IReadOnlyList<ILuthnMcpTool> CreateDefault(ILuthnClient client)
+    public static IReadOnlyList<ILuthnMcpTool> CreateDefault(ILuthnAgentClient client)
     {
         ArgumentNullException.ThrowIfNull(client);
 
@@ -127,12 +127,13 @@ public static class LuthnMcpToolRegistry
     private static KeyValuePair<string, object> IntegerProperty(
         string name,
         string description,
-        int maximum = 50) =>
+        int maximum = 50,
+        int minimum = 1) =>
         new(name, new Dictionary<string, object>
         {
             ["type"] = "integer",
             ["description"] = description,
-            ["minimum"] = 1,
+            ["minimum"] = minimum,
             ["maximum"] = maximum
         });
 

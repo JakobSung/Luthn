@@ -554,11 +554,32 @@ public sealed class LuthnClientTests
         Assert.Contains("GetSensitiveAccessResultAsync", methodNames);
         Assert.Contains("CreateSensitiveAccessRequestAsync", methodNames);
         Assert.Contains("GetSensitiveAccessRequestAsync", methodNames);
-        Assert.DoesNotContain("ApproveSensitiveAccessRequestAsync", methodNames);
-        Assert.DoesNotContain("DenySensitiveAccessRequestAsync", methodNames);
+        Assert.Contains("ApproveSensitiveAccessRequestAsync", methodNames);
+        Assert.Contains("DenySensitiveAccessRequestAsync", methodNames);
         Assert.Contains("IntakeTurnSummaryAsync", methodNames);
         Assert.Contains("ListAgentConnectionsAsync", methodNames);
         Assert.Contains("ReportAgentConnectionObservationAsync", methodNames);
+    }
+
+    [Fact]
+    public void LegacyDecisionMethodsRemainObsoleteWhileAgentInterfaceExcludesThem()
+    {
+        var legacyDecisionMethods = typeof(ILuthnClient)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            .Where(method => method.Name is
+                "ApproveSensitiveAccessRequestAsync" or
+                "DenySensitiveAccessRequestAsync")
+            .ToArray();
+        var agentMethodNames = typeof(ILuthnAgentClient)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .Select(method => method.Name)
+            .ToArray();
+
+        Assert.Equal(2, legacyDecisionMethods.Length);
+        Assert.All(legacyDecisionMethods, method =>
+            Assert.NotNull(method.GetCustomAttribute<ObsoleteAttribute>()));
+        Assert.DoesNotContain("ApproveSensitiveAccessRequestAsync", agentMethodNames);
+        Assert.DoesNotContain("DenySensitiveAccessRequestAsync", agentMethodNames);
     }
 
     private sealed class CapturingHandler(string responseContent) : HttpMessageHandler, IDisposable

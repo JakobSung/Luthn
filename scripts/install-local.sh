@@ -44,6 +44,7 @@ append_env_if_missing() {
 ensure_local_connector_scopes() {
   local read_present=false
   local write_present=false
+  local access_request_present=false
   local wildcard_present=false
   local scope_value
   local scope_index
@@ -56,20 +57,22 @@ ensure_local_connector_scopes() {
       '*') wildcard_present=true ;;
       agent.connection.read) read_present=true ;;
       agent.connection.write) write_present=true ;;
+      access.request) access_request_present=true ;;
       '') empty_indices+=("$scope_index") ;;
     esac
   done
 
   if [[ "$wildcard_present" == "true" \
-    || ( "$read_present" == "true" && "$write_present" == "true" ) ]]; then
+    || ( "$read_present" == "true" && "$write_present" == "true" && "$access_request_present" == "true" ) ]]; then
     return 0
   fi
 
   local required_slots=0
   [[ "$read_present" == "true" ]] || required_slots=$((required_slots + 1))
   [[ "$write_present" == "true" ]] || required_slots=$((required_slots + 1))
+  [[ "$access_request_present" == "true" ]] || required_slots=$((required_slots + 1))
   if (( ${#empty_indices[@]} < required_slots )); then
-    echo "not enough free service-token scope slots are available for agent connection scopes" >&2
+    echo "not enough free service-token scope slots are available for agent connector scopes" >&2
     return 1
   fi
 
@@ -77,6 +80,8 @@ ensure_local_connector_scopes() {
   local value1=""
   local key2=""
   local value2=""
+  local key3=""
+  local value3=""
   local next_slot=0
   if [[ "$read_present" != "true" ]]; then
     key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
@@ -91,18 +96,33 @@ ensure_local_connector_scopes() {
       key2="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
       value2="agent.connection.write"
     fi
+    next_slot=$((next_slot + 1))
+  fi
+  if [[ "$access_request_present" != "true" ]]; then
+    if [[ -z "$key1" ]]; then
+      key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value1="access.request"
+    elif [[ -z "$key2" ]]; then
+      key2="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value2="access.request"
+    else
+      key3="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value3="access.request"
+    fi
   fi
 
   local env_tmp
   env_tmp="$(mktemp "${env_file}.connector-scopes.XXXXXX")" || return 1
-  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" '
-    BEGIN { updated1 = 0; updated2 = 0 }
+  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" -v key3="$key3" -v value3="$value3" '
+    BEGIN { updated1 = 0; updated2 = 0; updated3 = 0 }
     key1 != "" && $1 == key1 { print key1 "=" value1; updated1 = 1; next }
     key2 != "" && $1 == key2 { print key2 "=" value2; updated2 = 1; next }
+    key3 != "" && $1 == key3 { print key3 "=" value3; updated3 = 1; next }
     { print }
     END {
       if (key1 != "" && !updated1) print key1 "=" value1
       if (key2 != "" && !updated2) print key2 "=" value2
+      if (key3 != "" && !updated3) print key3 "=" value3
     }
   ' "$env_file" >"$env_tmp" \
     || ! chmod 0600 "$env_tmp" \

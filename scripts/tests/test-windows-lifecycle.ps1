@@ -310,6 +310,7 @@ esac
     $configBytes = [IO.File]::ReadAllBytes($configFile)
     Assert-True (-not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF)) "config should be UTF-8 without BOM"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "Luthn__Auth__Tokens__0__Sha256Digest=sha256:[0-9a-f]{64}") "config should preserve the token-digest sha256 prefix"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "new installs should provision the MCP sensitive-access request scope"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "one-step Codex registration should not contain the token"
     $installedHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
@@ -420,6 +421,8 @@ esac
     $updateLogStart = [IO.File]::ReadAllLines($fakeDockerLog).Count
     $oversizedUnownedInstructions = "x" * (1024 * 1024 + 1)
     [IO.File]::WriteAllText($codexInstructionsFile, $oversizedUnownedInstructions, [Text.UTF8Encoding]::new($false))
+    $legacyConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object { $_ -cne "Luthn__Auth__Tokens__0__Scopes__7=access.request" })
+    [IO.File]::WriteAllText($configFile, (($legacyConfig -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
     $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $oversizedUnownedInstructions) "an update without connector ownership should ignore unrelated oversized instructions"
@@ -428,6 +431,7 @@ esac
     Assert-True ($update.Output -match "Revision: a{40} -> a{40}") "successful update should report the revision transition"
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
     Assert-True ($backupFiles.Count -eq 1 -and $backupFiles[0].Length -gt 0) "update should create a non-empty PostgreSQL backup"
     $updateStateFile = Join-Path $windowsRoot "state/update-windows.json"

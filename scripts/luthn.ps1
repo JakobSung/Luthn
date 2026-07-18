@@ -381,6 +381,22 @@ function Ensure-ConfigValue {
     if (-not (Read-ConfigValue -Key $Key)) { Set-ConfigValue -Key $Key -Value $Value }
 }
 
+function Ensure-ServiceTokenScope {
+    param([Parameter(Mandatory = $true)][string]$Scope)
+    for ($index = 0; $index -lt 16; $index++) {
+        $value = Read-ConfigValue "Luthn__Auth__Tokens__0__Scopes__$index"
+        if ($value -ceq "*" -or $value -ceq $Scope) { return }
+    }
+    for ($index = 0; $index -lt 16; $index++) {
+        $key = "Luthn__Auth__Tokens__0__Scopes__$index"
+        if (-not (Read-ConfigValue $key)) {
+            Set-ConfigValue $key $Scope
+            return
+        }
+    }
+    throw "No free service-token scope slot is available for $Scope."
+}
+
 function New-ServiceToken {
     $bytes = [Security.Cryptography.RandomNumberGenerator]::GetBytes(24)
     return [Convert]::ToHexString($bytes).ToLowerInvariant()
@@ -583,6 +599,7 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Scopes__4=classification.preview",
         "Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read",
         "Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write"
+        "Luthn__Auth__Tokens__0__Scopes__7=access.request"
     ) -join "`n"
     Write-Utf8File -Path $script:ConfigFile -Content ($content + "`n")
     Protect-SecretFile $script:ConfigFile
@@ -689,6 +706,7 @@ function Install-Luthn {
         for ($index = 0; $index -lt $scopes.Count; $index++) {
             Ensure-ConfigValue "Luthn__Auth__Tokens__0__Scopes__$index" $scopes[$index]
         }
+        Ensure-ServiceTokenScope "access.request"
     }
 
     Write-Host "Starting Luthn..."
@@ -942,6 +960,7 @@ function Update-Luthn {
                 throw "Codex connector reconciliation failed: $detail"
             }
         }
+        Ensure-ServiceTokenScope "access.request"
     } catch {
         $restoreErrors = @()
         foreach ($snapshot in @($runtimeSnapshots) + @($connectorSnapshots)) {

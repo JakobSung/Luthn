@@ -82,6 +82,10 @@ status_output="$("$cli" status)"
 grep -q 'Readiness: ready' <<<"$status_output"
 mcp_output="$("$cli" mcp --list-tools)"
 grep -q '^get_context_pack$' <<<"$mcp_output"
+grep -q '^create_sensitive_access_request$' <<<"$mcp_output"
+mcp_call_output="$(printf '%s\n' '{"jsonrpc":"2.0","id":"access-smoke","method":"tools/call","params":{"name":"create_sensitive_access_request","arguments":{"sensitiveReferenceId":"missing-smoke-reference","reason":"Verify authenticated MCP request scope.","sessionId":"distribution-smoke","expiresInSeconds":60}}}' | "$cli" mcp)"
+grep -q '"id":"access-smoke"' <<<"$mcp_call_output"
+! grep -q '403' <<<"$mcp_call_output"
 
 echo "[3/8] adapter write"
 printf '%s\n' '{"sessionId":"lifecycle","turnId":"before-update","sourceAgent":"codex","summary":"Lifecycle sentinel remains after update.","coreTags":["lifecycle"],"idempotencyKey":"lifecycle-before-update"}' \
@@ -93,6 +97,9 @@ context_output="$(curl -fsS -X POST "$base_url/api/agent/context-packs" \
 grep -q 'Lifecycle sentinel' <<<"$context_output"
 
 echo "[4/8] update"
+grep -v '^Luthn__Auth__Tokens__0__Scopes__7=access.request$' "$LUTHN_CONFIG_DIR/luthn.env" \
+  >"$LUTHN_CONFIG_DIR/luthn.env.legacy"
+mv "$LUTHN_CONFIG_DIR/luthn.env.legacy" "$LUTHN_CONFIG_DIR/luthn.env"
 update_write_probe="$test_root/update-write-probe.sh"
 cat >"$update_write_probe" <<EOF
 #!/usr/bin/env bash
@@ -114,6 +121,7 @@ test -s "$backup_path"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__4=classification.preview$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__0__Scopes__7=access.request$' "$LUTHN_CONFIG_DIR/luthn.env"
 context_output="$(curl -fsS -X POST "$base_url/api/agent/context-packs" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_after" \

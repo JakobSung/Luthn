@@ -81,9 +81,12 @@ classify_preview
 create_shared_memory
 query_shared_memory
 get_shared_memory_item
+create_sensitive_access_request
+get_sensitive_access_request
+get_sensitive_access_result
 ```
 
-원본 Vault 일괄 추출, 제한 없는 원본 조회, 비공개 기록 내보내기는 기본 에이전트 기능이 아닙니다. 비공개 세부 정보에는 별도 승인 경로가 필요합니다.
+원본 Vault 일괄 추출, 제한 없는 원본 조회, 비공개 기록 내보내기는 기본 에이전트 기능이 아닙니다. connector는 위 세 가지 메타데이터 전용 요청 도구에 필요한 `access.request` scope를 기본 설정하지만 MCP는 승인·거절을 노출하지 않습니다. 비공개 세부 정보 결정에는 별도의 신뢰된 운영자 경로가 필요합니다.
 
 ## 확인과 연결 해제
 

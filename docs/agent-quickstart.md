@@ -136,11 +136,16 @@ classify_preview
 create_shared_memory
 query_shared_memory
 get_shared_memory_item
+create_sensitive_access_request
+get_sensitive_access_request
+get_sensitive_access_result
 ```
 
 Raw Vault dumps, unrestricted source reads, and private-record export tools are
-not part of the default agent surface. Private details require a separate
-approval path.
+not part of the default agent surface. The connector provisions the
+`access.request` scope for the three metadata-only request tools above, but MCP
+does not expose approval or denial. Private details require the separate trusted
+operator decision path.
 
 ## Verify And Disconnect
 
