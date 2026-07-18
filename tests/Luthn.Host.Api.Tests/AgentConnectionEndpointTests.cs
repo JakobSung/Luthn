@@ -68,6 +68,48 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
     }
 
     [Fact]
+    public async Task UnknownConfigurationRefreshPreservesSuccessfulActivityEvidence()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var active = await client.PostAsJsonAsync(
+            "/api/agent-connections/codex/observations",
+            Observation(
+                Channel(
+                    "automatic-ingestion",
+                    configured: true,
+                    verification: "Verified",
+                    activity: "Succeeded"),
+                Channel(
+                    "mcp",
+                    configured: true,
+                    verification: "Verified",
+                    activity: "Succeeded")));
+        using var activeBody = await JsonDocument.ParseAsync(await active.Content.ReadAsStreamAsync());
+        var lastSuccess = activeBody.RootElement.GetProperty("lastSuccessfulActivityAt").GetDateTimeOffset();
+
+        using var refreshed = await client.PostAsJsonAsync(
+            "/api/agent-connections/codex/observations",
+            Observation(
+                Channel("automatic-ingestion", configured: true),
+                Channel("mcp", configured: true, verification: "Verified")));
+        using var refreshedBody = await JsonDocument.ParseAsync(
+            await refreshed.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+        Assert.Equal("Active", refreshedBody.RootElement.GetProperty("state").GetString());
+        Assert.Equal(
+            lastSuccess,
+            refreshedBody.RootElement.GetProperty("lastSuccessfulActivityAt").GetDateTimeOffset());
+        var channels = refreshedBody.RootElement.GetProperty("channels").EnumerateArray().ToArray();
+        Assert.All(channels, channel => Assert.Equal("Active", channel.GetProperty("state").GetString()));
+        Assert.All(
+            channels,
+            channel => Assert.Equal("Succeeded", channel.GetProperty("activityState").GetString()));
+    }
+
+    [Fact]
     public async Task FailedAndDisconnectedObservationsUseBoundedReplacementState()
     {
         using var factory = CreateFactory();

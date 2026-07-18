@@ -238,6 +238,9 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
 
 
 class TurnCapsuleTests(unittest.TestCase):
+    def test_connector_template_exposes_a_bounded_version(self):
+        self.assertRegex(CONNECTOR.CONNECTOR_TEMPLATE_VERSION, r"^[1-9][0-9]*$")
+
     def test_turn_capsule_is_bounded_deterministic_and_excludes_host_paths(self):
         hook_input = {
             "session_id": "session-original",

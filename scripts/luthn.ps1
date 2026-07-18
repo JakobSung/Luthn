@@ -12,7 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:LuthnWindowsCliVersion = "1"
+$script:LuthnWindowsCliVersion = "2"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
 $script:RootDir = if ($env:LUTHN_WINDOWS_ROOT) {
     $env:LUTHN_WINDOWS_ROOT
@@ -92,6 +92,7 @@ function Show-Usage {
 usage: luthn <command> [options]
 
 commands:
+  version                    Show the installed Windows CLI template version.
   install [--connect-codex]  Install Luthn and optionally connect Codex.
   status                     Show services, readiness, console, and image.
   update [image]             Back up, pull, migrate, restart, and verify.
@@ -402,9 +403,21 @@ function Test-WindowsCliFile {
     $parseErrors = $null
     [void][Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw "downloaded Windows CLI did not pass PowerShell syntax validation" }
-    if ([IO.File]::ReadAllText($Path) -notmatch '\$script:LuthnWindowsCliVersion\s*=\s*"1"') {
+    $content = [IO.File]::ReadAllText($Path)
+    if ($content -notmatch '\$script:LuthnWindowsCliVersion\s*=\s*"[1-9][0-9]*"' -or
+        $content -notmatch '(?m)^function Connect-Codex\s*\{') {
         throw "downloaded Windows CLI did not match the Luthn distribution contract"
     }
+}
+
+function Get-WindowsCliVersionFromFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $content = [IO.File]::ReadAllText($Path)
+    if ($content -notmatch '\$script:LuthnWindowsCliVersion\s*=\s*"([1-9][0-9]*)"') {
+        throw "Windows CLI template version is missing or invalid: $Path"
+    }
+    return $Matches[1]
 }
 
 function Invoke-ToolToFile {
@@ -833,12 +846,54 @@ function Update-Luthn {
     $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $targetImage)
     $targetRevision = if ($revisionResult.ExitCode -eq 0) { $revisionResult.StdOut.Trim() } else { "" }
 
+    $installedCli = Join-Path $script:BinDir "luthn.ps1"
+    $runtimeSnapshots = @(
+        Get-CodexFileSnapshot -Path $script:ComposeFile
+        Get-CodexFileSnapshot -Path $installedCli
+    )
+    $connectorSnapshots = @(
+        Get-CodexFileSnapshot -Path $script:CodexHooksFile
+        Get-CodexFileSnapshot -Path $script:CodexInstructionsFile
+        Get-CodexFileSnapshot -Path $script:CodexStateFile
+        Get-CodexFileSnapshot -Path $script:CodexPendingStateFile
+    )
+    $connectorWasConfigured = $false
+    $connectorAutoRecall = $true
+    $previousConnectorVersion = ""
+    if ([IO.File]::Exists($script:CodexStateFile)) {
+        try {
+            $connectorState = [IO.File]::ReadAllText($script:CodexStateFile) | ConvertFrom-Json -AsHashtable
+            $connectorWasConfigured = $connectorState.Contains("setupState") -and $connectorState["setupState"] -ceq "configured"
+            if ($connectorState.Contains("autoRecall")) { $connectorAutoRecall = [bool]$connectorState["autoRecall"] }
+            if ($connectorState.Contains("connectorVersion")) { $previousConnectorVersion = [string]$connectorState["connectorVersion"] }
+        } catch {
+            $connectorWasConfigured = $false
+        }
+    }
+
     Write-Host "Refreshing Windows CLI and Compose runtime..."
     try {
         Install-ComposeRuntime -RuntimeSource (Get-RuntimeSource -Image $targetImage -Revision $targetRevision) -IncludeCli
+        $targetConnectorVersion = Get-WindowsCliVersionFromFile -Path $installedCli
+        if ($connectorWasConfigured) {
+            $connectorAction = if ($previousConnectorVersion -cne $targetConnectorVersion) { "Reconciling" } else { "Validating" }
+            Write-Host "$connectorAction Codex connector template version $targetConnectorVersion..."
+            $connectArguments = @("connect", "codex")
+            if (-not $connectorAutoRecall) { $connectArguments += "--no-auto-recall" }
+            $reconcile = Invoke-ToolCapture -Tool (New-ToolSpecFromPath -Path $installedCli) -Arguments $connectArguments
+            if ($reconcile.ExitCode -ne 0) {
+                $detail = ($reconcile.StdErr + "`n" + $reconcile.StdOut).Trim()
+                throw "Codex connector reconciliation failed: $detail"
+            }
+        }
     } catch {
+        $restoreErrors = @()
+        foreach ($snapshot in @($runtimeSnapshots) + @($connectorSnapshots)) {
+            try { Restore-CodexFileSnapshot $snapshot } catch { $restoreErrors += $_.Exception.Message }
+        }
         Write-UpdateState -Status "failed" -TargetImage $targetImage -TargetImageId $targetImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId
-        throw "Update failed while refreshing the Windows lifecycle runtime. The running API and previous image were preserved. $($_.Exception.Message)"
+        $restoreDetail = if ($restoreErrors.Count -gt 0) { " Restore also failed: $($restoreErrors -join '; ')" } else { "" }
+        throw "Update failed while refreshing the Windows lifecycle runtime. The running API and previous image were preserved. $($_.Exception.Message)$restoreDetail"
     }
 
     $postgres = Invoke-ComposeCapture @("up", "-d", "postgres")
@@ -1366,6 +1421,7 @@ function Write-ConnectorState {
     Ensure-Directories
     $content = [ordered]@{
         version = 2
+        connectorVersion = $script:LuthnWindowsCliVersion
         integration = "host-hook-mcp"
         setupState = $State
         mcpName = "luthn"
@@ -1632,6 +1688,7 @@ function Uninstall-Luthn {
 
 try {
     switch -CaseSensitive ($Command.ToLowerInvariant()) {
+        "version" { Write-Output $script:LuthnWindowsCliVersion }
         "install" { Install-Luthn $CommandArguments }
         "status" { Show-Status }
         "update" { Update-Luthn $CommandArguments }

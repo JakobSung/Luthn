@@ -152,6 +152,10 @@ import os
 import subprocess
 import sys
 
+if len(sys.argv) > 1 and sys.argv[1] == "version":
+    print("2")
+    raise SystemExit(0)
+
 if len(sys.argv) > 1 and sys.argv[1] in {"report", "status"}:
     report_log = os.environ.get("FAKE_REPORT_LOG")
     if sys.argv[1] == "report" and report_log:
@@ -259,7 +263,7 @@ for group in groups:
 PY
 }
 
-echo "[1/17] connect installs both channels and explains required hook trust"
+echo "[1/18] connect installs both channels and explains required hook trust"
 connect_output="$(run_luthn connect codex)"
 grep -q '^Required one-time Codex security steps:$' <<<"$connect_output"
 grep -q 'enter /hooks' <<<"$connect_output"
@@ -285,7 +289,7 @@ grep -q '^Server observation: test$' <<<"$status_output"
 grep -q '^Automatic memory capture is not active yet.$' <<<"$status_output"
 grep -q 'Restart Codex, enter /hooks' <<<"$status_output"
 
-echo "[2/17] reconnect upgrades only legacy Luthn-managed configuration"
+echo "[2/18] reconnect upgrades only legacy Luthn-managed configuration"
 python3 - "$codex_home/hooks.json" "$codex_home/AGENTS.md" <<'PY'
 import json
 from pathlib import Path
@@ -328,7 +332,7 @@ assert_hook_counts 1 1
 [[ "$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')" == "$hook_hash" ]]
 [[ "$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')" == "$recall_hash" ]]
 
-echo "[2a/17] explicit recall compatibility and opt-out are supported"
+echo "[2a/18] explicit recall compatibility and opt-out are supported"
 run_luthn connect codex --auto-recall >/dev/null
 run_luthn connect codex --auto-recall >/dev/null
 [[ "$(grep -c '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md")" -eq 1 ]]
@@ -353,15 +357,14 @@ cp "$state_dir/connectors/codex.env" \
 : >"$report_log"
 run_luthn connection status codex >/dev/null
 [[ ! -f "$state_dir/connectors/codex.disconnect.pending.env" ]]
-grep -q -- '--channel automatic-ingestion:true:Unknown:Unknown:' "$report_log"
-grep -q -- '--channel mcp:true:Verified:Unknown:' "$report_log"
+[[ ! -s "$report_log" ]]
 
-echo "[3/17] missing Codex reports MCP as unconfigured"
+echo "[3/18] missing Codex reports MCP as unconfigured"
 : >"$report_log"
 run_luthn_without_codex reset --yes >/dev/null
 grep -q -- '--channel mcp:false:Unknown:Unknown:' "$report_log"
 
-echo "[4/17] failed disconnect restores Luthn-owned configuration"
+echo "[4/18] failed disconnect restores Luthn-owned configuration"
 if FAKE_CODEX_REMOVE_FAIL=true run_luthn disconnect codex >/dev/null 2>&1; then
   echo "expected disconnect failure" >&2
   exit 1
@@ -371,7 +374,7 @@ fi
 assert_hook_counts 1 1
 grep -q '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md"
 
-echo "[5/17] failed disconnect observation is retried after API recovery"
+echo "[5/18] failed disconnect observation is retried after API recovery"
 : >"$report_log"
 FAKE_REPORT_FAIL=true run_luthn disconnect codex >/dev/null
 [[ ! -f "$mcp_state" ]]
@@ -386,7 +389,7 @@ run_luthn connection status codex >/dev/null
 [[ ! -f "$state_dir/connectors/codex.disconnect.pending.env" ]]
 [[ "$(grep -c -- '--channel automatic-ingestion:false:Unknown:Unknown:' "$report_log")" -eq 2 ]]
 
-echo "[6/17] successful disconnect removes only Luthn-owned configuration"
+echo "[6/18] successful disconnect removes only Luthn-owned configuration"
 run_luthn connect codex >/dev/null
 run_luthn disconnect codex >/dev/null
 [[ ! -f "$mcp_state" ]]
@@ -395,7 +398,7 @@ run_luthn disconnect codex >/dev/null
 [[ ! -f "$state_dir/connectors/codex.disconnect.pending.env" ]]
 assert_hook_counts 0 1
 
-echo "[6a/17] malformed default recall rolls connector setup back"
+echo "[6a/18] malformed default recall rolls connector setup back"
 instructions_before_malformed="$(cat "$codex_home/AGENTS.md")"
 printf '%s\n<!-- luthn:auto-recall:start -->\n' \
   "$instructions_before_malformed" >"$codex_home/AGENTS.md"
@@ -414,7 +417,7 @@ normal_config="$tmp_root/luthn-normal.env"
 awk '!/^Luthn__Auth__Tokens__0__Scopes__(7|8)=/' "$config_dir/luthn.env" >"$normal_config"
 cp "$normal_config" "$config_dir/luthn.env"
 
-echo "[7/17] partial scope failure rolls all connector changes back"
+echo "[7/18] partial scope failure rolls all connector changes back"
 for scope_index in {7..14}; do
   printf 'Luthn__Auth__Tokens__0__Scopes__%s=custom.%s\n' "$scope_index" "$scope_index" >>"$config_dir/luthn.env"
 done
@@ -432,7 +435,7 @@ after_config_hash="$(shasum -a 256 "$config_dir/luthn.env" | awk '{print $1}')"
 assert_hook_counts 0 1
 cp "$normal_config" "$config_dir/luthn.env"
 
-echo "[8/17] API scope refresh failure restores all connector changes"
+echo "[8/18] API scope refresh failure restores all connector changes"
 : >"$docker_log"
 rm -f "$docker_fail_marker"
 before_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
@@ -450,7 +453,7 @@ assert_hook_counts 0 1
 [[ "$(grep -c -- '--force-recreate api' "$docker_log")" -eq 2 ]]
 grep -q -- ' stop api$' "$docker_log"
 
-echo "[9/17] MCP registration failure rolls hooks and scopes back"
+echo "[9/18] MCP registration failure rolls hooks and scopes back"
 before_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
 before_config_hash="$(shasum -a 256 "$config_dir/luthn.env" | awk '{print $1}')"
 if FAKE_CODEX_ADD_FAIL=true run_luthn connect codex >/dev/null 2>&1; then
@@ -463,7 +466,7 @@ after_config_hash="$(shasum -a 256 "$config_dir/luthn.env" | awk '{print $1}')"
 [[ "$before_config_hash" == "$after_config_hash" ]]
 [[ ! -f "$mcp_state" ]]
 
-echo "[10/17] unrecoverable API stop is reported without a false safety claim"
+echo "[10/18] unrecoverable API stop is reported without a false safety claim"
 : >"$docker_log"
 rm -f "$docker_stop_count"
 before_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
@@ -488,7 +491,7 @@ grep -q 'could not confirm that the API stopped' <<<"$failure_output"
 compgen -G "${config_dir}/luthn.env.codex-connect.*" >/dev/null
 rm -f "${config_dir}/luthn.env.codex-connect."*
 
-echo "[11/17] unrelated luthn MCP registration is preserved"
+echo "[11/18] unrelated luthn MCP registration is preserved"
 printf '%s' /other/product/mcp >"$mcp_state"
 before_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
 before_config_hash="$(shasum -a 256 "$config_dir/luthn.env" | awk '{print $1}')"
@@ -503,16 +506,31 @@ after_config_hash="$(shasum -a 256 "$config_dir/luthn.env" | awk '{print $1}')"
 [[ "$(cat "$mcp_state")" == "/other/product/mcp" ]]
 rm -f "$mcp_state"
 
-echo "[12/17] missing helper self-heals from the installed runtime revision"
+echo "[12/18] missing helper self-heals from the installed runtime revision"
 rm -f "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
 [[ -x "$tmp_root/connector-helper.py" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "2" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
-run_luthn disconnect codex >/dev/null
 cp "$tmp_root/connector-helper-fixture.py" "$tmp_root/connector-helper.py"
+run_luthn disconnect codex >/dev/null
+
+cat >"$tmp_root/connector-helper.py" <<'EOF'
+#!/usr/bin/env python3
+import sys
+if len(sys.argv) > 1 and sys.argv[1] == "version":
+    print("1")
+    raise SystemExit(0)
+raise SystemExit(1)
+EOF
+chmod 0700 "$tmp_root/connector-helper.py"
+run_luthn connect codex >/dev/null
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "2" ]]
+cp "$tmp_root/connector-helper-fixture.py" "$tmp_root/connector-helper.py"
+run_luthn disconnect codex >/dev/null
 run_luthn connection status codex >/dev/null
 
-echo "[13/17] failed partial MCP cleanup preserves ownership and blocks uninstall"
+echo "[13/18] failed partial MCP cleanup preserves ownership and blocks uninstall"
 if FAKE_DOCKER_MCP_PROBE_FAIL=true FAKE_CODEX_REMOVE_FAIL=true \
   run_luthn connect codex >/dev/null 2>&1; then
   echo "expected connector probe and cleanup failure" >&2
@@ -531,7 +549,7 @@ fi
 [[ -f "$state_dir/connectors/codex.pending.env" ]]
 run_luthn disconnect codex >/dev/null
 
-echo "[14/17] ownership state preparation fails before host configuration changes"
+echo "[14/18] ownership state preparation fails before host configuration changes"
 before_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
 before_config_hash="$(shasum -a 256 "$config_dir/luthn.env" | awk '{print $1}')"
 if LUTHN_CODEX_PENDING_STATE_FILE="$tmp_root/missing/state/codex.pending.env" \
@@ -545,7 +563,7 @@ after_config_hash="$(shasum -a 256 "$config_dir/luthn.env" | awk '{print $1}')"
 [[ "$before_config_hash" == "$after_config_hash" ]]
 [[ ! -f "$mcp_state" ]]
 
-echo "[15/17] pre-connector runtime is accepted only without connector ownership"
+echo "[15/18] pre-connector runtime is accepted only without connector ownership"
 old_runtime="$tmp_root/old-runtime"
 mkdir -p "$old_runtime/deploy" "$old_runtime/scripts"
 printf 'services: {}\n' >"$old_runtime/deploy/compose.yaml"
@@ -594,7 +612,7 @@ fi
 after_cli_hash="$(shasum -a 256 "$cli" | awk '{print $1}')"
 [[ "$before_cli_hash" == "$after_cli_hash" ]]
 
-echo "[16/17] non-connector update preserves a full custom scope table"
+echo "[16/18] non-connector update preserves a full custom scope table"
 full_scope_config="$tmp_root/full-scope.env"
 printf 'LUTHN_IMAGE=test/luthn:old\n' >"$full_scope_config"
 for scope_index in {0..15}; do
@@ -633,7 +651,7 @@ before_scope_hash="$(rg '^Luthn__Auth__Tokens__0__Scopes__' "$full_scope_config"
 after_scope_hash="$(rg '^Luthn__Auth__Tokens__0__Scopes__' "$full_scope_config" | shasum -a 256 | awk '{print $1}')"
 [[ "$before_scope_hash" == "$after_scope_hash" ]]
 
-echo "[17/17] active connector update stops when scope setup fails"
+echo "[17/18] active connector update stops when scope setup fails"
 active_scope_config="$tmp_root/full-scope-active.env"
 cp "$full_scope_config" "$active_scope_config"
 active_scope_state="$tmp_root/full-scope-active-state"
@@ -660,6 +678,7 @@ if (
   ensure_directories() { mkdir -p "$state_dir/backups"; }
   image_id_for_container() { :; }
   download_runtime() { :; }
+  reconcile_codex_managed_configuration() { :; }
   compose_cmd() { touch "$compose_marker"; }
   record_state() { :; }
   docker() { :; }
@@ -669,5 +688,160 @@ if (
   exit 1
 fi
 [[ ! -e "$compose_marker" ]]
+
+echo "[18/18] active connector update reconciles templates and rolls back probe failures"
+reconcile_root="$tmp_root/update-reconcile"
+reconcile_data="$reconcile_root/data"
+reconcile_config="$reconcile_root/config"
+reconcile_state="$reconcile_root/state"
+reconcile_bin="$reconcile_root/bin"
+reconcile_codex="$reconcile_root/codex"
+mkdir -p "$reconcile_data/runtime" "$reconcile_config" \
+  "$reconcile_state/connectors" "$reconcile_bin" "$reconcile_codex"
+cp "$repo_root/scripts/luthn" "$reconcile_bin/luthn"
+chmod 0755 "$reconcile_bin/luthn"
+cp "$repo_root/scripts/luthn-codex-connector.py" \
+  "$reconcile_data/runtime/luthn-codex-connector.py"
+chmod 0700 "$reconcile_data/runtime/luthn-codex-connector.py"
+printf 'services: {}\n' >"$reconcile_data/compose.yaml"
+cp "$config_dir/luthn.env" "$reconcile_config/luthn.env"
+cat >"$reconcile_codex/hooks.json" <<'EOF'
+{"hooks":{"Stop":[{"matcher":"other.owner","hooks":[{"type":"command","command":"other"}]},{"matcher":"luthn.agent-connector.v1","hooks":[{"type":"command","command":"old","statusMessage":"stale"}]}]}}
+EOF
+cat >"$reconcile_codex/AGENTS.md" <<'EOF'
+# User instructions
+
+Preserve this text.
+
+<!-- luthn:auto-recall:start -->
+Legacy managed instructions.
+<!-- luthn:auto-recall:end -->
+EOF
+cat >"$reconcile_state/connectors/codex.env" <<EOF
+AGENT_ID=codex
+CONNECTOR_VERSION=1
+HOOKS_FILE=$reconcile_codex/hooks.json
+INSTRUCTIONS_FILE=$reconcile_codex/AGENTS.md
+AUTO_RECALL=true
+MCP_CHANGED=false
+SETUP_STATE=configured
+EOF
+(
+  export HOME="$home_dir"
+  export PATH="$fake_bin:$PATH"
+  export LUTHN_DATA_DIR="$reconcile_data"
+  export LUTHN_CONFIG_DIR="$reconcile_config"
+  export LUTHN_STATE_DIR="$reconcile_state"
+  export LUTHN_BIN_DIR="$reconcile_bin"
+  export LUTHN_COMPOSE_FILE="$reconcile_data/compose.yaml"
+  export LUTHN_CONFIG_FILE="$reconcile_config/luthn.env"
+  export LUTHN_CLI_PATH="$reconcile_bin/luthn"
+  export LUTHN_CODEX_CONNECTOR_HELPER="$reconcile_data/runtime/luthn-codex-connector.py"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  require_installation() { :; }
+  require_docker() { :; }
+  require_command() { :; }
+  pull_image() { :; }
+  image_id_for_container() { printf '%s' sha256:previous; }
+  download_runtime() { :; }
+  ensure_connector_scopes() { :; }
+  compose_cmd() {
+    if [[ " $* " == *" --list-tools "* ]]; then
+      printf '%s\n' get_context_pack
+    elif [[ " $* " == *" pg_dump "* ]]; then
+      printf '%s\n' backup
+    fi
+  }
+  wait_for_postgres() { :; }
+  stop_write_paths() { :; }
+  wait_for_api() { :; }
+  record_state() { :; }
+  docker() {
+    if [[ " $* " == *"{{.Id}}"* ]]; then printf '%s\n' sha256:target; fi
+  }
+  update_luthn test/luthn:new >/dev/null
+)
+grep -q '^CONNECTOR_VERSION=2$' "$reconcile_state/connectors/codex.env"
+python3 - "$reconcile_codex/hooks.json" <<'PY'
+import json
+import sys
+document = json.load(open(sys.argv[1], encoding="utf-8"))
+managed = [
+    group for group in document["hooks"]["Stop"]
+    if group.get("matcher") == "luthn.agent-connector.v1"
+]
+assert len(managed) == 1
+assert managed[0]["hooks"][0]["statusMessage"] == "Luthn 메모리 저장 예약 중…"
+PY
+grep -q 'Preserve this text.' "$reconcile_codex/AGENTS.md"
+grep -q '`maxItems`: 3' "$reconcile_codex/AGENTS.md"
+
+python3 - "$reconcile_state/connectors/codex.env" <<'PY'
+import sys
+path = sys.argv[1]
+content = open(path, encoding="utf-8").read()
+with open(path, "w", encoding="utf-8") as stream:
+    stream.write(content.replace("CONNECTOR_VERSION=2\n", "CONNECTOR_VERSION=1\n"))
+PY
+python3 - "$reconcile_codex/hooks.json" <<'PY'
+import json
+import sys
+path = sys.argv[1]
+document = json.load(open(path, encoding="utf-8"))
+for group in document["hooks"]["Stop"]:
+    if group.get("matcher") == "luthn.agent-connector.v1":
+        group["hooks"][0]["statusMessage"] = "stale before failed update"
+with open(path, "w", encoding="utf-8") as stream:
+    json.dump(document, stream, ensure_ascii=False)
+    stream.write("\n")
+PY
+rollback_cli_hash="$(shasum -a 256 "$reconcile_bin/luthn" | awk '{print $1}')"
+rollback_compose_hash="$(shasum -a 256 "$reconcile_data/compose.yaml" | awk '{print $1}')"
+rollback_hook_hash="$(shasum -a 256 "$reconcile_codex/hooks.json" | awk '{print $1}')"
+rollback_instruction_hash="$(shasum -a 256 "$reconcile_codex/AGENTS.md" | awk '{print $1}')"
+rollback_state_hash="$(shasum -a 256 "$reconcile_state/connectors/codex.env" | awk '{print $1}')"
+if (
+  export HOME="$home_dir"
+  export PATH="$fake_bin:$PATH"
+  export LUTHN_DATA_DIR="$reconcile_data"
+  export LUTHN_CONFIG_DIR="$reconcile_config"
+  export LUTHN_STATE_DIR="$reconcile_state"
+  export LUTHN_BIN_DIR="$reconcile_bin"
+  export LUTHN_COMPOSE_FILE="$reconcile_data/compose.yaml"
+  export LUTHN_CONFIG_FILE="$reconcile_config/luthn.env"
+  export LUTHN_CLI_PATH="$reconcile_bin/luthn"
+  export LUTHN_CODEX_CONNECTOR_HELPER="$reconcile_data/runtime/luthn-codex-connector.py"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  require_installation() { :; }
+  require_docker() { :; }
+  require_command() { :; }
+  pull_image() { :; }
+  image_id_for_container() { printf '%s' sha256:previous; }
+  download_runtime() {
+    printf '# changed runtime\n' >"$compose_file"
+    printf '# changed cli\n' >"$cli_path"
+  }
+  ensure_connector_scopes() { :; }
+  compose_cmd() {
+    [[ " $* " != *" --list-tools "* ]]
+  }
+  record_state() { :; }
+  docker() {
+    if [[ " $* " == *"{{.Id}}"* ]]; then printf '%s\n' sha256:target; fi
+  }
+  update_luthn test/luthn:new >/dev/null
+); then
+  echo "expected connector probe failure to stop update" >&2
+  exit 1
+fi
+[[ "$(shasum -a 256 "$reconcile_bin/luthn" | awk '{print $1}')" == "$rollback_cli_hash" ]]
+[[ "$(shasum -a 256 "$reconcile_data/compose.yaml" | awk '{print $1}')" == "$rollback_compose_hash" ]]
+[[ "$(shasum -a 256 "$reconcile_codex/hooks.json" | awk '{print $1}')" == "$rollback_hook_hash" ]]
+[[ "$(shasum -a 256 "$reconcile_codex/AGENTS.md" | awk '{print $1}')" == "$rollback_instruction_hash" ]]
+[[ "$(shasum -a 256 "$reconcile_state/connectors/codex.env" | awk '{print $1}')" == "$rollback_state_hash" ]]
 
 echo "Agent connector lifecycle tests passed."

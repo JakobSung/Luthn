@@ -13,6 +13,8 @@ public sealed class GetContextPackTool : ILuthnMcpTool
     private const int MaximumTimeoutMilliseconds = 5_000;
     private const int MaximumCacheTtlSeconds = 3_600;
     private const int MaximumCacheEntries = 128;
+    private const int CandidatePoolMultiplier = 4;
+    private const int MaximumCandidatePoolSize = 50;
 
     private readonly ILuthnClient _client;
     private readonly Func<DateTimeOffset> _utcNow;
@@ -78,9 +80,12 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         ContextPackDto result;
         try
         {
+            var candidateMaxItems = maxTokens is null
+                ? maxItems
+                : Math.Min(MaximumCandidatePoolSize, maxItems * CandidatePoolMultiplier);
             result = await _client.GetContextPackAsync(
                 coreTags,
-                maxItems,
+                candidateMaxItems,
                 query,
                 effectiveCancellationToken);
         }
@@ -106,24 +111,32 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         int maxItems,
         int? maxTokens)
     {
-        var candidates = contextPack.Items.Take(maxItems);
+        var candidates = contextPack.Items.ToArray();
         if (maxTokens is null)
         {
-            return new ContextPackDto(contextPack.CoreTags, candidates.ToArray());
+            return new ContextPackDto(contextPack.CoreTags, candidates.Take(maxItems).ToArray());
         }
 
         var remainingTokens = maxTokens.Value;
         var items = new List<ContextPackItemDto>();
+        var desiredItems = Math.Min(maxItems, candidates.Length);
         foreach (var item in candidates)
         {
-            var estimatedTokens = EstimateTokens(item);
-            if (estimatedTokens > remainingTokens)
+            if (items.Count >= desiredItems || remainingTokens <= 0)
+            {
+                break;
+            }
+
+            var remainingSlots = desiredItems - items.Count;
+            var itemBudget = remainingTokens / remainingSlots;
+            var fitted = FitWithinTokenBudget(item, itemBudget);
+            if (fitted is null)
             {
                 continue;
             }
 
-            items.Add(item);
-            remainingTokens -= estimatedTokens;
+            items.Add(fitted);
+            remainingTokens -= EstimateTokens(fitted);
         }
 
         return new ContextPackDto(contextPack.CoreTags, items);
@@ -131,14 +144,83 @@ public sealed class GetContextPackTool : ILuthnMcpTool
 
     private static int EstimateTokens(ContextPackItemDto item)
     {
+        var characters = EstimateCharacters(item);
+        return Math.Max(1, (characters + 2) / 3);
+    }
+
+    private static int EstimateCharacters(ContextPackItemDto item)
+    {
         const int JsonFieldOverheadCharacters = 80;
-        var characters = JsonFieldOverheadCharacters +
+        return JsonFieldOverheadCharacters +
             item.Id.Length +
             item.Title.Length +
             item.SafeSummary.Length +
             item.Sensitivity.Length +
             item.CoreTags.Sum(tag => tag.Length + 3);
-        return Math.Max(1, (characters + 2) / 3);
+    }
+
+    private static ContextPackItemDto? FitWithinTokenBudget(
+        ContextPackItemDto item,
+        int tokenBudget)
+    {
+        if (tokenBudget <= 0)
+        {
+            return null;
+        }
+
+        if (EstimateTokens(item) <= tokenBudget)
+        {
+            return item;
+        }
+
+        var fixedCharacters = EstimateCharacters(item) - item.SafeSummary.Length;
+        var maximumSummaryCharacters = (tokenBudget * 3) - 2 - fixedCharacters;
+        if (maximumSummaryCharacters <= 0)
+        {
+            return null;
+        }
+
+        var fitted = item with
+        {
+            SafeSummary = TruncateSummary(item.SafeSummary, maximumSummaryCharacters)
+        };
+        return EstimateTokens(fitted) <= tokenBudget ? fitted : null;
+    }
+
+    private static string TruncateSummary(string summary, int maximumCharacters)
+    {
+        if (summary.Length <= maximumCharacters)
+        {
+            return summary;
+        }
+
+        if (maximumCharacters == 1)
+        {
+            return "…";
+        }
+
+        var contentLength = maximumCharacters - 1;
+        if (contentLength < summary.Length &&
+            contentLength > 0 &&
+            char.IsHighSurrogate(summary[contentLength - 1]) &&
+            char.IsLowSurrogate(summary[contentLength]))
+        {
+            contentLength--;
+        }
+
+        var prefix = summary[..contentLength].TrimEnd();
+        if (prefix.Length == 0)
+        {
+            return "…";
+        }
+
+        var sentenceBoundary = prefix.LastIndexOfAny(['.', '!', '?', '\n']);
+        if (sentenceBoundary >= prefix.Length / 2)
+        {
+            prefix = prefix[..(sentenceBoundary + 1)].TrimEnd();
+        }
+
+        return $"{prefix}…";
     }
 
     private static string BuildCacheKey(

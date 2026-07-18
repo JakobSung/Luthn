@@ -88,7 +88,7 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
-    public async Task LightweightContextPackAppliesItemAndConservativeTokenBounds()
+    public async Task LightweightContextPackTruncatesRankedItemsWithinConservativeTokenBounds()
     {
         var client = new FakeLuthnClient
         {
@@ -108,8 +108,38 @@ public sealed class McpToolBoundaryTests
 
         var result = Assert.IsType<ContextPackDto>(await tool.InvokeAsync(args.RootElement));
 
-        Assert.Single(result.Items);
-        Assert.Equal(3, client.LastMaxItems);
+        Assert.Equal(3, result.Items.Count);
+        Assert.All(result.Items, item => Assert.EndsWith("…", item.SafeSummary, StringComparison.Ordinal));
+        Assert.True(EstimateTokens(result.Items) <= 600);
+        Assert.Equal(12, client.LastMaxItems);
+    }
+
+    [Fact]
+    public async Task LightweightContextPackBackfillsWhenRankedCandidateMetadataCannotFit()
+    {
+        var client = new FakeLuthnClient
+        {
+            ContextPackResult = new ContextPackDto(
+                ["project"],
+                [
+                    new ContextPackItemDto(
+                        new string('i', 800),
+                        "Oversized metadata",
+                        "Relevant but impossible to fit.",
+                        "Public",
+                        ["project"]),
+                    ContextPack("memory-1", "First backfilled context").Items[0],
+                    ContextPack("memory-2", "Second backfilled context").Items[0],
+                    ContextPack("memory-3", "Third backfilled context").Items[0]
+                ])
+        };
+        var tool = new GetContextPackTool(client);
+        using var args = JsonDocument.Parse("""{"maxItems":3,"maxTokens":600}""");
+
+        var result = Assert.IsType<ContextPackDto>(await tool.InvokeAsync(args.RootElement));
+
+        Assert.Equal(["memory-1", "memory-2", "memory-3"], result.Items.Select(item => item.Id));
+        Assert.True(EstimateTokens(result.Items) <= 600);
     }
 
     [Fact]
@@ -441,4 +471,15 @@ public sealed class McpToolBoundaryTests
         new(
             ["project"],
             [new ContextPackItemDto(id, "Project memory", summary, "Public", ["project"])]);
+
+    private static int EstimateTokens(IEnumerable<ContextPackItemDto> items) =>
+        items.Sum(item => Math.Max(
+            1,
+            (80 +
+                item.Id.Length +
+                item.Title.Length +
+                item.SafeSummary.Length +
+                item.Sensitivity.Length +
+                item.CoreTags.Sum(tag => tag.Length + 3) +
+                2) / 3));
 }
