@@ -197,6 +197,21 @@ generate_token() {
   fi
 }
 
+compute_token_digest() {
+  token="$1"
+  image="$2"
+  local digest
+  if ! digest="$(printf '%s' "$token" | docker run --rm -i "$image" token-digest --stdin)"; then
+    echo "operator token digest generation failed" >&2
+    return 1
+  fi
+  if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "operator token digest output was invalid" >&2
+    return 1
+  fi
+  printf '%s' "$digest"
+}
+
 operator_credential_slot_available() {
   image="$1"
   [[ -f "$config_file" ]] || return 0
@@ -211,7 +226,9 @@ operator_credential_slot_available() {
     return 1
   fi
   operator_token="$(cat "$operator_token_file")"
-  operator_digest="$(printf '%s' "$operator_token" | docker run --rm -i "$image" token-digest --stdin)"
+  if ! operator_digest="$(compute_token_digest "$operator_token" "$image")"; then
+    return 1
+  fi
   if [[ "$(read_config Luthn__Auth__Tokens__1__Sha256Digest)" != "$operator_digest" ]]; then
     echo "token slot 1 is occupied and cannot be used for the local operator credential" >&2
     return 1
@@ -224,12 +241,18 @@ ensure_operator_credential() {
   operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
   if [[ -f "$operator_token_file" ]]; then
     operator_token="$(cat "$operator_token_file")"
+    operator_token_exists=true
   else
     operator_token="$(generate_token)"
+    operator_token_exists=false
+  fi
+  if ! operator_digest="$(compute_token_digest "$operator_token" "$image")"; then
+    return 1
+  fi
+  if [[ "$operator_token_exists" != "true" ]]; then
     write_operator_token_file "$operator_token"
   fi
   set_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file"
-  operator_digest="$(printf '%s' "$operator_token" | docker run --rm -i "$image" token-digest --stdin)"
   operator_prefix="Luthn__Auth__Tokens__1__"
   remove_config_prefix "$operator_prefix"
   set_config "${operator_prefix}Name" local-operator
@@ -592,7 +615,10 @@ install_luthn() {
     token="$(generate_token)"
     digest="$(printf '%s' "$token" | docker run --rm -i "$image" token-digest --stdin)"
     operator_token="$(generate_token)"
-    operator_digest="$(printf '%s' "$operator_token" | docker run --rm -i "$image" token-digest --stdin)"
+    if ! operator_digest="$(compute_token_digest "$operator_token" "$image")"; then
+      echo "Install stopped because the local operator credential could not be configured." >&2
+      return 1
+    fi
     write_token_file "$token"
     write_operator_token_file "$operator_token"
     write_initial_config "$image" "$digest" "$operator_digest"

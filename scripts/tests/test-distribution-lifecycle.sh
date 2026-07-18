@@ -142,6 +142,33 @@ grep -q 'Lifecycle sentinel' <<<"$context_output"
 
 echo "[4/8] update"
 operator_digest_before="$(awk -F= '$1 == "Luthn__Auth__Tokens__1__Sha256Digest" { print $2 }' "$LUTHN_CONFIG_DIR/luthn.env")"
+cp "$LUTHN_CONFIG_DIR/luthn.env" "$test_root/valid-config-before-update-tests"
+grep -v '^Luthn__Auth__Tokens__1__Sha256Digest=' "$LUTHN_CONFIG_DIR/luthn.env" \
+  >"$LUTHN_CONFIG_DIR/luthn.env.partial-operator"
+mv "$LUTHN_CONFIG_DIR/luthn.env.partial-operator" "$LUTHN_CONFIG_DIR/luthn.env"
+cp "$LUTHN_CONFIG_DIR/luthn.env" "$test_root/partial-operator-config-before"
+operator_token_hash_before="$(shasum -a 256 "$LUTHN_OPERATOR_TOKEN_FILE" | awk '{print $1}')"
+runtime_hash_before="$(shasum -a 256 "$LUTHN_CLI_PATH" "$LUTHN_DATA_DIR/compose.yaml")"
+real_docker="$(command -v docker)"
+mkdir -p "$test_root/failing-digest-bin"
+cat >"$test_root/failing-digest-bin/docker" <<'EOF'
+#!/usr/bin/env bash
+if [[ " $* " == *" token-digest --stdin "* ]]; then
+  exit 41
+fi
+exec "${LUTHN_REAL_DOCKER:?}" "$@"
+EOF
+chmod 0755 "$test_root/failing-digest-bin/docker"
+if PATH="$test_root/failing-digest-bin:$PATH" LUTHN_REAL_DOCKER="$real_docker" \
+  "$cli" update "$image" >/dev/null 2>&1; then
+  echo "update unexpectedly succeeded after operator digest generation failed" >&2
+  exit 1
+fi
+cmp "$test_root/partial-operator-config-before" "$LUTHN_CONFIG_DIR/luthn.env"
+test "$operator_token_hash_before" = "$(shasum -a 256 "$LUTHN_OPERATOR_TOKEN_FILE" | awk '{print $1}')"
+test "$runtime_hash_before" = "$(shasum -a 256 "$LUTHN_CLI_PATH" "$LUTHN_DATA_DIR/compose.yaml")"
+cp "$test_root/valid-config-before-update-tests" "$LUTHN_CONFIG_DIR/luthn.env"
+
 grep -v -e '^Luthn__Auth__Tokens__0__Scopes__7=access.request$' \
   -e '^Luthn__Auth__Tokens__1__' "$LUTHN_CONFIG_DIR/luthn.env" \
   >"$LUTHN_CONFIG_DIR/luthn.env.collision"
