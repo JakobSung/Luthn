@@ -92,6 +92,7 @@ public static class SensitiveAccessEndpoints
         SensitiveAccessRequestCreateRequest request,
         LuthnDbContext db,
         HttpContext httpContext,
+        IOperationalMetrics metrics,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateCreateRequest(request);
@@ -136,6 +137,7 @@ public static class SensitiveAccessEndpoints
         });
 
         await db.SaveChangesAsync(cancellationToken);
+        metrics.RecordSensitiveAccessRequest();
 
         return TypedResults.Created(
             $"/api/access-requests/{accessRequest.Id}",
@@ -213,6 +215,7 @@ public static class SensitiveAccessEndpoints
         IPolicyEngine policyEngine,
         LuthnDbContext db,
         HttpContext httpContext,
+        IOperationalMetrics metrics,
         CancellationToken cancellationToken) =>
         DecideRequest(
             id,
@@ -225,6 +228,7 @@ public static class SensitiveAccessEndpoints
             "approved-redacted-output-unavailable",
             db,
             httpContext,
+            metrics,
             cancellationToken);
 
     public static Task<Results<
@@ -236,6 +240,7 @@ public static class SensitiveAccessEndpoints
         SensitiveAccessDecisionRequest request,
         LuthnDbContext db,
         HttpContext httpContext,
+        IOperationalMetrics metrics,
         CancellationToken cancellationToken) =>
         DecideRequest(
             id,
@@ -248,6 +253,7 @@ public static class SensitiveAccessEndpoints
             "denied-no-output",
             db,
             httpContext,
+            metrics,
             cancellationToken);
 
     private static async Task<Results<
@@ -265,6 +271,7 @@ public static class SensitiveAccessEndpoints
         string redactionState,
         LuthnDbContext db,
         HttpContext httpContext,
+        IOperationalMetrics metrics,
         CancellationToken cancellationToken)
     {
         var accessRequest = await db.SensitiveAccessRequests
@@ -356,6 +363,7 @@ public static class SensitiveAccessEndpoints
         });
 
         await db.SaveChangesAsync(cancellationToken);
+        metrics.RecordSensitiveAccessDecision(decisionKind == SensitiveAccessDecisionKind.Approved ? "approved" : "denied");
 
         var redactedOutputAvailable = status == SensitiveAccessRequestStatus.Approved &&
             await HasRedactedOutputAsync(

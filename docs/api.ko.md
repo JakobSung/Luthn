@@ -117,6 +117,19 @@ POST /api/operator/classification-provider/test
 
 응답은 `provider`, `model`, `endpoint`, `authHeaderName`, `payloadClass`, `redactionState`, `hasApiKey`만 반환하고 API key는 절대 돌려주지 않습니다. 시험 endpoint는 선택적 `content`, `sourceType`을 받아 현재 provider와 정책 engine을 실행하고 안전한 설정 보기, 분류, 저장 결정을 반환합니다. 저장과 시험은 메타데이터 전용 감사 사건을 기록합니다.
 
+## 운영 관측 지표 내보내기
+
+```http
+GET /api/operator/metrics
+GET /api/operator/metrics/export
+```
+
+두 로컬 운영자 endpoint는 `metrics.read` 서비스 token scope가 필요합니다.
+동일한 bounded JSON 스냅샷을 반환하며, `/export`는 다운로드 응답입니다. 스냅샷에는
+저카디널리티 분류 provider 요청 시간·결과, 민감 접근 요청·결정 처리량, 안전 검색 후보
+압력의 집계만 포함됩니다. query 텍스트, memory/source 식별자, actor 식별값, prompt,
+원문, 경로, token은 포함하지 않고 외부 공개 작업도 만들지 않습니다.
+
 ## 원본 수집
 
 ```http
@@ -255,7 +268,7 @@ GET /api/audit-events?subjectId=access-...&limit=50
 dotnet run --project src/Luthn.Tools -- token-digest --stdin
 ```
 
-지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.decide`, `audit.read`, `*`.
+지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, `*`.
 
 ## Vault 경계
 

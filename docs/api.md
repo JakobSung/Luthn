@@ -272,6 +272,21 @@ provider and policy engine, and returns the safe configuration view,
 classification, and storage decision. Save and test operations write
 metadata-only audit events.
 
+## Operational metrics export
+
+```http
+GET /api/operator/metrics
+GET /api/operator/metrics/export
+```
+
+These local operator endpoints require the `metrics.read` service-token scope.
+They return the same bounded JSON snapshot; `/export` supplies it as a download.
+The snapshot contains only aggregate, low-cardinality classification-provider
+attempt duration/outcome, sensitive-access request/decision throughput, and
+safe-search candidate-pressure values. It never contains query text, memory or
+source identifiers, actor identities, prompts, raw content, paths, or tokens,
+and it does not create an external-publication job.
+
 ## Source intake
 
 ```http
@@ -617,6 +632,7 @@ Supported scopes:
 - `access.request`
 - `access.decide`
 - `audit.read`
+- `metrics.read`
 - `*`
 
 ## Vault boundary

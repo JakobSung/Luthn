@@ -101,6 +101,7 @@ public sealed class ExternalHttpContentClassifier : IContentClassifier
             _runtimeOptions,
             _logger,
             "external-http",
+            NullOperationalMetrics.Instance,
             cancellationToken);
 
         var providerResponse = await response.Content.ReadFromJsonAsync<ExternalClassifierResponse>(

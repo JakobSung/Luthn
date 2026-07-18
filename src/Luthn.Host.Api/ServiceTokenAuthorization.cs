@@ -21,6 +21,7 @@ public static class ServiceScopes
     public const string AccessDecide = "access.decide";
     public const string AuditRead = "audit.read";
     public const string ConfigWrite = "config.write";
+    public const string MetricsRead = "metrics.read";
     public const string All = "*";
 }
 

@@ -49,6 +49,7 @@ builder.Services.AddSingleton<IRetrievalBackend, DeterministicRetrievalBackend>(
 builder.Services.AddScoped<IRetrievalCandidateSelector, DbBackedRetrievalCandidateSelector>();
 builder.Services.AddSingleton<ContextPackBuilder>();
 builder.Services.AddSingleton<WikiMarkdownRenderer>();
+builder.Services.AddSingleton<IOperationalMetrics, OperationalMetrics>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSafeProjectionSyncFoundation();
 builder.Services.AddProblemDetails();
@@ -133,6 +134,7 @@ if (app.Environment.IsEnvironment("Testing"))
 
 app.MapLuthnApi();
 app.MapOperatorConfiguration();
+app.MapOperationalMetrics();
 
 app.Run();
 
