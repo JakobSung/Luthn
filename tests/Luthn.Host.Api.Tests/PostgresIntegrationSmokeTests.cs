@@ -44,7 +44,7 @@ public sealed class PostgresIntegrationSmokeTests
         await db.Database.EnsureDeletedAsync();
 
         const string migrationUnderTest = "20260718110000_AddSensitiveAccessRequestExpiryAndSession";
-        var migrations = (await db.Database.GetMigrationsAsync()).ToArray();
+        var migrations = db.Database.GetMigrations().ToArray();
         var migrationIndex = Array.IndexOf(migrations, migrationUnderTest);
         Assert.True(migrationIndex > 0);
 
@@ -72,6 +72,14 @@ public sealed class PostgresIntegrationSmokeTests
         var migratedRequest = await db.SensitiveAccessRequests
             .SingleAsync(record => record.Id == "access-legacy-approved");
         Assert.Equal("Reviewed legacy output.", migratedRequest.RedactedSummary);
+        var migratedResult = await SensitiveAccessEndpoints.ReadRequestResult(
+            "access-legacy-approved",
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+        var migratedResultOk = Assert.IsType<Ok<SensitiveAccessResultResponse>>(migratedResult.Result);
+        Assert.True(migratedResultOk.Value!.RedactedOutputAvailable);
+        Assert.Equal("Reviewed legacy output.", migratedResultOk.Value.RedactedOutput);
 
         var pending = await db.Database.GetPendingMigrationsAsync();
         Assert.Empty(pending);

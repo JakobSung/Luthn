@@ -5,8 +5,10 @@ using Luthn.Sdk.Access;
 using Luthn.Sdk.Agent;
 using Luthn.Sdk.AgentConnections;
 using Luthn.Sdk.Classification;
+using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
 using Luthn.Sdk.Source;
+using Luthn.Sdk.Wiki;
 
 namespace Luthn.AgentConnector.Tests;
 
@@ -620,6 +622,23 @@ public sealed class LuthnClientTests
 
         Task<ClassificationPreviewDto> ILuthnClient.ClassifyPreviewAsync(
             ClassificationPreviewRequestDto request,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        Task<SensitiveAccessResultDto> ILuthnClient.GetSensitiveAccessResultAsync(
+            string id,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        Task<SensitiveAccessRequestDto> ILuthnClient.ApproveSensitiveAccessRequestAsync(
+            string id,
+            SensitiveAccessDecisionRequestDto request,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        Task<SensitiveAccessRequestDto> ILuthnClient.DenySensitiveAccessRequestAsync(
+            string id,
+            SensitiveAccessDecisionRequestDto request,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
