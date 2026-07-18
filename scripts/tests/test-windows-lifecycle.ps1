@@ -415,8 +415,12 @@ esac
     $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $updatedCli
     $targetImage = "ghcr.io/jakobsung/luthn:sha-$('b' * 40)"
     $updateLogStart = [IO.File]::ReadAllLines($fakeDockerLog).Count
+    $oversizedUnownedInstructions = "x" * (1024 * 1024 + 1)
+    [IO.File]::WriteAllText($codexInstructionsFile, $oversizedUnownedInstructions, [Text.UTF8Encoding]::new($false))
     $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $oversizedUnownedInstructions) "an update without connector ownership should ignore unrelated oversized instructions"
+    [IO.File]::WriteAllText($codexInstructionsFile, $originalInstructions, [Text.UTF8Encoding]::new($false))
     Assert-True ($update.Output -match "Luthn update completed") "successful update should report completion"
     Assert-True ($update.Output -match "Revision: a{40} -> a{40}") "successful update should report the revision transition"
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"

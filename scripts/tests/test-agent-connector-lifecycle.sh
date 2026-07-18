@@ -703,6 +703,9 @@ chmod 0755 "$reconcile_bin/luthn"
 cp "$repo_root/scripts/luthn-codex-connector.py" \
   "$reconcile_data/runtime/luthn-codex-connector.py"
 chmod 0700 "$reconcile_data/runtime/luthn-codex-connector.py"
+sed 's/print("2")/print("3")/' "$tmp_root/connector-helper-fixture.py" \
+  >"$reconcile_root/target-helper.py"
+chmod 0700 "$reconcile_root/target-helper.py"
 printf 'services: {}\n' >"$reconcile_data/compose.yaml"
 cp "$config_dir/luthn.env" "$reconcile_config/luthn.env"
 cat >"$reconcile_codex/hooks.json" <<'EOF'
@@ -737,6 +740,7 @@ EOF
   export LUTHN_CONFIG_FILE="$reconcile_config/luthn.env"
   export LUTHN_CLI_PATH="$reconcile_bin/luthn"
   export LUTHN_CODEX_CONNECTOR_HELPER="$reconcile_data/runtime/luthn-codex-connector.py"
+  export REAL_CONNECTOR_HELPER="$repo_root/scripts/luthn-codex-connector.py"
   set -- help
   # shellcheck disable=SC1090
   source "$repo_root/scripts/luthn" >/dev/null
@@ -745,7 +749,10 @@ EOF
   require_command() { :; }
   pull_image() { :; }
   image_id_for_container() { printf '%s' sha256:previous; }
-  download_runtime() { :; }
+  download_runtime() {
+    cp "$reconcile_root/target-helper.py" "$LUTHN_CODEX_CONNECTOR_HELPER"
+    chmod 0700 "$LUTHN_CODEX_CONNECTOR_HELPER"
+  }
   ensure_connector_scopes() { :; }
   compose_cmd() {
     if [[ " $* " == *" --list-tools "* ]]; then
@@ -763,7 +770,7 @@ EOF
   }
   update_luthn test/luthn:new >/dev/null
 )
-grep -q '^CONNECTOR_VERSION=2$' "$reconcile_state/connectors/codex.env"
+grep -q '^CONNECTOR_VERSION=3$' "$reconcile_state/connectors/codex.env"
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
 import sys
@@ -783,7 +790,7 @@ import sys
 path = sys.argv[1]
 content = open(path, encoding="utf-8").read()
 with open(path, "w", encoding="utf-8") as stream:
-    stream.write(content.replace("CONNECTOR_VERSION=2\n", "CONNECTOR_VERSION=1\n"))
+    stream.write(content.replace("CONNECTOR_VERSION=3\n", "CONNECTOR_VERSION=1\n"))
 PY
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
@@ -813,6 +820,7 @@ if (
   export LUTHN_CONFIG_FILE="$reconcile_config/luthn.env"
   export LUTHN_CLI_PATH="$reconcile_bin/luthn"
   export LUTHN_CODEX_CONNECTOR_HELPER="$reconcile_data/runtime/luthn-codex-connector.py"
+  export REAL_CONNECTOR_HELPER="$repo_root/scripts/luthn-codex-connector.py"
   set -- help
   # shellcheck disable=SC1090
   source "$repo_root/scripts/luthn" >/dev/null
@@ -827,7 +835,9 @@ if (
   }
   ensure_connector_scopes() { :; }
   compose_cmd() {
-    [[ " $* " != *" --list-tools "* ]]
+    if [[ " $* " == *" --list-tools "* ]]; then
+      printf '%s\n' search_safe_context
+    fi
   }
   record_state() { :; }
   docker() {
@@ -835,7 +845,7 @@ if (
   }
   update_luthn test/luthn:new >/dev/null
 ); then
-  echo "expected connector probe failure to stop update" >&2
+  echo "expected missing get_context_pack tool to stop update" >&2
   exit 1
 fi
 [[ "$(shasum -a 256 "$reconcile_bin/luthn" | awk '{print $1}')" == "$rollback_cli_hash" ]]

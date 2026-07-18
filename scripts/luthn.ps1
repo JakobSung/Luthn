@@ -851,12 +851,7 @@ function Update-Luthn {
         Get-CodexFileSnapshot -Path $script:ComposeFile
         Get-CodexFileSnapshot -Path $installedCli
     )
-    $connectorSnapshots = @(
-        Get-CodexFileSnapshot -Path $script:CodexHooksFile
-        Get-CodexFileSnapshot -Path $script:CodexInstructionsFile
-        Get-CodexFileSnapshot -Path $script:CodexStateFile
-        Get-CodexFileSnapshot -Path $script:CodexPendingStateFile
-    )
+    $connectorSnapshots = @()
     $connectorWasConfigured = $false
     $connectorAutoRecall = $true
     $previousConnectorVersion = ""
@@ -869,6 +864,14 @@ function Update-Luthn {
         } catch {
             $connectorWasConfigured = $false
         }
+    }
+    if ($connectorWasConfigured) {
+        $connectorSnapshots = @(
+            Get-CodexFileSnapshot -Path $script:CodexHooksFile
+            Get-CodexFileSnapshot -Path $script:CodexInstructionsFile
+            Get-CodexFileSnapshot -Path $script:CodexStateFile
+            Get-CodexFileSnapshot -Path $script:CodexPendingStateFile
+        )
     }
 
     Write-Host "Refreshing Windows CLI and Compose runtime..."

@@ -115,6 +115,31 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task LightweightContextPackRetriesWithFewerItemsWhenEqualSlotsAreTooSmall()
+    {
+        var client = new FakeLuthnClient
+        {
+            ContextPackResult = new ContextPackDto(
+                ["project"],
+                Enumerable.Range(1, 3)
+                    .Select(index => new ContextPackItemDto(
+                        new string((char)('a' + index), 600),
+                        $"Memory {index}",
+                        "Fitting context",
+                        "Public",
+                        ["project"]))
+                    .ToArray())
+        };
+        var tool = new GetContextPackTool(client);
+        using var args = JsonDocument.Parse("""{"maxItems":3,"maxTokens":600}""");
+
+        var result = Assert.IsType<ContextPackDto>(await tool.InvokeAsync(args.RootElement));
+
+        Assert.Equal(2, result.Items.Count);
+        Assert.True(EstimateTokens(result.Items) <= 600);
+    }
+
+    [Fact]
     public async Task LightweightContextPackBackfillsWhenRankedCandidateMetadataCannotFit()
     {
         var client = new FakeLuthnClient

@@ -632,15 +632,17 @@ reconcile_codex_managed_configuration() {
 
   mcp_probe="$(compose_cmd --profile tools run --rm --no-deps -T mcp mcp --list-tools 2>&1)" \
     || return 1
-  printf '%s\n' "$mcp_probe" | grep -q '^get_context_pack$'
+  printf '%s\n' "$mcp_probe" | grep -q '^get_context_pack$' || return 1
 
+  target_connector_version="$(python3 "$helper" version 2>/dev/null)" || return 1
+  [[ "$target_connector_version" =~ ^[1-9][0-9]*$ ]] || return 1
   installed_connector_version="$(codex_state_value CONNECTOR_VERSION)"
-  if [[ "$installed_connector_version" != "$codex_connector_version" ]]; then
+  if [[ "$installed_connector_version" != "$target_connector_version" ]]; then
     mcp_changed="$(codex_state_value MCP_CHANGED)"
     [[ -n "$mcp_changed" ]] || mcp_changed=false
     record_codex_connector_state \
       "$hooks_file" "$codex_state_file" configured "$mcp_changed" \
-      "$auto_recall" "$instructions_file"
+      "$auto_recall" "$instructions_file" "$target_connector_version"
   fi
 }
 
@@ -676,13 +678,14 @@ record_codex_connector_state() {
   mcp_changed="${4:-false}"
   auto_recall="${5:-false}"
   instructions_file="${6:-$(codex_instructions_path)}"
+  connector_version="${7:-$codex_connector_version}"
   ensure_directories || return 1
   state_tmp="$(mktemp "${destination}.XXXXXX")" || return 1
   if ! cat >"$state_tmp" <<EOF
 AGENT_ID=codex
 AGENT_NAME=Codex
 INTEGRATION_KIND=host-hook-mcp
-CONNECTOR_VERSION=$codex_connector_version
+CONNECTOR_VERSION=$connector_version
 CONFIGURATION_OWNER=luthn
 CHANNELS=automatic-ingestion,mcp
 HOOKS_FILE=$hooks_file

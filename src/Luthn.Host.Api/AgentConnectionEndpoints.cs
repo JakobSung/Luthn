@@ -163,10 +163,17 @@ public static partial class AgentConnectionEndpoints
             record.LastActivityAt = observedAt;
         }
 
-        if (channel.VerificationState != AgentConnectionVerificationState.Unknown ||
-            channel.ActivityState != AgentConnectionActivityState.Unknown)
+        if (channel.VerificationState == AgentConnectionVerificationState.Failed ||
+            channel.ActivityState == AgentConnectionActivityState.Failed)
         {
             record.FailureCode = NormalizeFailureCode(channel.FailureCode);
+        }
+        else if ((channel.VerificationState != AgentConnectionVerificationState.Unknown ||
+            channel.ActivityState != AgentConnectionActivityState.Unknown) &&
+            record.VerificationState != AgentConnectionVerificationState.Failed &&
+            record.ActivityState != AgentConnectionActivityState.Failed)
+        {
+            record.FailureCode = null;
         }
 
         if (channel.ActivityState == AgentConnectionActivityState.Succeeded)

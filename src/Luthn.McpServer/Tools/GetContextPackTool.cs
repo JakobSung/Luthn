@@ -117,29 +117,36 @@ public sealed class GetContextPackTool : ILuthnMcpTool
             return new ContextPackDto(contextPack.CoreTags, candidates.Take(maxItems).ToArray());
         }
 
-        var remainingTokens = maxTokens.Value;
-        var items = new List<ContextPackItemDto>();
-        var desiredItems = Math.Min(maxItems, candidates.Length);
-        foreach (var item in candidates)
+        for (var desiredItems = Math.Min(maxItems, candidates.Length); desiredItems > 0; desiredItems--)
         {
-            if (items.Count >= desiredItems || remainingTokens <= 0)
+            var remainingTokens = maxTokens.Value;
+            var items = new List<ContextPackItemDto>();
+            foreach (var item in candidates)
             {
-                break;
+                if (items.Count >= desiredItems || remainingTokens <= 0)
+                {
+                    break;
+                }
+
+                var remainingSlots = desiredItems - items.Count;
+                var itemBudget = remainingTokens / remainingSlots;
+                var fitted = FitWithinTokenBudget(item, itemBudget);
+                if (fitted is null)
+                {
+                    continue;
+                }
+
+                items.Add(fitted);
+                remainingTokens -= EstimateTokens(fitted);
             }
 
-            var remainingSlots = desiredItems - items.Count;
-            var itemBudget = remainingTokens / remainingSlots;
-            var fitted = FitWithinTokenBudget(item, itemBudget);
-            if (fitted is null)
+            if (items.Count == desiredItems)
             {
-                continue;
+                return new ContextPackDto(contextPack.CoreTags, items);
             }
-
-            items.Add(fitted);
-            remainingTokens -= EstimateTokens(fitted);
         }
 
-        return new ContextPackDto(contextPack.CoreTags, items);
+        return new ContextPackDto(contextPack.CoreTags, []);
     }
 
     private static int EstimateTokens(ContextPackItemDto item)

@@ -110,6 +110,36 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
     }
 
     [Fact]
+    public async Task VerificationOnlyRefreshPreservesFailedActivityCode()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var failed = await client.PostAsJsonAsync(
+            "/api/agent-connections/codex/observations",
+            Observation(Channel(
+                "automatic-ingestion",
+                configured: true,
+                verification: "Verified",
+                activity: "Failed",
+                failureCode: "delivery.timeout")));
+        using var refreshed = await client.PostAsJsonAsync(
+            "/api/agent-connections/codex/observations",
+            Observation(Channel(
+                "automatic-ingestion",
+                configured: true,
+                verification: "Verified")));
+        using var body = await JsonDocument.ParseAsync(await refreshed.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+        Assert.Equal("Degraded", body.RootElement.GetProperty("state").GetString());
+        var channel = Assert.Single(body.RootElement.GetProperty("channels").EnumerateArray());
+        Assert.Equal("Failed", channel.GetProperty("activityState").GetString());
+        Assert.Equal("delivery.timeout", channel.GetProperty("failureCode").GetString());
+    }
+
+    [Fact]
     public async Task FailedAndDisconnectedObservationsUseBoundedReplacementState()
     {
         using var factory = CreateFactory();
