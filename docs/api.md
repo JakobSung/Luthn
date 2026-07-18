@@ -504,7 +504,7 @@ POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. Listing and decision operations require the decision scope; create/read operations require the request scope.
+These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. Listing and decision operations require the separate trusted `access.decide` scope; create/read operations require only `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
 
 List response:
 
@@ -516,7 +516,9 @@ List response:
       "sensitiveReferenceId": "sensitive-ref-...",
       "status": "Pending",
       "requestedBy": "agent-service",
+      "sessionId": "session-...",
       "createdAt": "2026-07-04T00:00:00Z",
+      "expiresAt": "2026-07-04T00:10:00Z",
       "decidedBy": null,
       "decidedAt": null,
       "redactedOutputAvailable": false
@@ -530,9 +532,16 @@ Create request:
 ```json
 {
   "sensitiveReferenceId": "sensitive-ref-...",
-  "reason": "Need approval for a redacted operational summary."
+  "reason": "Need approval for a redacted operational summary.",
+  "sessionId": "session-...",
+  "expiresInSeconds": 600
 }
 ```
+
+New callers should send both `sessionId` and `expiresInSeconds`. For compatibility
+with the pre-expiry unversioned contract, omitted values receive a server-generated
+`legacy-...` session id and a 600-second lifetime. Explicit lifetimes must remain
+within 60–3600 seconds.
 
 Response shape includes request/decision metadata only:
 
@@ -575,7 +584,7 @@ Result response:
 }
 ```
 
-`GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy.
+`GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Explicit request lifetime is bounded to 60–3600 seconds; expiry records a metadata-only `sensitive_access.expired` audit event. Result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy.
 
 ## Audit events
 

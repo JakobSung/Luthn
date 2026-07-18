@@ -4,7 +4,7 @@ using Luthn.Sdk.Classification;
 
 namespace Luthn.McpServer.Tools;
 
-public sealed class ClassifyPreviewTool(ILuthnClient client) : ILuthnMcpTool
+public sealed class ClassifyPreviewTool(ILuthnAgentClient client) : ILuthnMcpTool
 {
     public string Name => "classify_preview";
 

@@ -152,7 +152,7 @@ luthn mcp --list-tools
 
 연결은 Luthn 소유 Stop hook과 Docker Compose stdio MCP를 등록합니다. 기본 자동 회상은 새 작업 때 최대 3개 항목·약 600 token·200ms 제한·10분 cache로 `get_context_pack`을 한 번 호출합니다. 반복 실행과 연결 해제는 관계없는 Codex 설정을 보존합니다.
 
-예상 MCP tool은 `get_context_pack`, `search_safe_context`, `get_wiki_proposal`, `classify_preview`, `create_shared_memory`, `query_shared_memory`, `get_shared_memory_item`입니다.
+예상 MCP tool은 `get_context_pack`, `search_safe_context`, `get_wiki_proposal`, `classify_preview`, `create_shared_memory`, `query_shared_memory`, `get_shared_memory_item`, `create_sensitive_access_request`, `get_sensitive_access_request`, `get_sensitive_access_result`입니다. 기본 connector token에는 `access.request`가 포함되어 새 설치와 update 뒤 요청·상태·결과 도구가 바로 동작합니다. 승인·거절은 MCP 밖의 신뢰된 운영자 경로에 남습니다.
 
 ## 비밀 값
 

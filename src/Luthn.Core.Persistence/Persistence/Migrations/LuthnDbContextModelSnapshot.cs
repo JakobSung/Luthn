@@ -363,6 +363,9 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                     b.Property<DateTimeOffset?>("DecidedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("DecidedBy")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
@@ -372,7 +375,17 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<string>("RedactedSummary")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
                     b.Property<string>("RequestedBy")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("SessionId")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
@@ -394,7 +407,7 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
 
                     b.HasIndex("SensitiveRecordReferenceId");
 
-                    b.HasIndex("Status", "UpdatedAt");
+                    b.HasIndex("Status", "ExpiresAt", "UpdatedAt");
 
                     b.ToTable("sensitive_access_requests", (string)null);
                 });

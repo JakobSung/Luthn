@@ -25,12 +25,15 @@ services:
       Luthn__Auth__Tokens__0__Scopes__7: ${Luthn__Auth__Tokens__0__Scopes__7:-external-publication.read}
       Luthn__Auth__Tokens__0__Scopes__8: ${Luthn__Auth__Tokens__0__Scopes__8:-external-publication.write}
       Luthn__Auth__Tokens__0__Scopes__9: ${Luthn__Auth__Tokens__0__Scopes__9:-metrics.read}
-      Luthn__Auth__Tokens__0__Scopes__10: ${Luthn__Auth__Tokens__0__Scopes__10:-}
+      Luthn__Auth__Tokens__0__Scopes__10: ${Luthn__Auth__Tokens__0__Scopes__10:-access.request}
       Luthn__Auth__Tokens__0__Scopes__11: ${Luthn__Auth__Tokens__0__Scopes__11:-}
       Luthn__Auth__Tokens__0__Scopes__12: ${Luthn__Auth__Tokens__0__Scopes__12:-}
       Luthn__Auth__Tokens__0__Scopes__13: ${Luthn__Auth__Tokens__0__Scopes__13:-}
       Luthn__Auth__Tokens__0__Scopes__14: ${Luthn__Auth__Tokens__0__Scopes__14:-}
       Luthn__Auth__Tokens__0__Scopes__15: ${Luthn__Auth__Tokens__0__Scopes__15:-}
+      Luthn__Auth__Tokens__1__Name: ${Luthn__Auth__Tokens__1__Name:-local-operator}
+      Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:-}
+      Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
     ports:
       - "8080:8080"
     depends_on:

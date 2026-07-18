@@ -487,7 +487,13 @@ classify_preview
 create_shared_memory
 query_shared_memory
 get_shared_memory_item
+create_sensitive_access_request
+get_sensitive_access_request
+get_sensitive_access_result
 ```
+
+The default connector token includes `access.request`, so these request/status/result
+tools work after a new install or update. Approval and denial remain outside MCP.
 
 ### Additional Agents
 

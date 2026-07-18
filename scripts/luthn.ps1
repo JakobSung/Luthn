@@ -28,6 +28,7 @@ $script:BinDir = if ($env:LUTHN_BIN_DIR) { $env:LUTHN_BIN_DIR } else { Join-Path
 $script:ComposeFile = if ($env:LUTHN_COMPOSE_FILE) { $env:LUTHN_COMPOSE_FILE } else { Join-Path $script:DataDir "compose.yaml" }
 $script:ConfigFile = if ($env:LUTHN_CONFIG_FILE) { $env:LUTHN_CONFIG_FILE } else { Join-Path $script:ConfigDir "luthn.env" }
 $script:TokenFile = if ($env:LUTHN_SERVICE_TOKEN_FILE) { $env:LUTHN_SERVICE_TOKEN_FILE } else { Join-Path $script:ConfigDir "service-token" }
+$script:OperatorTokenFile = if ($env:LUTHN_OPERATOR_TOKEN_FILE) { $env:LUTHN_OPERATOR_TOKEN_FILE } else { Join-Path $script:ConfigDir "operator-token" }
 $script:ConnectorStateDir = if ($env:LUTHN_CONNECTOR_STATE_DIR) { $env:LUTHN_CONNECTOR_STATE_DIR } else { Join-Path $script:StateDir "connectors" }
 $script:CodexStateFile = if ($env:LUTHN_CODEX_STATE_FILE) { $env:LUTHN_CODEX_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.json" }
 $script:CodexPendingStateFile = if ($env:LUTHN_CODEX_PENDING_STATE_FILE) { $env:LUTHN_CODEX_PENDING_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.pending.json" }
@@ -376,9 +377,42 @@ function Set-ConfigValue {
     Protect-SecretFile $script:ConfigFile
 }
 
+function Remove-ConfigPrefix {
+    param([Parameter(Mandatory = $true)][string]$Prefix)
+    if (-not [IO.File]::Exists($script:ConfigFile)) { return }
+    $lines = @([IO.File]::ReadAllLines($script:ConfigFile) | Where-Object {
+        $separator = $_.IndexOf("=")
+        $separator -lt 0 -or -not $_.Substring(0, $separator).StartsWith($Prefix, [StringComparison]::Ordinal)
+    })
+    Write-Utf8File -Path $script:ConfigFile -Content $(if ($lines.Count -gt 0) { ($lines -join "`n") + "`n" } else { "" })
+    Protect-SecretFile $script:ConfigFile
+}
+
 function Ensure-ConfigValue {
     param([string]$Key, [string]$Value)
     if (-not (Read-ConfigValue -Key $Key)) { Set-ConfigValue -Key $Key -Value $Value }
+}
+
+function Ensure-ServiceTokenScope {
+    param(
+        [Parameter(Mandatory = $true)][string]$Scope,
+        [switch]$Required
+    )
+    for ($index = 0; $index -lt 16; $index++) {
+        $value = Read-ConfigValue "Luthn__Auth__Tokens__0__Scopes__$index"
+        if ($value -ceq "*" -or $value -ceq $Scope) { return }
+    }
+    for ($index = 0; $index -lt 16; $index++) {
+        $key = "Luthn__Auth__Tokens__0__Scopes__$index"
+        if (-not (Read-ConfigValue $key)) {
+            Set-ConfigValue $key $Scope
+            return
+        }
+    }
+    if ($Required) {
+        throw "No free service-token scope slot is available for $Scope."
+    }
+    Write-Warning "The custom service-token scope table is full; $Scope was not added."
 }
 
 function New-ServiceToken {
@@ -556,7 +590,7 @@ Luthn__Auth__Tokens__0__Sha256Digest=validation
 }
 
 function Write-InitialConfig {
-    param([string]$Image, [string]$Digest)
+    param([string]$Image, [string]$Digest, [string]$OperatorDigest)
     $port = if ($env:LUTHN_PORT) { $env:LUTHN_PORT } else { "8080" }
     $postgresVolume = if ($env:LUTHN_POSTGRES_VOLUME) { $env:LUTHN_POSTGRES_VOLUME } else { "luthn-postgres" }
     $operatorVolume = if ($env:LUTHN_OPERATOR_VOLUME) { $env:LUTHN_OPERATOR_VOLUME } else { "luthn-operator" }
@@ -568,6 +602,7 @@ function Write-InitialConfig {
         "LUTHN_POSTGRES_VOLUME=$postgresVolume",
         "LUTHN_OPERATOR_VOLUME=$operatorVolume",
         "LUTHN_SERVICE_TOKEN_FILE=$script:TokenFile",
+        "LUTHN_OPERATOR_TOKEN_FILE=$script:OperatorTokenFile",
         "LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=luthn",
         "POSTGRES_DB=luthn",
         "POSTGRES_USER=luthn",
@@ -583,6 +618,10 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Scopes__4=classification.preview",
         "Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read",
         "Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write"
+        "Luthn__Auth__Tokens__0__Scopes__7=access.request",
+        "Luthn__Auth__Tokens__1__Name=local-operator",
+        "Luthn__Auth__Tokens__1__Sha256Digest=$OperatorDigest",
+        "Luthn__Auth__Tokens__1__Scopes__0=access.decide"
     ) -join "`n"
     Write-Utf8File -Path $script:ConfigFile -Content ($content + "`n")
     Protect-SecretFile $script:ConfigFile
@@ -595,6 +634,46 @@ function Get-TokenDigest {
     $digest = $result.StdOut.Trim()
     if ($digest -cnotmatch "^sha256:[0-9a-f]{64}$") { throw "service token digest output was invalid" }
     return $digest
+}
+
+function Assert-OperatorCredentialSlotAvailable {
+    param([string]$Image)
+    if (-not [IO.File]::Exists($script:ConfigFile)) { return }
+    $slotOccupied = [IO.File]::ReadAllLines($script:ConfigFile) |
+        Where-Object { $_ -cmatch '^Luthn__Auth__Tokens__1__' } |
+        Select-Object -First 1
+    if (-not $slotOccupied) { return }
+
+    $configuredOperatorTokenFile = Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
+    if ((Read-ConfigValue "Luthn__Auth__Tokens__1__Name") -cne "local-operator" -or
+        -not [IO.File]::Exists($configuredOperatorTokenFile)) {
+        throw "token slot 1 is occupied and cannot be used for the local operator credential"
+    }
+    $operatorToken = [IO.File]::ReadAllText($configuredOperatorTokenFile).Trim()
+    $operatorDigest = Get-TokenDigest -Image $Image -Token $operatorToken
+    if ((Read-ConfigValue "Luthn__Auth__Tokens__1__Sha256Digest") -cne $operatorDigest) {
+        throw "token slot 1 is occupied and cannot be used for the local operator credential"
+    }
+}
+
+function Ensure-OperatorCredential {
+    param([string]$Image)
+    Assert-OperatorCredentialSlotAvailable -Image $Image
+    $script:OperatorTokenFile = Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
+    if ([IO.File]::Exists($script:OperatorTokenFile)) {
+        $operatorToken = [IO.File]::ReadAllText($script:OperatorTokenFile).Trim()
+    } else {
+        $operatorToken = New-ServiceToken
+        Write-Utf8File -Path $script:OperatorTokenFile -Content $operatorToken
+    }
+    Protect-SecretFile $script:OperatorTokenFile
+    Set-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
+    $operatorDigest = Get-TokenDigest -Image $Image -Token $operatorToken
+    $operatorPrefix = "Luthn__Auth__Tokens__1__"
+    Remove-ConfigPrefix $operatorPrefix
+    Set-ConfigValue "${operatorPrefix}Name" "local-operator"
+    Set-ConfigValue "${operatorPrefix}Sha256Digest" $operatorDigest
+    Set-ConfigValue "${operatorPrefix}Scopes__0" "access.decide"
 }
 
 function Wait-ForPostgres {
@@ -648,6 +727,7 @@ function Install-Luthn {
     $image = Read-ConfigValue "LUTHN_IMAGE" $(if ($env:LUTHN_IMAGE) { $env:LUTHN_IMAGE } else { $script:DefaultImage })
     Write-Host "Pulling $image..."
     Invoke-ToolVisible -Tool $docker -Arguments @("pull", $image)
+    Assert-OperatorCredentialSlotAvailable -Image $image
 
     $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $image)
     $revision = if ($revisionResult.ExitCode -eq 0) { $revisionResult.StdOut.Trim() } else { "" }
@@ -657,9 +737,13 @@ function Install-Luthn {
     if (-not [IO.File]::Exists($script:ConfigFile)) {
         $token = New-ServiceToken
         $digest = Get-TokenDigest -Image $image -Token $token
+        $operatorToken = New-ServiceToken
+        $operatorDigest = Get-TokenDigest -Image $image -Token $operatorToken
         Write-Utf8File -Path $script:TokenFile -Content $token
         Protect-SecretFile $script:TokenFile
-        Write-InitialConfig -Image $image -Digest $digest
+        Write-Utf8File -Path $script:OperatorTokenFile -Content $operatorToken
+        Protect-SecretFile $script:OperatorTokenFile
+        Write-InitialConfig -Image $image -Digest $digest -OperatorDigest $operatorDigest
     } else {
         Ensure-ConfigValue "LUTHN_IMAGE" $image
         Ensure-ConfigValue "LUTHN_PORT" $(if ($env:LUTHN_PORT) { $env:LUTHN_PORT } else { "8080" })
@@ -689,7 +773,12 @@ function Install-Luthn {
         for ($index = 0; $index -lt $scopes.Count; $index++) {
             Ensure-ConfigValue "Luthn__Auth__Tokens__0__Scopes__$index" $scopes[$index]
         }
+        $accessScopeRequired = $connectCodex -or
+            [IO.File]::Exists($script:CodexStateFile) -or
+            [IO.File]::Exists($script:CodexPendingStateFile)
+        Ensure-ServiceTokenScope "access.request" -Required:$accessScopeRequired
     }
+    Ensure-OperatorCredential -Image $image
 
     Write-Host "Starting Luthn..."
     Invoke-ComposeVisible @("pull", "postgres")
@@ -706,6 +795,7 @@ function Install-Luthn {
     Write-Host "Console: $baseUrl/"
     Write-Host "Status:  luthn status"
     Write-Host "Config:  $script:ConfigFile"
+    Write-Host "Operator token: $script:OperatorTokenFile"
     Write-Host "Agent:   luthn connect codex"
 
     if ($connectCodex) { Connect-Codex }
@@ -870,6 +960,7 @@ function Update-Luthn {
     $targetImageId = $targetIdResult.StdOut.Trim()
     $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $targetImage)
     $targetRevision = if ($revisionResult.ExitCode -eq 0) { $revisionResult.StdOut.Trim() } else { "" }
+    Assert-OperatorCredentialSlotAvailable -Image $targetImage
 
     $installedCli = Join-Path $script:BinDir "luthn.ps1"
     $runtimeSnapshots = @(
@@ -942,6 +1033,8 @@ function Update-Luthn {
                 throw "Codex connector reconciliation failed: $detail"
             }
         }
+        Ensure-ServiceTokenScope "access.request" -Required:$connectorWasConfigured
+        Ensure-OperatorCredential -Image $targetImage
     } catch {
         $restoreErrors = @()
         foreach ($snapshot in @($runtimeSnapshots) + @($connectorSnapshots)) {
@@ -1304,10 +1397,15 @@ function New-CodexTurnCapsule {
     if ($inputObject.last_assistant_message -isnot [string]) { throw "Codex Stop hook last_assistant_message must be text" }
     $summary = $inputObject.last_assistant_message.Trim()
     if (-not $summary -or (Test-CodexMessageContainsCredentials $summary)) { return $null }
-    $serviceTokenFile = Read-ConfigValue "LUTHN_SERVICE_TOKEN_FILE" $script:TokenFile
-    if ([IO.File]::Exists($serviceTokenFile)) {
-        $serviceToken = [IO.File]::ReadAllText($serviceTokenFile).Trim()
-        if ($serviceToken -and $summary.Contains($serviceToken, [StringComparison]::Ordinal)) { return $null }
+    $managedTokenFiles = @(
+        (Read-ConfigValue "LUTHN_SERVICE_TOKEN_FILE" $script:TokenFile),
+        (Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile)
+    )
+    foreach ($managedTokenFile in $managedTokenFiles) {
+        if ([IO.File]::Exists($managedTokenFile)) {
+            $managedToken = [IO.File]::ReadAllText($managedTokenFile).Trim()
+            if ($managedToken -and $summary.Contains($managedToken, [StringComparison]::Ordinal)) { return $null }
+        }
     }
     if ($summary.Length -gt $script:MaxTurnCapsuleCharacters) {
         $summary = $summary.Substring(0, $script:MaxTurnCapsuleCharacters).TrimEnd()

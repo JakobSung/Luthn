@@ -16,11 +16,11 @@ public sealed class GetContextPackTool : ILuthnMcpTool
     private const int CandidatePoolMultiplier = 4;
     private const int MaximumCandidatePoolSize = 50;
 
-    private readonly ILuthnClient _client;
+    private readonly ILuthnAgentClient _client;
     private readonly Func<DateTimeOffset> _utcNow;
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
 
-    public GetContextPackTool(ILuthnClient client, Func<DateTimeOffset>? utcNow = null)
+    public GetContextPackTool(ILuthnAgentClient client, Func<DateTimeOffset>? utcNow = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);

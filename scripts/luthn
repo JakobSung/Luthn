@@ -11,6 +11,7 @@ config_file="${LUTHN_CONFIG_FILE:-$config_dir/luthn.env}"
 state_file="${LUTHN_STATE_FILE:-$state_dir/install-state.env}"
 cli_path="${LUTHN_CLI_PATH:-$bin_dir/luthn}"
 token_file="${LUTHN_SERVICE_TOKEN_FILE:-$config_dir/service-token}"
+operator_token_file="${LUTHN_OPERATOR_TOKEN_FILE:-$config_dir/operator-token}"
 runtime_dir="${LUTHN_RUNTIME_DIR:-$data_dir/runtime}"
 connector_state_dir="${LUTHN_CONNECTOR_STATE_DIR:-$state_dir/connectors}"
 codex_state_file="${LUTHN_CODEX_STATE_FILE:-$connector_state_dir/codex.env}"
@@ -122,6 +123,15 @@ remove_config() {
   mv "$tmp_file" "$config_file"
 }
 
+remove_config_prefix() {
+  prefix="$1"
+  [[ -f "$config_file" ]] || return 0
+  tmp_file="$(mktemp "${config_file}.XXXXXX")"
+  awk -F= -v prefix="$prefix" 'index($1, prefix) != 1 { print }' "$config_file" >"$tmp_file"
+  chmod 0600 "$tmp_file"
+  mv "$tmp_file" "$config_file"
+}
+
 write_token_file() {
   token="$1"
   ensure_directories
@@ -130,9 +140,18 @@ write_token_file() {
   chmod 0600 "$token_file"
 }
 
+write_operator_token_file() {
+  token="$1"
+  ensure_directories
+  umask 077
+  printf '%s' "$token" >"$operator_token_file"
+  chmod 0600 "$operator_token_file"
+}
+
 write_initial_config() {
   image="$1"
   digest="$2"
+  operator_digest="$3"
   port="${LUTHN_PORT:-8080}"
   postgres_volume="${LUTHN_POSTGRES_VOLUME:-luthn-postgres}"
   operator_volume="${LUTHN_OPERATOR_VOLUME:-luthn-operator}"
@@ -146,6 +165,7 @@ LUTHN_BASE_URL=http://127.0.0.1:$port
 LUTHN_POSTGRES_VOLUME=$postgres_volume
 LUTHN_OPERATOR_VOLUME=$operator_volume
 LUTHN_SERVICE_TOKEN_FILE=$token_file
+LUTHN_OPERATOR_TOKEN_FILE=$operator_token_file
 LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=luthn
 POSTGRES_DB=luthn
 POSTGRES_USER=luthn
@@ -161,6 +181,10 @@ Luthn__Auth__Tokens__0__Scopes__3=memory.read
 Luthn__Auth__Tokens__0__Scopes__4=classification.preview
 Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read
 Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write
+Luthn__Auth__Tokens__0__Scopes__7=access.request
+Luthn__Auth__Tokens__1__Name=local-operator
+Luthn__Auth__Tokens__1__Sha256Digest=$operator_digest
+Luthn__Auth__Tokens__1__Scopes__0=access.decide
 EOF
   chmod 0600 "$config_file"
 }
@@ -171,6 +195,69 @@ generate_token() {
   else
     od -An -N 24 -tx1 /dev/urandom | tr -d ' \n'
   fi
+}
+
+compute_token_digest() {
+  token="$1"
+  image="$2"
+  local digest
+  if ! digest="$(printf '%s' "$token" | docker run --rm -i "$image" token-digest --stdin)"; then
+    echo "operator token digest generation failed" >&2
+    return 1
+  fi
+  if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "operator token digest output was invalid" >&2
+    return 1
+  fi
+  printf '%s' "$digest"
+}
+
+operator_credential_slot_available() {
+  image="$1"
+  [[ -f "$config_file" ]] || return 0
+  if ! awk -F= '$1 ~ /^Luthn__Auth__Tokens__1__/ { found = 1 } END { exit !found }' "$config_file"; then
+    return 0
+  fi
+
+  operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
+  if [[ "$(read_config Luthn__Auth__Tokens__1__Name)" != "local-operator" \
+    || ! -f "$operator_token_file" ]]; then
+    echo "token slot 1 is occupied and cannot be used for the local operator credential" >&2
+    return 1
+  fi
+  operator_token="$(cat "$operator_token_file")"
+  if ! operator_digest="$(compute_token_digest "$operator_token" "$image")"; then
+    return 1
+  fi
+  if [[ "$(read_config Luthn__Auth__Tokens__1__Sha256Digest)" != "$operator_digest" ]]; then
+    echo "token slot 1 is occupied and cannot be used for the local operator credential" >&2
+    return 1
+  fi
+}
+
+ensure_operator_credential() {
+  image="$1"
+  operator_credential_slot_available "$image" || return 1
+  operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
+  if [[ -f "$operator_token_file" ]]; then
+    operator_token="$(cat "$operator_token_file")"
+    operator_token_exists=true
+  else
+    operator_token="$(generate_token)"
+    operator_token_exists=false
+  fi
+  if ! operator_digest="$(compute_token_digest "$operator_token" "$image")"; then
+    return 1
+  fi
+  if [[ "$operator_token_exists" != "true" ]]; then
+    write_operator_token_file "$operator_token"
+  fi
+  set_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file"
+  operator_prefix="Luthn__Auth__Tokens__1__"
+  remove_config_prefix "$operator_prefix"
+  set_config "${operator_prefix}Name" local-operator
+  set_config "${operator_prefix}Sha256Digest" "$operator_digest"
+  set_config "${operator_prefix}Scopes__0" access.decide
 }
 
 ensure_config_value() {
@@ -266,12 +353,14 @@ install_runtime_file() {
 
 ensure_connector_scopes() {
   connector_scopes_changed=false
+  local check_only="${1:-false}"
   if ! ensure_directories; then
     return 1
   fi
 
   local read_present=false
   local write_present=false
+  local access_request_present=false
   local wildcard_present=false
   local scope_value
   local scope_index
@@ -284,27 +373,34 @@ ensure_connector_scopes() {
       '*') wildcard_present=true ;;
       agent.connection.read) read_present=true ;;
       agent.connection.write) write_present=true ;;
+      access.request) access_request_present=true ;;
       '') empty_indices+=("$scope_index") ;;
     esac
   done
 
   if [[ "$wildcard_present" == "true" \
-    || ( "$read_present" == "true" && "$write_present" == "true" ) ]]; then
+    || ( "$read_present" == "true" && "$write_present" == "true" && "$access_request_present" == "true" ) ]]; then
     return 0
   fi
 
   local required_slots=0
   [[ "$read_present" == "true" ]] || required_slots=$((required_slots + 1))
   [[ "$write_present" == "true" ]] || required_slots=$((required_slots + 1))
+  [[ "$access_request_present" == "true" ]] || required_slots=$((required_slots + 1))
   if (( ${#empty_indices[@]} < required_slots )); then
     echo "No free service-token scope slots are available for the connector." >&2
     return 1
+  fi
+  if [[ "$check_only" == "--check-only" ]]; then
+    return 0
   fi
 
   local key1=""
   local value1=""
   local key2=""
   local value2=""
+  local key3=""
+  local value3=""
   local next_slot=0
   if [[ "$read_present" != "true" ]]; then
     key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
@@ -319,6 +415,19 @@ ensure_connector_scopes() {
       key2="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
       value2="agent.connection.write"
     fi
+    next_slot=$((next_slot + 1))
+  fi
+  if [[ "$access_request_present" != "true" ]]; then
+    if [[ -z "$key1" ]]; then
+      key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value1="access.request"
+    elif [[ -z "$key2" ]]; then
+      key2="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value2="access.request"
+    else
+      key3="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value3="access.request"
+    fi
   fi
 
   local input_file="$config_file"
@@ -327,14 +436,16 @@ ensure_connector_scopes() {
   if ! config_tmp="$(mktemp "${config_file}.connector-scopes.XXXXXX")"; then
     return 1
   fi
-  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" '
-    BEGIN { updated1 = 0; updated2 = 0 }
+  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" -v key3="$key3" -v value3="$value3" '
+    BEGIN { updated1 = 0; updated2 = 0; updated3 = 0 }
     key1 != "" && $1 == key1 { print key1 "=" value1; updated1 = 1; next }
     key2 != "" && $1 == key2 { print key2 "=" value2; updated2 = 1; next }
+    key3 != "" && $1 == key3 { print key3 "=" value3; updated3 = 1; next }
     { print }
     END {
       if (key1 != "" && !updated1) print key1 "=" value1
       if (key2 != "" && !updated2) print key2 "=" value2
+      if (key3 != "" && !updated3) print key3 "=" value3
     }
   ' "$input_file" >"$config_tmp"; then
     rm -f "$config_tmp"
@@ -345,6 +456,30 @@ ensure_connector_scopes() {
     return 1
   fi
   connector_scopes_changed=true
+}
+
+ensure_access_request_scope() {
+  connector_scopes_changed=false
+  local index key value
+  for index in $(seq 0 15); do
+    key="Luthn__Auth__Tokens__0__Scopes__${index}"
+    value="$(read_config "$key")"
+    if [[ "$value" == "*" || "$value" == "access.request" ]]; then
+      return 0
+    fi
+  done
+
+  for index in $(seq 0 15); do
+    key="Luthn__Auth__Tokens__0__Scopes__${index}"
+    if [[ -z "$(read_config "$key")" ]]; then
+      set_config "$key" access.request
+      connector_scopes_changed=true
+      return 0
+    fi
+  done
+
+  echo "No free service-token scope slot is available for access.request." >&2
+  return 1
 }
 
 require_installation() {
@@ -460,17 +595,33 @@ install_luthn() {
   require_docker
   require_command curl
 
+  if [[ -f "$config_file" ]] && has_codex_connector_state \
+    && ! ensure_connector_scopes --check-only; then
+    echo "Install stopped because the active Codex connector scopes could not be configured." >&2
+    return 1
+  fi
+
   image="$(read_config LUTHN_IMAGE "${LUTHN_IMAGE:-$default_image}")"
   echo "Pulling $image..."
   pull_image "$image"
+  if ! operator_credential_slot_available "$image"; then
+    echo "Install stopped because the local operator credential could not be configured." >&2
+    return 1
+  fi
   image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
   download_runtime "$(runtime_source_for_image "$image" "$image_revision")"
 
   if [[ ! -f "$config_file" ]]; then
     token="$(generate_token)"
     digest="$(printf '%s' "$token" | docker run --rm -i "$image" token-digest --stdin)"
+    operator_token="$(generate_token)"
+    if ! operator_digest="$(compute_token_digest "$operator_token" "$image")"; then
+      echo "Install stopped because the local operator credential could not be configured." >&2
+      return 1
+    fi
     write_token_file "$token"
-    write_initial_config "$image" "$digest"
+    write_operator_token_file "$operator_token"
+    write_initial_config "$image" "$digest" "$operator_digest"
   else
     ensure_config_value LUTHN_IMAGE "$image"
     ensure_config_value LUTHN_PORT "${LUTHN_PORT:-8080}"
@@ -506,11 +657,17 @@ install_luthn() {
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__3 memory.read
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__4 classification.preview
   fi
+  if ! ensure_operator_credential "$image"; then
+    echo "Install stopped because the local operator credential could not be configured." >&2
+    return 1
+  fi
   if has_codex_connector_state; then
     if ! ensure_connector_scopes; then
       echo "Install stopped because the active Codex connector scopes could not be configured." >&2
       return 1
     fi
+  elif ! ensure_access_request_scope; then
+    echo "warning: access.request could not be added because the custom service-token scope table is full" >&2
   fi
 
   echo "Starting Luthn..."
@@ -527,6 +684,7 @@ Luthn is ready.
 Console: $(read_config LUTHN_BASE_URL http://127.0.0.1:8080)/
 Status:  $cli_path status
 Config:  $config_file
+Operator token: $operator_token_file
 Agent:   $cli_path connect codex
 EOF
 
@@ -1302,12 +1460,17 @@ run_codex_hook() {
   [[ -f "$helper" && -f "$config_file" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
   service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"
+  managed_operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
   base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
   [[ -f "$service_token_file" ]] || return 0
-  python3 "$helper" hook-run \
+  hook_args=("$helper" hook-run \
     --base-url "$base_url" \
     --token-file "$service_token_file" \
-    --connector-version "$codex_connector_version" >/dev/null 2>&1 || true
+    --connector-version "$codex_connector_version")
+  if [[ -f "$managed_operator_token_file" ]]; then
+    hook_args+=(--excluded-token-file "$managed_operator_token_file")
+  fi
+  python3 "${hook_args[@]}" >/dev/null 2>&1 || true
 }
 
 stop_write_paths() {
@@ -1347,6 +1510,15 @@ update_luthn() {
 
   target_id="$(docker image inspect --format '{{.Id}}' "$target_image")"
   target_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target_image" 2>/dev/null || true)"
+  if ! operator_credential_slot_available "$target_image"; then
+    echo "Update stopped because the local operator credential could not be configured." >&2
+    return 1
+  fi
+  if has_codex_connector_state && ! ensure_connector_scopes --check-only; then
+    record_state failed "$target_image" "$target_id" "$previous_id"
+    echo "Update stopped because the active Codex connector scopes could not be configured." >&2
+    return 1
+  fi
   runtime_rollback_dir="$(mktemp -d "$state_dir/runtime-update.XXXXXX")"
   cp -p "$compose_file" "$runtime_rollback_dir/compose.yaml"
   cp -p "$cli_path" "$runtime_rollback_dir/luthn"
@@ -1406,6 +1578,13 @@ update_luthn() {
       echo "Update stopped because the active Codex connector scopes could not be configured." >&2
       return 1
     fi
+  elif ! ensure_access_request_scope; then
+    echo "warning: access.request could not be added because the custom service-token scope table is full" >&2
+  fi
+  if ! ensure_operator_credential "$target_image"; then
+    record_state failed "$target_image" "$target_id" "$previous_id"
+    echo "Update stopped because the local operator credential could not be configured." >&2
+    return 1
   fi
 
   compose_cmd up -d postgres

@@ -368,6 +368,37 @@ class TurnCapsuleTests(unittest.TestCase):
 
             request_json.assert_not_called()
 
+    def test_current_bare_operator_token_is_not_sent_to_turn_summary_intake(self):
+        operator_token = "fedcba9876543210" * 3
+        payload = json.dumps(
+            {
+                "session_id": "session-operator-secret",
+                "turn_id": "turn-operator-secret",
+                "hook_event_name": "Stop",
+                "last_assistant_message": operator_token,
+            }
+        ).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "service-token"
+            token_file.write_text("test-token", encoding="utf-8")
+            operator_token_file = Path(directory) / "operator-token"
+            operator_token_file.write_text(operator_token, encoding="utf-8")
+            with mock.patch.object(
+                CONNECTOR, "_read_bounded_hook_input", return_value=payload
+            ), mock.patch.object(CONNECTOR, "_request_json") as request_json:
+                self.assertEqual(
+                    0,
+                    CONNECTOR.upload_hook(
+                        "http://127.0.0.1:1",
+                        token_file,
+                        "1",
+                        [operator_token_file],
+                    ),
+                )
+
+            request_json.assert_not_called()
+
     def test_truncated_service_token_is_not_sent_to_turn_summary_intake(self):
         token = "0123456789abcdef" * 3
         prefix = "x" * (CONNECTOR.MAX_TURN_CAPSULE_CHARS - len(token) + 1)
@@ -407,7 +438,10 @@ class TurnCapsuleTests(unittest.TestCase):
             CONNECTOR.subprocess, "Popen", side_effect=capture_spawn
         ) as popen:
             result = CONNECTOR.run_hook(
-                "http://127.0.0.1:8080", Path("/tmp/token"), "1"
+                "http://127.0.0.1:8080",
+                Path("/tmp/token"),
+                "1",
+                [Path("/tmp/operator-token")],
             )
 
         self.assertEqual(0, result)
@@ -416,6 +450,7 @@ class TurnCapsuleTests(unittest.TestCase):
         self.assertTrue(popen.call_args.kwargs["close_fds"])
         self.assertEqual(CONNECTOR.subprocess.DEVNULL, popen.call_args.kwargs["stdout"])
         self.assertEqual(CONNECTOR.subprocess.DEVNULL, popen.call_args.kwargs["stderr"])
+        self.assertIn("/tmp/operator-token", popen.call_args.args[0])
 
     def test_success_observation_failure_does_not_report_intake_as_failed(self):
         payload = json.dumps(

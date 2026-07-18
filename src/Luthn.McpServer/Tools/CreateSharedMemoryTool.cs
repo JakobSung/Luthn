@@ -4,7 +4,7 @@ using Luthn.Sdk.Memory;
 
 namespace Luthn.McpServer.Tools;
 
-public sealed class CreateSharedMemoryTool(ILuthnClient client) : ILuthnMcpTool
+public sealed class CreateSharedMemoryTool(ILuthnAgentClient client) : ILuthnMcpTool
 {
     public string Name => "create_shared_memory";
 

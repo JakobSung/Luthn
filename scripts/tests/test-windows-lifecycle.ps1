@@ -303,14 +303,22 @@ esac
 
     $configFile = Join-Path $windowsRoot "config/luthn.env"
     $tokenFile = Join-Path $windowsRoot "config/service-token"
+    $operatorTokenFile = Join-Path $windowsRoot "config/operator-token"
     Assert-True ([IO.File]::Exists($configFile)) "config should exist"
     Assert-True ([IO.File]::Exists($tokenFile)) "token should exist"
+    Assert-True ([IO.File]::Exists($operatorTokenFile)) "operator token should exist"
     $token = [IO.File]::ReadAllText($tokenFile)
+    $operatorToken = [IO.File]::ReadAllText($operatorTokenFile)
     Assert-True ($token -cmatch "^[0-9a-f]{48}$") "token should be a 24-byte hex value"
+    Assert-True ($operatorToken -cmatch "^[0-9a-f]{48}$" -and $operatorToken -cne $token) "operator token should be a distinct 24-byte hex value"
     $configBytes = [IO.File]::ReadAllBytes($configFile)
     Assert-True (-not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF)) "config should be UTF-8 without BOM"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "Luthn__Auth__Tokens__0__Sha256Digest=sha256:[0-9a-f]{64}") "config should preserve the token-digest sha256 prefix"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "new installs should provision the MCP sensitive-access request scope"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$") "new installs should provision a distinct local operator credential"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "the local operator credential should be decision-only"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
+    Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($operatorToken))) "Docker arguments and logs should not contain the operator token"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "one-step Codex registration should not contain the token"
     $installedHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
     $luthnHook = @($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
@@ -350,8 +358,20 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $originalInstructions) "disconnect should preserve unrelated instructions"
 
     $firstHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
+    $configBeforeFullScopeInstall = [IO.File]::ReadAllText($configFile)
+    $nonScopeConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object {
+        $_ -notmatch '^Luthn__Auth__Tokens__0__Scopes__\d+='
+    })
+    $fullCustomScopes = @(0..15 | ForEach-Object { "Luthn__Auth__Tokens__0__Scopes__$_=custom.scope.$_" })
+    [IO.File]::WriteAllText(
+        $configFile,
+        ((@($nonScopeConfig) + $fullCustomScopes) -join "`n") + "`n",
+        [Text.UTF8Encoding]::new($false))
     $secondInstall = Invoke-InstallerProcess $installerPath
     Assert-True ($secondInstall.ExitCode -eq 0) "repeated install should be idempotent: $($secondInstall.Output)"
+    Assert-True ($secondInstall.Output -match "scope table is full") "install should warn instead of failing for a full custom scope table without connector ownership"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^Luthn__Auth__Tokens__0__Scopes__15=custom\.scope\.15$") "install should preserve a full custom scope table"
+    [IO.File]::WriteAllText($configFile, $configBeforeFullScopeInstall, [Text.UTF8Encoding]::new($false))
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "repeated install should preserve the validated CLI"
 
     [IO.File]::WriteAllText($failingCli, '$script:LuthnWindowsCliVersion = "1"' + "`nexit 23`n", [Text.UTF8Encoding]::new($false))
@@ -420,6 +440,41 @@ esac
     $updateLogStart = [IO.File]::ReadAllLines($fakeDockerLog).Count
     $oversizedUnownedInstructions = "x" * (1024 * 1024 + 1)
     [IO.File]::WriteAllText($codexInstructionsFile, $oversizedUnownedInstructions, [Text.UTF8Encoding]::new($false))
+    $operatorDigest = ([IO.File]::ReadAllLines($configFile) | Where-Object { $_ -cmatch '^Luthn__Auth__Tokens__1__Sha256Digest=' }).Split('=', 2)[1]
+    $legacyConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object {
+        $_ -cne "Luthn__Auth__Tokens__0__Scopes__7=access.request" -and
+        $_ -cnotmatch '^Luthn__Auth__Tokens__1__'
+    }) + @(
+        "Luthn__Auth__Tokens__1__Name=existing-integration",
+        "Luthn__Auth__Tokens__1__Sha256Digest=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "Luthn__Auth__Tokens__1__Scopes__0=memory.read",
+        "Luthn__Auth__Tokens__1__Scopes__1=*",
+        "Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z",
+        "Luthn__Auth__Tokens__2__Name=local-operator",
+        "Luthn__Auth__Tokens__2__Sha256Digest=$operatorDigest",
+        "Luthn__Auth__Tokens__2__Scopes__0=access.decide",
+        "Luthn__Auth__Tokens__2__Scopes__1=*",
+        "Luthn__Auth__Tokens__2__ExpiresAt=2099-01-01T00:00:00Z"
+    )
+    [IO.File]::WriteAllText($configFile, (($legacyConfig -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+    $collisionConfig = [IO.File]::ReadAllText($configFile)
+    $collisionOperatorToken = [IO.File]::ReadAllText($operatorTokenFile)
+    $collisionCliHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
+    $collisionUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($collisionUpdate.ExitCode -ne 0) "Windows update should stop when operator token slot 1 is occupied"
+    Assert-True ($collisionUpdate.Output -match "token slot 1 is occupied") "operator slot collision should report the reason"
+    Assert-True ([IO.File]::ReadAllText($configFile) -ceq $collisionConfig) "operator slot collision should preserve configuration"
+    Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $collisionOperatorToken) "operator slot collision should preserve the operator credential"
+    Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $collisionCliHash) "operator slot collision should preserve the installed CLI"
+
+    $validLegacyConfig = @($legacyConfig | Where-Object { $_ -cnotmatch '^Luthn__Auth__Tokens__(?:1|2)__' }) + @(
+        "Luthn__Auth__Tokens__1__Name=local-operator",
+        "Luthn__Auth__Tokens__1__Sha256Digest=$operatorDigest",
+        "Luthn__Auth__Tokens__1__Scopes__0=access.decide",
+        "Luthn__Auth__Tokens__1__Scopes__1=*",
+        "Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z"
+    )
+    [IO.File]::WriteAllText($configFile, (($validLegacyConfig -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
     $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $oversizedUnownedInstructions) "an update without connector ownership should ignore unrelated oversized instructions"
@@ -428,6 +483,11 @@ esac
     Assert-True ($update.Output -match "Revision: a{40} -> a{40}") "successful update should report the revision transition"
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
+    Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
+    $updatedConfig = [IO.File]::ReadAllText($configFile)
+    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "update should reuse the Compose-exposed operator slot"
+    Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__1__(?:Scopes__1|ExpiresAt)=") "update should normalize the managed operator slot to decision-only"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
     Assert-True ($backupFiles.Count -eq 1 -and $backupFiles[0].Length -gt 0) "update should create a non-empty PostgreSQL backup"
     $updateStateFile = Join-Path $windowsRoot "state/update-windows.json"
@@ -449,6 +509,20 @@ esac
     }
     Assert-True ($stopIndex -ge 0 -and $stopIndex -lt $backupIndex) "update should stop API writes before backup"
     Assert-True ($backupIndex -lt $migrationIndex -and $migrationIndex -lt $apiStartIndex) "update should back up before migration and start API afterward"
+
+    $configBeforeFullScopeUpdate = [IO.File]::ReadAllText($configFile)
+    $nonScopeConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object {
+        $_ -notmatch '^Luthn__Auth__Tokens__0__Scopes__\d+='
+    })
+    [IO.File]::WriteAllText(
+        $configFile,
+        ((@($nonScopeConfig) + $fullCustomScopes) -join "`n") + "`n",
+        [Text.UTF8Encoding]::new($false))
+    $fullScopeUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($fullScopeUpdate.ExitCode -eq 0) "update should not fail for a full custom scope table without connector ownership: $($fullScopeUpdate.Output)"
+    Assert-True ($fullScopeUpdate.Output -match "scope table is full") "update should warn when it cannot add access.request to a full custom scope table"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^Luthn__Auth__Tokens__0__Scopes__15=custom\.scope\.15$") "update should preserve a full custom scope table"
+    [IO.File]::WriteAllText($configFile, $configBeforeFullScopeUpdate, [Text.UTF8Encoding]::new($false))
 
     $updatedHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
     $env:FAKE_DOCKER_PULL_FAIL = "true"
@@ -703,6 +777,15 @@ esac
     $secretHook = Invoke-CodexHookProcess $installedCli $secretHookEvent
     Assert-True ($secretHook.ExitCode -eq 0) "a secret-bearing hook payload should fail open"
     Assert-True ((Get-FileHash -LiteralPath $codexHookCapture -Algorithm SHA256).Hash -eq $captureHash) "a secret-bearing response should not be captured"
+    $operatorTokenHookEvent = [ordered]@{
+        hook_event_name = "Stop"
+        session_id = "operator-secret-session"
+        turn_id = "operator-secret-turn"
+        last_assistant_message = $operatorToken
+    } | ConvertTo-Json -Compress
+    $operatorTokenHook = Invoke-CodexHookProcess $installedCli $operatorTokenHookEvent
+    Assert-True ($operatorTokenHook.ExitCode -eq 0) "an operator-token hook payload should fail open"
+    Assert-True ((Get-FileHash -LiteralPath $codexHookCapture -Algorithm SHA256).Hash -eq $captureHash) "a bare generated operator token should not be captured"
     $oversizedHook = "{`"hook_event_name`":`"Stop`",`"session_id`":`"s`",`"turn_id`":`"t`",`"last_assistant_message`":`"$(`"x`" * 270000)`"}"
     $oversizedResult = Invoke-CodexHookProcess $installedCli $oversizedHook
     Assert-True ($oversizedResult.ExitCode -eq 0) "oversized hook input should fail open"

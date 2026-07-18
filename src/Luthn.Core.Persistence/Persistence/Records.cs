@@ -57,7 +57,8 @@ public enum SensitiveAccessRequestStatus
 {
     Pending,
     Approved,
-    Denied
+    Denied,
+    Expired
 }
 
 public enum SensitiveAccessDecisionKind
@@ -71,9 +72,12 @@ public sealed class SensitiveAccessRequestRecord
     public string Id { get; set; } = "";
     public string SensitiveRecordReferenceId { get; set; } = "";
     public string RequestedBy { get; set; } = "";
+    public string SessionId { get; set; } = "";
     public string RequestReason { get; set; } = "";
+    public string RedactedSummary { get; set; } = "";
     public SensitiveAccessRequestStatus Status { get; set; } = SensitiveAccessRequestStatus.Pending;
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string? DecidedBy { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }

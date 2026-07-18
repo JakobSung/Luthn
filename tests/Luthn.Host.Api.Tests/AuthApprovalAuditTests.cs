@@ -4,11 +4,15 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Luthn.Core.Classification;
+using Luthn.Core.Common;
 using Luthn.Core.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Luthn.Host.Api.Tests;
 
@@ -92,6 +96,36 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task RequestOnlyAgentCannotDecideButLocalOperatorCredentialCan()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        client.SetBearer(RequestBearer);
+        using var agentList = await client.GetAsync("/api/access-requests?status=Pending&limit=10");
+        using var agentDecision = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "The requesting agent must not approve its own request."
+        });
+
+        client.SetBearer(DeciderBearer);
+        client.DefaultRequestHeaders.Add("X-Luthn-Operator", "local-console");
+        using var operatorList = await client.GetAsync("/api/access-requests?status=Pending&limit=10");
+        using var operatorDecision = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Approved through the local operator fallback."
+        });
+        using var body = await JsonDocument.ParseAsync(await operatorDecision.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Forbidden, agentList.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, agentDecision.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, operatorList.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, operatorDecision.StatusCode);
+        Assert.Equal("Approved", body.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task AgentSummaryWriteScopeAuthorizesTurnSummaryIntake()
     {
         using var factory = CreateAuthFactory();
@@ -167,7 +201,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var response = await client.PostAsJsonAsync("/api/access-requests", new
         {
             sensitiveReferenceId = "sensitive-ref-1",
-            reason = "Need approval for a redacted operational summary."
+            reason = "Need approval for a redacted operational summary.",
+            sessionId = "session-operator-identity",
+            expiresInSeconds = 600
         });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -193,7 +229,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var response = await client.PostAsJsonAsync("/api/access-requests", new
         {
             sensitiveReferenceId = "sensitive-ref-1",
-            reason = "Need approval for a redacted operational summary."
+            reason = "Need approval for a redacted operational summary.",
+            sessionId = "session-pending",
+            expiresInSeconds = 600
         });
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 
@@ -213,6 +251,200 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         Assert.Equal(request.Id, audit.SubjectId);
         Assert.Equal("metadata-only", audit.PayloadClass);
         Assert.Equal("sensitive-boundary-only", audit.RedactionState);
+    }
+
+    [Fact]
+    public async Task LegacySensitiveAccessRequestGetsServerGeneratedSessionAndDefaultExpiry()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        client.SetBearer(RequestBearer);
+        var observedAt = DateTimeOffset.UtcNow;
+
+        using var response = await client.PostAsJsonAsync("/api/access-requests", new
+        {
+            sensitiveReferenceId = "sensitive-ref-1",
+            reason = "Legacy callers may omit newly introduced request metadata."
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.StartsWith("legacy-", body.RootElement.GetProperty("sessionId").GetString(), StringComparison.Ordinal);
+        var createdAt = body.RootElement.GetProperty("createdAt").GetDateTimeOffset();
+        var expiresAt = body.RootElement.GetProperty("expiresAt").GetDateTimeOffset();
+        Assert.InRange(createdAt, observedAt.AddSeconds(-1), DateTimeOffset.UtcNow.AddSeconds(1));
+        Assert.InRange(expiresAt - createdAt, TimeSpan.FromSeconds(599), TimeSpan.FromSeconds(601));
+    }
+
+    [Theory]
+    [InlineData(0, HttpStatusCode.BadRequest)]
+    [InlineData(59, HttpStatusCode.BadRequest)]
+    [InlineData(60, HttpStatusCode.Created)]
+    [InlineData(3600, HttpStatusCode.Created)]
+    [InlineData(3601, HttpStatusCode.BadRequest)]
+    public async Task SensitiveAccessRequestValidatesExplicitExpiryBoundaries(
+        int expiresInSeconds,
+        HttpStatusCode expectedStatus)
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        client.SetBearer(RequestBearer);
+
+        using var response = await client.PostAsJsonAsync("/api/access-requests", new
+        {
+            sensitiveReferenceId = "sensitive-ref-1",
+            reason = "Verify the explicit request lifetime boundary.",
+            sessionId = $"session-expiry-{expiresInSeconds}",
+            expiresInSeconds
+        });
+
+        Assert.Equal(expectedStatus, response.StatusCode);
+        if (expectedStatus == HttpStatusCode.Created)
+        {
+            using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+            var createdAt = body.RootElement.GetProperty("createdAt").GetDateTimeOffset();
+            var expiresAt = body.RootElement.GetProperty("expiresAt").GetDateTimeOffset();
+            Assert.InRange(
+                expiresAt - createdAt,
+                TimeSpan.FromSeconds(expiresInSeconds - 1),
+                TimeSpan.FromSeconds(expiresInSeconds + 1));
+        }
+    }
+
+    [Fact]
+    public async Task ExpiredSensitiveAccessRequestTransitionsToExpiredWithMetadataOnlyAudit()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            var request = await db.SensitiveAccessRequests.SingleAsync(record => record.Id == requestId);
+            request.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+            await db.SaveChangesAsync();
+        }
+
+        client.SetBearer(RequestBearer);
+        using var response = await client.GetAsync($"/api/access-requests/{requestId}");
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Expired", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal("expired-no-output", body.RootElement.GetProperty("outputPolicy").GetString());
+
+        using var verifyScope = factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Contains(await verifyDb.AuditEvents.ToArrayAsync(), audit =>
+            audit.Action == "sensitive_access.expired" &&
+            audit.SubjectId == requestId &&
+            audit.PayloadClass == "metadata-only");
+    }
+
+    [Fact]
+    public async Task SensitiveAccessListExpiresOverdueRequestsExactlyOnce()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            var request = await db.SensitiveAccessRequests.SingleAsync(record => record.Id == requestId);
+            request.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+            await db.SaveChangesAsync();
+        }
+
+        client.SetBearer(DeciderBearer);
+        using var pendingResponse = await client.GetAsync("/api/access-requests?status=Pending&limit=10");
+        using var pendingBody = await JsonDocument.ParseAsync(await pendingResponse.Content.ReadAsStreamAsync());
+        using var expiredResponse = await client.GetAsync("/api/access-requests?status=Expired&limit=10");
+        using var expiredBody = await JsonDocument.ParseAsync(await expiredResponse.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, pendingResponse.StatusCode);
+        Assert.Empty(pendingBody.RootElement.GetProperty("requests").EnumerateArray());
+        Assert.Equal(HttpStatusCode.OK, expiredResponse.StatusCode);
+        var expiredRequest = Assert.Single(expiredBody.RootElement.GetProperty("requests").EnumerateArray());
+        Assert.Equal(requestId, expiredRequest.GetProperty("id").GetString());
+        Assert.Equal("Expired", expiredRequest.GetProperty("status").GetString());
+
+        using var verifyScope = factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(1, await verifyDb.AuditEvents.CountAsync(record =>
+            record.SubjectId == requestId && record.Action == "sensitive_access.expired"));
+    }
+
+    [Fact]
+    public async Task ApprovalCannotCommitAfterRequestExpiresDuringClassification()
+    {
+        var classifier = new BlockingPublicContentClassifier();
+        using var factory = CreateAuthFactory(classifier);
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
+        client.SetBearer(DeciderBearer);
+
+        var approval = client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Approval must re-check state after classification.",
+            redactedSummary = "Public-safe release steps."
+        });
+        await classifier.Started.WaitAsync(TimeSpan.FromSeconds(5));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            var request = await db.SensitiveAccessRequests.SingleAsync(record => record.Id == requestId);
+            request.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+            await db.SaveChangesAsync();
+        }
+        classifier.Release();
+
+        using var response = await approval;
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var verifyScope = factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(
+            SensitiveAccessRequestStatus.Expired,
+            (await verifyDb.SensitiveAccessRequests.SingleAsync(record => record.Id == requestId)).Status);
+        Assert.Empty(await verifyDb.SensitiveAccessDecisions.Where(record => record.SensitiveAccessRequestId == requestId).ToArrayAsync());
+        Assert.DoesNotContain(await verifyDb.AuditEvents.ToArrayAsync(), record =>
+            record.SubjectId == requestId && record.Action == "sensitive_access.approved");
+        Assert.Equal(1, await verifyDb.AuditEvents.CountAsync(record =>
+            record.SubjectId == requestId && record.Action == "sensitive_access.expired"));
+    }
+
+    [Fact]
+    public async Task ConcurrentSensitiveAccessDecisionsCommitExactlyOneTransition()
+    {
+        using var factory = CreateAuthFactory();
+        using var approveClient = factory.CreateClient();
+        using var denyClient = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(approveClient);
+        approveClient.SetBearer(DeciderBearer);
+        denyClient.SetBearer(DeciderBearer);
+
+        var approve = approveClient.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Concurrent approval attempt."
+        });
+        var deny = denyClient.PostAsJsonAsync($"/api/access-requests/{requestId}/deny", new
+        {
+            reason = "Concurrent denial attempt."
+        });
+        var responses = await Task.WhenAll(approve, deny);
+
+        Assert.Equal(1, responses.Count(response => response.StatusCode == HttpStatusCode.OK));
+        Assert.Equal(1, responses.Count(response => response.StatusCode == HttpStatusCode.BadRequest));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(1, await db.SensitiveAccessDecisions.CountAsync(record => record.SensitiveAccessRequestId == requestId));
+        Assert.Equal(1, await db.AuditEvents.CountAsync(record =>
+            record.SubjectId == requestId &&
+            (record.Action == "sensitive_access.approved" || record.Action == "sensitive_access.denied")));
     }
 
     [Fact]
@@ -385,9 +617,61 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var request = await db.SensitiveAccessRequests.SingleAsync(record => record.Id == requestId);
         var reference = await db.SensitiveRecordReferences
             .SingleAsync(record => record.Id == "sensitive-ref-without-safe-output");
-        Assert.Equal("Public-safe release steps.", reference.RedactedSummary);
+        Assert.Equal("Public-safe release steps.", request.RedactedSummary);
+        Assert.Equal("", reference.RedactedSummary);
+    }
+
+    [Fact]
+    public async Task RedactedResultsRemainImmutableAndScopedToTheirAccessRequest()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var firstRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
+        var secondRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
+
+        client.SetBearer(DeciderBearer);
+        using var firstApproval = await client.PostAsJsonAsync($"/api/access-requests/{firstRequestId}/approve", new
+        {
+            reason = "Approve the first request-specific projection.",
+            redactedSummary = "First public-safe result."
+        });
+        Assert.Equal(HttpStatusCode.OK, firstApproval.StatusCode);
+
+        client.SetBearer(RequestBearer);
+        using var pendingSecondResult = await client.GetAsync($"/api/access-requests/{secondRequestId}/result");
+        using var pendingSecondBody = await JsonDocument.ParseAsync(await pendingSecondResult.Content.ReadAsStreamAsync());
+        Assert.Equal("Pending", pendingSecondBody.RootElement.GetProperty("status").GetString());
+        Assert.False(pendingSecondBody.RootElement.GetProperty("redactedOutputAvailable").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, pendingSecondBody.RootElement.GetProperty("redactedOutput").ValueKind);
+
+        client.SetBearer(DeciderBearer);
+        using var secondApproval = await client.PostAsJsonAsync($"/api/access-requests/{secondRequestId}/approve", new
+        {
+            reason = "Approve a different request-specific projection.",
+            redactedSummary = "Second public-safe result."
+        });
+        Assert.Equal(HttpStatusCode.OK, secondApproval.StatusCode);
+
+        client.SetBearer(RequestBearer);
+        using var firstResult = await client.GetAsync($"/api/access-requests/{firstRequestId}/result");
+        using var firstBody = await JsonDocument.ParseAsync(await firstResult.Content.ReadAsStreamAsync());
+        using var secondResult = await client.GetAsync($"/api/access-requests/{secondRequestId}/result");
+        using var secondBody = await JsonDocument.ParseAsync(await secondResult.Content.ReadAsStreamAsync());
+
+        Assert.Equal("First public-safe result.", firstBody.RootElement.GetProperty("redactedOutput").GetString());
+        Assert.Equal("Second public-safe result.", secondBody.RootElement.GetProperty("redactedOutput").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(
+            "First public-safe result.",
+            (await db.SensitiveAccessRequests.SingleAsync(record => record.Id == firstRequestId)).RedactedSummary);
+        Assert.Equal(
+            "Second public-safe result.",
+            (await db.SensitiveAccessRequests.SingleAsync(record => record.Id == secondRequestId)).RedactedSummary);
     }
 
     [Fact]
@@ -534,7 +818,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("status must be Pending, Approved, or Denied.", body.RootElement.GetProperty("detail").GetString());
+        Assert.Equal("status must be Pending, Approved, Denied, or Expired.", body.RootElement.GetProperty("detail").GetString());
     }
 
     [Fact]
@@ -601,7 +885,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var response = await client.PostAsJsonAsync("/api/access-requests", new
         {
             sensitiveReferenceId = "missing-reference",
-            reason = "Unknown records must not create an implicit access path."
+            reason = "Unknown records must not create an implicit access path.",
+            sessionId = "session-missing",
+            expiresInSeconds = 600
         });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -615,7 +901,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var response = await client.PostAsJsonAsync("/api/access-requests", new
         {
             sensitiveReferenceId,
-            reason = "Need approval for a redacted operational summary."
+            reason = "Need approval for a redacted operational summary.",
+            sessionId = "session-sensitive-access",
+            expiresInSeconds = 600
         });
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 
@@ -623,7 +911,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         return body.RootElement.GetProperty("id").GetString()!;
     }
 
-    private WebApplicationFactory<Program> CreateAuthFactory()
+    private WebApplicationFactory<Program> CreateAuthFactory(IContentClassifier? classifier = null)
     {
         return _factory.WithWebHostBuilder(builder =>
         {
@@ -643,6 +931,14 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
                 db.Database.EnsureCreated();
                 SeedSensitiveReference(db);
             });
+            if (classifier is not null)
+            {
+                builder.ConfigureTestServices(services =>
+                {
+                    services.RemoveAll<IContentClassifier>();
+                    services.AddSingleton(classifier);
+                });
+            }
         });
     }
 
@@ -728,6 +1024,35 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
         return $"sha256:{Convert.ToHexString(hash).ToLowerInvariant()}";
+    }
+
+    private sealed class BlockingPublicContentClassifier : IContentClassifier
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ClassificationProviderBoundary Boundary { get; } =
+            new("blocking-test", "local-classification-input", "local-only");
+
+        public Task Started => _started.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        public async ValueTask<ClassificationResult> ClassifyAsync(
+            PublicRecordId sourceId,
+            string content,
+            string? sourceType,
+            CancellationToken cancellationToken = default)
+        {
+            _started.TrySetResult();
+            await _release.Task.WaitAsync(cancellationToken);
+            return new ClassificationResult(
+                sourceId,
+                SensitivityLevel.Public,
+                0.9,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                ContainsSensitiveMaterial: false);
+        }
     }
 }
 
