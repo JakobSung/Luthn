@@ -591,19 +591,44 @@ codex_helper_path() {
   printf '%s' "$source_helper"
 }
 
+read_codex_helper_digests() {
+  digest_helper="$1"
+  codex_helper_digest=""
+  codex_template_digest=""
+  helper_digest_supported=false
+  template_digest_supported=false
+  if codex_helper_digest="$(python3 "$digest_helper" helper-digest 2>/dev/null)"; then
+    helper_digest_supported=true
+  fi
+  if codex_template_digest="$(python3 "$digest_helper" template-digest 2>/dev/null)"; then
+    template_digest_supported=true
+  fi
+  if [[ "$helper_digest_supported" == "true" && "$template_digest_supported" == "true" ]]; then
+    [[ "$codex_helper_digest" =~ ^[0-9a-f]{64}$ \
+      && "$codex_template_digest" =~ ^[0-9a-f]{64}$ ]]
+    return
+  fi
+  if [[ "$helper_digest_supported" == "false" && "$template_digest_supported" == "false" ]]; then
+    return 2
+  fi
+  return 1
+}
+
 ensure_codex_connector_helper() {
   helper="$(codex_helper_path)"
   if [[ -f "$helper" ]]; then
     current_version="$(python3 "$helper" version 2>/dev/null || true)"
-    current_helper_digest="$(python3 "$helper" helper-digest 2>/dev/null || true)"
-    current_template_digest="$(python3 "$helper" template-digest 2>/dev/null || true)"
     expected_helper_digest="$(codex_state_value HELPER_DIGEST)"
     expected_template_digest="$(codex_state_value TEMPLATE_DIGEST)"
-    if [[ "$current_version" == "$codex_connector_version" \
-      && "$current_helper_digest" =~ ^[0-9a-f]{64}$ \
-      && "$current_template_digest" =~ ^[0-9a-f]{64}$ \
-      && ( -z "$expected_helper_digest" || "$current_helper_digest" == "$expected_helper_digest" ) \
-      && ( -z "$expected_template_digest" || "$current_template_digest" == "$expected_template_digest" ) ]]; then
+    digest_status=0
+    read_codex_helper_digests "$helper" || digest_status=$?
+    if [[ "$current_version" == "$codex_connector_version" && "$digest_status" -eq 0 \
+      && ( -z "$expected_helper_digest" || "$codex_helper_digest" == "$expected_helper_digest" ) \
+      && ( -z "$expected_template_digest" || "$codex_template_digest" == "$expected_template_digest" ) ]]; then
+      return 0
+    fi
+    if [[ "$current_version" == "$codex_connector_version" && "$digest_status" -eq 2 \
+      && -z "$expected_helper_digest" && -z "$expected_template_digest" ]]; then
       return 0
     fi
   fi
@@ -615,9 +640,21 @@ ensure_codex_connector_helper() {
   helper_tmp="$(mktemp "${helper}.XXXXXX")" || return 1
   if ! curl -fsSL "$runtime_source/scripts/luthn-codex-connector.py" -o "$helper_tmp" \
     || ! grep -q '^#!/usr/bin/env python3' "$helper_tmp" \
-    || ! grep -q '^CONNECTOR_TEMPLATE_VERSION = "[1-9][0-9]*"$' "$helper_tmp" \
-    || ! [[ "$(python3 "$helper_tmp" helper-digest 2>/dev/null)" =~ ^[0-9a-f]{64}$ ]] \
-    || ! [[ "$(python3 "$helper_tmp" template-digest 2>/dev/null)" =~ ^[0-9a-f]{64}$ ]] \
+    || ! grep -q '^CONNECTOR_TEMPLATE_VERSION = "[1-9][0-9]*"$' "$helper_tmp"; then
+    rm -f "$helper_tmp"
+    return 1
+  fi
+  helper_tmp_version="$(python3 "$helper_tmp" version 2>/dev/null)" || {
+    rm -f "$helper_tmp"
+    return 1
+  }
+  if ! [[ "$helper_tmp_version" =~ ^[1-9][0-9]*$ ]]; then
+    rm -f "$helper_tmp"
+    return 1
+  fi
+  digest_status=0
+  read_codex_helper_digests "$helper_tmp" || digest_status=$?
+  if [[ "$digest_status" -eq 1 ]] \
     || ! install_runtime_file "$helper_tmp" "$helper" 0700; then
     rm -f "$helper_tmp"
     return 1
@@ -648,10 +685,13 @@ reconcile_codex_managed_configuration() {
 
   target_connector_version="$(python3 "$helper" version 2>/dev/null)" || return 1
   [[ "$target_connector_version" =~ ^[1-9][0-9]*$ ]] || return 1
-  target_helper_digest="$(python3 "$helper" helper-digest 2>/dev/null)" || return 1
-  [[ "$target_helper_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
-  target_template_digest="$(python3 "$helper" template-digest 2>/dev/null)" || return 1
-  [[ "$target_template_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  digest_status=0
+  read_codex_helper_digests "$helper" || digest_status=$?
+  [[ "$digest_status" -ne 1 ]] || return 1
+  target_helper_digest="$codex_helper_digest"
+  target_template_digest="$codex_template_digest"
+  digest_mode=modern
+  [[ "$digest_status" -eq 2 ]] && digest_mode=legacy
   installed_connector_version="$(codex_state_value CONNECTOR_VERSION)"
   installed_helper_digest="$(codex_state_value HELPER_DIGEST)"
   installed_template_digest="$(codex_state_value TEMPLATE_DIGEST)"
@@ -663,7 +703,7 @@ reconcile_codex_managed_configuration() {
     record_codex_connector_state \
       "$hooks_file" "$codex_state_file" configured "$mcp_changed" \
       "$auto_recall" "$instructions_file" "$target_connector_version" \
-      "$target_helper_digest" "$target_template_digest"
+      "$target_helper_digest" "$target_template_digest" "$digest_mode"
   fi
 }
 
@@ -702,11 +742,28 @@ record_codex_connector_state() {
   connector_version="${7:-$codex_connector_version}"
   helper_digest="${8:-}"
   template_digest="${9:-}"
+  digest_mode="${10:-auto}"
   helper="$(codex_helper_path)"
-  [[ -n "$helper_digest" ]] || helper_digest="$(python3 "$helper" helper-digest 2>/dev/null)" || return 1
-  [[ -n "$template_digest" ]] || template_digest="$(python3 "$helper" template-digest 2>/dev/null)" || return 1
-  [[ "$helper_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
-  [[ "$template_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  if [[ "$digest_mode" == "auto" ]]; then
+    digest_status=0
+    read_codex_helper_digests "$helper" || digest_status=$?
+    [[ "$digest_status" -ne 1 ]] || return 1
+    if [[ "$digest_status" -eq 0 ]]; then
+      helper_digest="$codex_helper_digest"
+      template_digest="$codex_template_digest"
+      digest_mode=modern
+    else
+      digest_mode=legacy
+    fi
+  fi
+  digest_lines=""
+  if [[ "$digest_mode" == "modern" ]]; then
+    [[ "$helper_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ "$template_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    digest_lines="$(printf 'HELPER_DIGEST=%s\nTEMPLATE_DIGEST=%s' "$helper_digest" "$template_digest")"
+  elif [[ "$digest_mode" != "legacy" ]]; then
+    return 1
+  fi
   ensure_directories || return 1
   state_tmp="$(mktemp "${destination}.XXXXXX")" || return 1
   if ! cat >"$state_tmp" <<EOF
@@ -714,8 +771,7 @@ AGENT_ID=codex
 AGENT_NAME=Codex
 INTEGRATION_KIND=host-hook-mcp
 CONNECTOR_VERSION=$connector_version
-HELPER_DIGEST=$helper_digest
-TEMPLATE_DIGEST=$template_digest
+$digest_lines
 CONFIGURATION_OWNER=luthn
 CHANNELS=automatic-ingestion,mcp
 HOOKS_FILE=$hooks_file

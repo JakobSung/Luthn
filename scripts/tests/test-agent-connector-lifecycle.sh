@@ -875,4 +875,66 @@ fi
 [[ "$(shasum -a 256 "$reconcile_codex/AGENTS.md" | awk '{print $1}')" == "$rollback_instruction_hash" ]]
 [[ "$(shasum -a 256 "$reconcile_state/connectors/codex.env" | awk '{print $1}')" == "$rollback_state_hash" ]]
 
+echo "legacy connector runtime rollback uses version-only reconciliation"
+cat >"$reconcile_root/legacy-helper.py" <<'PY'
+#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+
+if len(sys.argv) > 1 and sys.argv[1] == "version":
+    print("1")
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] in {"helper-digest", "template-digest"}:
+    raise SystemExit(2)
+raise SystemExit(
+    subprocess.call([sys.executable, os.environ["REAL_CONNECTOR_HELPER"], *sys.argv[1:]])
+)
+PY
+chmod 0700 "$reconcile_root/legacy-helper.py"
+(
+  export HOME="$home_dir"
+  export PATH="$fake_bin:$PATH"
+  export LUTHN_DATA_DIR="$reconcile_data"
+  export LUTHN_CONFIG_DIR="$reconcile_config"
+  export LUTHN_STATE_DIR="$reconcile_state"
+  export LUTHN_BIN_DIR="$reconcile_bin"
+  export LUTHN_COMPOSE_FILE="$reconcile_data/compose.yaml"
+  export LUTHN_CONFIG_FILE="$reconcile_config/luthn.env"
+  export LUTHN_CLI_PATH="$reconcile_bin/luthn"
+  export LUTHN_CODEX_CONNECTOR_HELPER="$reconcile_data/runtime/luthn-codex-connector.py"
+  export REAL_CONNECTOR_HELPER="$repo_root/scripts/luthn-codex-connector.py"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  require_installation() { :; }
+  require_docker() { :; }
+  require_command() { :; }
+  pull_image() { :; }
+  image_id_for_container() { printf '%s' sha256:previous; }
+  download_runtime() {
+    cp "$reconcile_root/legacy-helper.py" "$LUTHN_CODEX_CONNECTOR_HELPER"
+    chmod 0700 "$LUTHN_CODEX_CONNECTOR_HELPER"
+  }
+  ensure_connector_scopes() { :; }
+  compose_cmd() {
+    if [[ " $* " == *" --list-tools "* ]]; then
+      printf '%s\n' get_context_pack
+    elif [[ " $* " == *" pg_dump "* ]]; then
+      printf '%s\n' backup
+    fi
+  }
+  wait_for_postgres() { :; }
+  stop_write_paths() { :; }
+  wait_for_api() { :; }
+  record_state() { :; }
+  docker() {
+    if [[ " $* " == *"{{.Id}}"* ]]; then printf '%s\n' sha256:target; fi
+  }
+  update_luthn test/luthn:legacy >/dev/null
+)
+grep -q '^CONNECTOR_VERSION=1$' "$reconcile_state/connectors/codex.env"
+! grep -q '^HELPER_DIGEST=' "$reconcile_state/connectors/codex.env"
+! grep -q '^TEMPLATE_DIGEST=' "$reconcile_state/connectors/codex.env"
+
 echo "Agent connector lifecycle tests passed."

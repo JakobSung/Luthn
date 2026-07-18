@@ -406,8 +406,7 @@ function Test-WindowsCliFile {
     if ($parseErrors.Count -gt 0) { throw "downloaded Windows CLI did not pass PowerShell syntax validation" }
     $content = [IO.File]::ReadAllText($Path)
     if ($content -notmatch '\$script:LuthnWindowsCliVersion\s*=\s*"[1-9][0-9]*"' -or
-        $content -notmatch '(?m)^function Connect-Codex\s*\{' -or
-        $content -notmatch '"manifest"\s*\{') {
+        $content -notmatch '(?m)^function Connect-Codex\s*\{') {
         throw "downloaded Windows CLI did not match the Luthn distribution contract"
     }
 }
@@ -907,21 +906,32 @@ function Update-Luthn {
     Write-Host "Refreshing Windows CLI and Compose runtime..."
     try {
         Install-ComposeRuntime -RuntimeSource (Get-RuntimeSource -Image $targetImage -Revision $targetRevision) -IncludeCli
-        $manifestResult = Invoke-ToolCapture -Tool (New-ToolSpecFromPath -Path $installedCli) -Arguments @("manifest")
-        if ($manifestResult.ExitCode -ne 0) { throw "downloaded Windows CLI manifest could not be read" }
-        $targetManifest = $manifestResult.StdOut | ConvertFrom-Json -AsHashtable
-        $targetConnectorVersion = [string]$targetManifest["version"]
-        $targetHelperDigest = [string]$targetManifest["helperDigest"]
-        $targetTemplateDigest = [string]$targetManifest["templateDigest"]
-        if ($targetConnectorVersion -notmatch '^[1-9][0-9]*$' -or
-            $targetHelperDigest -notmatch '^[0-9a-f]{64}$' -or
-            $targetTemplateDigest -notmatch '^[0-9a-f]{64}$') {
-            throw "downloaded Windows CLI manifest did not match the Luthn distribution contract"
+        $targetCliContent = [IO.File]::ReadAllText($installedCli)
+        $targetHasManifest = $targetCliContent -match '"manifest"\s*\{'
+        if ($targetHasManifest) {
+            $manifestResult = Invoke-ToolCapture -Tool (New-ToolSpecFromPath -Path $installedCli) -Arguments @("manifest")
+            if ($manifestResult.ExitCode -ne 0) { throw "downloaded Windows CLI manifest could not be read" }
+            $targetManifest = $manifestResult.StdOut | ConvertFrom-Json -AsHashtable
+            $targetConnectorVersion = [string]$targetManifest["version"]
+            $targetHelperDigest = [string]$targetManifest["helperDigest"]
+            $targetTemplateDigest = [string]$targetManifest["templateDigest"]
+            if ($targetConnectorVersion -notmatch '^[1-9][0-9]*$' -or
+                $targetHelperDigest -notmatch '^[0-9a-f]{64}$' -or
+                $targetTemplateDigest -notmatch '^[0-9a-f]{64}$') {
+                throw "downloaded Windows CLI manifest did not match the Luthn distribution contract"
+            }
+        } else {
+            $targetConnectorVersion = Get-WindowsCliVersionFromFile -Path $installedCli
+            $targetHelperDigest = ""
+            $targetTemplateDigest = ""
         }
         if ($connectorWasConfigured) {
-            $connectorChanged = $previousConnectorVersion -cne $targetConnectorVersion -or
-                $previousHelperDigest -cne $targetHelperDigest -or
-                $previousTemplateDigest -cne $targetTemplateDigest
+            $connectorChanged = $previousConnectorVersion -cne $targetConnectorVersion
+            if ($targetHasManifest) {
+                $connectorChanged = $connectorChanged -or
+                    $previousHelperDigest -cne $targetHelperDigest -or
+                    $previousTemplateDigest -cne $targetTemplateDigest
+            }
             $connectorAction = if ($connectorChanged) { "Reconciling" } else { "Validating" }
             Write-Host "$connectorAction Codex connector template version $targetConnectorVersion..."
             $connectArguments = @("connect", "codex")

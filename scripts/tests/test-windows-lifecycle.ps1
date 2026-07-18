@@ -76,6 +76,7 @@ $invalidCli = Join-Path $testRoot "invalid.ps1"
 $failingCli = Join-Path $testRoot "failing.ps1"
 $updatedCli = Join-Path $testRoot "updated.ps1"
 $connectorUpdateCli = Join-Path $testRoot "connector-update.ps1"
+$legacyCli = Join-Path $testRoot "legacy.ps1"
 $sharedBinDir = Join-Path $testRoot "shared 도구 bin"
 $sharedBinSentinel = Join-Path $sharedBinDir "unrelated-tool.txt"
 $installedCli = Join-Path $sharedBinDir "luthn.ps1"
@@ -719,6 +720,18 @@ esac
     Assert-True ($recoverOwnership.ExitCode -eq 0) "matching Codex MCP registration should recover ownership state: $($recoverOwnership.Output)"
     Assert-True ([IO.File]::Exists($codexOwnershipState)) "matching registration should restore ownership state for uninstall"
     Assert-True (([IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json).autoRecall) "ownership recovery should retain the managed auto-recall state"
+
+    $legacyCliContent = [IO.File]::ReadAllText((Join-Path $RepoRoot "scripts/luthn.ps1"))
+    $legacyCliContent = $legacyCliContent -replace '(?m)^\s*"manifest"\s*\{[^\r\n]*\}\r?\n', ''
+    $legacyCliContent = $legacyCliContent -replace '(?m)^\s*(helperDigest|templateDigest)\s*=.*\r?\n', ''
+    [IO.File]::WriteAllText($legacyCli, $legacyCliContent, [Text.UTF8Encoding]::new($false))
+    $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $legacyCli
+    $legacyRollback = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:legacy")
+    Assert-True ($legacyRollback.ExitCode -eq 0) "update should roll back to a pre-manifest Windows runtime: $($legacyRollback.Output)"
+    $legacyConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
+    Assert-True ($legacyConnectorState.connectorVersion -ceq "2") "legacy rollback should retain version-only connector state"
+    Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "helperDigest")) "legacy rollback state should not require a helper digest"
+    Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "templateDigest")) "legacy rollback state should not require a template digest"
 
     Remove-Item Env:LUTHN_CODEX_COMMAND
     $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
