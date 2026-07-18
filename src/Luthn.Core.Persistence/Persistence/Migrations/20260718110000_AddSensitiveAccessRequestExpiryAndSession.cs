@@ -35,6 +35,15 @@ public partial class AddSensitiveAccessRequestExpiryAndSession : Migration
             nullable: false,
             defaultValue: "");
 
+        migrationBuilder.Sql(
+            """
+            UPDATE sensitive_access_requests AS request
+            SET "RedactedSummary" = reference."RedactedSummary"
+            FROM sensitive_record_references AS reference
+            WHERE request."SensitiveRecordReferenceId" = reference."Id"
+              AND request."Status" = 'Approved';
+            """);
+
         migrationBuilder.DropIndex(
             name: "IX_sensitive_access_requests_Status_UpdatedAt",
             table: "sensitive_access_requests");

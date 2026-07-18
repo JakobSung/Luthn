@@ -188,6 +188,9 @@ public sealed class PersistenceContractTests
         Assert.Contains("IX_wiki_proposals_AllowsAgentContext_Sensitivity_CreatedAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_sensitive_access_requests_Status_UpdatedAt", script, StringComparison.Ordinal);
         Assert.Contains("RedactedSummary", script, StringComparison.Ordinal);
+        Assert.Contains("UPDATE sensitive_access_requests AS request", script, StringComparison.Ordinal);
+        Assert.Contains("SET \"RedactedSummary\" = reference.\"RedactedSummary\"", script, StringComparison.Ordinal);
+        Assert.Contains("request.\"Status\" = 'Approved'", script, StringComparison.Ordinal);
         Assert.Contains("IX_audit_events_SubjectId_OccurredAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_agent_connection_channels_AgentId_Channel", script, StringComparison.Ordinal);
         Assert.DoesNotContain("raw_content", script, StringComparison.OrdinalIgnoreCase);

@@ -5,6 +5,8 @@ using Luthn.Core.Search;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api.Tests;
@@ -40,7 +42,36 @@ public sealed class PostgresIntegrationSmokeTests
 
         await using var db = new LuthnDbContext(options);
         await db.Database.EnsureDeletedAsync();
-        await db.Database.MigrateAsync();
+
+        const string migrationUnderTest = "20260718110000_AddSensitiveAccessRequestExpiryAndSession";
+        var migrations = (await db.Database.GetMigrationsAsync()).ToArray();
+        var migrationIndex = Array.IndexOf(migrations, migrationUnderTest);
+        Assert.True(migrationIndex > 0);
+
+        var migrator = db.GetService<IMigrator>();
+        await migrator.MigrateAsync(migrations[migrationIndex - 1]);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO source_events
+                ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial")
+            VALUES
+                ('source-legacy-approved', 'test', 'postgres-smoke', CURRENT_TIMESTAMP, 'sha256:legacy-approved', TRUE);
+
+            INSERT INTO sensitive_record_references
+                ("Id", "SourceEventId", "SourceSystem", "SourceType", "ReceivedAt", "ContainsSensitiveMaterial", "ReferenceLabel", "RedactedSummary")
+            VALUES
+                ('sensitive-ref-legacy-approved', 'source-legacy-approved', 'test', 'postgres-smoke', CURRENT_TIMESTAMP, TRUE, 'sensitive-record:source-legacy-approved', 'Reviewed legacy output.');
+
+            INSERT INTO sensitive_access_requests
+                ("Id", "SensitiveRecordReferenceId", "RequestedBy", "RequestReason", "Status", "CreatedAt", "UpdatedAt")
+            VALUES
+                ('access-legacy-approved', 'sensitive-ref-legacy-approved', 'postgres-smoke', 'Verify approved result survives migration.', 'Approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+            """);
+        await migrator.MigrateAsync();
+
+        var migratedRequest = await db.SensitiveAccessRequests
+            .SingleAsync(record => record.Id == "access-legacy-approved");
+        Assert.Equal("Reviewed legacy output.", migratedRequest.RedactedSummary);
 
         var pending = await db.Database.GetPendingMigrationsAsync();
         Assert.Empty(pending);

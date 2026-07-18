@@ -582,6 +582,48 @@ public sealed class LuthnClientTests
         Assert.DoesNotContain("DenySensitiveAccessRequestAsync", agentMethodNames);
     }
 
+    [Fact]
+    public void LegacyInterfaceRetainsAgentMemberDefinitionsForExplicitImplementations()
+    {
+        var legacyMethodNames = typeof(ILuthnClient)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            .Select(method => method.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var agentMethodNames = typeof(ILuthnAgentClient)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            .Select(method => method.Name);
+
+        Assert.All(agentMethodNames, methodName => Assert.Contains(methodName, legacyMethodNames));
+        Assert.IsAssignableFrom<ILuthnClient>(new ExplicitLegacyClient());
+    }
+
+    private sealed class ExplicitLegacyClient : ILuthnClient
+    {
+        Task<ContextPackDto> ILuthnClient.GetContextPackAsync(
+            IReadOnlyList<string> coreTags,
+            int maxItems,
+            string? query,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        Task<SafeSearchResponseDto> ILuthnClient.SearchAsync(
+            string? query,
+            IReadOnlyList<string> coreTags,
+            int maxItems,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        Task<WikiProposalDto> ILuthnClient.GetWikiProposalAsync(
+            string id,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        Task<ClassificationPreviewDto> ILuthnClient.ClassifyPreviewAsync(
+            ClassificationPreviewRequestDto request,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
     private sealed class CapturingHandler(string responseContent) : HttpMessageHandler, IDisposable
     {
         public HttpRequestMessage? Request { get; private set; }

@@ -85,6 +85,100 @@ public interface ILuthnAgentClient
 
 public interface ILuthnClient : ILuthnAgentClient
 {
+    Task<ContextPackDto> ILuthnAgentClient.GetContextPackAsync(
+        IReadOnlyList<string> coreTags,
+        int maxItems,
+        string? query,
+        CancellationToken cancellationToken) =>
+        GetContextPackAsync(coreTags, maxItems, query, cancellationToken);
+
+    new Task<ContextPackDto> GetContextPackAsync(
+        IReadOnlyList<string> coreTags,
+        int maxItems = 20,
+        string? query = null,
+        CancellationToken cancellationToken = default);
+
+    Task<SafeSearchResponseDto> ILuthnAgentClient.SearchAsync(
+        string? query,
+        IReadOnlyList<string> coreTags,
+        int maxItems,
+        CancellationToken cancellationToken) =>
+        SearchAsync(query, coreTags, maxItems, cancellationToken);
+
+    new Task<SafeSearchResponseDto> SearchAsync(
+        string? query,
+        IReadOnlyList<string> coreTags,
+        int maxItems = 20,
+        CancellationToken cancellationToken = default);
+
+    Task<WikiProposalDto> ILuthnAgentClient.GetWikiProposalAsync(
+        string id,
+        CancellationToken cancellationToken) =>
+        GetWikiProposalAsync(id, cancellationToken);
+
+    new Task<WikiProposalDto> GetWikiProposalAsync(
+        string id,
+        CancellationToken cancellationToken = default);
+
+    Task<ClassificationPreviewDto> ILuthnAgentClient.ClassifyPreviewAsync(
+        ClassificationPreviewRequestDto request,
+        CancellationToken cancellationToken) =>
+        ClassifyPreviewAsync(request, cancellationToken);
+
+    new Task<ClassificationPreviewDto> ClassifyPreviewAsync(
+        ClassificationPreviewRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    new Task<TurnSummaryIntakeResponseDto> IntakeTurnSummaryAsync(
+        TurnSummaryIntakeRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement turn summary intake.");
+
+    new Task<AgentConnectionListDto> ListAgentConnectionsAsync(
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement agent connection status reads.");
+
+    new Task<AgentConnectionDto> ReportAgentConnectionObservationAsync(
+        string agentId,
+        AgentConnectionObservationRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement agent connection observations.");
+
+    new Task<SourceIntakeResponseDto> IntakeSourceAsync(
+        SourceIntakeRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement source intake.");
+
+    new Task<SharedMemoryItemDto> CreateSharedMemoryItemAsync(
+        CreateSharedMemoryItemRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement shared memory writes.");
+
+    new Task<SharedMemoryItemDto> GetSharedMemoryItemAsync(
+        string id,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement shared memory reads.");
+
+    new Task<SharedMemoryQueryResponseDto> QuerySharedMemoryAsync(
+        SharedMemoryQueryRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement shared memory queries.");
+
+    new Task<SensitiveAccessRequestDto> CreateSensitiveAccessRequestAsync(
+        SensitiveAccessCreateRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement sensitive access requests.");
+
+    new Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+        string id,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement sensitive access status reads.");
+
+    new Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
+        string id,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement sensitive access result reads.");
+
     [Obsolete("Approval is an operator-only capability. Use the trusted access-decision API directly.")]
     Task<SensitiveAccessRequestDto> ApproveSensitiveAccessRequestAsync(
         string id,
