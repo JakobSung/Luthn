@@ -11,6 +11,7 @@ config_file="${LUTHN_CONFIG_FILE:-$config_dir/luthn.env}"
 state_file="${LUTHN_STATE_FILE:-$state_dir/install-state.env}"
 cli_path="${LUTHN_CLI_PATH:-$bin_dir/luthn}"
 token_file="${LUTHN_SERVICE_TOKEN_FILE:-$config_dir/service-token}"
+operator_token_file="${LUTHN_OPERATOR_TOKEN_FILE:-$config_dir/operator-token}"
 runtime_dir="${LUTHN_RUNTIME_DIR:-$data_dir/runtime}"
 connector_state_dir="${LUTHN_CONNECTOR_STATE_DIR:-$state_dir/connectors}"
 codex_state_file="${LUTHN_CODEX_STATE_FILE:-$connector_state_dir/codex.env}"
@@ -130,9 +131,18 @@ write_token_file() {
   chmod 0600 "$token_file"
 }
 
+write_operator_token_file() {
+  token="$1"
+  ensure_directories
+  umask 077
+  printf '%s' "$token" >"$operator_token_file"
+  chmod 0600 "$operator_token_file"
+}
+
 write_initial_config() {
   image="$1"
   digest="$2"
+  operator_digest="$3"
   port="${LUTHN_PORT:-8080}"
   postgres_volume="${LUTHN_POSTGRES_VOLUME:-luthn-postgres}"
   operator_volume="${LUTHN_OPERATOR_VOLUME:-luthn-operator}"
@@ -146,6 +156,7 @@ LUTHN_BASE_URL=http://127.0.0.1:$port
 LUTHN_POSTGRES_VOLUME=$postgres_volume
 LUTHN_OPERATOR_VOLUME=$operator_volume
 LUTHN_SERVICE_TOKEN_FILE=$token_file
+LUTHN_OPERATOR_TOKEN_FILE=$operator_token_file
 LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=luthn
 POSTGRES_DB=luthn
 POSTGRES_USER=luthn
@@ -162,6 +173,9 @@ Luthn__Auth__Tokens__0__Scopes__4=classification.preview
 Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read
 Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write
 Luthn__Auth__Tokens__0__Scopes__7=access.request
+Luthn__Auth__Tokens__1__Name=local-operator
+Luthn__Auth__Tokens__1__Sha256Digest=$operator_digest
+Luthn__Auth__Tokens__1__Scopes__0=access.decide
 EOF
   chmod 0600 "$config_file"
 }
@@ -172,6 +186,22 @@ generate_token() {
   else
     od -An -N 24 -tx1 /dev/urandom | tr -d ' \n'
   fi
+}
+
+ensure_operator_credential() {
+  image="$1"
+  operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
+  if [[ -f "$operator_token_file" ]]; then
+    operator_token="$(cat "$operator_token_file")"
+  else
+    operator_token="$(generate_token)"
+    write_operator_token_file "$operator_token"
+  fi
+  set_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file"
+  operator_digest="$(printf '%s' "$operator_token" | docker run --rm -i "$image" token-digest --stdin)"
+  set_config Luthn__Auth__Tokens__1__Name local-operator
+  set_config Luthn__Auth__Tokens__1__Sha256Digest "$operator_digest"
+  set_config Luthn__Auth__Tokens__1__Scopes__0 access.decide
 }
 
 ensure_config_value() {
@@ -524,8 +554,11 @@ install_luthn() {
   if [[ ! -f "$config_file" ]]; then
     token="$(generate_token)"
     digest="$(printf '%s' "$token" | docker run --rm -i "$image" token-digest --stdin)"
+    operator_token="$(generate_token)"
+    operator_digest="$(printf '%s' "$operator_token" | docker run --rm -i "$image" token-digest --stdin)"
     write_token_file "$token"
-    write_initial_config "$image" "$digest"
+    write_operator_token_file "$operator_token"
+    write_initial_config "$image" "$digest" "$operator_digest"
   else
     ensure_config_value LUTHN_IMAGE "$image"
     ensure_config_value LUTHN_PORT "${LUTHN_PORT:-8080}"
@@ -561,6 +594,10 @@ install_luthn() {
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__3 memory.read
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__4 classification.preview
   fi
+  if ! ensure_operator_credential "$image"; then
+    echo "Install stopped because the local operator credential could not be configured." >&2
+    return 1
+  fi
   if has_codex_connector_state; then
     if ! ensure_connector_scopes; then
       echo "Install stopped because the active Codex connector scopes could not be configured." >&2
@@ -584,6 +621,7 @@ Luthn is ready.
 Console: $(read_config LUTHN_BASE_URL http://127.0.0.1:8080)/
 Status:  $cli_path status
 Config:  $config_file
+Operator token: $operator_token_file
 Agent:   $cli_path connect codex
 EOF
 
@@ -1470,6 +1508,11 @@ update_luthn() {
     fi
   elif ! ensure_access_request_scope; then
     echo "warning: access.request could not be added because the custom service-token scope table is full" >&2
+  fi
+  if ! ensure_operator_credential "$target_image"; then
+    record_state failed "$target_image" "$target_id" "$previous_id"
+    echo "Update stopped because the local operator credential could not be configured." >&2
+    return 1
   fi
 
   compose_cmd up -d postgres

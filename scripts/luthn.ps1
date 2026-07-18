@@ -28,6 +28,7 @@ $script:BinDir = if ($env:LUTHN_BIN_DIR) { $env:LUTHN_BIN_DIR } else { Join-Path
 $script:ComposeFile = if ($env:LUTHN_COMPOSE_FILE) { $env:LUTHN_COMPOSE_FILE } else { Join-Path $script:DataDir "compose.yaml" }
 $script:ConfigFile = if ($env:LUTHN_CONFIG_FILE) { $env:LUTHN_CONFIG_FILE } else { Join-Path $script:ConfigDir "luthn.env" }
 $script:TokenFile = if ($env:LUTHN_SERVICE_TOKEN_FILE) { $env:LUTHN_SERVICE_TOKEN_FILE } else { Join-Path $script:ConfigDir "service-token" }
+$script:OperatorTokenFile = if ($env:LUTHN_OPERATOR_TOKEN_FILE) { $env:LUTHN_OPERATOR_TOKEN_FILE } else { Join-Path $script:ConfigDir "operator-token" }
 $script:ConnectorStateDir = if ($env:LUTHN_CONNECTOR_STATE_DIR) { $env:LUTHN_CONNECTOR_STATE_DIR } else { Join-Path $script:StateDir "connectors" }
 $script:CodexStateFile = if ($env:LUTHN_CODEX_STATE_FILE) { $env:LUTHN_CODEX_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.json" }
 $script:CodexPendingStateFile = if ($env:LUTHN_CODEX_PENDING_STATE_FILE) { $env:LUTHN_CODEX_PENDING_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.pending.json" }
@@ -578,7 +579,7 @@ Luthn__Auth__Tokens__0__Sha256Digest=validation
 }
 
 function Write-InitialConfig {
-    param([string]$Image, [string]$Digest)
+    param([string]$Image, [string]$Digest, [string]$OperatorDigest)
     $port = if ($env:LUTHN_PORT) { $env:LUTHN_PORT } else { "8080" }
     $postgresVolume = if ($env:LUTHN_POSTGRES_VOLUME) { $env:LUTHN_POSTGRES_VOLUME } else { "luthn-postgres" }
     $operatorVolume = if ($env:LUTHN_OPERATOR_VOLUME) { $env:LUTHN_OPERATOR_VOLUME } else { "luthn-operator" }
@@ -590,6 +591,7 @@ function Write-InitialConfig {
         "LUTHN_POSTGRES_VOLUME=$postgresVolume",
         "LUTHN_OPERATOR_VOLUME=$operatorVolume",
         "LUTHN_SERVICE_TOKEN_FILE=$script:TokenFile",
+        "LUTHN_OPERATOR_TOKEN_FILE=$script:OperatorTokenFile",
         "LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=luthn",
         "POSTGRES_DB=luthn",
         "POSTGRES_USER=luthn",
@@ -605,7 +607,10 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Scopes__4=classification.preview",
         "Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read",
         "Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write"
-        "Luthn__Auth__Tokens__0__Scopes__7=access.request"
+        "Luthn__Auth__Tokens__0__Scopes__7=access.request",
+        "Luthn__Auth__Tokens__1__Name=local-operator",
+        "Luthn__Auth__Tokens__1__Sha256Digest=$OperatorDigest",
+        "Luthn__Auth__Tokens__1__Scopes__0=access.decide"
     ) -join "`n"
     Write-Utf8File -Path $script:ConfigFile -Content ($content + "`n")
     Protect-SecretFile $script:ConfigFile
@@ -618,6 +623,22 @@ function Get-TokenDigest {
     $digest = $result.StdOut.Trim()
     if ($digest -cnotmatch "^sha256:[0-9a-f]{64}$") { throw "service token digest output was invalid" }
     return $digest
+}
+
+function Ensure-OperatorCredential {
+    param([string]$Image)
+    $script:OperatorTokenFile = Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
+    if ([IO.File]::Exists($script:OperatorTokenFile)) {
+        $operatorToken = [IO.File]::ReadAllText($script:OperatorTokenFile).Trim()
+    } else {
+        $operatorToken = New-ServiceToken
+        Write-Utf8File -Path $script:OperatorTokenFile -Content $operatorToken
+    }
+    Protect-SecretFile $script:OperatorTokenFile
+    Set-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
+    Set-ConfigValue "Luthn__Auth__Tokens__1__Name" "local-operator"
+    Set-ConfigValue "Luthn__Auth__Tokens__1__Sha256Digest" (Get-TokenDigest -Image $Image -Token $operatorToken)
+    Set-ConfigValue "Luthn__Auth__Tokens__1__Scopes__0" "access.decide"
 }
 
 function Wait-ForPostgres {
@@ -680,9 +701,13 @@ function Install-Luthn {
     if (-not [IO.File]::Exists($script:ConfigFile)) {
         $token = New-ServiceToken
         $digest = Get-TokenDigest -Image $image -Token $token
+        $operatorToken = New-ServiceToken
+        $operatorDigest = Get-TokenDigest -Image $image -Token $operatorToken
         Write-Utf8File -Path $script:TokenFile -Content $token
         Protect-SecretFile $script:TokenFile
-        Write-InitialConfig -Image $image -Digest $digest
+        Write-Utf8File -Path $script:OperatorTokenFile -Content $operatorToken
+        Protect-SecretFile $script:OperatorTokenFile
+        Write-InitialConfig -Image $image -Digest $digest -OperatorDigest $operatorDigest
     } else {
         Ensure-ConfigValue "LUTHN_IMAGE" $image
         Ensure-ConfigValue "LUTHN_PORT" $(if ($env:LUTHN_PORT) { $env:LUTHN_PORT } else { "8080" })
@@ -717,6 +742,7 @@ function Install-Luthn {
             [IO.File]::Exists($script:CodexPendingStateFile)
         Ensure-ServiceTokenScope "access.request" -Required:$accessScopeRequired
     }
+    Ensure-OperatorCredential -Image $image
 
     Write-Host "Starting Luthn..."
     Invoke-ComposeVisible @("pull", "postgres")
@@ -733,6 +759,7 @@ function Install-Luthn {
     Write-Host "Console: $baseUrl/"
     Write-Host "Status:  luthn status"
     Write-Host "Config:  $script:ConfigFile"
+    Write-Host "Operator token: $script:OperatorTokenFile"
     Write-Host "Agent:   luthn connect codex"
 
     if ($connectCodex) { Connect-Codex }
@@ -970,6 +997,7 @@ function Update-Luthn {
             }
         }
         Ensure-ServiceTokenScope "access.request" -Required:$connectorWasConfigured
+        Ensure-OperatorCredential -Image $targetImage
     } catch {
         $restoreErrors = @()
         foreach ($snapshot in @($runtimeSnapshots) + @($connectorSnapshots)) {

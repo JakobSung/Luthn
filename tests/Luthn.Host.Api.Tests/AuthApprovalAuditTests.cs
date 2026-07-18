@@ -96,6 +96,32 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task RequestOnlyAgentCannotDecideButLocalOperatorCredentialCan()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        client.SetBearer(RequestBearer);
+        using var agentDecision = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "The requesting agent must not approve its own request."
+        });
+
+        client.SetBearer(DeciderBearer);
+        client.DefaultRequestHeaders.Add("X-Luthn-Operator", "local-console");
+        using var operatorDecision = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Approved through the local operator fallback."
+        });
+        using var body = await JsonDocument.ParseAsync(await operatorDecision.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Forbidden, agentDecision.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, operatorDecision.StatusCode);
+        Assert.Equal("Approved", body.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task AgentSummaryWriteScopeAuthorizesTurnSummaryIntake()
     {
         using var factory = CreateAuthFactory();

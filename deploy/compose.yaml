@@ -61,6 +61,9 @@ services:
       Luthn__Auth__Tokens__0__Scopes__13: ${Luthn__Auth__Tokens__0__Scopes__13:-}
       Luthn__Auth__Tokens__0__Scopes__14: ${Luthn__Auth__Tokens__0__Scopes__14:-}
       Luthn__Auth__Tokens__0__Scopes__15: ${Luthn__Auth__Tokens__0__Scopes__15:-}
+      Luthn__Auth__Tokens__1__Name: ${Luthn__Auth__Tokens__1__Name:-local-operator}
+      Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:?operator token digest is required}
+      Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
     ports:
       - "127.0.0.1:${LUTHN_PORT:-8080}:8080"
     healthcheck:

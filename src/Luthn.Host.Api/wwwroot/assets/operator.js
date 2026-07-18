@@ -1,5 +1,6 @@
 const state = {
   token: sessionStorage.getItem("luthn.serviceToken") || "",
+  decisionToken: sessionStorage.getItem("luthn.decisionToken") || "",
   operatorIdentity: sessionStorage.getItem("luthn.operatorIdentity") || ""
 };
 
@@ -38,15 +39,16 @@ const renderReadinessChecks = (checks) => {
   }));
 };
 
-const authHeaders = () => {
+const authHeaders = (useDecisionToken = false) => {
   const headers = {};
-  if (!state.token) {
+  const token = useDecisionToken ? state.decisionToken : state.token;
+  if (!token) {
     return state.operatorIdentity
       ? { "X-Luthn-Operator": state.operatorIdentity }
       : headers;
   }
 
-  headers.Authorization = `Bearer ${state.token}`;
+  headers.Authorization = `Bearer ${token}`;
   if (state.operatorIdentity) {
     headers["X-Luthn-Operator"] = state.operatorIdentity;
   }
@@ -55,12 +57,13 @@ const authHeaders = () => {
 };
 
 const requestJson = async (url, options = {}) => {
+  const { useDecisionToken = false, ...requestOptions } = options;
   const response = await fetch(url, {
-    ...options,
+    ...requestOptions,
     headers: {
-      ...authHeaders(),
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {})
+      ...authHeaders(useDecisionToken),
+      ...(requestOptions.body ? { "Content-Type": "application/json" } : {}),
+      ...(requestOptions.headers || {})
     }
   });
 
@@ -511,7 +514,8 @@ const decideAccessRequest = async (id, decision) => {
   try {
     const result = await requestJson(`/api/access-requests/${id}/${decision}`, {
       method: "POST",
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      useDecisionToken: true
     });
     setAction(`access ${decision}`, result.id);
     await refreshAccessRequests();
@@ -659,14 +663,21 @@ const fillIntakeExample = () => {
 };
 
 $("#serviceToken").value = state.token;
+$("#decisionToken").value = state.decisionToken;
 $("#operatorIdentity").value = state.operatorIdentity;
 $("#saveToken").addEventListener("click", () => {
   state.token = $("#serviceToken").value.trim();
+  state.decisionToken = $("#decisionToken").value.trim();
   state.operatorIdentity = $("#operatorIdentity").value.trim();
   if (state.token) {
     sessionStorage.setItem("luthn.serviceToken", state.token);
   } else {
     sessionStorage.removeItem("luthn.serviceToken");
+  }
+  if (state.decisionToken) {
+    sessionStorage.setItem("luthn.decisionToken", state.decisionToken);
+  } else {
+    sessionStorage.removeItem("luthn.decisionToken");
   }
   if (state.operatorIdentity) {
     sessionStorage.setItem("luthn.operatorIdentity", state.operatorIdentity);
@@ -679,10 +690,13 @@ $("#saveToken").addEventListener("click", () => {
 });
 $("#clearToken").addEventListener("click", () => {
   state.token = "";
+  state.decisionToken = "";
   state.operatorIdentity = "";
   $("#serviceToken").value = "";
+  $("#decisionToken").value = "";
   $("#operatorIdentity").value = "";
   sessionStorage.removeItem("luthn.serviceToken");
+  sessionStorage.removeItem("luthn.decisionToken");
   sessionStorage.removeItem("luthn.operatorIdentity");
   setAction("token cleared", "Bearer header disabled");
   refreshAgentConnections();

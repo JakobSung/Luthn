@@ -303,15 +303,22 @@ esac
 
     $configFile = Join-Path $windowsRoot "config/luthn.env"
     $tokenFile = Join-Path $windowsRoot "config/service-token"
+    $operatorTokenFile = Join-Path $windowsRoot "config/operator-token"
     Assert-True ([IO.File]::Exists($configFile)) "config should exist"
     Assert-True ([IO.File]::Exists($tokenFile)) "token should exist"
+    Assert-True ([IO.File]::Exists($operatorTokenFile)) "operator token should exist"
     $token = [IO.File]::ReadAllText($tokenFile)
+    $operatorToken = [IO.File]::ReadAllText($operatorTokenFile)
     Assert-True ($token -cmatch "^[0-9a-f]{48}$") "token should be a 24-byte hex value"
+    Assert-True ($operatorToken -cmatch "^[0-9a-f]{48}$" -and $operatorToken -cne $token) "operator token should be a distinct 24-byte hex value"
     $configBytes = [IO.File]::ReadAllBytes($configFile)
     Assert-True (-not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF)) "config should be UTF-8 without BOM"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "Luthn__Auth__Tokens__0__Sha256Digest=sha256:[0-9a-f]{64}") "config should preserve the token-digest sha256 prefix"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "new installs should provision the MCP sensitive-access request scope"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$") "new installs should provision a distinct local operator credential"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "the local operator credential should be decision-only"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
+    Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($operatorToken))) "Docker arguments and logs should not contain the operator token"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "one-step Codex registration should not contain the token"
     $installedHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
     $luthnHook = @($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
@@ -444,6 +451,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
+    Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
     Assert-True ($backupFiles.Count -eq 1 -and $backupFiles[0].Length -gt 0) "update should create a non-empty PostgreSQL backup"
     $updateStateFile = Join-Path $windowsRoot "state/update-windows.json"

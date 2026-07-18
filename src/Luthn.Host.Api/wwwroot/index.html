@@ -17,12 +17,14 @@
         </div>
       </div>
       <div class="token-control">
-        <label for="serviceToken">Bearer token</label>
+        <label for="serviceToken">Service token</label>
         <div class="token-row">
           <input id="serviceToken" name="serviceToken" type="password" autocomplete="off" placeholder="Optional in Testing mode">
           <button id="saveToken" type="button">Save</button>
           <button id="clearToken" type="button" class="secondary">Clear</button>
         </div>
+        <label for="decisionToken">Decision token</label>
+        <input id="decisionToken" name="decisionToken" type="password" autocomplete="off" placeholder="Local operator token for approve or deny">
         <label for="operatorIdentity">Operator identity</label>
         <input id="operatorIdentity" name="operatorIdentity" maxlength="64" autocomplete="off" placeholder="Optional audit label">
       </div>
