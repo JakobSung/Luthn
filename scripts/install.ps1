@@ -146,7 +146,7 @@ try {
     [void][Management.Automation.Language.Parser]::ParseFile($temporaryCli, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw "downloaded Windows CLI did not pass PowerShell syntax validation" }
     $downloadedContent = [IO.File]::ReadAllText($temporaryCli)
-    if ($downloadedContent -notmatch '\$script:LuthnWindowsCliVersion\s*=\s*"1"') {
+    if ($downloadedContent -notmatch '\$script:LuthnWindowsCliVersion\s*=\s*"[1-9][0-9]*"') {
         throw "downloaded Windows CLI did not match the Luthn distribution contract"
     }
 
