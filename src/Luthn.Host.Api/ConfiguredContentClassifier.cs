@@ -14,6 +14,7 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ClassificationProviderRuntimeOptions _runtimeOptions;
     private readonly ILogger<ConfiguredContentClassifier> _logger;
+    private readonly IOperationalMetrics _metrics;
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -41,7 +42,8 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
             settingsStore,
             httpClientFactory,
             Options.Create(new ClassificationProviderRuntimeOptions()),
-            NullLogger<ConfiguredContentClassifier>.Instance)
+            NullLogger<ConfiguredContentClassifier>.Instance,
+            NullOperationalMetrics.Instance)
     {
     }
 
@@ -49,12 +51,14 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
         IOperatorClassificationSettingsStore settingsStore,
         IHttpClientFactory httpClientFactory,
         IOptions<ClassificationProviderRuntimeOptions> runtimeOptions,
-        ILogger<ConfiguredContentClassifier> logger)
+        ILogger<ConfiguredContentClassifier> logger,
+        IOperationalMetrics? metrics = null)
     {
         _settingsStore = settingsStore;
         _httpClientFactory = httpClientFactory;
         _runtimeOptions = runtimeOptions.Value;
         _logger = logger;
+        _metrics = metrics ?? NullOperationalMetrics.Instance;
     }
 
     public ClassificationProviderBoundary Boundary => BoundaryFor(_settingsStore.Current);
@@ -346,6 +350,7 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
             _runtimeOptions,
             _logger,
             provider.ToString(),
+            _metrics,
             cancellationToken);
 
     private static ClassifierJsonResponse? ParseClassifierJson(string? json)

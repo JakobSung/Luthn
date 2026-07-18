@@ -136,7 +136,7 @@ Supported scopes include `agent.read`, `agent.write.summary`,
 `config.write`,
 `external-publication.read`, `external-publication.write`, `source.write`,
 `memory.read`, `memory.write`, `access.request`,
-`access.decide`, `audit.read`, and `*` for operator-controlled admin use. Local
+`access.decide`, `audit.read`, `metrics.read`, and `*` for operator-controlled admin use. Local
 `Testing` mode remains credential-free unless token options are configured.
 `ExpiresAt` is optional. Expired tokens are ignored by the authorization filter
 and make `/readyz` fail when no other active token is available.

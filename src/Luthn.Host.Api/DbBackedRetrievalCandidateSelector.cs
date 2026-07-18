@@ -27,8 +27,10 @@ public interface IRetrievalCandidateSelector
 
 public sealed class DbBackedRetrievalCandidateSelector(
     LuthnDbContext db,
-    TimeProvider timeProvider) : IRetrievalCandidateSelector
+    TimeProvider timeProvider,
+    IOperationalMetrics? metrics = null) : IRetrievalCandidateSelector
 {
+    private readonly IOperationalMetrics _metrics = metrics ?? NullOperationalMetrics.Instance;
     public async Task<IReadOnlyList<ContextPackCandidate>> SelectAgentContextAsync(
         SafeSearchRequest request,
         CancellationToken cancellationToken)
@@ -42,9 +44,11 @@ public sealed class DbBackedRetrievalCandidateSelector(
         LuthnHostMetrics.SafeSearchCandidateCount.Record(
             wikiCandidates.Length,
             new KeyValuePair<string, object?>("source", "wiki_proposals"));
+        _metrics.RecordSafeSearchCandidates("wiki_proposals", wikiCandidates.Length);
         LuthnHostMetrics.SafeSearchCandidateCount.Record(
             memoryCandidates.Length,
             new KeyValuePair<string, object?>("source", "shared_memory_items"));
+        _metrics.RecordSafeSearchCandidates("shared_memory_items", memoryCandidates.Length);
 
         return wikiCandidates.Concat(memoryCandidates).ToArray();
     }
@@ -61,6 +65,7 @@ public sealed class DbBackedRetrievalCandidateSelector(
         LuthnHostMetrics.SafeSearchCandidateCount.Record(
             candidates.Length,
             new KeyValuePair<string, object?>("source", "shared_memory_items"));
+        _metrics.RecordSafeSearchCandidates("shared_memory_items", candidates.Length);
         return candidates;
     }
 
