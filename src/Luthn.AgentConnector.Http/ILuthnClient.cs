@@ -66,17 +66,15 @@ public interface ILuthnClient
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement shared memory queries.");
 
+    Task<SensitiveAccessRequestDto> CreateSensitiveAccessRequestAsync(
+        SensitiveAccessCreateRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+        string id,
+        CancellationToken cancellationToken = default);
+
     Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
         string id,
-        CancellationToken cancellationToken = default);
-
-    Task<SensitiveAccessRequestDto> ApproveSensitiveAccessRequestAsync(
-        string id,
-        SensitiveAccessDecisionRequestDto request,
-        CancellationToken cancellationToken = default);
-
-    Task<SensitiveAccessRequestDto> DenySensitiveAccessRequestAsync(
-        string id,
-        SensitiveAccessDecisionRequestDto request,
         CancellationToken cancellationToken = default);
 }

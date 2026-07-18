@@ -211,6 +211,31 @@ public sealed class LuthnClient : ILuthnClient
         return await SendJsonAsync<SharedMemoryQueryResponseDto>(httpRequest, cancellationToken);
     }
 
+    public async Task<SensitiveAccessRequestDto> CreateSensitiveAccessRequestAsync(
+        SensitiveAccessCreateRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/access-requests")
+        {
+            Content = JsonContent.Create(request, options: JsonOptions)
+        };
+        return await SendJsonAsync<SensitiveAccessRequestDto>(httpRequest, cancellationToken);
+    }
+
+    public async Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+        string id,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new ArgumentException("Sensitive access request id is required.", nameof(id));
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/access-requests/{Uri.EscapeDataString(id)}");
+        return await SendJsonAsync<SensitiveAccessRequestDto>(request, cancellationToken);
+    }
+
     public async Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
         string id,
         CancellationToken cancellationToken = default)
@@ -227,40 +252,6 @@ public sealed class LuthnClient : ILuthnClient
         return await SendJsonAsync<SensitiveAccessResultDto>(request, cancellationToken);
     }
 
-    public Task<SensitiveAccessRequestDto> ApproveSensitiveAccessRequestAsync(
-        string id,
-        SensitiveAccessDecisionRequestDto request,
-        CancellationToken cancellationToken = default) =>
-        SendSensitiveAccessDecisionAsync(id, "approve", request, cancellationToken);
-
-    public Task<SensitiveAccessRequestDto> DenySensitiveAccessRequestAsync(
-        string id,
-        SensitiveAccessDecisionRequestDto request,
-        CancellationToken cancellationToken = default) =>
-        SendSensitiveAccessDecisionAsync(id, "deny", request, cancellationToken);
-
-    private async Task<SensitiveAccessRequestDto> SendSensitiveAccessDecisionAsync(
-        string id,
-        string decision,
-        SensitiveAccessDecisionRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(id))
-        {
-            throw new ArgumentException("Sensitive access request id is required.", nameof(id));
-        }
-
-        ArgumentNullException.ThrowIfNull(request);
-
-        var httpRequest = new HttpRequestMessage(
-            HttpMethod.Post,
-            $"/api/access-requests/{Uri.EscapeDataString(id)}/{decision}")
-        {
-            Content = JsonContent.Create(request, options: JsonOptions)
-        };
-
-        return await SendJsonAsync<SensitiveAccessRequestDto>(httpRequest, cancellationToken);
-    }
 
     private async Task<T> SendJsonAsync<T>(
         HttpRequestMessage request,

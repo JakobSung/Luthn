@@ -63,7 +63,24 @@ public static class LuthnMcpToolRegistry
         new(
             "get_shared_memory_item",
             "Read a safe shared-memory item by id.",
-            ToolSchema([StringProperty("id", "Shared memory item id.")], ["id"]))
+            ToolSchema([StringProperty("id", "Shared memory item id.")], ["id"])),
+        new(
+            "create_sensitive_access_request",
+            "Create a bounded sensitive-access request. This tool cannot approve or deny requests.",
+            ToolSchema([
+                StringProperty("sensitiveReferenceId", "Public sensitive record reference id."),
+                StringProperty("reason", "Bounded request purpose."),
+                StringProperty("sessionId", "Non-sensitive session correlation id."),
+                IntegerProperty("expiresInSeconds", "Bounded request lifetime in seconds.", 3_600)
+            ], ["sensitiveReferenceId", "reason", "sessionId", "expiresInSeconds"])),
+        new(
+            "get_sensitive_access_request",
+            "Read the metadata-only status of a sensitive-access request.",
+            ToolSchema([StringProperty("id", "Sensitive access request id.")], ["id"])),
+        new(
+            "get_sensitive_access_result",
+            "Read the bounded public-safe redacted result of a sensitive-access request.",
+            ToolSchema([StringProperty("id", "Sensitive access request id.")], ["id"]))
     ];
 
     public static IReadOnlyList<string> AllowedToolNames { get; } =
@@ -81,7 +98,10 @@ public static class LuthnMcpToolRegistry
             new ClassifyPreviewTool(client),
             new CreateSharedMemoryTool(client),
             new QuerySharedMemoryTool(client),
-            new GetSharedMemoryItemTool(client)
+            new GetSharedMemoryItemTool(client),
+            new CreateSensitiveAccessRequestTool(client),
+            new GetSensitiveAccessRequestTool(client),
+            new GetSensitiveAccessResultTool(client)
         ];
     }
 

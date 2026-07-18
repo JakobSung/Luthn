@@ -442,65 +442,66 @@ public sealed class LuthnClientTests
     }
 
     [Fact]
-    public async Task ApproveSensitiveAccessRequestCanSendReviewedRedactedSummary()
+    public async Task CreateSensitiveAccessRequestPostsBoundedRequest()
     {
         using var handler = new CapturingHandler("""
             {
               "id": "access-1",
               "sensitiveReferenceId": "sensitive-ref-1",
-              "status": "Approved",
+              "status": "Pending",
               "requestedBy": "agent-service",
+              "sessionId": "session-1",
               "createdAt": "2026-07-05T00:00:00+00:00",
-              "decidedBy": "operator",
-              "decidedAt": "2026-07-05T00:01:00+00:00",
-              "redactedOutputAvailable": true,
-              "outputPolicy": "approved-redacted-output-available"
+              "expiresAt": "2026-07-05T00:10:00+00:00",
+              "decidedBy": null,
+              "decidedAt": null,
+              "redactedOutputAvailable": false,
+              "outputPolicy": "pending-approval"
             }
             """);
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
         var client = new LuthnClient(http);
 
-        var response = await client.ApproveSensitiveAccessRequestAsync(
-            "access-1",
-            new SensitiveAccessDecisionRequestDto(
-                "Approved with reviewed output.",
-                "Public-safe release steps."));
+        var response = await client.CreateSensitiveAccessRequestAsync(
+            new SensitiveAccessCreateRequestDto(
+                "sensitive-ref-1", "Need bounded access.", "session-1", 600));
         var body = await handler.RequestContent!.ReadAsStringAsync();
 
         Assert.Equal(HttpMethod.Post, handler.Request!.Method);
-        Assert.Equal("/api/access-requests/access-1/approve", handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal("/api/access-requests", handler.Request.RequestUri!.AbsolutePath);
         Assert.Contains("\"reason\"", body, StringComparison.Ordinal);
-        Assert.Contains("\"redactedSummary\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"sessionId\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"expiresInSeconds\"", body, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", body, StringComparison.OrdinalIgnoreCase);
-        Assert.True(response.RedactedOutputAvailable);
+        Assert.Equal("Pending", response.Status);
     }
 
     [Fact]
-    public async Task DenySensitiveAccessRequestPostsDecisionWithoutRawRoute()
+    public async Task GetSensitiveAccessRequestReadsMetadataOnlyStatus()
     {
         using var handler = new CapturingHandler("""
             {
               "id": "access-1",
               "sensitiveReferenceId": "sensitive-ref-1",
-              "status": "Denied",
+              "status": "Pending",
               "requestedBy": "agent-service",
+              "sessionId": "session-1",
               "createdAt": "2026-07-05T00:00:00+00:00",
-              "decidedBy": "operator",
-              "decidedAt": "2026-07-05T00:01:00+00:00",
+              "expiresAt": "2026-07-05T00:10:00+00:00",
+              "decidedBy": null,
+              "decidedAt": null,
               "redactedOutputAvailable": false,
-              "outputPolicy": "denied-no-output"
+              "outputPolicy": "pending-approval"
             }
             """);
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
         var client = new LuthnClient(http);
 
-        var response = await client.DenySensitiveAccessRequestAsync(
-            "access-1",
-            new SensitiveAccessDecisionRequestDto("Denied by policy."));
+        var response = await client.GetSensitiveAccessRequestAsync("access-1");
 
-        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
-        Assert.Equal("/api/access-requests/access-1/deny", handler.Request.RequestUri!.AbsolutePath);
-        Assert.Equal("denied-no-output", response.OutputPolicy);
+        Assert.Equal(HttpMethod.Get, handler.Request!.Method);
+        Assert.Equal("/api/access-requests/access-1", handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal("pending-approval", response.OutputPolicy);
         Assert.DoesNotContain("vault", handler.Request.RequestUri.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
@@ -551,6 +552,10 @@ public sealed class LuthnClientTests
         Assert.Contains("QuerySharedMemoryAsync", methodNames);
         Assert.Contains("GetSharedMemoryItemAsync", methodNames);
         Assert.Contains("GetSensitiveAccessResultAsync", methodNames);
+        Assert.Contains("CreateSensitiveAccessRequestAsync", methodNames);
+        Assert.Contains("GetSensitiveAccessRequestAsync", methodNames);
+        Assert.DoesNotContain("ApproveSensitiveAccessRequestAsync", methodNames);
+        Assert.DoesNotContain("DenySensitiveAccessRequestAsync", methodNames);
         Assert.Contains("IntakeTurnSummaryAsync", methodNames);
         Assert.Contains("ListAgentConnectionsAsync", methodNames);
         Assert.Contains("ReportAgentConnectionObservationAsync", methodNames);

@@ -167,7 +167,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var response = await client.PostAsJsonAsync("/api/access-requests", new
         {
             sensitiveReferenceId = "sensitive-ref-1",
-            reason = "Need approval for a redacted operational summary."
+            reason = "Need approval for a redacted operational summary.",
+            sessionId = "session-operator-identity",
+            expiresInSeconds = 600
         });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -193,7 +195,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var response = await client.PostAsJsonAsync("/api/access-requests", new
         {
             sensitiveReferenceId = "sensitive-ref-1",
-            reason = "Need approval for a redacted operational summary."
+            reason = "Need approval for a redacted operational summary.",
+            sessionId = "session-pending",
+            expiresInSeconds = 600
         });
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 
@@ -213,6 +217,37 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         Assert.Equal(request.Id, audit.SubjectId);
         Assert.Equal("metadata-only", audit.PayloadClass);
         Assert.Equal("sensitive-boundary-only", audit.RedactionState);
+    }
+
+    [Fact]
+    public async Task ExpiredSensitiveAccessRequestTransitionsToExpiredWithMetadataOnlyAudit()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            var request = await db.SensitiveAccessRequests.SingleAsync(record => record.Id == requestId);
+            request.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+            await db.SaveChangesAsync();
+        }
+
+        client.SetBearer(RequestBearer);
+        using var response = await client.GetAsync($"/api/access-requests/{requestId}");
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Expired", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal("expired-no-output", body.RootElement.GetProperty("outputPolicy").GetString());
+
+        using var verifyScope = factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Contains(await verifyDb.AuditEvents.ToArrayAsync(), audit =>
+            audit.Action == "sensitive_access.expired" &&
+            audit.SubjectId == requestId &&
+            audit.PayloadClass == "metadata-only");
     }
 
     [Fact]
@@ -534,7 +569,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("status must be Pending, Approved, or Denied.", body.RootElement.GetProperty("detail").GetString());
+        Assert.Equal("status must be Pending, Approved, Denied, or Expired.", body.RootElement.GetProperty("detail").GetString());
     }
 
     [Fact]
@@ -601,7 +636,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var response = await client.PostAsJsonAsync("/api/access-requests", new
         {
             sensitiveReferenceId = "missing-reference",
-            reason = "Unknown records must not create an implicit access path."
+            reason = "Unknown records must not create an implicit access path.",
+            sessionId = "session-missing",
+            expiresInSeconds = 600
         });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -615,7 +652,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var response = await client.PostAsJsonAsync("/api/access-requests", new
         {
             sensitiveReferenceId,
-            reason = "Need approval for a redacted operational summary."
+            reason = "Need approval for a redacted operational summary.",
+            sessionId = "session-sensitive-access",
+            expiresInSeconds = 600
         });
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 

@@ -27,11 +27,16 @@ public sealed class McpToolBoundaryTests
             "classify_preview",
             "create_shared_memory",
             "query_shared_memory",
-            "get_shared_memory_item"
+            "get_shared_memory_item",
+            "create_sensitive_access_request",
+            "get_sensitive_access_request",
+            "get_sensitive_access_result"
         ], names);
         Assert.DoesNotContain("read_raw_vault", names);
         Assert.DoesNotContain("dump_source_records", names);
         Assert.DoesNotContain("query_private_records", names);
+        Assert.DoesNotContain(names, name => name.Contains("approve", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(names, name => name.Contains("deny", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -275,6 +280,28 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task SensitiveAccessToolsExposeRequestStatusAndResultWithoutDecisionTools()
+    {
+        var client = new FakeLuthnClient();
+        using var createArgs = JsonDocument.Parse(
+            """{"sensitiveReferenceId":"sensitive-ref-1","reason":"Need bounded access.","sessionId":"session-1","expiresInSeconds":600}""");
+        using var idArgs = JsonDocument.Parse("""{"id":"access-1"}""");
+
+        var created = await new CreateSensitiveAccessRequestTool(client).InvokeAsync(createArgs.RootElement);
+        var status = await new GetSensitiveAccessRequestTool(client).InvokeAsync(idArgs.RootElement);
+        var result = await new GetSensitiveAccessResultTool(client).InvokeAsync(idArgs.RootElement);
+
+        Assert.IsType<SensitiveAccessRequestDto>(created);
+        Assert.IsType<SensitiveAccessRequestDto>(status);
+        Assert.IsType<SensitiveAccessResultDto>(result);
+        Assert.Contains("create_sensitive_access_request", LuthnMcpToolRegistry.AllowedToolNames);
+        Assert.Contains("get_sensitive_access_request", LuthnMcpToolRegistry.AllowedToolNames);
+        Assert.Contains("get_sensitive_access_result", LuthnMcpToolRegistry.AllowedToolNames);
+        Assert.DoesNotContain(LuthnMcpToolRegistry.AllowedToolNames, name => name.Contains("approve", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(LuthnMcpToolRegistry.AllowedToolNames, name => name.Contains("deny", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task JsonRpcServerInitializesAndListsToolSchemas()
     {
         var server = new McpJsonRpcServer(LuthnMcpToolRegistry.CreateDefault(new FakeLuthnClient()));
@@ -445,37 +472,37 @@ public sealed class McpToolBoundaryTests
                 "approved-redacted-output-available",
                 ["Approved limited output is sourced from a public-safe redacted summary."]));
 
-        public Task<SensitiveAccessRequestDto> ApproveSensitiveAccessRequestAsync(
-            string id,
-            SensitiveAccessDecisionRequestDto request,
+        public Task<SensitiveAccessRequestDto> CreateSensitiveAccessRequestAsync(
+            SensitiveAccessCreateRequestDto request,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new SensitiveAccessRequestDto(
-                id,
+                "access-1",
                 "sensitive-ref-1",
-                "Approved",
+                "Pending",
                 "agent-service",
+                request.SessionId,
                 DateTimeOffset.UnixEpoch,
-                "operator",
-                DateTimeOffset.UnixEpoch,
-                !string.IsNullOrWhiteSpace(request.RedactedSummary),
-                string.IsNullOrWhiteSpace(request.RedactedSummary)
-                    ? "approved-redacted-output-unavailable"
-                    : "approved-redacted-output-available"));
-
-        public Task<SensitiveAccessRequestDto> DenySensitiveAccessRequestAsync(
-            string id,
-            SensitiveAccessDecisionRequestDto request,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new SensitiveAccessRequestDto(
-                id,
-                "sensitive-ref-1",
-                "Denied",
-                "agent-service",
-                DateTimeOffset.UnixEpoch,
-                "operator",
-                DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch.AddMinutes(10),
+                null,
+                null,
                 false,
-                "denied-no-output"));
+                "pending-approval"));
+
+        public Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+            string id,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new SensitiveAccessRequestDto(
+                id,
+                "sensitive-ref-1",
+                "Pending",
+                "agent-service",
+                "session-1",
+                DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch.AddMinutes(10),
+                null,
+                null,
+                false,
+                "pending-approval"));
 
         private static SharedMemoryItemDto MemoryItem() =>
             new(

@@ -46,6 +46,16 @@ internal static class McpToolArguments
             ? value
             : 20;
 
+    public static int ReadRequiredInt(JsonElement arguments, string propertyName)
+    {
+        if (!arguments.TryGetProperty(propertyName, out var element) || !element.TryGetInt32(out var value))
+        {
+            throw new ArgumentException($"{propertyName} is required and must be an integer.", nameof(arguments));
+        }
+
+        return value;
+    }
+
     public static DateTimeOffset? ReadOptionalDateTimeOffset(JsonElement arguments, string propertyName)
     {
         if (!arguments.TryGetProperty(propertyName, out var element) ||
