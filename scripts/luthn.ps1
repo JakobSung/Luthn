@@ -377,6 +377,17 @@ function Set-ConfigValue {
     Protect-SecretFile $script:ConfigFile
 }
 
+function Remove-ConfigPrefix {
+    param([Parameter(Mandatory = $true)][string]$Prefix)
+    if (-not [IO.File]::Exists($script:ConfigFile)) { return }
+    $lines = @([IO.File]::ReadAllLines($script:ConfigFile) | Where-Object {
+        $separator = $_.IndexOf("=")
+        $separator -lt 0 -or -not $_.Substring(0, $separator).StartsWith($Prefix, [StringComparison]::Ordinal)
+    })
+    Write-Utf8File -Path $script:ConfigFile -Content $(if ($lines.Count -gt 0) { ($lines -join "`n") + "`n" } else { "" })
+    Protect-SecretFile $script:ConfigFile
+}
+
 function Ensure-ConfigValue {
     param([string]$Key, [string]$Value)
     if (-not (Read-ConfigValue -Key $Key)) { Set-ConfigValue -Key $Key -Value $Value }
@@ -636,9 +647,29 @@ function Ensure-OperatorCredential {
     }
     Protect-SecretFile $script:OperatorTokenFile
     Set-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
-    Set-ConfigValue "Luthn__Auth__Tokens__1__Name" "local-operator"
-    Set-ConfigValue "Luthn__Auth__Tokens__1__Sha256Digest" (Get-TokenDigest -Image $Image -Token $operatorToken)
-    Set-ConfigValue "Luthn__Auth__Tokens__1__Scopes__0" "access.decide"
+    $operatorDigest = Get-TokenDigest -Image $Image -Token $operatorToken
+    $occupiedIndexes = [Collections.Generic.HashSet[int]]::new()
+    $operatorIndex = $null
+    foreach ($line in [IO.File]::ReadAllLines($script:ConfigFile)) {
+        $match = [regex]::Match($line, '^Luthn__Auth__Tokens__(\d+)__')
+        if ($match.Success) { [void]$occupiedIndexes.Add([int]$match.Groups[1].Value) }
+    }
+    foreach ($index in @($occupiedIndexes | Sort-Object)) {
+        if ((Read-ConfigValue "Luthn__Auth__Tokens__${index}__Name") -ceq "local-operator" -and
+            (Read-ConfigValue "Luthn__Auth__Tokens__${index}__Sha256Digest") -ceq $operatorDigest) {
+            $operatorIndex = $index
+            break
+        }
+    }
+    if ($null -eq $operatorIndex) {
+        $operatorIndex = 1
+        while ($occupiedIndexes.Contains($operatorIndex)) { $operatorIndex++ }
+    }
+    $operatorPrefix = "Luthn__Auth__Tokens__${operatorIndex}__"
+    Remove-ConfigPrefix $operatorPrefix
+    Set-ConfigValue "${operatorPrefix}Name" "local-operator"
+    Set-ConfigValue "${operatorPrefix}Sha256Digest" $operatorDigest
+    Set-ConfigValue "${operatorPrefix}Scopes__0" "access.decide"
 }
 
 function Wait-ForPostgres {
@@ -1360,10 +1391,15 @@ function New-CodexTurnCapsule {
     if ($inputObject.last_assistant_message -isnot [string]) { throw "Codex Stop hook last_assistant_message must be text" }
     $summary = $inputObject.last_assistant_message.Trim()
     if (-not $summary -or (Test-CodexMessageContainsCredentials $summary)) { return $null }
-    $serviceTokenFile = Read-ConfigValue "LUTHN_SERVICE_TOKEN_FILE" $script:TokenFile
-    if ([IO.File]::Exists($serviceTokenFile)) {
-        $serviceToken = [IO.File]::ReadAllText($serviceTokenFile).Trim()
-        if ($serviceToken -and $summary.Contains($serviceToken, [StringComparison]::Ordinal)) { return $null }
+    $managedTokenFiles = @(
+        (Read-ConfigValue "LUTHN_SERVICE_TOKEN_FILE" $script:TokenFile),
+        (Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile)
+    )
+    foreach ($managedTokenFile in $managedTokenFiles) {
+        if ([IO.File]::Exists($managedTokenFile)) {
+            $managedToken = [IO.File]::ReadAllText($managedTokenFile).Trim()
+            if ($managedToken -and $summary.Contains($managedToken, [StringComparison]::Ordinal)) { return $null }
+        }
     }
     if ($summary.Length -gt $script:MaxTurnCapsuleCharacters) {
         $summary = $summary.Substring(0, $script:MaxTurnCapsuleCharacters).TrimEnd()

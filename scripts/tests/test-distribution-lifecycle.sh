@@ -141,8 +141,22 @@ context_output="$(curl -fsS -X POST "$base_url/api/agent/context-packs" \
 grep -q 'Lifecycle sentinel' <<<"$context_output"
 
 echo "[4/8] update"
-grep -v '^Luthn__Auth__Tokens__0__Scopes__7=access.request$' "$LUTHN_CONFIG_DIR/luthn.env" \
+operator_digest_before="$(awk -F= '$1 == "Luthn__Auth__Tokens__1__Sha256Digest" { print $2 }' "$LUTHN_CONFIG_DIR/luthn.env")"
+grep -v -e '^Luthn__Auth__Tokens__0__Scopes__7=access.request$' \
+  -e '^Luthn__Auth__Tokens__1__' "$LUTHN_CONFIG_DIR/luthn.env" \
   >"$LUTHN_CONFIG_DIR/luthn.env.legacy"
+cat >>"$LUTHN_CONFIG_DIR/luthn.env.legacy" <<EOF
+Luthn__Auth__Tokens__1__Name=existing-integration
+Luthn__Auth__Tokens__1__Sha256Digest=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+Luthn__Auth__Tokens__1__Scopes__0=memory.read
+Luthn__Auth__Tokens__1__Scopes__1=*
+Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z
+Luthn__Auth__Tokens__2__Name=local-operator
+Luthn__Auth__Tokens__2__Sha256Digest=$operator_digest_before
+Luthn__Auth__Tokens__2__Scopes__0=access.decide
+Luthn__Auth__Tokens__2__Scopes__1=*
+Luthn__Auth__Tokens__2__ExpiresAt=2099-01-01T00:00:00Z
+EOF
 mv "$LUTHN_CONFIG_DIR/luthn.env.legacy" "$LUTHN_CONFIG_DIR/luthn.env"
 update_write_probe="$test_root/update-write-probe.sh"
 cat >"$update_write_probe" <<EOF
@@ -168,6 +182,13 @@ grep -q '^Luthn__Auth__Tokens__0__Scopes__4=classification.preview$' "$LUTHN_CON
 grep -q '^Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__7=access.request$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__1__Name=existing-integration$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__1__Scopes__1=\*$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__2__Name=local-operator$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__2__Scopes__0=access.decide$' "$LUTHN_CONFIG_DIR/luthn.env"
+! grep -q '^Luthn__Auth__Tokens__2__Scopes__1=' "$LUTHN_CONFIG_DIR/luthn.env"
+! grep -q '^Luthn__Auth__Tokens__2__ExpiresAt=' "$LUTHN_CONFIG_DIR/luthn.env"
 context_output="$(curl -fsS -X POST "$base_url/api/agent/context-packs" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_after" \

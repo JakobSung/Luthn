@@ -491,7 +491,9 @@ const refreshAccessRequests = async (event) => {
   params.set("limit", limit);
 
   try {
-    const result = await requestJson(`/api/access-requests?${params}`);
+    const result = await requestJson(`/api/access-requests?${params}`, {
+      useDecisionToken: true
+    });
     renderAccessRows(result.requests || []);
     setAction("access refreshed", `${result.requests?.length || 0} requests`);
   } catch (error) {

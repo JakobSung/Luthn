@@ -440,7 +440,22 @@ esac
     $updateLogStart = [IO.File]::ReadAllLines($fakeDockerLog).Count
     $oversizedUnownedInstructions = "x" * (1024 * 1024 + 1)
     [IO.File]::WriteAllText($codexInstructionsFile, $oversizedUnownedInstructions, [Text.UTF8Encoding]::new($false))
-    $legacyConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object { $_ -cne "Luthn__Auth__Tokens__0__Scopes__7=access.request" })
+    $operatorDigest = ([IO.File]::ReadAllLines($configFile) | Where-Object { $_ -cmatch '^Luthn__Auth__Tokens__1__Sha256Digest=' }).Split('=', 2)[1]
+    $legacyConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object {
+        $_ -cne "Luthn__Auth__Tokens__0__Scopes__7=access.request" -and
+        $_ -cnotmatch '^Luthn__Auth__Tokens__1__'
+    }) + @(
+        "Luthn__Auth__Tokens__1__Name=existing-integration",
+        "Luthn__Auth__Tokens__1__Sha256Digest=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "Luthn__Auth__Tokens__1__Scopes__0=memory.read",
+        "Luthn__Auth__Tokens__1__Scopes__1=*",
+        "Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z",
+        "Luthn__Auth__Tokens__2__Name=local-operator",
+        "Luthn__Auth__Tokens__2__Sha256Digest=$operatorDigest",
+        "Luthn__Auth__Tokens__2__Scopes__0=access.decide",
+        "Luthn__Auth__Tokens__2__Scopes__1=*",
+        "Luthn__Auth__Tokens__2__ExpiresAt=2099-01-01T00:00:00Z"
+    )
     [IO.File]::WriteAllText($configFile, (($legacyConfig -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
     $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
@@ -452,6 +467,10 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
     Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
+    $updatedConfig = [IO.File]::ReadAllText($configFile)
+    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=existing-integration$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__1=\*$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z$") "update should preserve an occupied token slot"
+    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__2__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__2__Scopes__0=access\.decide$") "update should reuse the verified managed operator slot"
+    Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__2__(?:Scopes__1|ExpiresAt)=") "update should normalize the managed operator slot to decision-only"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
     Assert-True ($backupFiles.Count -eq 1 -and $backupFiles[0].Length -gt 0) "update should create a non-empty PostgreSQL backup"
     $updateStateFile = Join-Path $windowsRoot "state/update-windows.json"
@@ -741,6 +760,15 @@ esac
     $secretHook = Invoke-CodexHookProcess $installedCli $secretHookEvent
     Assert-True ($secretHook.ExitCode -eq 0) "a secret-bearing hook payload should fail open"
     Assert-True ((Get-FileHash -LiteralPath $codexHookCapture -Algorithm SHA256).Hash -eq $captureHash) "a secret-bearing response should not be captured"
+    $operatorTokenHookEvent = [ordered]@{
+        hook_event_name = "Stop"
+        session_id = "operator-secret-session"
+        turn_id = "operator-secret-turn"
+        last_assistant_message = $operatorToken
+    } | ConvertTo-Json -Compress
+    $operatorTokenHook = Invoke-CodexHookProcess $installedCli $operatorTokenHookEvent
+    Assert-True ($operatorTokenHook.ExitCode -eq 0) "an operator-token hook payload should fail open"
+    Assert-True ((Get-FileHash -LiteralPath $codexHookCapture -Algorithm SHA256).Hash -eq $captureHash) "a bare generated operator token should not be captured"
     $oversizedHook = "{`"hook_event_name`":`"Stop`",`"session_id`":`"s`",`"turn_id`":`"t`",`"last_assistant_message`":`"$(`"x`" * 270000)`"}"
     $oversizedResult = Invoke-CodexHookProcess $installedCli $oversizedHook
     Assert-True ($oversizedResult.ExitCode -eq 0) "oversized hook input should fail open"

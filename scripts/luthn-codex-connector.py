@@ -472,7 +472,12 @@ def _read_bounded_hook_input() -> bytes:
     return raw
 
 
-def upload_hook(base_url: str, token_file: Path, connector_version: str) -> int:
+def upload_hook(
+    base_url: str,
+    token_file: Path,
+    connector_version: str,
+    excluded_token_files: list[Path] | None = None,
+) -> int:
     try:
         raw = _read_bounded_hook_input()
         hook_input = json.loads(raw.decode("utf-8"))
@@ -480,8 +485,13 @@ def upload_hook(base_url: str, token_file: Path, connector_version: str) -> int:
             raise ValueError("Codex hook input must be a JSON object")
         token = _read_token(token_file)
         assistant_message = hook_input.get("last_assistant_message")
-        if isinstance(assistant_message, str) and token in assistant_message:
-            return 0
+        if isinstance(assistant_message, str):
+            excluded_tokens = [token]
+            excluded_tokens.extend(
+                _read_token(path) for path in (excluded_token_files or [])
+            )
+            if any(value in assistant_message for value in excluded_tokens):
+                return 0
         capsule = build_turn_capsule(hook_input)
         if capsule is None:
             return 0
@@ -541,25 +551,33 @@ def upload_hook(base_url: str, token_file: Path, connector_version: str) -> int:
     return 0
 
 
-def run_hook(base_url: str, token_file: Path, connector_version: str) -> int:
+def run_hook(
+    base_url: str,
+    token_file: Path,
+    connector_version: str,
+    excluded_token_files: list[Path] | None = None,
+) -> int:
     try:
         raw = _read_bounded_hook_input()
         with tempfile.TemporaryFile() as payload:
             payload.write(raw)
             payload.flush()
             payload.seek(0)
+            command = [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "hook-upload",
+                "--base-url",
+                base_url,
+                "--token-file",
+                str(token_file),
+                "--connector-version",
+                connector_version,
+            ]
+            for path in excluded_token_files or []:
+                command.extend(["--excluded-token-file", str(path)])
             subprocess.Popen(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve()),
-                    "hook-upload",
-                    "--base-url",
-                    base_url,
-                    "--token-file",
-                    str(token_file),
-                    "--connector-version",
-                    connector_version,
-                ],
+                command,
                 stdin=payload,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -626,11 +644,13 @@ def build_parser() -> argparse.ArgumentParser:
     hook_run = subparsers.add_parser("hook-run")
     hook_run.add_argument("--base-url", required=True)
     hook_run.add_argument("--token-file", type=Path, required=True)
+    hook_run.add_argument("--excluded-token-file", type=Path, action="append")
     hook_run.add_argument("--connector-version", required=True)
 
     hook_upload = subparsers.add_parser("hook-upload", help=argparse.SUPPRESS)
     hook_upload.add_argument("--base-url", required=True)
     hook_upload.add_argument("--token-file", type=Path, required=True)
+    hook_upload.add_argument("--excluded-token-file", type=Path, action="append")
     hook_upload.add_argument("--connector-version", required=True)
 
     status = subparsers.add_parser("status")
@@ -682,12 +702,18 @@ def main() -> int:
 
     if arguments.operation == "hook-run":
         return run_hook(
-            arguments.base_url, arguments.token_file, arguments.connector_version
+            arguments.base_url,
+            arguments.token_file,
+            arguments.connector_version,
+            arguments.excluded_token_file,
         )
 
     if arguments.operation == "hook-upload":
         return upload_hook(
-            arguments.base_url, arguments.token_file, arguments.connector_version
+            arguments.base_url,
+            arguments.token_file,
+            arguments.connector_version,
+            arguments.excluded_token_file,
         )
 
     if arguments.operation == "version":

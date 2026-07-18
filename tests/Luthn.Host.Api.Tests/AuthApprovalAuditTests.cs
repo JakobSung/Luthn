@@ -103,6 +103,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         var requestId = await CreateSensitiveAccessRequestAsync(client);
 
         client.SetBearer(RequestBearer);
+        using var agentList = await client.GetAsync("/api/access-requests?status=Pending&limit=10");
         using var agentDecision = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
         {
             reason = "The requesting agent must not approve its own request."
@@ -110,13 +111,16 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
 
         client.SetBearer(DeciderBearer);
         client.DefaultRequestHeaders.Add("X-Luthn-Operator", "local-console");
+        using var operatorList = await client.GetAsync("/api/access-requests?status=Pending&limit=10");
         using var operatorDecision = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
         {
             reason = "Approved through the local operator fallback."
         });
         using var body = await JsonDocument.ParseAsync(await operatorDecision.Content.ReadAsStreamAsync());
 
+        Assert.Equal(HttpStatusCode.Forbidden, agentList.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, agentDecision.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, operatorList.StatusCode);
         Assert.Equal(HttpStatusCode.OK, operatorDecision.StatusCode);
         Assert.Equal("Approved", body.RootElement.GetProperty("status").GetString());
     }
