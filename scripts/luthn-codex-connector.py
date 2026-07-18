@@ -68,6 +68,23 @@ under these rules:
 - Do not put the recall status in a normal assistant response or final response.
 {INSTRUCTION_END_MARKER}"""
 
+
+def helper_digest() -> str:
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def managed_template_digest() -> str:
+    template = {
+        "hookMarker": HOOK_MARKER,
+        "hookStatusMessage": HOOK_STATUS_MESSAGE,
+        "hookTimeoutSeconds": HTTP_TIMEOUT_SECONDS + 1,
+        "autoRecallInstruction": AUTO_RECALL_INSTRUCTION,
+    }
+    serialized = json.dumps(
+        template, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
 _PRIVATE_KEY_PATTERN = re.compile(
     r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?"
     r"-----END [A-Z0-9 ]*PRIVATE KEY-----",
@@ -621,6 +638,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--token-file", type=Path, required=True)
     status.add_argument("--agent-id", default="codex")
     subparsers.add_parser("version")
+    subparsers.add_parser("helper-digest")
+    subparsers.add_parser("template-digest")
     return parser
 
 
@@ -673,6 +692,14 @@ def main() -> int:
 
     if arguments.operation == "version":
         print(CONNECTOR_TEMPLATE_VERSION)
+        return 0
+
+    if arguments.operation == "helper-digest":
+        print(helper_digest())
+        return 0
+
+    if arguments.operation == "template-digest":
+        print(managed_template_digest())
         return 0
 
     token = _read_token(arguments.token_file)

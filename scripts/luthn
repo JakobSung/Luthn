@@ -593,9 +593,19 @@ codex_helper_path() {
 
 ensure_codex_connector_helper() {
   helper="$(codex_helper_path)"
-  if [[ -f "$helper" ]] \
-    && [[ "$(python3 "$helper" version 2>/dev/null || true)" == "$codex_connector_version" ]]; then
-    return 0
+  if [[ -f "$helper" ]]; then
+    current_version="$(python3 "$helper" version 2>/dev/null || true)"
+    current_helper_digest="$(python3 "$helper" helper-digest 2>/dev/null || true)"
+    current_template_digest="$(python3 "$helper" template-digest 2>/dev/null || true)"
+    expected_helper_digest="$(codex_state_value HELPER_DIGEST)"
+    expected_template_digest="$(codex_state_value TEMPLATE_DIGEST)"
+    if [[ "$current_version" == "$codex_connector_version" \
+      && "$current_helper_digest" =~ ^[0-9a-f]{64}$ \
+      && "$current_template_digest" =~ ^[0-9a-f]{64}$ \
+      && ( -z "$expected_helper_digest" || "$current_helper_digest" == "$expected_helper_digest" ) \
+      && ( -z "$expected_template_digest" || "$current_template_digest" == "$expected_template_digest" ) ]]; then
+      return 0
+    fi
   fi
   image="$(read_config LUTHN_IMAGE "$default_image")"
   image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
@@ -606,6 +616,8 @@ ensure_codex_connector_helper() {
   if ! curl -fsSL "$runtime_source/scripts/luthn-codex-connector.py" -o "$helper_tmp" \
     || ! grep -q '^#!/usr/bin/env python3' "$helper_tmp" \
     || ! grep -q '^CONNECTOR_TEMPLATE_VERSION = "[1-9][0-9]*"$' "$helper_tmp" \
+    || ! [[ "$(python3 "$helper_tmp" helper-digest 2>/dev/null)" =~ ^[0-9a-f]{64}$ ]] \
+    || ! [[ "$(python3 "$helper_tmp" template-digest 2>/dev/null)" =~ ^[0-9a-f]{64}$ ]] \
     || ! install_runtime_file "$helper_tmp" "$helper" 0700; then
     rm -f "$helper_tmp"
     return 1
@@ -636,13 +648,22 @@ reconcile_codex_managed_configuration() {
 
   target_connector_version="$(python3 "$helper" version 2>/dev/null)" || return 1
   [[ "$target_connector_version" =~ ^[1-9][0-9]*$ ]] || return 1
+  target_helper_digest="$(python3 "$helper" helper-digest 2>/dev/null)" || return 1
+  [[ "$target_helper_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  target_template_digest="$(python3 "$helper" template-digest 2>/dev/null)" || return 1
+  [[ "$target_template_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
   installed_connector_version="$(codex_state_value CONNECTOR_VERSION)"
-  if [[ "$installed_connector_version" != "$target_connector_version" ]]; then
+  installed_helper_digest="$(codex_state_value HELPER_DIGEST)"
+  installed_template_digest="$(codex_state_value TEMPLATE_DIGEST)"
+  if [[ "$installed_connector_version" != "$target_connector_version" \
+    || "$installed_helper_digest" != "$target_helper_digest" \
+    || "$installed_template_digest" != "$target_template_digest" ]]; then
     mcp_changed="$(codex_state_value MCP_CHANGED)"
     [[ -n "$mcp_changed" ]] || mcp_changed=false
     record_codex_connector_state \
       "$hooks_file" "$codex_state_file" configured "$mcp_changed" \
-      "$auto_recall" "$instructions_file" "$target_connector_version"
+      "$auto_recall" "$instructions_file" "$target_connector_version" \
+      "$target_helper_digest" "$target_template_digest"
   fi
 }
 
@@ -679,6 +700,13 @@ record_codex_connector_state() {
   auto_recall="${5:-false}"
   instructions_file="${6:-$(codex_instructions_path)}"
   connector_version="${7:-$codex_connector_version}"
+  helper_digest="${8:-}"
+  template_digest="${9:-}"
+  helper="$(codex_helper_path)"
+  [[ -n "$helper_digest" ]] || helper_digest="$(python3 "$helper" helper-digest 2>/dev/null)" || return 1
+  [[ -n "$template_digest" ]] || template_digest="$(python3 "$helper" template-digest 2>/dev/null)" || return 1
+  [[ "$helper_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ "$template_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
   ensure_directories || return 1
   state_tmp="$(mktemp "${destination}.XXXXXX")" || return 1
   if ! cat >"$state_tmp" <<EOF
@@ -686,6 +714,8 @@ AGENT_ID=codex
 AGENT_NAME=Codex
 INTEGRATION_KIND=host-hook-mcp
 CONNECTOR_VERSION=$connector_version
+HELPER_DIGEST=$helper_digest
+TEMPLATE_DIGEST=$template_digest
 CONFIGURATION_OWNER=luthn
 CHANNELS=automatic-ingestion,mcp
 HOOKS_FILE=$hooks_file

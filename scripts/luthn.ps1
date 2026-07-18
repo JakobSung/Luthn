@@ -93,6 +93,7 @@ usage: luthn <command> [options]
 
 commands:
   version                    Show the installed Windows CLI template version.
+  manifest                   Show versioned connector template digests as JSON.
   install [--connect-codex]  Install Luthn and optionally connect Codex.
   status                     Show services, readiness, console, and image.
   update [image]             Back up, pull, migrate, restart, and verify.
@@ -405,7 +406,8 @@ function Test-WindowsCliFile {
     if ($parseErrors.Count -gt 0) { throw "downloaded Windows CLI did not pass PowerShell syntax validation" }
     $content = [IO.File]::ReadAllText($Path)
     if ($content -notmatch '\$script:LuthnWindowsCliVersion\s*=\s*"[1-9][0-9]*"' -or
-        $content -notmatch '(?m)^function Connect-Codex\s*\{') {
+        $content -notmatch '(?m)^function Connect-Codex\s*\{' -or
+        $content -notmatch '"manifest"\s*\{') {
         throw "downloaded Windows CLI did not match the Luthn distribution contract"
     }
 }
@@ -418,6 +420,30 @@ function Get-WindowsCliVersionFromFile {
         throw "Windows CLI template version is missing or invalid: $Path"
     }
     return $Matches[1]
+}
+
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+}
+
+function Get-WindowsManagedTemplateDigest {
+    $template = [ordered]@{
+        hookMarker = $script:CodexHookMarker
+        hookStatusMessage = $script:CodexHookStatusMessage
+        hookTimeoutSeconds = $script:CodexHttpTimeoutSeconds + 1
+        autoRecallInstruction = $script:AutoRecallInstruction
+    } | ConvertTo-Json -Compress
+    return Get-Sha256Hex -Bytes ([Text.Encoding]::UTF8.GetBytes($template))
+}
+
+function Get-CurrentWindowsCliManifest {
+    $cliPath = [IO.Path]::GetFullPath($PSCommandPath)
+    return [ordered]@{
+        version = $script:LuthnWindowsCliVersion
+        helperDigest = Get-Sha256Hex -Bytes ([IO.File]::ReadAllBytes($cliPath))
+        templateDigest = Get-WindowsManagedTemplateDigest
+    }
 }
 
 function Invoke-ToolToFile {
@@ -855,12 +881,16 @@ function Update-Luthn {
     $connectorWasConfigured = $false
     $connectorAutoRecall = $true
     $previousConnectorVersion = ""
+    $previousHelperDigest = ""
+    $previousTemplateDigest = ""
     if ([IO.File]::Exists($script:CodexStateFile)) {
         try {
             $connectorState = [IO.File]::ReadAllText($script:CodexStateFile) | ConvertFrom-Json -AsHashtable
             $connectorWasConfigured = $connectorState.Contains("setupState") -and $connectorState["setupState"] -ceq "configured"
             if ($connectorState.Contains("autoRecall")) { $connectorAutoRecall = [bool]$connectorState["autoRecall"] }
             if ($connectorState.Contains("connectorVersion")) { $previousConnectorVersion = [string]$connectorState["connectorVersion"] }
+            if ($connectorState.Contains("helperDigest")) { $previousHelperDigest = [string]$connectorState["helperDigest"] }
+            if ($connectorState.Contains("templateDigest")) { $previousTemplateDigest = [string]$connectorState["templateDigest"] }
         } catch {
             $connectorWasConfigured = $false
         }
@@ -877,9 +907,22 @@ function Update-Luthn {
     Write-Host "Refreshing Windows CLI and Compose runtime..."
     try {
         Install-ComposeRuntime -RuntimeSource (Get-RuntimeSource -Image $targetImage -Revision $targetRevision) -IncludeCli
-        $targetConnectorVersion = Get-WindowsCliVersionFromFile -Path $installedCli
+        $manifestResult = Invoke-ToolCapture -Tool (New-ToolSpecFromPath -Path $installedCli) -Arguments @("manifest")
+        if ($manifestResult.ExitCode -ne 0) { throw "downloaded Windows CLI manifest could not be read" }
+        $targetManifest = $manifestResult.StdOut | ConvertFrom-Json -AsHashtable
+        $targetConnectorVersion = [string]$targetManifest["version"]
+        $targetHelperDigest = [string]$targetManifest["helperDigest"]
+        $targetTemplateDigest = [string]$targetManifest["templateDigest"]
+        if ($targetConnectorVersion -notmatch '^[1-9][0-9]*$' -or
+            $targetHelperDigest -notmatch '^[0-9a-f]{64}$' -or
+            $targetTemplateDigest -notmatch '^[0-9a-f]{64}$') {
+            throw "downloaded Windows CLI manifest did not match the Luthn distribution contract"
+        }
         if ($connectorWasConfigured) {
-            $connectorAction = if ($previousConnectorVersion -cne $targetConnectorVersion) { "Reconciling" } else { "Validating" }
+            $connectorChanged = $previousConnectorVersion -cne $targetConnectorVersion -or
+                $previousHelperDigest -cne $targetHelperDigest -or
+                $previousTemplateDigest -cne $targetTemplateDigest
+            $connectorAction = if ($connectorChanged) { "Reconciling" } else { "Validating" }
             Write-Host "$connectorAction Codex connector template version $targetConnectorVersion..."
             $connectArguments = @("connect", "codex")
             if (-not $connectorAutoRecall) { $connectArguments += "--no-auto-recall" }
@@ -1422,9 +1465,12 @@ function Write-ConnectorState {
         [bool]$InstructionsExisted
     )
     Ensure-Directories
+    $manifest = Get-CurrentWindowsCliManifest
     $content = [ordered]@{
         version = 2
         connectorVersion = $script:LuthnWindowsCliVersion
+        helperDigest = $manifest.helperDigest
+        templateDigest = $manifest.templateDigest
         integration = "host-hook-mcp"
         setupState = $State
         mcpName = "luthn"
@@ -1692,6 +1738,7 @@ function Uninstall-Luthn {
 try {
     switch -CaseSensitive ($Command.ToLowerInvariant()) {
         "version" { Write-Output $script:LuthnWindowsCliVersion }
+        "manifest" { Get-CurrentWindowsCliManifest | ConvertTo-Json -Compress }
         "install" { Install-Luthn $CommandArguments }
         "status" { Show-Status }
         "update" { Update-Luthn $CommandArguments }

@@ -149,12 +149,25 @@ ln -s "$(command -v python3)" "$no_codex_bin/python3"
 cat >"$tmp_root/connector-helper.py" <<'EOF'
 #!/usr/bin/env python3
 import os
+import hashlib
+from pathlib import Path
 import subprocess
 import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "version":
     print("2")
     raise SystemExit(0)
+
+if len(sys.argv) > 1 and sys.argv[1] == "helper-digest":
+    print(hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
+    raise SystemExit(0)
+
+if len(sys.argv) > 1 and sys.argv[1] == "template-digest":
+    raise SystemExit(
+        subprocess.call(
+            [sys.executable, os.environ["REAL_CONNECTOR_HELPER"], "template-digest"]
+        )
+    )
 
 if len(sys.argv) > 1 and sys.argv[1] in {"report", "status"}:
     report_log = os.environ.get("FAKE_REPORT_LOG")
@@ -273,6 +286,8 @@ grep -q 'Setup is complete only when automatic-ingestion reports Active' <<<"$co
 [[ -f "$state_dir/connectors/codex.env" ]]
 grep -q '^SETUP_STATE=configured$' "$state_dir/connectors/codex.env"
 grep -q '^AUTO_RECALL=true$' "$state_dir/connectors/codex.env"
+grep -Eq '^HELPER_DIGEST=[0-9a-f]{64}$' "$state_dir/connectors/codex.env"
+grep -Eq '^TEMPLATE_DIGEST=[0-9a-f]{64}$' "$state_dir/connectors/codex.env"
 ! grep -q 'test-token' "$state_dir/connectors/codex.env"
 ! grep -q 'test-token' "$codex_home/hooks.json"
 grep -q '<!-- luthn:auto-recall:start -->' "$codex_home/AGENTS.md"
@@ -512,6 +527,12 @@ run_luthn connect codex >/dev/null
 [[ -x "$tmp_root/connector-helper.py" ]]
 [[ "$(python3 "$tmp_root/connector-helper.py" version)" == "2" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
+expected_helper_digest="$(awk -F= '$1 == "HELPER_DIGEST" { print $2 }' "$state_dir/connectors/codex.env")"
+printf '\n# same-version stale helper\n' >>"$tmp_root/connector-helper.py"
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "2" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" != "$expected_helper_digest" ]]
+run_luthn connect codex >/dev/null
+[[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" == "$expected_helper_digest" ]]
 cp "$tmp_root/connector-helper-fixture.py" "$tmp_root/connector-helper.py"
 run_luthn disconnect codex >/dev/null
 

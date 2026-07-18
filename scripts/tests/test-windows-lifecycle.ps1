@@ -322,6 +322,8 @@ esac
     $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
     Assert-True ($connectorState.connectorVersion -ceq "2") "Windows connector state should record the managed template version"
+    Assert-True ($connectorState.helperDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the selected CLI digest"
+    Assert-True ($connectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the managed template digest"
     Assert-True ($connectorState.hookInstalled -and $connectorState.autoRecall) "connector state should record default auto-recall"
     Assert-True (-not ([IO.File]::ReadAllText($codexOwnershipState).Contains($token))) "connector ownership state should not contain the token"
     if ($IsWindows) {
@@ -599,7 +601,8 @@ esac
     Assert-True ((Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash -eq $instructionsHashBeforeRepeat) "repeated connect should not rewrite managed instructions"
 
     $staleConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
-    $staleConnectorState.connectorVersion = "1"
+    $staleConnectorState.connectorVersion = "2"
+    $staleConnectorState.helperDigest = "0" * 64
     [IO.File]::WriteAllText($codexOwnershipState, (($staleConnectorState | ConvertTo-Json -Depth 20) + "`n"), [Text.UTF8Encoding]::new($false))
     $staleConnectorHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
     $staleManagedHook = @($staleConnectorHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
@@ -629,6 +632,8 @@ esac
     Assert-True ($connectorUpdate.Output -match "Reconciling Codex connector template version 2") "update should report connector template reconciliation"
     $reconciledConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($reconciledConnectorState.connectorVersion -ceq "2") "successful update should record the current connector template version"
+    Assert-True ($reconciledConnectorState.helperDigest -cmatch "^[0-9a-f]{64}$" -and $reconciledConnectorState.helperDigest -cne ("0" * 64)) "successful update should replace a same-version stale helper digest"
+    Assert-True ($reconciledConnectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "successful update should record the current managed template digest"
     $reconciledHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
     $reconciledManagedHook = @($reconciledHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
     Assert-True ($reconciledManagedHook[0].hooks[0].statusMessage -ceq "Luthn 메모리 저장 예약 중…") "successful update should replace the stale managed hook template"
