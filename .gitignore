@@ -21,6 +21,9 @@ credentials.*
 .codex/
 .agents/
 .drig/
+# Keep the repository-local Codex development instructions on each developer's
+# machine. This file is intentionally untracked, not disposable: do not remove
+# or overwrite it as part of public-repository cleanup.
 AGENTS.md
 .luthn/
 .luthn/out/
