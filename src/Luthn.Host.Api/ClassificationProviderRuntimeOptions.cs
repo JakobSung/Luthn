@@ -53,7 +53,21 @@ internal static class ClassificationProviderHttp
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             var started = Stopwatch.GetTimestamp();
-            var outcome = "succeeded";
+            var attemptRecorded = false;
+            void RecordAttempt(string outcome)
+            {
+                if (attemptRecorded)
+                {
+                    return;
+                }
+
+                attemptRecorded = true;
+                metrics.RecordClassificationProviderRequest(
+                    providerName,
+                    outcome,
+                    Stopwatch.GetElapsedTime(started));
+            }
+
             using var request = createRequest();
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(timeout);
@@ -70,12 +84,13 @@ internal static class ClassificationProviderHttp
 
                 if (response.IsSuccessStatusCode)
                 {
+                    RecordAttempt("succeeded");
                     return response;
                 }
 
                 if (attempt < maxAttempts && IsTransient(response.StatusCode))
                 {
-                    outcome = "retry";
+                    RecordAttempt("retry");
                     logger.LogWarning(
                         "Classification provider {ProviderName} returned transient HTTP {StatusCode} on attempt {Attempt}.",
                         providerName,
@@ -91,7 +106,7 @@ internal static class ClassificationProviderHttp
                 }
 
                 var statusCode = (int)response.StatusCode;
-                outcome = "http_failure";
+                RecordAttempt("http_failure");
                 response.Dispose();
                 LuthnHostMetrics.ClassificationProviderFailures.Add(
                     1,
@@ -102,7 +117,7 @@ internal static class ClassificationProviderHttp
             }
             catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
             {
-                outcome = attempt < maxAttempts ? "retry" : "timeout";
+                RecordAttempt(attempt < maxAttempts ? "retry" : "timeout");
                 lastError = error;
                 if (attempt < maxAttempts)
                 {
@@ -126,9 +141,14 @@ internal static class ClassificationProviderHttp
                     $"Classification provider request timed out after {timeout.TotalSeconds:0} seconds.",
                     error);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                RecordAttempt("canceled");
+                throw;
+            }
             catch (HttpRequestException error) when (attempt < maxAttempts)
             {
-                outcome = "retry";
+                RecordAttempt("retry");
                 lastError = error;
                 logger.LogWarning(
                     error,
@@ -143,7 +163,7 @@ internal static class ClassificationProviderHttp
             }
             catch (HttpRequestException error)
             {
-                outcome = "http_exception";
+                RecordAttempt("http_exception");
                 LuthnHostMetrics.ClassificationProviderFailures.Add(
                     1,
                     new KeyValuePair<string, object?>("provider", providerName),
@@ -151,13 +171,6 @@ internal static class ClassificationProviderHttp
                 throw new ClassificationProviderException(
                     "Classification provider request failed.",
                     error);
-            }
-            finally
-            {
-                metrics.RecordClassificationProviderRequest(
-                    providerName,
-                    outcome,
-                    Stopwatch.GetElapsedTime(started));
             }
         }
 

@@ -673,6 +673,58 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("timed out", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ProviderAttemptRecordsCallerCancellation()
+    {
+        using var handler = new CancelableHandler();
+        var metrics = new RecordingOperationalMetrics();
+        using var cancellationSource = new CancellationTokenSource();
+        var request = ClassificationProviderHttp.SendAsync(
+            new StaticHttpClientFactory(new HttpClient(handler)),
+            "test",
+            () => new HttpRequestMessage(HttpMethod.Get, "https://classifier.local/classify"),
+            new ClassificationProviderRuntimeOptions { MaxAttempts = 1 },
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            "ExternalHttp",
+            metrics,
+            cancellationSource.Token);
+
+        await handler.Started;
+        cancellationSource.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+        var recorded = Assert.Single(metrics.ProviderRequests);
+        Assert.Equal("canceled", recorded.Outcome);
+    }
+
+    [Fact]
+    public async Task ProviderAttemptRecordsRetryBeforeNonzeroBackoff()
+    {
+        using var handler = new TransientFailureHandler();
+        var metrics = new RecordingOperationalMetrics();
+        var request = ClassificationProviderHttp.SendAsync(
+            new StaticHttpClientFactory(new HttpClient(handler)),
+            "test",
+            () => new HttpRequestMessage(HttpMethod.Get, "https://classifier.local/classify"),
+            new ClassificationProviderRuntimeOptions
+            {
+                MaxAttempts = 2,
+                RetryDelayMilliseconds = 250
+            },
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            "ExternalHttp",
+            metrics,
+            CancellationToken.None);
+
+        var firstRecorded = await metrics.FirstProviderRequest;
+        Assert.Equal("retry", firstRecorded.Outcome);
+        Assert.False(request.IsCompleted);
+
+        using var response = await request;
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["retry", "succeeded"], metrics.ProviderRequests.Select(item => item.Outcome));
+    }
+
     private sealed class StaticSettingsStore(
         OperatorClassificationProviderSettings settings) : IOperatorClassificationSettingsStore
     {
@@ -790,6 +842,45 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             });
         }
     }
+
+    private sealed class CancelableHandler : HttpMessageHandler, IDisposable
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Cancellation was not observed.");
+        }
+    }
+
+    private sealed class RecordingOperationalMetrics : IOperationalMetrics
+    {
+        private readonly TaskCompletionSource<ProviderRequest> _firstProviderRequest =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public List<ProviderRequest> ProviderRequests { get; } = [];
+        public Task<ProviderRequest> FirstProviderRequest => _firstProviderRequest.Task;
+
+        public void RecordClassificationProviderRequest(string provider, string outcome, TimeSpan duration)
+        {
+            var request = new ProviderRequest(outcome, duration);
+            ProviderRequests.Add(request);
+            _firstProviderRequest.TrySetResult(request);
+        }
+
+        public void RecordSensitiveAccessRequest() { }
+        public void RecordSensitiveAccessDecision(string outcome) { }
+        public void RecordSafeSearchCandidates(string source, int count) { }
+        public OperationalMetricsSnapshot Snapshot() => OperationalMetricsSnapshot.Empty;
+    }
+
+    private sealed record ProviderRequest(string Outcome, TimeSpan Duration);
 
     private sealed class StalledBodyHandler : HttpMessageHandler, IDisposable
     {

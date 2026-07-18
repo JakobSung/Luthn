@@ -40,7 +40,7 @@ public sealed class OperationalMetrics : IOperationalMetrics
         _search.Values.OrderBy(metric => metric.Source, StringComparer.Ordinal).Select(metric => metric.ToSnapshot()).ToArray());
 
     private static string BoundProvider(string provider) => provider switch { "ExternalHttp" or "OpenAi" or "OpenRouter" or "Anthropic" or "GoogleAi" => provider, _ => "other" };
-    private static string BoundProviderOutcome(string outcome) => outcome switch { "succeeded" or "http_failure" or "timeout" or "http_exception" or "retry" => outcome, _ => "other" };
+    private static string BoundProviderOutcome(string outcome) => outcome switch { "succeeded" or "http_failure" or "timeout" or "http_exception" or "retry" or "canceled" => outcome, _ => "other" };
     private static string BoundAccessOutcome(string outcome) => outcome switch { "approved" or "denied" => outcome, _ => "other" };
     private static string BoundSearchSource(string source) => source switch { "wiki_proposals" or "shared_memory_items" => source, _ => "other" };
 
