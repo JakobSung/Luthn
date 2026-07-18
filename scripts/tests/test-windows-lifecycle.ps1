@@ -457,6 +457,24 @@ esac
         "Luthn__Auth__Tokens__2__ExpiresAt=2099-01-01T00:00:00Z"
     )
     [IO.File]::WriteAllText($configFile, (($legacyConfig -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+    $collisionConfig = [IO.File]::ReadAllText($configFile)
+    $collisionOperatorToken = [IO.File]::ReadAllText($operatorTokenFile)
+    $collisionCliHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
+    $collisionUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($collisionUpdate.ExitCode -ne 0) "Windows update should stop when operator token slot 1 is occupied"
+    Assert-True ($collisionUpdate.Output -match "token slot 1 is occupied") "operator slot collision should report the reason"
+    Assert-True ([IO.File]::ReadAllText($configFile) -ceq $collisionConfig) "operator slot collision should preserve configuration"
+    Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $collisionOperatorToken) "operator slot collision should preserve the operator credential"
+    Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $collisionCliHash) "operator slot collision should preserve the installed CLI"
+
+    $validLegacyConfig = @($legacyConfig | Where-Object { $_ -cnotmatch '^Luthn__Auth__Tokens__(?:1|2)__' }) + @(
+        "Luthn__Auth__Tokens__1__Name=local-operator",
+        "Luthn__Auth__Tokens__1__Sha256Digest=$operatorDigest",
+        "Luthn__Auth__Tokens__1__Scopes__0=access.decide",
+        "Luthn__Auth__Tokens__1__Scopes__1=*",
+        "Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z"
+    )
+    [IO.File]::WriteAllText($configFile, (($validLegacyConfig -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
     $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $oversizedUnownedInstructions) "an update without connector ownership should ignore unrelated oversized instructions"
@@ -468,9 +486,8 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
     Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
     $updatedConfig = [IO.File]::ReadAllText($configFile)
-    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=existing-integration$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__1=\*$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z$") "update should preserve an occupied token slot"
-    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__2__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__2__Scopes__0=access\.decide$") "update should reuse the verified managed operator slot"
-    Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__2__(?:Scopes__1|ExpiresAt)=") "update should normalize the managed operator slot to decision-only"
+    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "update should reuse the Compose-exposed operator slot"
+    Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__1__(?:Scopes__1|ExpiresAt)=") "update should normalize the managed operator slot to decision-only"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
     Assert-True ($backupFiles.Count -eq 1 -and $backupFiles[0].Length -gt 0) "update should create a non-empty PostgreSQL backup"
     $updateStateFile = Join-Path $windowsRoot "state/update-windows.json"

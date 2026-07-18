@@ -144,18 +144,31 @@ echo "[4/8] update"
 operator_digest_before="$(awk -F= '$1 == "Luthn__Auth__Tokens__1__Sha256Digest" { print $2 }' "$LUTHN_CONFIG_DIR/luthn.env")"
 grep -v -e '^Luthn__Auth__Tokens__0__Scopes__7=access.request$' \
   -e '^Luthn__Auth__Tokens__1__' "$LUTHN_CONFIG_DIR/luthn.env" \
-  >"$LUTHN_CONFIG_DIR/luthn.env.legacy"
-cat >>"$LUTHN_CONFIG_DIR/luthn.env.legacy" <<EOF
+  >"$LUTHN_CONFIG_DIR/luthn.env.collision"
+cat >>"$LUTHN_CONFIG_DIR/luthn.env.collision" <<EOF
 Luthn__Auth__Tokens__1__Name=existing-integration
 Luthn__Auth__Tokens__1__Sha256Digest=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 Luthn__Auth__Tokens__1__Scopes__0=memory.read
 Luthn__Auth__Tokens__1__Scopes__1=*
 Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z
-Luthn__Auth__Tokens__2__Name=local-operator
-Luthn__Auth__Tokens__2__Sha256Digest=$operator_digest_before
-Luthn__Auth__Tokens__2__Scopes__0=access.decide
-Luthn__Auth__Tokens__2__Scopes__1=*
-Luthn__Auth__Tokens__2__ExpiresAt=2099-01-01T00:00:00Z
+EOF
+mv "$LUTHN_CONFIG_DIR/luthn.env.collision" "$LUTHN_CONFIG_DIR/luthn.env"
+cp "$LUTHN_CONFIG_DIR/luthn.env" "$test_root/collision-config-before"
+if "$cli" update "$image" >/dev/null 2>&1; then
+  echo "update unexpectedly succeeded with an occupied operator token slot" >&2
+  exit 1
+fi
+cmp "$test_root/collision-config-before" "$LUTHN_CONFIG_DIR/luthn.env"
+test "$operator_token_before" = "$(cat "$LUTHN_OPERATOR_TOKEN_FILE")"
+
+grep -v '^Luthn__Auth__Tokens__1__' "$LUTHN_CONFIG_DIR/luthn.env" \
+  >"$LUTHN_CONFIG_DIR/luthn.env.legacy"
+cat >>"$LUTHN_CONFIG_DIR/luthn.env.legacy" <<EOF
+Luthn__Auth__Tokens__1__Name=local-operator
+Luthn__Auth__Tokens__1__Sha256Digest=$operator_digest_before
+Luthn__Auth__Tokens__1__Scopes__0=access.decide
+Luthn__Auth__Tokens__1__Scopes__1=*
+Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z
 EOF
 mv "$LUTHN_CONFIG_DIR/luthn.env.legacy" "$LUTHN_CONFIG_DIR/luthn.env"
 update_write_probe="$test_root/update-write-probe.sh"
@@ -182,18 +195,31 @@ grep -q '^Luthn__Auth__Tokens__0__Scopes__4=classification.preview$' "$LUTHN_CON
 grep -q '^Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__7=access.request$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Auth__Tokens__1__Name=existing-integration$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Auth__Tokens__1__Scopes__1=\*$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Auth__Tokens__2__Name=local-operator$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Auth__Tokens__2__Scopes__0=access.decide$' "$LUTHN_CONFIG_DIR/luthn.env"
-! grep -q '^Luthn__Auth__Tokens__2__Scopes__1=' "$LUTHN_CONFIG_DIR/luthn.env"
-! grep -q '^Luthn__Auth__Tokens__2__ExpiresAt=' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__1__Name=local-operator$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__1__Scopes__0=access.decide$' "$LUTHN_CONFIG_DIR/luthn.env"
+! grep -q '^Luthn__Auth__Tokens__1__Scopes__1=' "$LUTHN_CONFIG_DIR/luthn.env"
+! grep -q '^Luthn__Auth__Tokens__1__ExpiresAt=' "$LUTHN_CONFIG_DIR/luthn.env"
 context_output="$(curl -fsS -X POST "$base_url/api/agent/context-packs" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_after" \
   --data '{"query":"Lifecycle sentinel","coreTags":["lifecycle"],"maxItems":20}')"
 grep -q 'Lifecycle sentinel' <<<"$context_output"
+upgraded_access_request="$(curl -fsS -X POST "$base_url/api/access-requests" \
+  -H 'content-type: application/json' \
+  -H "Authorization: Bearer $token_after" \
+  --data "{\"sensitiveReferenceId\":\"$sensitive_reference_id\",\"reason\":\"Verify the upgraded operator credential.\",\"sessionId\":\"distribution-upgraded-operator\",\"expiresInSeconds\":600}")"
+upgraded_access_request_id="$(printf '%s' "$upgraded_access_request" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+test -n "$upgraded_access_request_id"
+operator_request_list="$(curl -fsS "$base_url/api/access-requests" \
+  -H "Authorization: Bearer $operator_token_after" \
+  -H 'X-Luthn-Operator: local-console')"
+grep -q "$upgraded_access_request_id" <<<"$operator_request_list"
+upgraded_operator_decision="$(curl -fsS -X POST "$base_url/api/access-requests/$upgraded_access_request_id/approve" \
+  -H 'content-type: application/json' \
+  -H "Authorization: Bearer $operator_token_after" \
+  -H 'X-Luthn-Operator: local-console' \
+  --data '{"reason":"Approved after the lifecycle upgrade."}')"
+grep -q '"status":"Approved"' <<<"$upgraded_operator_decision"
 
 echo "[5/8] reset guard"
 if "$cli" reset >/dev/null 2>&1; then

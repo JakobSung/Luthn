@@ -636,8 +636,29 @@ function Get-TokenDigest {
     return $digest
 }
 
+function Assert-OperatorCredentialSlotAvailable {
+    param([string]$Image)
+    if (-not [IO.File]::Exists($script:ConfigFile)) { return }
+    $slotOccupied = [IO.File]::ReadAllLines($script:ConfigFile) |
+        Where-Object { $_ -cmatch '^Luthn__Auth__Tokens__1__' } |
+        Select-Object -First 1
+    if (-not $slotOccupied) { return }
+
+    $configuredOperatorTokenFile = Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
+    if ((Read-ConfigValue "Luthn__Auth__Tokens__1__Name") -cne "local-operator" -or
+        -not [IO.File]::Exists($configuredOperatorTokenFile)) {
+        throw "token slot 1 is occupied and cannot be used for the local operator credential"
+    }
+    $operatorToken = [IO.File]::ReadAllText($configuredOperatorTokenFile).Trim()
+    $operatorDigest = Get-TokenDigest -Image $Image -Token $operatorToken
+    if ((Read-ConfigValue "Luthn__Auth__Tokens__1__Sha256Digest") -cne $operatorDigest) {
+        throw "token slot 1 is occupied and cannot be used for the local operator credential"
+    }
+}
+
 function Ensure-OperatorCredential {
     param([string]$Image)
+    Assert-OperatorCredentialSlotAvailable -Image $Image
     $script:OperatorTokenFile = Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
     if ([IO.File]::Exists($script:OperatorTokenFile)) {
         $operatorToken = [IO.File]::ReadAllText($script:OperatorTokenFile).Trim()
@@ -648,24 +669,7 @@ function Ensure-OperatorCredential {
     Protect-SecretFile $script:OperatorTokenFile
     Set-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
     $operatorDigest = Get-TokenDigest -Image $Image -Token $operatorToken
-    $occupiedIndexes = [Collections.Generic.HashSet[int]]::new()
-    $operatorIndex = $null
-    foreach ($line in [IO.File]::ReadAllLines($script:ConfigFile)) {
-        $match = [regex]::Match($line, '^Luthn__Auth__Tokens__(\d+)__')
-        if ($match.Success) { [void]$occupiedIndexes.Add([int]$match.Groups[1].Value) }
-    }
-    foreach ($index in @($occupiedIndexes | Sort-Object)) {
-        if ((Read-ConfigValue "Luthn__Auth__Tokens__${index}__Name") -ceq "local-operator" -and
-            (Read-ConfigValue "Luthn__Auth__Tokens__${index}__Sha256Digest") -ceq $operatorDigest) {
-            $operatorIndex = $index
-            break
-        }
-    }
-    if ($null -eq $operatorIndex) {
-        $operatorIndex = 1
-        while ($occupiedIndexes.Contains($operatorIndex)) { $operatorIndex++ }
-    }
-    $operatorPrefix = "Luthn__Auth__Tokens__${operatorIndex}__"
+    $operatorPrefix = "Luthn__Auth__Tokens__1__"
     Remove-ConfigPrefix $operatorPrefix
     Set-ConfigValue "${operatorPrefix}Name" "local-operator"
     Set-ConfigValue "${operatorPrefix}Sha256Digest" $operatorDigest
@@ -723,6 +727,7 @@ function Install-Luthn {
     $image = Read-ConfigValue "LUTHN_IMAGE" $(if ($env:LUTHN_IMAGE) { $env:LUTHN_IMAGE } else { $script:DefaultImage })
     Write-Host "Pulling $image..."
     Invoke-ToolVisible -Tool $docker -Arguments @("pull", $image)
+    Assert-OperatorCredentialSlotAvailable -Image $image
 
     $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $image)
     $revision = if ($revisionResult.ExitCode -eq 0) { $revisionResult.StdOut.Trim() } else { "" }
@@ -955,6 +960,7 @@ function Update-Luthn {
     $targetImageId = $targetIdResult.StdOut.Trim()
     $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $targetImage)
     $targetRevision = if ($revisionResult.ExitCode -eq 0) { $revisionResult.StdOut.Trim() } else { "" }
+    Assert-OperatorCredentialSlotAvailable -Image $targetImage
 
     $installedCli = Join-Path $script:BinDir "luthn.ps1"
     $runtimeSnapshots = @(

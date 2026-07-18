@@ -197,8 +197,30 @@ generate_token() {
   fi
 }
 
+operator_credential_slot_available() {
+  image="$1"
+  [[ -f "$config_file" ]] || return 0
+  if ! awk -F= '$1 ~ /^Luthn__Auth__Tokens__1__/ { found = 1 } END { exit !found }' "$config_file"; then
+    return 0
+  fi
+
+  operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
+  if [[ "$(read_config Luthn__Auth__Tokens__1__Name)" != "local-operator" \
+    || ! -f "$operator_token_file" ]]; then
+    echo "token slot 1 is occupied and cannot be used for the local operator credential" >&2
+    return 1
+  fi
+  operator_token="$(cat "$operator_token_file")"
+  operator_digest="$(printf '%s' "$operator_token" | docker run --rm -i "$image" token-digest --stdin)"
+  if [[ "$(read_config Luthn__Auth__Tokens__1__Sha256Digest)" != "$operator_digest" ]]; then
+    echo "token slot 1 is occupied and cannot be used for the local operator credential" >&2
+    return 1
+  fi
+}
+
 ensure_operator_credential() {
   image="$1"
+  operator_credential_slot_available "$image" || return 1
   operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
   if [[ -f "$operator_token_file" ]]; then
     operator_token="$(cat "$operator_token_file")"
@@ -208,24 +230,7 @@ ensure_operator_credential() {
   fi
   set_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file"
   operator_digest="$(printf '%s' "$operator_token" | docker run --rm -i "$image" token-digest --stdin)"
-  operator_index="$(awk -F= '$1 ~ /^Luthn__Auth__Tokens__[0-9]+__Name$/ && $2 == "local-operator" {
-    key = $1
-    sub(/^Luthn__Auth__Tokens__/, "", key)
-    sub(/__Name$/, "", key)
-    print key
-  }' "$config_file" | while IFS= read -r index; do
-    if [[ "$(read_config "Luthn__Auth__Tokens__${index}__Sha256Digest")" == "$operator_digest" ]]; then
-      printf '%s\n' "$index"
-      break
-    fi
-  done)"
-  if [[ -z "$operator_index" ]]; then
-    operator_index=1
-    while awk -F= -v prefix="Luthn__Auth__Tokens__${operator_index}__" 'index($1, prefix) == 1 { found = 1 } END { exit !found }' "$config_file"; do
-      operator_index=$((operator_index + 1))
-    done
-  fi
-  operator_prefix="Luthn__Auth__Tokens__${operator_index}__"
+  operator_prefix="Luthn__Auth__Tokens__1__"
   remove_config_prefix "$operator_prefix"
   set_config "${operator_prefix}Name" local-operator
   set_config "${operator_prefix}Sha256Digest" "$operator_digest"
@@ -576,6 +581,10 @@ install_luthn() {
   image="$(read_config LUTHN_IMAGE "${LUTHN_IMAGE:-$default_image}")"
   echo "Pulling $image..."
   pull_image "$image"
+  if ! operator_credential_slot_available "$image"; then
+    echo "Install stopped because the local operator credential could not be configured." >&2
+    return 1
+  fi
   image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
   download_runtime "$(runtime_source_for_image "$image" "$image_revision")"
 
@@ -1475,6 +1484,10 @@ update_luthn() {
 
   target_id="$(docker image inspect --format '{{.Id}}' "$target_image")"
   target_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target_image" 2>/dev/null || true)"
+  if ! operator_credential_slot_available "$target_image"; then
+    echo "Update stopped because the local operator credential could not be configured." >&2
+    return 1
+  fi
   if has_codex_connector_state && ! ensure_connector_scopes --check-only; then
     record_state failed "$target_image" "$target_id" "$previous_id"
     echo "Update stopped because the active Codex connector scopes could not be configured." >&2
