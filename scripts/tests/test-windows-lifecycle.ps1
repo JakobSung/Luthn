@@ -75,6 +75,8 @@ $fakeCodexTemplate = Join-Path $testRoot "codex-template.json"
 $invalidCli = Join-Path $testRoot "invalid.ps1"
 $failingCli = Join-Path $testRoot "failing.ps1"
 $updatedCli = Join-Path $testRoot "updated.ps1"
+$connectorUpdateCli = Join-Path $testRoot "connector-update.ps1"
+$legacyCli = Join-Path $testRoot "legacy.ps1"
 $sharedBinDir = Join-Path $testRoot "shared 도구 bin"
 $sharedBinSentinel = Join-Path $sharedBinDir "unrelated-tool.txt"
 $installedCli = Join-Path $sharedBinDir "luthn.ps1"
@@ -320,6 +322,9 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start")) "one-step setup should enable auto-recall by default"
     $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
+    Assert-True ($connectorState.connectorVersion -ceq "2") "Windows connector state should record the managed template version"
+    Assert-True ($connectorState.helperDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the selected CLI digest"
+    Assert-True ($connectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the managed template digest"
     Assert-True ($connectorState.hookInstalled -and $connectorState.autoRecall) "connector state should record default auto-recall"
     Assert-True (-not ([IO.File]::ReadAllText($codexOwnershipState).Contains($token))) "connector ownership state should not contain the token"
     if ($IsWindows) {
@@ -413,8 +418,12 @@ esac
     $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $updatedCli
     $targetImage = "ghcr.io/jakobsung/luthn:sha-$('b' * 40)"
     $updateLogStart = [IO.File]::ReadAllLines($fakeDockerLog).Count
+    $oversizedUnownedInstructions = "x" * (1024 * 1024 + 1)
+    [IO.File]::WriteAllText($codexInstructionsFile, $oversizedUnownedInstructions, [Text.UTF8Encoding]::new($false))
     $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $oversizedUnownedInstructions) "an update without connector ownership should ignore unrelated oversized instructions"
+    [IO.File]::WriteAllText($codexInstructionsFile, $originalInstructions, [Text.UTF8Encoding]::new($false))
     Assert-True ($update.Output -match "Luthn update completed") "successful update should report completion"
     Assert-True ($update.Output -match "Revision: a{40} -> a{40}") "successful update should report the revision transition"
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
@@ -592,6 +601,46 @@ esac
     Assert-True ((Get-FileHash -LiteralPath $codexHooksFile -Algorithm SHA256).Hash -eq $hookHashBeforeRepeat) "repeated connect should not rewrite the trusted hook"
     Assert-True ((Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash -eq $instructionsHashBeforeRepeat) "repeated connect should not rewrite managed instructions"
 
+    $staleConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
+    $staleConnectorState.connectorVersion = "2"
+    $staleConnectorState.helperDigest = "0" * 64
+    [IO.File]::WriteAllText($codexOwnershipState, (($staleConnectorState | ConvertTo-Json -Depth 20) + "`n"), [Text.UTF8Encoding]::new($false))
+    $staleConnectorHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
+    $staleManagedHook = @($staleConnectorHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
+    $staleManagedHook[0].hooks[0].statusMessage = "Stale managed connector template"
+    [IO.File]::WriteAllText($codexHooksFile, (($staleConnectorHooks | ConvertTo-Json -Depth 20) + "`n"), [Text.UTF8Encoding]::new($false))
+    $connectorUpdateContent = [IO.File]::ReadAllText((Join-Path $RepoRoot "scripts/luthn.ps1")) + "`n# connector-update-rollback-fixture`n"
+    [IO.File]::WriteAllText($connectorUpdateCli, $connectorUpdateContent, [Text.UTF8Encoding]::new($false))
+    $runtimeHashBeforeFailedReconcile = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
+    $composeHashBeforeFailedReconcile = (Get-FileHash -LiteralPath (Join-Path $windowsRoot "data/compose.yaml") -Algorithm SHA256).Hash
+    $hooksBeforeFailedReconcile = [IO.File]::ReadAllText($codexHooksFile)
+    $instructionsBeforeFailedReconcile = [IO.File]::ReadAllText($codexInstructionsFile)
+    $stateBeforeFailedReconcile = [IO.File]::ReadAllText($codexOwnershipState)
+    $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $connectorUpdateCli
+    $env:FAKE_MCP_PROBE_FAIL = "true"
+    $failedConnectorUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($failedConnectorUpdate.ExitCode -ne 0) "connector probe failure should fail the update"
+    Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $runtimeHashBeforeFailedReconcile) "failed connector reconciliation should restore the previous CLI bytes"
+    Assert-True ((Get-FileHash -LiteralPath (Join-Path $windowsRoot "data/compose.yaml") -Algorithm SHA256).Hash -eq $composeHashBeforeFailedReconcile) "failed connector reconciliation should restore the previous Compose bytes"
+    Assert-True ([IO.File]::ReadAllText($codexHooksFile) -ceq $hooksBeforeFailedReconcile) "failed connector reconciliation should restore hooks exactly"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $instructionsBeforeFailedReconcile) "failed connector reconciliation should restore instructions exactly"
+    Assert-True ([IO.File]::ReadAllText($codexOwnershipState) -ceq $stateBeforeFailedReconcile) "failed connector reconciliation should restore ownership state exactly"
+    $env:FAKE_MCP_PROBE_FAIL = "false"
+    $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $updatedCli
+
+    $connectorUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
+    Assert-True ($connectorUpdate.ExitCode -eq 0) "update should reconcile a stale connector template: $($connectorUpdate.Output)"
+    Assert-True ($connectorUpdate.Output -match "Reconciling Codex connector template version 2") "update should report connector template reconciliation"
+    $reconciledConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
+    Assert-True ($reconciledConnectorState.connectorVersion -ceq "2") "successful update should record the current connector template version"
+    Assert-True ($reconciledConnectorState.helperDigest -cmatch "^[0-9a-f]{64}$" -and $reconciledConnectorState.helperDigest -cne ("0" * 64)) "successful update should replace a same-version stale helper digest"
+    Assert-True ($reconciledConnectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "successful update should record the current managed template digest"
+    $reconciledHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
+    $reconciledManagedHook = @($reconciledHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
+    Assert-True ($reconciledManagedHook[0].hooks[0].statusMessage -ceq "Luthn 메모리 저장 예약 중…") "successful update should replace the stale managed hook template"
+    Assert-True (@($reconciledHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "connector reconciliation should preserve unrelated hooks"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("Preserve this text.")) "connector reconciliation should preserve unrelated instructions"
+
     $enableRecall = Invoke-LuthnProcess $installedCli @("connect", "codex", "--auto-recall")
     Assert-True ($enableRecall.ExitCode -eq 0) "explicit auto-recall compatibility should succeed: $($enableRecall.Output)"
     $recallHash = (Get-FileHash -LiteralPath $codexInstructionsFile -Algorithm SHA256).Hash
@@ -671,6 +720,18 @@ esac
     Assert-True ($recoverOwnership.ExitCode -eq 0) "matching Codex MCP registration should recover ownership state: $($recoverOwnership.Output)"
     Assert-True ([IO.File]::Exists($codexOwnershipState)) "matching registration should restore ownership state for uninstall"
     Assert-True (([IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json).autoRecall) "ownership recovery should retain the managed auto-recall state"
+
+    $legacyCliContent = [IO.File]::ReadAllText((Join-Path $RepoRoot "scripts/luthn.ps1"))
+    $legacyCliContent = $legacyCliContent -replace '(?m)^\s*"manifest"\s*\{[^\r\n]*\}\r?\n', ''
+    $legacyCliContent = $legacyCliContent -replace '(?m)^\s*(helperDigest|templateDigest)\s*=.*\r?\n', ''
+    [IO.File]::WriteAllText($legacyCli, $legacyCliContent, [Text.UTF8Encoding]::new($false))
+    $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $legacyCli
+    $legacyRollback = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:legacy")
+    Assert-True ($legacyRollback.ExitCode -eq 0) "update should roll back to a pre-manifest Windows runtime: $($legacyRollback.Output)"
+    $legacyConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
+    Assert-True ($legacyConnectorState.connectorVersion -ceq "2") "legacy rollback should retain version-only connector state"
+    Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "helperDigest")) "legacy rollback state should not require a helper digest"
+    Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "templateDigest")) "legacy rollback state should not require a template digest"
 
     Remove-Item Env:LUTHN_CODEX_COMMAND
     $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"

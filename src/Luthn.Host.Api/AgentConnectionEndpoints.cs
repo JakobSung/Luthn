@@ -141,19 +141,39 @@ public static partial class AgentConnectionEndpoints
         record.IntegrationKind = request.IntegrationKind.Trim();
         record.ConnectorVersion = request.ConnectorVersion.Trim();
         record.IsConfigured = channel.Configured;
-        record.VerificationState = channel.VerificationState;
-        record.ActivityState = channel.ActivityState;
-        record.FailureCode = NormalizeFailureCode(channel.FailureCode);
         record.UpdatedAt = observedAt;
+
+        if (!channel.Configured)
+        {
+            record.VerificationState = AgentConnectionVerificationState.Unknown;
+            record.ActivityState = AgentConnectionActivityState.Unknown;
+            record.FailureCode = null;
+            return;
+        }
 
         if (channel.VerificationState != AgentConnectionVerificationState.Unknown)
         {
+            record.VerificationState = channel.VerificationState;
             record.LastVerifiedAt = observedAt;
         }
 
         if (channel.ActivityState != AgentConnectionActivityState.Unknown)
         {
+            record.ActivityState = channel.ActivityState;
             record.LastActivityAt = observedAt;
+        }
+
+        if (channel.VerificationState == AgentConnectionVerificationState.Failed ||
+            channel.ActivityState == AgentConnectionActivityState.Failed)
+        {
+            record.FailureCode = NormalizeFailureCode(channel.FailureCode);
+        }
+        else if ((channel.VerificationState != AgentConnectionVerificationState.Unknown ||
+            channel.ActivityState != AgentConnectionActivityState.Unknown) &&
+            record.VerificationState != AgentConnectionVerificationState.Failed &&
+            record.ActivityState != AgentConnectionActivityState.Failed)
+        {
+            record.FailureCode = null;
         }
 
         if (channel.ActivityState == AgentConnectionActivityState.Succeeded)

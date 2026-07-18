@@ -16,7 +16,7 @@ connector_state_dir="${LUTHN_CONNECTOR_STATE_DIR:-$state_dir/connectors}"
 codex_state_file="${LUTHN_CODEX_STATE_FILE:-$connector_state_dir/codex.env}"
 codex_pending_state_file="${LUTHN_CODEX_PENDING_STATE_FILE:-$connector_state_dir/codex.pending.env}"
 codex_disconnect_pending_state_file="${LUTHN_CODEX_DISCONNECT_PENDING_STATE_FILE:-$connector_state_dir/codex.disconnect.pending.env}"
-codex_connector_version="1"
+codex_connector_version="2"
 distribution_ref="${LUTHN_DISTRIBUTION_REF:-main}"
 source_base_url="${LUTHN_SOURCE_BASE_URL:-https://raw.githubusercontent.com/JakobSung/Luthn/${distribution_ref}}"
 default_image="ghcr.io/jakobsung/luthn:main"
@@ -230,28 +230,38 @@ download_runtime() {
       echo "The target runtime predates Codex connector support. Run 'luthn disconnect codex' before updating or rolling back." >&2
       return 1
     fi
-  elif ! grep -q '^#!/usr/bin/env python3' "$connector_tmp"; then
+  elif ! grep -q '^#!/usr/bin/env python3' "$connector_tmp" \
+    || ! grep -q '^CONNECTOR_TEMPLATE_VERSION = "[1-9][0-9]*"$' "$connector_tmp"; then
     rm -f "$compose_tmp" "$cli_tmp" "$connector_tmp"
     return 1
   fi
 
-  if ! chmod 0644 "$compose_tmp" \
-    || ! chmod 0755 "$cli_tmp" \
-    || ! mv "$compose_tmp" "$compose_file" \
-    || ! mv "$cli_tmp" "$cli_path"; then
+  if ! install_runtime_file "$compose_tmp" "$compose_file" 0644 \
+    || ! install_runtime_file "$cli_tmp" "$cli_path" 0755; then
     rm -f "$compose_tmp" "$cli_tmp" "$connector_tmp"
     return 1
   fi
 
   if [[ "$connector_available" == "true" ]]; then
-    if ! chmod 0700 "$connector_tmp" \
-      || ! mv "$connector_tmp" "$runtime_dir/luthn-codex-connector.py"; then
+    if ! install_runtime_file \
+      "$connector_tmp" "$runtime_dir/luthn-codex-connector.py" 0700; then
       rm -f "$connector_tmp"
       return 1
     fi
   else
     rm -f "$runtime_dir/luthn-codex-connector.py"
   fi
+}
+
+install_runtime_file() {
+  staged_file="$1"
+  destination="$2"
+  mode="$3"
+  if [[ -f "$destination" ]] && cmp -s "$staged_file" "$destination"; then
+    rm -f "$staged_file"
+    return 0
+  fi
+  chmod "$mode" "$staged_file" && mv "$staged_file" "$destination"
 }
 
 ensure_connector_scopes() {
@@ -566,8 +576,6 @@ show_status() {
   if [[ -n "$image_id" && -n "$selected_id" && "$image_id" != "$selected_id" ]]; then
     echo "Runtime drift: a locally selected image is not running; run 'luthn update'."
   fi
-  refresh_codex_connection_observation || \
-    echo "warning: Codex connector status could not be reported" >&2
 }
 
 codex_helper_path() {
@@ -583,10 +591,47 @@ codex_helper_path() {
   printf '%s' "$source_helper"
 }
 
+read_codex_helper_digests() {
+  digest_helper="$1"
+  codex_helper_digest=""
+  codex_template_digest=""
+  helper_digest_supported=false
+  template_digest_supported=false
+  if codex_helper_digest="$(python3 "$digest_helper" helper-digest 2>/dev/null)"; then
+    helper_digest_supported=true
+  fi
+  if codex_template_digest="$(python3 "$digest_helper" template-digest 2>/dev/null)"; then
+    template_digest_supported=true
+  fi
+  if [[ "$helper_digest_supported" == "true" && "$template_digest_supported" == "true" ]]; then
+    [[ "$codex_helper_digest" =~ ^[0-9a-f]{64}$ \
+      && "$codex_template_digest" =~ ^[0-9a-f]{64}$ ]]
+    return
+  fi
+  if [[ "$helper_digest_supported" == "false" && "$template_digest_supported" == "false" ]]; then
+    return 2
+  fi
+  return 1
+}
+
 ensure_codex_connector_helper() {
   helper="$(codex_helper_path)"
-  [[ -f "$helper" ]] && return 0
-
+  if [[ -f "$helper" ]]; then
+    current_version="$(python3 "$helper" version 2>/dev/null || true)"
+    expected_helper_digest="$(codex_state_value HELPER_DIGEST)"
+    expected_template_digest="$(codex_state_value TEMPLATE_DIGEST)"
+    digest_status=0
+    read_codex_helper_digests "$helper" || digest_status=$?
+    if [[ "$current_version" == "$codex_connector_version" && "$digest_status" -eq 0 \
+      && ( -z "$expected_helper_digest" || "$codex_helper_digest" == "$expected_helper_digest" ) \
+      && ( -z "$expected_template_digest" || "$codex_template_digest" == "$expected_template_digest" ) ]]; then
+      return 0
+    fi
+    if [[ "$current_version" == "$codex_connector_version" && "$digest_status" -eq 2 \
+      && -z "$expected_helper_digest" && -z "$expected_template_digest" ]]; then
+      return 0
+    fi
+  fi
   image="$(read_config LUTHN_IMAGE "$default_image")"
   image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
   runtime_source="$(runtime_source_for_image "$image" "$image_revision")"
@@ -595,10 +640,70 @@ ensure_codex_connector_helper() {
   helper_tmp="$(mktemp "${helper}.XXXXXX")" || return 1
   if ! curl -fsSL "$runtime_source/scripts/luthn-codex-connector.py" -o "$helper_tmp" \
     || ! grep -q '^#!/usr/bin/env python3' "$helper_tmp" \
-    || ! chmod 0700 "$helper_tmp" \
-    || ! mv "$helper_tmp" "$helper"; then
+    || ! grep -q '^CONNECTOR_TEMPLATE_VERSION = "[1-9][0-9]*"$' "$helper_tmp"; then
     rm -f "$helper_tmp"
     return 1
+  fi
+  helper_tmp_version="$(python3 "$helper_tmp" version 2>/dev/null)" || {
+    rm -f "$helper_tmp"
+    return 1
+  }
+  if ! [[ "$helper_tmp_version" =~ ^[1-9][0-9]*$ ]]; then
+    rm -f "$helper_tmp"
+    return 1
+  fi
+  digest_status=0
+  read_codex_helper_digests "$helper_tmp" || digest_status=$?
+  if [[ "$digest_status" -eq 1 ]] \
+    || ! install_runtime_file "$helper_tmp" "$helper" 0700; then
+    rm -f "$helper_tmp"
+    return 1
+  fi
+}
+
+reconcile_codex_managed_configuration() {
+  has_codex_connector_state || return 0
+  helper="$(codex_helper_path)"
+  [[ -f "$helper" ]] || return 1
+  hooks_file="$(codex_state_value HOOKS_FILE)"
+  [[ -n "$hooks_file" ]] || hooks_file="$(codex_hooks_path)"
+  instructions_file="$(codex_state_value INSTRUCTIONS_FILE)"
+  [[ -n "$instructions_file" ]] || instructions_file="$(codex_instructions_path)"
+  hook_command="$(codex_hook_command)"
+  auto_recall="$(codex_state_value AUTO_RECALL)"
+
+  python3 "$helper" hooks install --path "$hooks_file" --command "$hook_command" || return 1
+  if [[ "$auto_recall" == "true" ]]; then
+    python3 "$helper" instructions install --path "$instructions_file" || return 1
+  else
+    python3 "$helper" instructions remove --path "$instructions_file" || return 1
+  fi
+
+  mcp_probe="$(compose_cmd --profile tools run --rm --no-deps -T mcp mcp --list-tools 2>&1)" \
+    || return 1
+  printf '%s\n' "$mcp_probe" | grep -q '^get_context_pack$' || return 1
+
+  target_connector_version="$(python3 "$helper" version 2>/dev/null)" || return 1
+  [[ "$target_connector_version" =~ ^[1-9][0-9]*$ ]] || return 1
+  digest_status=0
+  read_codex_helper_digests "$helper" || digest_status=$?
+  [[ "$digest_status" -ne 1 ]] || return 1
+  target_helper_digest="$codex_helper_digest"
+  target_template_digest="$codex_template_digest"
+  digest_mode=modern
+  [[ "$digest_status" -eq 2 ]] && digest_mode=legacy
+  installed_connector_version="$(codex_state_value CONNECTOR_VERSION)"
+  installed_helper_digest="$(codex_state_value HELPER_DIGEST)"
+  installed_template_digest="$(codex_state_value TEMPLATE_DIGEST)"
+  if [[ "$installed_connector_version" != "$target_connector_version" \
+    || "$installed_helper_digest" != "$target_helper_digest" \
+    || "$installed_template_digest" != "$target_template_digest" ]]; then
+    mcp_changed="$(codex_state_value MCP_CHANGED)"
+    [[ -n "$mcp_changed" ]] || mcp_changed=false
+    record_codex_connector_state \
+      "$hooks_file" "$codex_state_file" configured "$mcp_changed" \
+      "$auto_recall" "$instructions_file" "$target_connector_version" \
+      "$target_helper_digest" "$target_template_digest" "$digest_mode"
   fi
 }
 
@@ -634,13 +739,39 @@ record_codex_connector_state() {
   mcp_changed="${4:-false}"
   auto_recall="${5:-false}"
   instructions_file="${6:-$(codex_instructions_path)}"
+  connector_version="${7:-$codex_connector_version}"
+  helper_digest="${8:-}"
+  template_digest="${9:-}"
+  digest_mode="${10:-auto}"
+  helper="$(codex_helper_path)"
+  if [[ "$digest_mode" == "auto" ]]; then
+    digest_status=0
+    read_codex_helper_digests "$helper" || digest_status=$?
+    [[ "$digest_status" -ne 1 ]] || return 1
+    if [[ "$digest_status" -eq 0 ]]; then
+      helper_digest="$codex_helper_digest"
+      template_digest="$codex_template_digest"
+      digest_mode=modern
+    else
+      digest_mode=legacy
+    fi
+  fi
+  digest_lines=""
+  if [[ "$digest_mode" == "modern" ]]; then
+    [[ "$helper_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ "$template_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    digest_lines="$(printf 'HELPER_DIGEST=%s\nTEMPLATE_DIGEST=%s' "$helper_digest" "$template_digest")"
+  elif [[ "$digest_mode" != "legacy" ]]; then
+    return 1
+  fi
   ensure_directories || return 1
   state_tmp="$(mktemp "${destination}.XXXXXX")" || return 1
   if ! cat >"$state_tmp" <<EOF
 AGENT_ID=codex
 AGENT_NAME=Codex
 INTEGRATION_KIND=host-hook-mcp
-CONNECTOR_VERSION=$codex_connector_version
+CONNECTOR_VERSION=$connector_version
+$digest_lines
 CONFIGURATION_OWNER=luthn
 CHANNELS=automatic-ingestion,mcp
 HOOKS_FILE=$hooks_file
@@ -1013,8 +1144,13 @@ EOF
 show_codex_connection_status() {
   require_installation
   require_command python3
-  refresh_codex_connection_observation || \
-    echo "warning: pending Codex connector status could not be reported" >&2
+  if [[ -f "$codex_disconnect_pending_state_file" ]]; then
+    if has_codex_connector_state; then
+      rm -f "$codex_disconnect_pending_state_file"
+    elif ! report_pending_codex_disconnect; then
+      echo "warning: pending Codex disconnect status could not be reported" >&2
+    fi
+  fi
   helper="$(codex_helper_path)"
   hooks_file="$(codex_state_value HOOKS_FILE)"
   [[ -n "$hooks_file" ]] || hooks_file="$(codex_hooks_path)"
@@ -1211,12 +1347,59 @@ update_luthn() {
 
   target_id="$(docker image inspect --format '{{.Id}}' "$target_image")"
   target_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target_image" 2>/dev/null || true)"
+  runtime_rollback_dir="$(mktemp -d "$state_dir/runtime-update.XXXXXX")"
+  cp -p "$compose_file" "$runtime_rollback_dir/compose.yaml"
+  cp -p "$cli_path" "$runtime_rollback_dir/luthn"
+  helper="$(codex_helper_path)"
+  [[ -f "$helper" ]] && cp -p "$helper" "$runtime_rollback_dir/luthn-codex-connector.py"
+  hooks_file=""
+  instructions_file=""
+  if has_codex_connector_state; then
+    hooks_file="$(codex_state_value HOOKS_FILE)"
+    [[ -n "$hooks_file" ]] || hooks_file="$(codex_hooks_path)"
+    instructions_file="$(codex_state_value INSTRUCTIONS_FILE)"
+    [[ -n "$instructions_file" ]] || instructions_file="$(codex_instructions_path)"
+    [[ -f "$hooks_file" ]] && cp -p "$hooks_file" "$runtime_rollback_dir/hooks.json"
+    [[ -f "$instructions_file" ]] && cp -p "$instructions_file" "$runtime_rollback_dir/AGENTS.md"
+  fi
   echo "Refreshing lifecycle runtime..."
   if ! download_runtime "$(runtime_source_for_image "$target_image" "$target_revision")"; then
+    cp -p "$runtime_rollback_dir/compose.yaml" "$compose_file"
+    cp -p "$runtime_rollback_dir/luthn" "$cli_path"
+    if [[ -f "$runtime_rollback_dir/luthn-codex-connector.py" ]]; then
+      cp -p "$runtime_rollback_dir/luthn-codex-connector.py" "$helper"
+    else
+      rm -f "$helper"
+    fi
+    rm -rf "$runtime_rollback_dir"
     record_state failed "$target_image" "$target_id" "$previous_id"
     echo "Update failed while downloading lifecycle runtime. The running API and previous image were preserved." >&2
     return 1
   fi
+  if has_codex_connector_state && ! reconcile_codex_managed_configuration; then
+    cp -p "$runtime_rollback_dir/compose.yaml" "$compose_file"
+    cp -p "$runtime_rollback_dir/luthn" "$cli_path"
+    if [[ -f "$runtime_rollback_dir/luthn-codex-connector.py" ]]; then
+      cp -p "$runtime_rollback_dir/luthn-codex-connector.py" "$helper"
+    else
+      rm -f "$helper"
+    fi
+    if [[ -f "$runtime_rollback_dir/hooks.json" ]]; then
+      cp -p "$runtime_rollback_dir/hooks.json" "$hooks_file"
+    else
+      rm -f "$hooks_file"
+    fi
+    if [[ -f "$runtime_rollback_dir/AGENTS.md" ]]; then
+      cp -p "$runtime_rollback_dir/AGENTS.md" "$instructions_file"
+    else
+      rm -f "$instructions_file"
+    fi
+    rm -rf "$runtime_rollback_dir"
+    record_state failed "$target_image" "$target_id" "$previous_id"
+    echo "Update failed while reconciling the Codex connector. Runtime and managed Codex configuration were restored." >&2
+    return 1
+  fi
+  rm -rf "$runtime_rollback_dir"
   if has_codex_connector_state; then
     if ! ensure_connector_scopes; then
       record_state failed "$target_image" "$target_id" "$previous_id"

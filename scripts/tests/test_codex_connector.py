@@ -238,6 +238,16 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
 
 
 class TurnCapsuleTests(unittest.TestCase):
+    def test_connector_template_exposes_a_bounded_version(self):
+        self.assertRegex(CONNECTOR.CONNECTOR_TEMPLATE_VERSION, r"^[1-9][0-9]*$")
+
+    def test_connector_exposes_stable_helper_and_managed_template_digests(self):
+        self.assertRegex(CONNECTOR.helper_digest(), r"^[0-9a-f]{64}$")
+        self.assertRegex(CONNECTOR.managed_template_digest(), r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            CONNECTOR.managed_template_digest(), CONNECTOR.managed_template_digest()
+        )
+
     def test_turn_capsule_is_bounded_deterministic_and_excludes_host_paths(self):
         hook_input = {
             "session_id": "session-original",
