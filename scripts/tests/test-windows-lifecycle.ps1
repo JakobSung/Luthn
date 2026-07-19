@@ -41,15 +41,17 @@ function Invoke-LuthnProcess {
 
 function Invoke-InstallerProcess {
     param([string]$InstallerPath, [switch]$ConnectCodex)
+    $captured = [Collections.Generic.List[string]]::new()
     try {
-        $output = if ($ConnectCodex) {
-            & $InstallerPath -ConnectCodex *>&1 | Out-String
+        if ($ConnectCodex) {
+            & $InstallerPath -ConnectCodex *>&1 | ForEach-Object { $captured.Add($_.ToString()) }
         } else {
-            & $InstallerPath *>&1 | Out-String
+            & $InstallerPath *>&1 | ForEach-Object { $captured.Add($_.ToString()) }
         }
-        return [pscustomobject]@{ ExitCode = 0; Output = $output }
+        return [pscustomobject]@{ ExitCode = 0; Output = ($captured -join "`n") }
     } catch {
-        return [pscustomobject]@{ ExitCode = 1; Output = ($_ | Out-String) }
+        $captured.Add(($_ | Out-String))
+        return [pscustomobject]@{ ExitCode = 1; Output = ($captured -join "`n") }
     }
 }
 
