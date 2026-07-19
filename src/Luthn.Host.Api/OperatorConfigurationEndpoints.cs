@@ -4,6 +4,7 @@ using Luthn.Core.Persistence;
 using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace Luthn.Host.Api;
@@ -29,15 +30,17 @@ public static class OperatorConfigurationEndpoints
 
     public static async Task<Ok<ClassificationProviderConfigurationResponse>> ReadClassificationProvider(
         IOperatorClassificationSettingsStore settingsStore,
+        IOptions<ClassificationProviderOptions> options,
         CancellationToken cancellationToken)
     {
         var settings = await settingsStore.ReadAsync(cancellationToken);
-        return TypedResults.Ok(ToResponse(settings));
+        return TypedResults.Ok(ToResponse(settings, options.Value));
     }
 
     public static async Task<Results<Ok<ClassificationProviderConfigurationResponse>, BadRequest<ProblemDetails>>> SaveClassificationProvider(
         SaveClassificationProviderConfigurationRequest request,
         IOperatorClassificationSettingsStore settingsStore,
+        IOptions<ClassificationProviderOptions> options,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -51,7 +54,7 @@ public static class OperatorConfigurationEndpoints
                 settings.Provider.ToString(),
                 settings));
             await db.SaveChangesAsync(cancellationToken);
-            return TypedResults.Ok(ToResponse(settings));
+            return TypedResults.Ok(ToResponse(settings, options.Value));
         }
         catch (InvalidOperationException error)
         {
@@ -64,6 +67,7 @@ public static class OperatorConfigurationEndpoints
         IOperatorClassificationSettingsStore settingsStore,
         ConfiguredContentClassifier classifier,
         IPolicyEngine policyEngine,
+        IOptions<ClassificationProviderOptions> options,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -94,7 +98,7 @@ public static class OperatorConfigurationEndpoints
             await db.SaveChangesAsync(cancellationToken);
 
             return TypedResults.Ok(new TestClassificationProviderConfigurationResponse(
-                ToResponse(settings),
+                ToResponse(settings, options.Value),
                 new ClassificationPreviewClassification(
                     classification.Sensitivity,
                     classification.Confidence,
@@ -109,7 +113,8 @@ public static class OperatorConfigurationEndpoints
     }
 
     private static ClassificationProviderConfigurationResponse ToResponse(
-        OperatorClassificationProviderSettings settings) =>
+        OperatorClassificationProviderSettings settings,
+        ClassificationProviderOptions options) =>
         new(
             settings.Provider.ToString(),
             settings.Model,
@@ -117,7 +122,33 @@ public static class OperatorConfigurationEndpoints
             settings.AuthHeaderName,
             settings.PayloadClass,
             settings.RedactionState,
-            settings.HasApiKey);
+            settings.HasApiKey,
+            options.AllowMock,
+            StatusFor(settings, options),
+            StatusDetailFor(settings, options));
+
+    private static string StatusFor(
+        OperatorClassificationProviderSettings settings,
+        ClassificationProviderOptions options) =>
+        settings.Provider switch
+        {
+            OperatorClassificationProviderKind.Unconfigured => "unconfigured",
+            OperatorClassificationProviderKind.Mock when !options.AllowMock => "mock-disabled",
+            OperatorClassificationProviderKind.Mock => "mock-non-production",
+            _ => "configured"
+        };
+
+    private static string StatusDetailFor(
+        OperatorClassificationProviderSettings settings,
+        ClassificationProviderOptions options) =>
+        settings.Provider switch
+        {
+            OperatorClassificationProviderKind.Unconfigured => ClassificationProviderOptions.ProviderRequiredMessage,
+            OperatorClassificationProviderKind.Mock when !options.AllowMock => ClassificationProviderOptions.MockDisabledMessage,
+            OperatorClassificationProviderKind.Mock =>
+                "Mock classification is enabled for explicit development or test use only.",
+            _ => $"{settings.Provider} classification is configured."
+        };
 
     private static AuditEventRecord CreateAudit(
         HttpContext httpContext,

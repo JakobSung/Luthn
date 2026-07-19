@@ -12,6 +12,7 @@ commands:
   seed-demo
   migration-script
   token-digest --stdin
+  classification-eval [--dataset path] [--output path]
   mcp [--list-tools]
   adapter
 USAGE
@@ -66,7 +67,7 @@ case "$command" in
     cd /app/worker
     exec dotnet /app/worker/Luthn.Host.Worker.dll "$@"
     ;;
-  migrate-db|seed-demo|migration-script|token-digest)
+  migrate-db|seed-demo|migration-script|token-digest|classification-eval)
     exec dotnet /app/tools/Luthn.Tools.dll "$command" "$@"
     ;;
   mcp)

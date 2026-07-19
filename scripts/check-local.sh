@@ -52,15 +52,17 @@ curl -fsS "$base_url/healthz"
 echo
 echo
 echo "Luthn readiness:"
+classification_ready=true
 ready_body="$(mktemp)"
 ready_status="$(curl -sS -o "$ready_body" -w '%{http_code}' "$base_url/readyz")"
 cat "$ready_body"
 if [[ "$ready_status" != "200" ]]; then
   if grep -q 'classification-provider' "$ready_body" &&
-    grep -q 'Production classification requires an operator-configured non-mock provider' "$ready_body"; then
+    grep -Eq 'No classification provider is configured|The mock classification provider is disabled|Production classification requires an operator-configured non-mock provider' "$ready_body"; then
+    classification_ready=false
     echo
     echo "warning: readiness is not_ready until an operator classification provider is configured."
-    echo "continuing local smoke tests with the mock provider."
+    echo "continuing smoke tests that do not require classification."
   else
     rm -f "$ready_body"
     exit 1
@@ -83,7 +85,9 @@ fi
 echo
 echo
 echo "Agent turn-summary intake smoke:"
-if [[ -n "${LUTHN_SERVICE_VALUE:-}" ]]; then
+if [[ "$classification_ready" != "true" ]]; then
+  echo "skipped: classification provider is not ready"
+elif [[ -n "${LUTHN_SERVICE_VALUE:-}" ]]; then
   curl -fsS -X POST "$base_url/api/agent/turn-summaries" \
     -H 'content-type: application/json' \
     -H "Authorization: Bearer $LUTHN_SERVICE_VALUE" \

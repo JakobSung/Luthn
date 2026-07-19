@@ -815,7 +815,7 @@ function Write-InitialConfig {
     $content = @(
         "LUTHN_IMAGE=$Image",
         "LUTHN_PORT=$port",
-        "LUTHN_ENVIRONMENT=Development",
+        "LUTHN_ENVIRONMENT=Production",
         "LUTHN_BASE_URL=http://127.0.0.1:$port",
         "LUTHN_POSTGRES_VOLUME=$postgresVolume",
         "LUTHN_OPERATOR_VOLUME=$operatorVolume",
@@ -825,7 +825,8 @@ function Write-InitialConfig {
         "POSTGRES_DB=luthn",
         "POSTGRES_USER=luthn",
         "POSTGRES_HOST_AUTH_METHOD=trust",
-        "Luthn__Classification__Provider=mock",
+        "Luthn__Classification__Provider=unconfigured",
+        "Luthn__Classification__AllowMock=false",
         "Luthn__Auth__RequireServiceToken=true",
         "Luthn__Auth__Tokens__0__Name=local-agent",
         "Luthn__Auth__Tokens__0__Sha256Digest=$Digest",
@@ -936,13 +937,34 @@ function Get-HttpDiagnostic {
     }
 }
 
+function Test-ClassificationSetupPending {
+    param([int]$StatusCode, [string]$Body)
+    return $StatusCode -eq 503 -and
+        $Body -match '"dependency"\s*:\s*"classification-provider"' -and
+        ($Body -match "No classification provider is configured" -or
+         $Body -match "The mock classification provider is disabled" -or
+         $Body -match "Production classification requires an operator-configured non-mock provider")
+}
+
+function Test-ClassificationSetupRequiredByConfig {
+    $provider = Read-ConfigValue "Luthn__Classification__Provider" "unconfigured"
+    $allowMock = Read-ConfigValue "Luthn__Classification__AllowMock" "false"
+    return $provider -ceq "unconfigured" -or
+        ($provider -ceq "mock" -and $allowMock -ine "true")
+}
+
 function Wait-ForApi {
     $baseUrl = Read-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:8080"
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
-        if ((Test-HttpReady "$baseUrl/healthz") -and (Test-HttpReady "$baseUrl/readyz")) { return }
+        if (Test-HttpReady "$baseUrl/healthz") {
+            if (Test-HttpReady "$baseUrl/readyz") { return }
+            $readiness = Get-HttpDiagnostic "$baseUrl/readyz"
+            if (($readiness.StatusCode -ge 200 -and $readiness.StatusCode -lt 300) -or
+                (Test-ClassificationSetupPending -StatusCode $readiness.StatusCode -Body $readiness.Body)) { return }
+        }
         Start-Sleep -Seconds 2
     }
-    throw "Luthn did not pass health and readiness checks."
+    throw "Luthn did not reach a healthy or safely unconfigured state."
 }
 
 function Require-Installation {
@@ -983,7 +1005,7 @@ function Install-Luthn {
     } else {
         Ensure-ConfigValue "LUTHN_IMAGE" $image
         Ensure-ConfigValue "LUTHN_PORT" $(if ($env:LUTHN_PORT) { $env:LUTHN_PORT } else { "8080" })
-        Ensure-ConfigValue "LUTHN_ENVIRONMENT" "Development"
+        Ensure-ConfigValue "LUTHN_ENVIRONMENT" "Production"
         Ensure-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:$(Read-ConfigValue 'LUTHN_PORT' '8080')"
         Ensure-ConfigValue "LUTHN_POSTGRES_VOLUME" $(if ($env:LUTHN_POSTGRES_VOLUME) { $env:LUTHN_POSTGRES_VOLUME } else { "luthn-postgres" })
         Ensure-ConfigValue "LUTHN_OPERATOR_VOLUME" $(if ($env:LUTHN_OPERATOR_VOLUME) { $env:LUTHN_OPERATOR_VOLUME } else { "luthn-operator" })
@@ -1002,7 +1024,8 @@ function Install-Luthn {
         Ensure-ConfigValue "POSTGRES_DB" "luthn"
         Ensure-ConfigValue "POSTGRES_USER" "luthn"
         Ensure-ConfigValue "POSTGRES_HOST_AUTH_METHOD" "trust"
-        Ensure-ConfigValue "Luthn__Classification__Provider" "mock"
+        Ensure-ConfigValue "Luthn__Classification__Provider" "unconfigured"
+        Ensure-ConfigValue "Luthn__Classification__AllowMock" "false"
         Ensure-ConfigValue "Luthn__Auth__RequireServiceToken" "true"
         Ensure-ConfigValue "Luthn__Auth__Tokens__0__Name" "local-agent"
         $scopes = @("agent.read", "agent.write.summary", "memory.write", "memory.read", "classification.preview", "agent.connection.read", "agent.connection.write")
@@ -1027,7 +1050,12 @@ function Install-Luthn {
 
     $baseUrl = Read-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:8080"
     Write-Host ""
-    Write-Host "Luthn is ready."
+    if (Test-ClassificationSetupRequiredByConfig) {
+        Write-Host "Luthn is running."
+        Write-Host "Classification: setup required in the operator console."
+    } else {
+        Write-Host "Luthn is ready."
+    }
     Write-Host "Console: $baseUrl/"
     Write-Host "Status:  luthn status"
     Write-Host "Config:  $script:ConfigFile"
@@ -1070,6 +1098,9 @@ function Show-Status {
     Write-Host ""
     Write-Host "Health: $(if (Test-HttpReady "$baseUrl/healthz") { 'ready' } else { 'unavailable' })"
     Write-Host "Readiness: $(if (Test-HttpReady "$baseUrl/readyz") { 'ready' } else { 'not ready' })"
+    if (Test-ClassificationSetupRequiredByConfig) {
+        Write-Host "Classification: setup required in the operator console"
+    }
     Write-Host "Console: $baseUrl/"
     Write-Host "Image: $imageRef"
     Write-Host "Image ID: $(if ($imageId) { $imageId } else { 'unavailable' })"
@@ -1144,6 +1175,9 @@ function Invoke-Doctor {
     if ($readiness.StatusCode -ge 200 -and $readiness.StatusCode -lt 300) {
         Add-DoctorCheck $checks "api-readiness" "pass" $true "API readiness check passed."
         Add-DoctorCheck $checks "migrations" "pass" $true "Database migrations are current."
+    } elseif (Test-ClassificationSetupPending -StatusCode $readiness.StatusCode -Body $readiness.Body) {
+        Add-DoctorCheck $checks "api-readiness" "fail" $true "Classification provider setup is required." "Open the operator console and configure a production provider."
+        Add-DoctorCheck $checks "migrations" "pass" $true "Database migrations are current; classification setup is pending."
     } elseif ($readiness.Body -match "pending migrations") {
         Add-DoctorCheck $checks "api-readiness" "fail" $true "API is not ready because migrations are pending." "Run 'luthn update' to apply the target migrations."
         Add-DoctorCheck $checks "migrations" "fail" $true "Database has pending migrations." "Run 'luthn update'."

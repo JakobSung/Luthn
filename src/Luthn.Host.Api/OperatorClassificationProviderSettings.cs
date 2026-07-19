@@ -5,6 +5,7 @@ namespace Luthn.Host.Api;
 
 public enum OperatorClassificationProviderKind
 {
+    Unconfigured,
     Mock,
     ExternalHttp,
     OpenAi,
@@ -15,7 +16,7 @@ public enum OperatorClassificationProviderKind
 
 public sealed record OperatorClassificationProviderSettings
 {
-    public OperatorClassificationProviderKind Provider { get; init; } = OperatorClassificationProviderKind.Mock;
+    public OperatorClassificationProviderKind Provider { get; init; } = OperatorClassificationProviderKind.Unconfigured;
     public string Model { get; init; } = "";
     public string Endpoint { get; init; } = "";
     public string AuthHeaderName { get; init; } = "Authorization";
@@ -35,7 +36,10 @@ public sealed record ClassificationProviderConfigurationResponse(
     string AuthHeaderName,
     string PayloadClass,
     string RedactionState,
-    bool HasApiKey);
+    bool HasApiKey,
+    bool MockAllowed,
+    string Status,
+    string StatusDetail);
 
 public sealed record SaveClassificationProviderConfigurationRequest(
     string Provider,

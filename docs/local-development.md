@@ -98,7 +98,8 @@ curl http://localhost:8080/readyz
 It also reports first-run configuration checks for service tokens,
 classification provider readiness, and transport hardening. In production,
 readiness is not considered complete when no active service token is configured
-or when the mock classifier is still active.
+or when no production classification provider is configured. The repository
+Compose defaults to the explicit `unconfigured` provider state.
 
 The Docker stack also serves the operator console at `http://localhost:8080/`.
 
@@ -158,13 +159,16 @@ or otherwise controlled classifier boundary. Direct third-party provider
 endpoints must be HTTPS URLs on the expected provider host before Luthn sends an
 API key header.
 
-The API defaults to the local mock classifier only when no operator provider or
-external provider is configured. `mock` is for tests and local experiments only;
-it is a deterministic keyword classifier, not a production safety or
-multilingual classification system.
+The packaged and Compose runtime defaults to `unconfigured`; classification
+writes fail safely until the operator configures a provider. Source
+`Development` and `Testing` environments opt in to the local mock explicitly.
+`mock` is a deterministic keyword classifier for tests and local experiments,
+not a production safety or multilingual classification system. A manual local
+override must set both values:
 
 ```bash
 Luthn__Classification__Provider=mock
+Luthn__Classification__AllowMock=true
 ```
 
 Provider HTTP calls use bounded runtime defaults so a stalled classifier does

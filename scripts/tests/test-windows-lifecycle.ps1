@@ -342,7 +342,8 @@ esac
         $shimHelp = & $installedShim help *>&1 | Out-String
         Assert-True ($LASTEXITCODE -eq 0 -and $shimHelp -match "usage: luthn") "installed command shim should execute from a non-ASCII path"
     }
-    Assert-True ($install.Output -match "Luthn is ready") "install should report readiness"
+    Assert-True ($install.Output -match "Luthn is running") "install should report that the safely unconfigured runtime is running"
+    Assert-True ($install.Output -match "Classification: setup required in the operator console") "install should explain the required classification setup"
 
     $configFile = Join-Path $windowsRoot "config/luthn.env"
     $tokenFile = Join-Path $windowsRoot "config/service-token"
@@ -360,6 +361,9 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "new installs should provision the MCP sensitive-access request scope"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$") "new installs should provision a distinct local operator credential"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "the local operator credential should be decision-only"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_ENVIRONMENT=Production$") "new installs should use the Production environment"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=unconfigured$") "new installs should not select the mock classifier"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__AllowMock=false$") "new installs should disable mock classification"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($operatorToken))) "Docker arguments and logs should not contain the operator token"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "one-step Codex registration should not contain the token"

@@ -73,6 +73,12 @@ public sealed class OperatorClassificationSettingsStore(
         CancellationToken cancellationToken = default)
     {
         var provider = ParseProvider(request.Provider);
+        var classificationOptions = ReadClassificationOptions();
+        if (provider == OperatorClassificationProviderKind.Mock)
+        {
+            classificationOptions.EnsureMockAllowed();
+        }
+
         var apiKey = await ResolveApiKeyAsync(request, provider, cancellationToken);
 
         var settings = new OperatorClassificationProviderSettings
@@ -169,9 +175,7 @@ public sealed class OperatorClassificationSettingsStore(
 
     private OperatorClassificationProviderSettings ReadConfiguredFallback()
     {
-        var options = configuration
-            .GetSection("Luthn:Classification")
-            .Get<ClassificationProviderOptions>() ?? new ClassificationProviderOptions();
+        var options = ReadClassificationOptions();
         var provider = options.ResolveProvider();
 
         if (string.Equals(provider, "external-http", StringComparison.OrdinalIgnoreCase))
@@ -186,6 +190,19 @@ public sealed class OperatorClassificationSettingsStore(
             };
         }
 
+        if (string.Equals(
+            provider,
+            ClassificationProviderOptions.UnconfiguredProvider,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            return new OperatorClassificationProviderSettings
+            {
+                Provider = OperatorClassificationProviderKind.Unconfigured,
+                PayloadClass = "classification-input",
+                RedactionState = "provider-unconfigured"
+            };
+        }
+
         return new OperatorClassificationProviderSettings
         {
             Provider = OperatorClassificationProviderKind.Mock,
@@ -193,6 +210,11 @@ public sealed class OperatorClassificationSettingsStore(
             RedactionState = "local-only"
         };
     }
+
+    private ClassificationProviderOptions ReadClassificationOptions() =>
+        configuration
+            .GetSection("Luthn:Classification")
+            .Get<ClassificationProviderOptions>() ?? new ClassificationProviderOptions();
 
     private OperatorClassificationProviderSettings ToSettings(PersistedSettings persisted) =>
         new()
@@ -234,16 +256,23 @@ public sealed class OperatorClassificationSettingsStore(
             value,
             ignoreCase: true,
             out var provider)
-            && Enum.IsDefined(provider))
+            && Enum.IsDefined(provider)
+            && provider != OperatorClassificationProviderKind.Unconfigured)
         {
             return provider;
         }
 
-        throw new InvalidOperationException($"Unsupported classification provider '{value}'.");
+        throw new InvalidOperationException(
+            $"Unsupported classification provider '{value}'. Choose a configured provider instead of the Unconfigured system state.");
     }
 
     private static void Validate(OperatorClassificationProviderSettings settings)
     {
+        if (settings.Provider == OperatorClassificationProviderKind.Unconfigured)
+        {
+            throw new InvalidOperationException(ClassificationProviderOptions.ProviderRequiredMessage);
+        }
+
         if (settings.Provider == OperatorClassificationProviderKind.Mock)
         {
             return;

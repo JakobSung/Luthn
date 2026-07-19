@@ -48,7 +48,7 @@ curl http://localhost:8080/healthz
 curl http://localhost:8080/readyz
 ```
 
-`/healthz`는 생존 여부만 확인하고 PostgreSQL을 조회하지 않습니다. `/readyz`는 database와 최초 설정을 확인합니다. 운영 환경에서는 활성 서비스 token이 없거나 mock 분류기가 켜져 있으면 준비 완료가 아닙니다.
+`/healthz`는 생존 여부만 확인하고 PostgreSQL을 조회하지 않습니다. `/readyz`는 database와 최초 설정을 확인합니다. 저장소 Compose의 기본 분류 상태는 명시적인 `unconfigured`이며, 운영 환경에서는 활성 서비스 token이나 실제 분류 provider가 없으면 준비 완료가 아닙니다.
 
 ## 운영 서비스 Token
 
@@ -65,10 +65,11 @@ printf '%s' "$LUTHN_SERVICE_VALUE" \
 
 운영자 화면의 `/api/operator/classification-provider`에서 `Mock`, `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, `External HTTP`를 선택하고 model·API key·연결 시험을 설정할 수 있습니다. API key는 server에 저장하며 응답이나 화면에 되돌려 보내지 않습니다.
 
-직접 제3자 LLM provider는 민감도 판정 전에 원문을 받습니다. 이 전송이 허용될 때만 사용하고, 원문을 통제된 경계에 남겨야 하면 `External HTTP`를 사용합니다. API key를 보내는 endpoint는 HTTPS여야 합니다. `mock`은 결정적 keyword 분류기이므로 시험·로컬 실험 전용입니다.
+직접 제3자 LLM provider는 민감도 판정 전에 원문을 받습니다. 이 전송이 허용될 때만 사용하고, 원문을 통제된 경계에 남겨야 하면 `External HTTP`를 사용합니다. API key를 보내는 endpoint는 HTTPS여야 합니다. 배포·Compose 기본값은 `unconfigured`이고, source `Development`와 `Testing` 환경만 mock을 명시적으로 켭니다. `mock`은 결정적 keyword 분류기이므로 시험·로컬 실험 전용이며 수동 실행 시 두 값을 모두 지정해야 합니다.
 
 ```bash
 Luthn__Classification__Provider=mock
+Luthn__Classification__AllowMock=true
 Luthn__Classification__Runtime__TimeoutSeconds=30
 Luthn__Classification__Runtime__MaxAttempts=2
 Luthn__Classification__Runtime__RetryDelayMilliseconds=200
