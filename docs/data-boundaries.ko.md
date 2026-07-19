@@ -46,14 +46,32 @@ agent context에 나중에 나타날 수 있는 전체 투영을 분류합니다
   `incident log`
 
 로컬 mock은 이 taxonomy에 대응하는 제한된 한국어·영어 표지를 인식합니다.
-이는 시험·실험용 동작이며 운영 품질을 보장하거나 예정된 golden dataset
-평가를 대신하지 않습니다.
+이는 시험·실험용 동작이며 운영 품질을 보장하지 않습니다.
 
 provider 결과는 정책 평가 전에 정규화합니다. 민감 category는 taxonomy의
 최소 민감도까지 올리고, `containsSensitiveMaterial`이 참이면 최소
 `Confidential`로 올립니다. `Confidential` 또는 `Restricted`는 항상
 `containsSensitiveMaterial`을 참으로 만듭니다. 따라서 필드가 서로 모순돼도
 더 공개적인 경로가 아니라 더 제한적인 경로만 선택됩니다.
+
+## 분류 Golden 평가
+
+버전이 지정된 합성 corpus `data/classification/golden-v1.json`이 품질 평가의
+기준 계약입니다. 한국어 사례가 과반이며 영어·혼합 언어, 민감·비민감 예시,
+`title`, `safeSummary`, `coreTags`에만 신호가 있는 사례를 포함합니다. 운영·고객
+자료나 실제 자격 증명은 포함하지 않습니다.
+
+평가기는 분류기를 실행하기 전에 dataset·taxonomy 버전, 중복되지 않는 제한된
+case 식별자, 표준 category 이름, 민감도와 저장 경로 기대값의 일관성을
+검증합니다. JSON 결과에는 case 식별자, 기대·실제 분류, 저장 경로,
+false-negative·false-positive·불일치 합계만 들어가며 corpus 원문은 복사하지
+않습니다.
+
+기본 평가는 로컬의 결정적 mock만 사용하고 network 요청을 하지 않습니다.
+설정된 API 평가는 corpus가 API의 설정된 분류기로 전달될 수 있으므로
+`--provider configured-api`와 `--allow-external-provider`를 모두 명시해야 합니다.
+선택적 bearer token은 `--token-env`로 지정한 환경 변수에서만 읽고 평가 결과에는
+token 값을 출력하지 않습니다.
 
 ## Codex 수집과 회상 경계
 

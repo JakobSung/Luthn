@@ -76,6 +76,38 @@ Luthn__Classification__Runtime__RetryDelayMilliseconds=200
 
 일시적 timeout, HTTP 408/429/5xx만 재시도합니다. 측정값은 `luthn.classification_provider.attempts`, `retries`, `failures`, `luthn.safe_search.candidates`입니다.
 
+### 분류 Golden 평가
+
+버전이 지정된 한국어 중심 합성 corpus를 network 요청 없이 로컬 mock으로
+평가합니다.
+
+```bash
+dotnet run --project src/Luthn.Tools -- classification-eval
+```
+
+같은 안정된 JSON 결과를 파일로 남길 수 있습니다.
+
+```bash
+dotnet run --project src/Luthn.Tools -- classification-eval \
+  --output artifacts/classification-eval.json
+```
+
+API에 현재 설정된 분류기를 평가하려면 API를 실행하고 외부 전송 가능성을
+명시적으로 허용해야 합니다. 보호 API token 값은 command line에 넣지 말고
+환경 변수 이름만 전달합니다.
+
+```bash
+export LUTHN_EVAL_TOKEN='<운영자가 제공한 token>'
+dotnet run --project src/Luthn.Tools -- classification-eval \
+  --provider configured-api \
+  --api-url http://127.0.0.1:5089 \
+  --allow-external-provider \
+  --token-env LUTHN_EVAL_TOKEN
+```
+
+결과에는 corpus 원문을 넣지 않고 제한된 case ID, case별 분류·저장 경로 비교,
+불일치 합계만 기록합니다.
+
 ```bash
 Luthn__Classification__Provider=external-http
 Luthn__Classification__ExternalHttp__Endpoint=https://provider.example/classify

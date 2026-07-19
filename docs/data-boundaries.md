@@ -59,13 +59,35 @@ Category taxonomy version `1` uses stable canonical category names:
 
 The local mock recognizes bounded English and Korean marker phrases for this
 taxonomy. It remains a test and experiment classifier, not a production
-quality claim or a replacement for the planned golden-dataset evaluation.
+quality claim.
 
 Provider output is normalized before policy evaluation. A sensitive category
 raises sensitivity to at least its taxonomy minimum; `containsSensitiveMaterial`
 raises sensitivity to at least `Confidential`; and `Confidential` or
 `Restricted` always sets `containsSensitiveMaterial`. Contradictory fields can
 therefore only make routing more restrictive, never more public.
+
+## Classification Golden Evaluation
+
+The versioned synthetic corpus at `data/classification/golden-v1.json` is the
+baseline quality contract. It is Korean-majority and also includes English and
+mixed-language cases, positive and negative examples, and signals that appear
+only in `title`, `safeSummary`, or `coreTags`. It contains no production,
+customer, or real credential data.
+
+The evaluator validates dataset and taxonomy versions, unique bounded case
+identifiers, canonical categories, and consistent sensitivity and routing
+expectations before running any classifier. Its JSON report contains only case
+identifiers, expected and actual classifications, routing decisions, and
+aggregate false-negative, false-positive, and mismatch counts. Raw corpus text
+is not copied into the report.
+
+Evaluation uses the local deterministic mock by default and performs no network
+request. Testing a configured API requires both `--provider configured-api` and
+the explicit `--allow-external-provider` acknowledgement because the API may
+relay corpus text to its configured classifier. An optional bearer token can be
+read only from the named environment variable supplied with `--token-env`; the
+token value is never included in evaluator output.
 
 ## Codex Capture And Recall Boundary
 
