@@ -559,6 +559,37 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
+    public async Task ExternalHttpClassifierNormalizesContradictoryProviderFieldsConservatively()
+    {
+        using var handler = new CapturingHandler
+        {
+            Sensitivity = "Public",
+            Categories = ["Private Key"],
+            ContainsSensitiveMaterial = false
+        };
+        var classifier = new ExternalHttpContentClassifier(
+            new StaticHttpClientFactory(new HttpClient(handler)),
+            Options.Create(new ClassificationProviderOptions
+            {
+                Provider = "external-http",
+                ExternalHttp = new ExternalHttpClassificationProviderOptions
+                {
+                    Endpoint = "https://classifier.local/classify"
+                }
+            }));
+
+        var result = await classifier.ClassifyAsync(
+            new("source-contradictory"),
+            "Provider response intentionally contradicts itself.",
+            "note");
+
+        Assert.Equal(SensitivityLevel.Restricted, result.Sensitivity);
+        Assert.True(result.ContainsSensitiveMaterial);
+        Assert.Equal(["private key"], result.Categories);
+        Assert.Equal(StorageDecisionKind.SensitiveDbOnly, new PolicyEngine().Decide(result).Kind);
+    }
+
+    [Fact]
     public async Task ExternalHttpClassifierRejectsUndefinedNumericSensitivity()
     {
         using var handler = new CapturingHandler
@@ -750,6 +781,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         public JsonDocument RequestJson { get; private set; } = null!;
         public string Sensitivity { get; init; } = "Confidential";
         public IReadOnlyList<string> Categories { get; init; } = ["contract"];
+        public bool ContainsSensitiveMaterial { get; init; } = true;
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -767,7 +799,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
                     sensitivity = Sensitivity,
                     confidence = 0.92,
                     categories = Categories,
-                    containsSensitiveMaterial = true
+                    containsSensitiveMaterial = ContainsSensitiveMaterial
                 })
             };
         }

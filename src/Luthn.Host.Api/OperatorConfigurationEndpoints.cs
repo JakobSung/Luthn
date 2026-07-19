@@ -78,13 +78,13 @@ public static class OperatorConfigurationEndpoints
         {
             var settings = await settingsStore.ReadAsync(cancellationToken);
             var sourceId = new PublicRecordId("operator-provider-test");
-            var classification = await classifier.ClassifyAsync(
+            var classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
                 sourceId,
                 string.IsNullOrWhiteSpace(request.Content)
                     ? "Public implementation note for provider connectivity testing."
                     : request.Content,
                 string.IsNullOrWhiteSpace(request.SourceType) ? "note" : request.SourceType,
-                cancellationToken);
+                cancellationToken));
             var decision = policyEngine.Decide(classification);
             db.AuditEvents.Add(CreateAudit(
                 httpContext,

@@ -31,6 +31,42 @@ raw intake
 
 Use this file for concrete classification examples.
 
+## Classification Contract
+
+Before policy routing, Luthn classifies the complete projection that could
+later appear in wiki, shared memory, search, MCP, or agent context: `content`,
+`title`, `safeSummary`, and every `coreTags` entry. A sensitive signal in any
+one field makes the combined projection sensitive.
+
+Sensitivity levels have these bounded meanings:
+
+- `Public`: deliberately public or team-shareable material with no known
+  sensitive signal. It may be eligible for agent context and wiki review.
+- `Internal`: non-sensitive operational knowledge that is not intended to be
+  public by default. It requires review and is not automatically agent-visible.
+- `Confidential`: personal, customer, contractual, financial, accounting, or
+  private communication material. It remains behind the sensitive boundary.
+- `Restricted`: credentials, access or private keys, and raw customer
+  originals. It remains behind the sensitive boundary and requires human
+  review.
+
+Category taxonomy version `1` uses stable canonical category names:
+
+- Restricted: `credential`, `private key`, `access key`, `customer original`
+- Confidential: `contract`, `invoice`, `payment`, `tax`, `customer`, `email`,
+  `personal identifier`, `finance`, `accounting`, `private message`,
+  `incident log`
+
+The local mock recognizes bounded English and Korean marker phrases for this
+taxonomy. It remains a test and experiment classifier, not a production
+quality claim or a replacement for the planned golden-dataset evaluation.
+
+Provider output is normalized before policy evaluation. A sensitive category
+raises sensitivity to at least its taxonomy minimum; `containsSensitiveMaterial`
+raises sensitivity to at least `Confidential`; and `Confidential` or
+`Restricted` always sets `containsSensitiveMaterial`. Contradictory fields can
+therefore only make routing more restrictive, never more public.
+
 ## Codex Capture And Recall Boundary
 
 On macOS, Linux, and Windows, the trusted Codex Stop hook accepts a bounded

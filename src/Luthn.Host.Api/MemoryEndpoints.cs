@@ -49,14 +49,20 @@ public static class MemoryEndpoints
         var createdAt = DateTimeOffset.UtcNow;
         var memoryId = $"memory-{Guid.NewGuid():N}";
         var sourceId = new PublicRecordId(memoryId);
+        var normalizedTags = NormalizeTags(request.CoreTags!);
+        var classificationInput = AgentVisibleClassificationInput.Compose(
+            content: null,
+            request.Title,
+            request.SafeSummary,
+            normalizedTags);
         ClassificationResult classification;
         try
         {
-            classification = await classifier.ClassifyAsync(
+            classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
                 sourceId,
-                request.SafeSummary,
+                classificationInput,
                 "shared-memory",
-                cancellationToken);
+                cancellationToken));
         }
         catch (ClassificationProviderException error)
         {
@@ -73,7 +79,7 @@ public static class MemoryEndpoints
             request.Title.Trim(),
             request.SafeSummary.Trim(),
             effectiveClassification.Sensitivity,
-            NormalizeTags(request.CoreTags!),
+            normalizedTags,
             visibility,
             retention,
             string.IsNullOrWhiteSpace(request.SourceSessionId)

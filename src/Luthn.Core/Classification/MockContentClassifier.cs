@@ -11,43 +11,21 @@ public sealed class MockContentClassifier : IContentClassifier
     public ClassificationProviderBoundary Boundary { get; } =
         new("mock", "local-classification-input", "local-only");
 
-    private static readonly string[] RestrictedMarkers =
-    [
-        "credential",
-        "private key",
-        "access key",
-        "customer original"
-    ];
-
-    private static readonly string[] ConfidentialMarkers =
-    [
-        "contract",
-        "invoice",
-        "payment",
-        "tax",
-        "customer",
-        "email"
-    ];
-
     public ValueTask<ClassificationResult> ClassifyAsync(
         PublicRecordId sourceId,
         string content,
         string? sourceType,
         CancellationToken cancellationToken = default)
     {
-        var normalized = content.ToLowerInvariant();
-        var categories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        AddMatches(categories, normalized, RestrictedMarkers);
-        AddMatches(categories, normalized, ConfidentialMarkers);
-
-        var sensitivity = categories.Overlaps(RestrictedMarkers)
-            ? SensitivityLevel.Restricted
-            : categories.Count > 0
-                ? SensitivityLevel.Confidential
-                : IsLikelyOperationalKnowledge(normalized, sourceType)
-                    ? SensitivityLevel.Internal
-                    : SensitivityLevel.Public;
+        var categories = ClassificationTaxonomy.DetectCategories(content);
+        var sensitivity = categories
+            .Select(ClassificationTaxonomy.MinimumSensitivityFor)
+            .Where(level => level is not null)
+            .Select(level => level!.Value)
+            .DefaultIfEmpty(IsLikelyOperationalKnowledge(content, sourceType)
+                ? SensitivityLevel.Internal
+                : SensitivityLevel.Public)
+            .Max();
 
         var confidence = string.IsNullOrWhiteSpace(content)
             ? 0
@@ -55,28 +33,17 @@ public sealed class MockContentClassifier : IContentClassifier
                 ? 0.9
                 : 0.75;
 
-        return ValueTask.FromResult(new ClassificationResult(
+        return ValueTask.FromResult(ClassificationResultNormalizer.Normalize(new ClassificationResult(
             sourceId,
             sensitivity,
             confidence,
             categories,
-            sensitivity is SensitivityLevel.Confidential or SensitivityLevel.Restricted));
+            sensitivity is SensitivityLevel.Confidential or SensitivityLevel.Restricted)));
     }
 
     private static bool IsLikelyOperationalKnowledge(string content, string? sourceType) =>
         string.Equals(sourceType, "runbook", StringComparison.OrdinalIgnoreCase)
-        || content.Contains("runbook", StringComparison.Ordinal)
-        || content.Contains("implementation", StringComparison.Ordinal)
-        || content.Contains("decision", StringComparison.Ordinal);
-
-    private static void AddMatches(HashSet<string> categories, string content, IEnumerable<string> markers)
-    {
-        foreach (var marker in markers)
-        {
-            if (content.Contains(marker, StringComparison.Ordinal))
-            {
-                categories.Add(marker);
-            }
-        }
-    }
+        || content.Contains("runbook", StringComparison.OrdinalIgnoreCase)
+        || content.Contains("implementation", StringComparison.OrdinalIgnoreCase)
+        || content.Contains("decision", StringComparison.OrdinalIgnoreCase);
 }

@@ -53,6 +53,11 @@ public static class TurnSummaryEndpoints
 
         var receivedAt = DateTimeOffset.UtcNow;
         var sourceId = new PublicRecordId(sourceEventId);
+        var classificationInput = AgentVisibleClassificationInput.Compose(
+            content: null,
+            ResolveTitle(request),
+            request.Summary,
+            normalizedTags);
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
         db.AuditEvents.Add(new AuditEventRecord
         {
@@ -69,11 +74,11 @@ public static class TurnSummaryEndpoints
         ClassificationResult classification;
         try
         {
-            classification = await classifier.ClassifyAsync(
+            classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
                 sourceId,
-                request.Summary,
+                classificationInput,
                 "turn-summary",
-                cancellationToken);
+                cancellationToken));
         }
         catch (ClassificationProviderException error)
         {

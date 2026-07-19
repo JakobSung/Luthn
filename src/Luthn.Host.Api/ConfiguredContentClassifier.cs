@@ -21,20 +21,6 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private static readonly HashSet<string> SafeCategories = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "access key",
-        "contract",
-        "credential",
-        "customer",
-        "customer original",
-        "email",
-        "invoice",
-        "payment",
-        "private key",
-        "tax"
-    };
-
     public ConfiguredContentClassifier(
         IOperatorClassificationSettingsStore settingsStore,
         IHttpClientFactory httpClientFactory)
@@ -385,16 +371,16 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
         var categories = (response.Categories ?? [])
             .Where(category => !string.IsNullOrWhiteSpace(category))
             .Select(category => category.Trim())
-            .Where(category => SafeCategories.Contains(category))
+            .Where(ClassificationTaxonomy.IsKnownCategory)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        return new ClassificationResult(
+        return ClassificationResultNormalizer.Normalize(new ClassificationResult(
             sourceId,
             sensitivity,
             Math.Clamp(response.Confidence, 0, 1),
             categories,
-            response.ContainsSensitiveMaterial);
+            response.ContainsSensitiveMaterial));
     }
 
     private static string BuildClassificationUserPrompt(
@@ -411,8 +397,11 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
         {content}
         """;
 
-    private const string ClassificationSystemPrompt =
-        "You classify source content for Luthn. Return only the requested structured classification. Use Public, Internal, Confidential, or Restricted sensitivity. Mark containsSensitiveMaterial true for Confidential or Restricted material.";
+    private static readonly string ClassificationSystemPrompt =
+        $"You classify source content for Luthn using category taxonomy version {ClassificationTaxonomy.Version}. " +
+        "Return only the requested structured classification. Use Public, Internal, Confidential, or Restricted sensitivity. " +
+        "Restricted categories are credential, private key, access key, and customer original. " +
+        "All other allowed categories are Confidential. Mark containsSensitiveMaterial true for Confidential or Restricted material.";
 
     private static readonly object ClassificationJsonSchema = new
     {
@@ -444,7 +433,7 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
                 items = new
                 {
                     type = "string",
-                    @enum = SafeCategoriesForSchema
+                    @enum = ClassificationTaxonomy.CategoryNames
                 }
             },
             containsSensitiveMaterial = new
@@ -453,21 +442,6 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
             }
         }
     };
-
-    private static readonly string[] SafeCategoriesForSchema =
-    [
-        "access key",
-        "contract",
-        "credential",
-        "customer",
-        "customer original",
-        "email",
-        "invoice",
-        "payment",
-        "private key",
-        "tax"
-    ];
-
     private sealed record ClassifierJsonResponse(
         string Sensitivity,
         double Confidence,

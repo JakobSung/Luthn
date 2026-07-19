@@ -19,9 +19,9 @@ public sealed class MemoryEndpointTests
         var httpContext = new DefaultHttpContext();
         var request = new CreateMemoryItemRequest
         {
-            Title = "Release runbook memory",
+            Title = "Release guide memory",
             SafeSummary = "Public-safe deployment memory.",
-            CoreTags = [" runbook ", "Runbook", "release"],
+            CoreTags = [" guide ", "Guide", "release"],
             Visibility = MemoryVisibility.SharedAcrossAgents
         };
 
@@ -36,7 +36,7 @@ public sealed class MemoryEndpointTests
         var id = created.Value!.Id;
 
         Assert.True(created.Value.AllowsAgentContext);
-        Assert.Equal(["runbook", "release"], created.Value.CoreTags);
+        Assert.Equal(["guide", "release"], created.Value.CoreTags);
         Assert.DoesNotContain("raw", created.Value.SafeSummary, StringComparison.OrdinalIgnoreCase);
 
         var readResult = await MemoryEndpoints.ReadMemoryItem(id, db, CancellationToken.None);
@@ -126,6 +126,60 @@ public sealed class MemoryEndpointTests
     }
 
     [Fact]
+    public async Task KoreanSensitiveTitleAloneKeepsSharedMemoryPrivate()
+    {
+        await using var db = CreateDbContext();
+        var request = new CreateMemoryItemRequest
+        {
+            Title = "고객 비밀번호 교체 메모",
+            SafeSummary = "공개 가능한 운영 요약입니다.",
+            CoreTags = ["security"],
+            Visibility = MemoryVisibility.SharedAcrossAgents
+        };
+
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            request,
+            new MockContentClassifier(),
+            new PolicyEngine(),
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result);
+        Assert.Equal(SensitivityLevel.Restricted, created.Value!.Sensitivity);
+        Assert.Equal(MemoryVisibility.PrivateToOwner, created.Value.Visibility);
+        Assert.False(created.Value.AllowsAgentContext);
+        Assert.IsType<NotFound>(
+            (await MemoryEndpoints.ReadMemoryItem(created.Value.Id, db, CancellationToken.None)).Result);
+    }
+
+    [Fact]
+    public async Task KoreanSensitiveTagAloneKeepsSharedMemoryPrivate()
+    {
+        await using var db = CreateDbContext();
+        var request = new CreateMemoryItemRequest
+        {
+            Title = "공개 가능한 운영 메모",
+            SafeSummary = "공개 가능한 운영 요약입니다.",
+            CoreTags = ["release", "주민등록번호"],
+            Visibility = MemoryVisibility.PublicSafe
+        };
+
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            request,
+            new MockContentClassifier(),
+            new PolicyEngine(),
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result);
+        Assert.Equal(SensitivityLevel.Confidential, created.Value!.Sensitivity);
+        Assert.Equal(MemoryVisibility.PrivateToOwner, created.Value.Visibility);
+        Assert.False(created.Value.AllowsAgentContext);
+    }
+
+    [Fact]
     public async Task MemoryWriteMapsClassificationProviderFailureToProblem()
     {
         await using var db = CreateDbContext();
@@ -133,7 +187,7 @@ public sealed class MemoryEndpointTests
         {
             Title = "Release memory",
             SafeSummary = "Public-safe release summary.",
-            CoreTags = ["runbook"],
+            CoreTags = ["release"],
             Visibility = MemoryVisibility.PublicSafe
         };
 
@@ -219,7 +273,7 @@ public sealed class MemoryEndpointTests
         {
             Title = "Expired public memory",
             SafeSummary = "Expired public safe summary.",
-            CoreTags = ["runbook"],
+            CoreTags = ["release"],
             Visibility = MemoryVisibility.PublicSafe,
             RetentionKind = MemoryRetentionKind.Ephemeral,
             ExpiresAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z")
@@ -228,7 +282,7 @@ public sealed class MemoryEndpointTests
         var privateRead = await MemoryEndpoints.ReadMemoryItem(privateId, db, CancellationToken.None);
         var expiredRead = await MemoryEndpoints.ReadMemoryItem(expiredId, db, CancellationToken.None);
         var query = await MemoryEndpoints.QueryMemoryItems(
-            new MemoryQueryRequest(CoreTags: ["runbook", "private"], MaxItems: 10),
+            new MemoryQueryRequest(CoreTags: ["release", "private"], MaxItems: 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,

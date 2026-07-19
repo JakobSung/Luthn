@@ -20,7 +20,8 @@ POST /api/agent/turn-summaries
 
 Agent adapters can send bounded turn summaries after a conversation turn or
 small batch of turns. This endpoint is for summaries, not raw transcripts.
-Luthn classifies the submitted summary before it becomes shared memory.
+Luthn classifies the submitted summary, resolved title, and Core tags as one
+agent-visible projection before it becomes shared memory.
 
 Request:
 
@@ -306,7 +307,7 @@ Request:
 }
 ```
 
-The endpoint computes a `sha256:` content digest and persists the digest, not the raw `content`, in the source event record. It runs the configured classifier and policy engine, persists the classification result, and writes metadata-only audit events for provider invocation and the intake decision.
+The endpoint computes a `sha256:` content digest and persists the digest, not the raw `content`, in the source event record. It classifies `content`, `title`, `safeSummary`, and every `coreTags` entry as one complete projection, runs the policy engine, persists the normalized classification result, and writes metadata-only audit events for provider invocation and the intake decision.
 
 If policy allows wiki projection, the endpoint creates a wiki proposal from `title`, `safeSummary`, and `coreTags`. Agent context is allowed only when the storage decision allows it, and context-pack responses are limited to public agent-allowed wiki proposals. For sensitive records, intake does not persist caller-provided `safeSummary` as approved output; a decider can attach reviewed redacted output only during approval.
 
@@ -481,9 +482,10 @@ Read and query endpoints return only public, non-expired, agent-allowed memory
 projections. They do not expose private owner memory, restricted shared memory,
 raw Vault/source data, or participant-specific private context.
 
-Memory writes are classified before storage. If the classifier or policy engine
-finds sensitive material in the submitted summary, Luthn keeps the record behind
-the private memory boundary instead of making it agent-visible.
+Memory writes are classified before storage. The classifier receives the
+combined `title`, `safeSummary`, and every `coreTags` entry. If any field is
+sensitive, Luthn keeps the record behind the private memory boundary instead of
+making it agent-visible.
 
 ## Wiki-safe proposal
 

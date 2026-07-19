@@ -2,10 +2,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Luthn.Core.Classification;
+using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
 using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -113,6 +115,60 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
+    public async Task SensitiveTurnSummaryTagAloneStaysBehindMemoryBoundary()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-sensitive-tag",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = "공개 가능한 배포 결과입니다.",
+            coreTags = new[] { "release", "api 키" },
+            idempotencyKey = "summary-sensitive-tag"
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal("Restricted", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.False(body.RootElement.GetProperty("allowsAgentContext").GetBoolean());
+    }
+
+    [Fact]
+    public async Task TurnSummaryClassificationInputIncludesSummaryOnlyOnce()
+    {
+        var options = new DbContextOptionsBuilder<LuthnDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        await using var db = new LuthnDbContext(options);
+        var classifier = new CapturingPublicClassifier();
+        const string summary = "Unique provider payload for a release note.";
+
+        await TurnSummaryEndpoints.IntakeTurnSummary(
+            new TurnSummaryIntakeRequest
+            {
+                SessionId = "session-single-summary",
+                TurnId = "turn-1",
+                SourceAgent = "codex",
+                Summary = summary,
+                Title = "Release note",
+                CoreTags = ["release"],
+                IdempotencyKey = "summary-single-payload"
+            },
+            classifier,
+            new PolicyEngine(),
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        Assert.Equal(1, CountOccurrences(classifier.Content, summary));
+        Assert.DoesNotContain($"content:\n{summary}", classifier.Content, StringComparison.Ordinal);
+        Assert.Contains($"safeSummary:\n{summary}", classifier.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TurnSummaryIntakeIsIdempotentByKey()
     {
         using var factory = CreateFactory();
@@ -154,5 +210,41 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             builder.UseEnvironment("Testing");
             builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
         });
+    }
+
+    private static int CountOccurrences(string content, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = content.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
+    }
+
+    private sealed class CapturingPublicClassifier : IContentClassifier
+    {
+        public ClassificationProviderBoundary Boundary { get; } =
+            new("test", "classification-input", "local-only");
+
+        public string Content { get; private set; } = "";
+
+        public ValueTask<ClassificationResult> ClassifyAsync(
+            PublicRecordId sourceId,
+            string content,
+            string? sourceType,
+            CancellationToken cancellationToken = default)
+        {
+            Content = content;
+            return ValueTask.FromResult(new ClassificationResult(
+                sourceId,
+                SensitivityLevel.Public,
+                0.9,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                ContainsSensitiveMaterial: false));
+        }
     }
 }

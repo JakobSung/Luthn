@@ -547,11 +547,11 @@ public static class SensitiveAccessEndpoints
                 $"redactedSummary must be {MaxStoredRedactedSummaryLength} characters or fewer."));
         }
 
-        var classification = await classifier.ClassifyAsync(
+        var classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
             new PublicRecordId($"{accessRequest.Id}-redacted-summary"),
             candidate,
             "redacted-summary",
-            cancellationToken);
+            cancellationToken));
         var decision = policyEngine.Decide(classification);
         if (classification.ContainsSensitiveMaterial || !decision.AllowsAgentContext)
         {
