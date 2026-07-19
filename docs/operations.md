@@ -49,6 +49,15 @@ upgrade reaches ready state, create and verify a new paired database/operator
 recovery set, then retire the legacy plaintext backup according to the
 operator's retention policy.
 
+The provenance migration backfills every existing source event and memory item
+inside the schema transaction. Legacy rows are marked `legacy-unknown`; the
+migration does not infer a user, agent, application, plugin, or connector from
+untrusted historical text. PostgreSQL deferred constraints require new subject
+rows and provenance to commit together, and the database rejects direct
+provenance mutation. Include `collection_provenance` in database backup and
+restore as ordinary metadata. Its retention follows the linked subject; do not
+export it to agent, sync, telemetry, or audit payloads.
+
 ## Self-Host Migration Model
 
 Luthn uses EF Core migrations against PostgreSQL. Operators should treat schema

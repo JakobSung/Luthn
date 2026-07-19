@@ -49,6 +49,20 @@ public static class SourceIntakeEndpoints
 
         var sourceEventId = $"source-{Guid.NewGuid():N}";
         var receivedAt = DateTimeOffset.UtcNow;
+        var actor = ServiceTokenAuthorization.GetActor(httpContext);
+        var provenanceError = CollectionProvenance.TryCreate(
+            sourceEventId,
+            memoryItemId: null,
+            request.Provenance,
+            actor,
+            ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
+            receivedAt,
+            out var provenance,
+            fallbackApplicationId: request.SourceSystem);
+        if (provenanceError is not null)
+        {
+            return TypedResults.BadRequest(provenanceError);
+        }
         var sourceId = new PublicRecordId(sourceEventId);
         var normalizedTags = NormalizeTags(request.CoreTags!);
         var classificationInput = AgentVisibleClassificationInput.Compose(
@@ -64,7 +78,7 @@ public static class SourceIntakeEndpoints
         {
             Id = providerAuditEventId,
             OccurredAt = receivedAt,
-            Actor = ServiceTokenAuthorization.GetActor(httpContext),
+            Actor = actor,
             Action = "classification.provider.invoked",
             SubjectId = sourceEventId,
             PayloadClass = classifier.Boundary.PayloadClass,
@@ -95,6 +109,7 @@ public static class SourceIntakeEndpoints
             ContentDigest = ComputeSha256Digest(request.Content),
             ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial
         });
+        db.CollectionProvenance.Add(provenance);
 
         var classificationResultId = $"classification-{Guid.NewGuid():N}";
         db.ClassificationResults.Add(new ClassificationResultRecord
@@ -152,7 +167,7 @@ public static class SourceIntakeEndpoints
         {
             Id = auditEventId,
             OccurredAt = receivedAt,
-            Actor = ServiceTokenAuthorization.GetActor(httpContext),
+            Actor = actor,
             Action = "source.intake.classified",
             SubjectId = sourceEventId,
             PayloadClass = decision.AllowsWikiProjection ? "metadata-only" : "sensitive-reference-only",
@@ -282,6 +297,7 @@ public sealed record SourceIntakeRequest
     public string? ProjectKey { get; init; }
     public string? TaskKey { get; init; }
     public IReadOnlyList<string>? TopicTags { get; init; }
+    public CollectionProvenanceClaims? Provenance { get; init; }
 }
 
 public sealed record SourceIntakeResponse(

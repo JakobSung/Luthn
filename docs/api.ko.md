@@ -242,6 +242,46 @@ payload를 복호화하지 않습니다. `/readyz`는 `sensitive-memory-protecti
 보고하며 key ring 또는 기존 암호문을 검증할 수 없으면 보호 API route가 `503`을
 반환합니다.
 
+`/api/memory/items`, `/api/sources`, `/api/agent/turn-summaries` 쓰기는 같은
+선택적 구조화 `provenance` 객체를 받습니다.
+
+```json
+{
+  "provenance": {
+    "userId": "owner.one",
+    "agentId": "codex",
+    "applicationId": "codex.desktop",
+    "pluginId": "luthn.hook",
+    "connectorId": "luthn.codex.connector",
+    "connectorVersion": "2",
+    "collectedAt": "2026-07-19T00:00:00Z"
+  }
+}
+```
+
+이 값은 길이와 문자가 제한된 호출자 주장입니다. 식별자는 소문자로 정규화하고,
+원본 경로와 자유형 source metadata는 받지 않으며, server 수신 시각보다 5분을 넘게
+앞선 수집 시각은 거부합니다. 인증된 service-token actor와 `receivedAt`은 항상
+server가 정하며 호출자가 덮어쓸 수 없습니다.
+
+## 수집 출처 정보
+
+```http
+GET /api/provenance/source-events/{sourceEventId}
+GET /api/provenance/memory-items/{memoryItemId}
+```
+
+두 route는 `audit.read`가 필요하며 MCP agent 도구와 agent 전용 connector interface에는
+노출하지 않습니다. source event와 memory item마다 versioned 불변 provenance 행이 정확히
+하나 있고, turn summary는 source event와 memory item 양쪽에 연결된 한 행을 사용합니다.
+`actorTrust`는 `service-token`, `local-runtime`, `legacy-unknown`, `claimsTrust`는
+`caller-supplied`, `no-claims`, `legacy-unknown` 중 하나입니다. 기존 행은 migration에서
+주장을 알 수 없는 결정적 version-1 기록을 받습니다.
+
+provenance는 수집 기원의 상태를, audit event는 시간에 따른 행위와 결정을 기록합니다.
+provenance를 audit payload, agent recall, search index, metric, 암호화 사용자 payload,
+safe sync, 외부 publication으로 복사하지 않습니다.
+
 ## 위키 안전 후보
 
 ```http

@@ -82,6 +82,10 @@ Runtime projects:
   authenticated protected payload store. Keep its key ring outside PostgreSQL,
   and never expose ciphertext through agent, sync, publication, audit, log, or
   metric contracts.
+- Store one immutable, versioned collection-provenance record atomically with
+  every new source event or shared-memory item. Keep caller claims distinct
+  from server-derived actor identity, and expose provenance only to authorized
+  operators.
 - Keep `Luthn.McpServer` connector-side over HTTP; do not wire it directly to
   Core.
 - Do not add one-off console apps. Prefer API endpoints, hosted services, MCP

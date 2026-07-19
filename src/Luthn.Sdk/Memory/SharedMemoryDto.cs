@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Luthn.Sdk.Provenance;
 
 namespace Luthn.Sdk.Memory;
 
@@ -13,7 +14,8 @@ public sealed record CreateSharedMemoryItemRequestDto(
     [property: JsonPropertyName("sensitivity")] string Sensitivity = "Public",
     [property: JsonPropertyName("projectKey")] string? ProjectKey = null,
     [property: JsonPropertyName("taskKey")] string? TaskKey = null,
-    [property: JsonPropertyName("topicTags")] IReadOnlyList<string>? TopicTags = null);
+    [property: JsonPropertyName("topicTags")] IReadOnlyList<string>? TopicTags = null,
+    [property: JsonPropertyName("provenance")] CollectionProvenanceClaimsDto? Provenance = null);
 
 public sealed record SharedMemoryQueryRequestDto(
     [property: JsonPropertyName("query")] string? Query,

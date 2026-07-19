@@ -45,6 +45,7 @@ public static class ServiceTokenAuthorization
     public const string OperatorHeaderName = "X-Luthn-Operator";
 
     private const string ActorItemKey = "Luthn.ServiceActor";
+    private const string ServiceTokenAuthenticatedItemKey = "Luthn.ServiceTokenAuthenticated";
     private const int MaxActorLength = 128;
     private const int MaxOperatorIdentityLength = 64;
 
@@ -78,6 +79,10 @@ public static class ServiceTokenAuthorization
         return "local-anonymous";
     }
 
+    public static bool IsServiceTokenAuthenticated(HttpContext httpContext) =>
+        httpContext.Items.TryGetValue(ServiceTokenAuthenticatedItemKey, out var value) &&
+        value is true;
+
     private static async ValueTask<object?> RequireScopeAsync(
         EndpointFilterInvocationContext context,
         EndpointFilterDelegate next,
@@ -91,6 +96,7 @@ public static class ServiceTokenAuthorization
 
         if (!RequiresServiceToken(environment, authOptions))
         {
+            httpContext.Items[ServiceTokenAuthenticatedItemKey] = false;
             httpContext.Items[ActorItemKey] = ComposeActor(
                 "local-anonymous",
                 httpContext.Request.Headers[OperatorHeaderName].ToString());
@@ -119,6 +125,7 @@ public static class ServiceTokenAuthorization
                 statusCode: StatusCodes.Status403Forbidden);
         }
 
+        httpContext.Items[ServiceTokenAuthenticatedItemKey] = true;
         httpContext.Items[ActorItemKey] = ComposeActor(
             matchedToken.Name.Trim(),
             httpContext.Request.Headers[OperatorHeaderName].ToString());

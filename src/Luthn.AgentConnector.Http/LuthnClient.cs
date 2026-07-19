@@ -7,6 +7,7 @@ using Luthn.Sdk.AgentConnections;
 using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
+using Luthn.Sdk.Provenance;
 using Luthn.Sdk.Source;
 using Luthn.Sdk.Telemetry;
 using Luthn.Sdk.Wiki;
@@ -192,6 +193,32 @@ public sealed class LuthnClient : ILuthnClient
         };
 
         return await SendJsonAsync<SharedMemoryItemDto>(httpRequest, cancellationToken);
+    }
+
+    public Task<CollectionProvenanceDto> GetSourceEventProvenanceAsync(
+        string sourceEventId,
+        CancellationToken cancellationToken = default) =>
+        GetProvenanceAsync("source-events", sourceEventId, cancellationToken);
+
+    public Task<CollectionProvenanceDto> GetMemoryItemProvenanceAsync(
+        string memoryItemId,
+        CancellationToken cancellationToken = default) =>
+        GetProvenanceAsync("memory-items", memoryItemId, cancellationToken);
+
+    private async Task<CollectionProvenanceDto> GetProvenanceAsync(
+        string subjectKind,
+        string subjectId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(subjectId))
+        {
+            throw new ArgumentException("Provenance subject id is required.", nameof(subjectId));
+        }
+
+        var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/provenance/{subjectKind}/{Uri.EscapeDataString(subjectId)}");
+        return await SendJsonAsync<CollectionProvenanceDto>(request, cancellationToken);
     }
 
     public async Task<SharedMemoryItemDto> GetSharedMemoryItemAsync(

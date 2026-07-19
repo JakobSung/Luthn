@@ -51,6 +51,7 @@ runtime 프로젝트는 `Luthn.Core`, `Luthn.Core.Persistence`, `Luthn.Host.Api`
 - 원본 Vault/source 조회 route, connector method, MCP tool을 기본으로 추가하지 않습니다.
 - 미래의 명시적 계획이 제한된 가림 출력을 구현하기 전까지 민감 접근·감사 응답은 메타데이터만 반환합니다.
 - 민감하거나 agent에 보이지 않는 shared-memory 사용자 필드는 인증된 보호 payload 저장소에 두고 key ring은 PostgreSQL 밖에 둡니다. 암호문을 agent, sync, publication, audit, log, metric 계약으로 노출하지 않습니다.
+- 모든 새 source event 또는 shared-memory item과 함께 버전이 지정된 불변 수집 출처 레코드 하나를 원자적으로 저장합니다. 호출자 주장은 서버가 확인한 actor identity와 구분하고, 출처정보는 권한 있는 운영자에게만 제공합니다.
 - `Luthn.McpServer`는 HTTP를 이용하는 connector 쪽에 두고 Core에 직접 연결하지 않습니다.
 - 일회성 console app을 추가하지 말고 API endpoint, hosted service, MCP tool, SDK/client library, 제한된 `Luthn.Tools` 하위 명령을 사용합니다.
 

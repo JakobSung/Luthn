@@ -60,6 +60,19 @@ public static class MemoryEndpoints
 
         var createdAt = DateTimeOffset.UtcNow;
         var memoryId = $"memory-{Guid.NewGuid():N}";
+        var actor = ServiceTokenAuthorization.GetActor(httpContext);
+        var provenanceError = CollectionProvenance.TryCreate(
+            sourceEventId: null,
+            memoryId,
+            request.Provenance,
+            actor,
+            ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
+            createdAt,
+            out var provenance);
+        if (provenanceError is not null)
+        {
+            return TypedResults.BadRequest(provenanceError);
+        }
         var sourceId = new PublicRecordId(memoryId);
         var normalizedTags = NormalizeTags(request.CoreTags!);
         var classificationInput = AgentVisibleClassificationInput.Compose(
@@ -119,9 +132,10 @@ public static class MemoryEndpoints
             AllowsAgentContext = allowsAgentContext,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
-            CreatedBy = ServiceTokenAuthorization.GetActor(httpContext)
+            CreatedBy = actor
         };
         db.SharedMemoryItems.Add(record);
+        db.CollectionProvenance.Add(provenance);
         if (SensitiveMemoryPersistence.RequiresProtection(record))
         {
             var payload = SensitiveMemoryPersistence.FromRecord(record);
@@ -136,7 +150,7 @@ public static class MemoryEndpoints
         {
             Id = $"audit-{Guid.NewGuid():N}",
             OccurredAt = createdAt,
-            Actor = ServiceTokenAuthorization.GetActor(httpContext),
+            Actor = actor,
             Action = "memory.item.classified",
             SubjectId = item.Id.Value,
             PayloadClass = "metadata-only",
@@ -453,6 +467,7 @@ public sealed record CreateMemoryItemRequest
     public string? ProjectKey { get; init; }
     public string? TaskKey { get; init; }
     public IReadOnlyList<string>? TopicTags { get; init; }
+    public CollectionProvenanceClaims? Provenance { get; init; }
 }
 
 public sealed record MemoryQueryRequest(

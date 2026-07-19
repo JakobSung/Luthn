@@ -50,6 +50,7 @@ public static class ClassificationEndpoints
 
         app.MapSensitiveAccessRequests();
         app.MapAuditEvents();
+        app.MapCollectionProvenance();
 
         return app;
     }

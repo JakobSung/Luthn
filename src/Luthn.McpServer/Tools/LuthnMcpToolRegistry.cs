@@ -59,7 +59,8 @@ public static class LuthnMcpToolRegistry
                 StringProperty("retentionKind", "Retention kind, defaults to Durable."),
                 StringProperty("expiresAt", "Expiration timestamp for non-durable memory."),
                 StringProperty("sourceSessionId", "Optional source session id."),
-                StringProperty("sensitivity", "Declared sensitivity, defaults to Public.")
+                StringProperty("sensitivity", "Declared sensitivity, defaults to Public."),
+                ProvenanceProperty()
             ], ["title", "safeSummary", "coreTags"])),
         new(
             "query_shared_memory",
@@ -226,6 +227,19 @@ public static class LuthnMcpToolRegistry
                 ["type"] = "string"
             }
         });
+
+    private static KeyValuePair<string, object> ProvenanceProperty() =>
+        new("provenance", ToolSchema(
+            [
+                BoundedStringProperty("userId", "Optional claimed user identifier.", 128, "^[A-Za-z0-9][A-Za-z0-9._:@-]*$"),
+                BoundedStringProperty("agentId", "Optional claimed agent identifier.", 128, "^[A-Za-z0-9][A-Za-z0-9._:@-]*$"),
+                BoundedStringProperty("applicationId", "Optional claimed application identifier.", 128, "^[A-Za-z0-9][A-Za-z0-9._:@-]*$"),
+                BoundedStringProperty("pluginId", "Optional claimed plugin identifier.", 128, "^[A-Za-z0-9][A-Za-z0-9._:@-]*$"),
+                BoundedStringProperty("connectorId", "Optional claimed connector identifier.", 128, "^[A-Za-z0-9][A-Za-z0-9._:@-]*$"),
+                BoundedStringProperty("connectorVersion", "Optional claimed connector version.", 64, "^[A-Za-z0-9][A-Za-z0-9._+:-]*$"),
+                StringProperty("collectedAt", "Optional ISO-8601 client collection timestamp.")
+            ],
+            allowAdditionalProperties: false));
 }
 
 public sealed record LuthnMcpToolDescriptor(

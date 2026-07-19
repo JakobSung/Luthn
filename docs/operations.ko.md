@@ -30,6 +30,14 @@ commit하지 않습니다. `update`와 일반 `uninstall`은 operator volume을 
 함께 만들고 검증한 다음, 기존 평문 backup은 운영자의 retention 정책에 따라
 폐기합니다.
 
+provenance migration은 기존 source event와 memory item 모두를 schema transaction 안에서
+backfill합니다. 기존 행은 `legacy-unknown`으로 표시하며 과거의 신뢰할 수 없는 text에서
+user, agent, application, plugin, connector를 추론하지 않습니다. PostgreSQL deferred
+constraint는 새 subject와 provenance가 함께 commit되도록 하고 database는 provenance의
+직접 수정을 거부합니다. `collection_provenance`는 일반 metadata로 database backup·복원에
+포함하고, 연결된 subject와 같은 retention을 적용합니다. agent, sync, telemetry, audit
+payload로 export하지 않습니다.
+
 ## 직접 호스팅 Migration 모형
 
 Schema 변경은 API 시작의 부수 효과가 아니라 명시적 유지 관리 단계입니다. 적용 전에 image와 migration 집합을 맞추고 migration script를 검토하며 저장소 밖에 backup을 만들고 임시 database로 복원 검증을 합니다. token·connection string은 secret 저장소나 runtime 환경에만 둡니다.

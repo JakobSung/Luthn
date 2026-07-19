@@ -42,7 +42,16 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             sourceMetadata = new Dictionary<string, string> { ["transcript_path"] = "/private/transcript.jsonl" },
             projectKey = " LUTHN ",
             taskKey = " RELEASE ",
-            topicTags = new[] { " Delivery ", "delivery" }
+            topicTags = new[] { " Delivery ", "delivery" },
+            provenance = new
+            {
+                userId = "Owner.One",
+                agentId = "Codex",
+                applicationId = "Codex.Desktop",
+                pluginId = "Luthn.Hook",
+                connectorId = "Luthn.Codex.Connector",
+                connectorVersion = "2"
+            }
         });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -77,6 +86,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         var source = await db.SourceEvents.SingleAsync();
         var classification = await db.ClassificationResults.SingleAsync();
         var memory = await db.SharedMemoryItems.SingleAsync();
+        var provenance = await db.CollectionProvenance.SingleAsync();
 
         Assert.Equal("turn-summary", source.SourceType);
         Assert.False(source.ContainsSensitiveMaterial);
@@ -88,6 +98,14 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.Equal("luthn", memory.ProjectKey);
         Assert.Equal("release", memory.TaskKey);
         Assert.Equal(["delivery"], memory.TopicTags);
+        Assert.Equal(source.Id, provenance.SourceEventId);
+        Assert.Equal(memory.Id, provenance.MemoryItemId);
+        Assert.Equal("owner.one", provenance.ClaimedUserId);
+        Assert.Equal("codex", provenance.AgentId);
+        Assert.Equal("codex.desktop", provenance.ApplicationId);
+        Assert.Equal("luthn.hook", provenance.PluginId);
+        Assert.Equal("luthn.codex.connector", provenance.ConnectorId);
+        Assert.Equal("2", provenance.ConnectorVersion);
         var persistedStrings = db.ChangeTracker.Entries()
             .Select(entry => entry.Entity)
             .SelectMany(record => record.GetType().GetProperties()

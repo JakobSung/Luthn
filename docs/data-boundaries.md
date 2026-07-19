@@ -174,6 +174,24 @@ recovery set. Never commit, print, or copy key XML into ordinary logs or an
 unencrypted repository. Losing the key ring makes encrypted memory
 unrecoverable; generating a new key ring does not decrypt existing payloads.
 
+## Collection Provenance Boundary
+
+Every source event and shared-memory item has one versioned immutable
+`collection_provenance` row. It stores the server-derived authenticated ingest
+actor and receipt time separately from optional caller claims for user, agent,
+application, plugin, connector, connector version, and client collection time.
+Caller claims are not authentication or tenancy evidence. Legacy rows use
+explicit `legacy-unknown` trust and null origin claims.
+
+Provenance identifiers are bounded and normalized. Raw workspace or transcript
+paths, device fingerprints, prompts, query text, credentials, free-form source
+metadata, and source content are excluded. Provenance follows its source or
+memory retention lifecycle and has no update/delete API. It is available only
+through operator-authorized `audit.read` routes and is excluded from agent
+recall, search indexes, encrypted user payloads, safe sync, publication, audit
+payloads, logs, and metrics. Audit remains the event history of actions and
+decisions; provenance remains the immutable origin statement.
+
 ## Provider Boundary
 
 - Fresh packaged installs use an explicit `unconfigured` state. Classification

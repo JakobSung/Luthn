@@ -4,6 +4,7 @@ using Luthn.Sdk.Agent;
 using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
+using Luthn.Sdk.Provenance;
 using Luthn.Sdk.Plugins;
 using Luthn.Sdk.Source;
 using Luthn.Sdk.Sync;
@@ -313,7 +314,14 @@ public sealed class SdkContractTests
         var create = new CreateSharedMemoryItemRequestDto(
             "Release memory",
             "Public-safe release summary.",
-            ["release", "runbook"]);
+            ["release", "runbook"],
+            Provenance: new CollectionProvenanceClaimsDto(
+                "owner.one",
+                "codex",
+                "codex.desktop",
+                "luthn.plugin",
+                "luthn.codex.connector",
+                "2"));
         var query = new SharedMemoryQueryRequestDto("release", ["runbook"], 5);
         var item = new SharedMemoryItemDto(
             "memory-1",
@@ -333,6 +341,8 @@ public sealed class SdkContractTests
         Assert.Contains("\"safeSummary\"", json, StringComparison.Ordinal);
         Assert.Contains("\"coreTags\"", json, StringComparison.Ordinal);
         Assert.Contains("\"allowsAgentContext\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"provenance\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"connectorId\":\"luthn.codex.connector\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("vault", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private", json, StringComparison.OrdinalIgnoreCase);

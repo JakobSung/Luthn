@@ -136,6 +136,25 @@ public sealed class SensitiveMemoryPayloadRecord
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
+public sealed class CollectionProvenanceRecord
+{
+    public string Id { get; set; } = "";
+    public int ContractVersion { get; set; } = 1;
+    public string? SourceEventId { get; set; }
+    public string? MemoryItemId { get; set; }
+    public string AuthenticatedActor { get; set; } = "";
+    public string ActorTrust { get; set; } = "";
+    public string ClaimsTrust { get; set; } = "";
+    public string? ClaimedUserId { get; set; }
+    public string? AgentId { get; set; }
+    public string? ApplicationId { get; set; }
+    public string? PluginId { get; set; }
+    public string? ConnectorId { get; set; }
+    public string? ConnectorVersion { get; set; }
+    public DateTimeOffset? CollectedAt { get; set; }
+    public DateTimeOffset ReceivedAt { get; set; }
+}
+
 public sealed class LocalInstallationStateRecord
 {
     public const string SingletonId = "local";

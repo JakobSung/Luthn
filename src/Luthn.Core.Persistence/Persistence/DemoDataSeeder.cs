@@ -49,6 +49,23 @@ public static class DemoDataSeeder
             created = true;
         }
 
+        if (!await db.CollectionProvenance.AnyAsync(
+                record => record.SourceEventId == SourceEventId,
+                cancellationToken))
+        {
+            db.CollectionProvenance.Add(new CollectionProvenanceRecord
+            {
+                Id = "provenance-demo-source-runbook",
+                ContractVersion = 1,
+                SourceEventId = SourceEventId,
+                AuthenticatedActor = "luthn-tools",
+                ActorTrust = "local-runtime",
+                ClaimsTrust = "no-claims",
+                ReceivedAt = timestamp
+            });
+            created = true;
+        }
+
         if (!await db.AuditEvents.AnyAsync(record => record.Id == AuditEventId, cancellationToken))
         {
             db.AuditEvents.Add(new AuditEventRecord

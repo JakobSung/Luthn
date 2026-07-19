@@ -14,6 +14,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public DbSet<SensitiveAccessDecisionRecord> SensitiveAccessDecisions => Set<SensitiveAccessDecisionRecord>();
     public DbSet<SharedMemoryItemRecord> SharedMemoryItems => Set<SharedMemoryItemRecord>();
     public DbSet<SensitiveMemoryPayloadRecord> SensitiveMemoryPayloads => Set<SensitiveMemoryPayloadRecord>();
+    public DbSet<CollectionProvenanceRecord> CollectionProvenance => Set<CollectionProvenanceRecord>();
     public DbSet<LocalInstallationStateRecord> LocalInstallationStates => Set<LocalInstallationStateRecord>();
     public DbSet<SafeProjectionSyncOutboxRecord> SafeProjectionSyncOutbox => Set<SafeProjectionSyncOutboxRecord>();
     public DbSet<SafeProjectionSyncCheckpointRecord> SafeProjectionSyncCheckpoints => Set<SafeProjectionSyncCheckpointRecord>();
@@ -176,6 +177,37 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<CollectionProvenanceRecord>(entity =>
+        {
+            entity.ToTable("collection_provenance", table => table.HasCheckConstraint(
+                "CK_collection_provenance_subject",
+                "\"SourceEventId\" IS NOT NULL OR \"MemoryItemId\" IS NOT NULL"));
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(64);
+            entity.Property(record => record.ContractVersion).HasDefaultValue(1);
+            entity.Property(record => record.SourceEventId).HasMaxLength(128);
+            entity.Property(record => record.MemoryItemId).HasMaxLength(128);
+            entity.Property(record => record.AuthenticatedActor).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.ActorTrust).HasMaxLength(32).IsRequired();
+            entity.Property(record => record.ClaimsTrust).HasMaxLength(32).IsRequired();
+            entity.Property(record => record.ClaimedUserId).HasMaxLength(128);
+            entity.Property(record => record.AgentId).HasMaxLength(128);
+            entity.Property(record => record.ApplicationId).HasMaxLength(128);
+            entity.Property(record => record.PluginId).HasMaxLength(128);
+            entity.Property(record => record.ConnectorId).HasMaxLength(128);
+            entity.Property(record => record.ConnectorVersion).HasMaxLength(64);
+            entity.HasIndex(record => record.SourceEventId).IsUnique();
+            entity.HasIndex(record => record.MemoryItemId).IsUnique();
+            entity.HasOne<SourceEventRecord>()
+                .WithOne()
+                .HasForeignKey<CollectionProvenanceRecord>(record => record.SourceEventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<SharedMemoryItemRecord>()
+                .WithOne()
+                .HasForeignKey<CollectionProvenanceRecord>(record => record.MemoryItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<LocalInstallationStateRecord>(entity =>
         {
             entity.ToTable("local_installation_state");
@@ -252,6 +284,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        RejectProvenanceUpdates();
         UpdateSearchIndexes();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -260,8 +293,18 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
+        RejectProvenanceUpdates();
         UpdateSearchIndexes();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void RejectProvenanceUpdates()
+    {
+        if (ChangeTracker.Entries<CollectionProvenanceRecord>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("Collection provenance records are immutable.");
+        }
     }
 
     private void UpdateSearchIndexes()
