@@ -32,13 +32,11 @@ AGENTS.md
 
 # BEGIN DRIG GENERATED ARTIFACTS
 .drig/
-.review-artifacts/
 docs/.drig-status.json
 docs/roadmap.md
 docs/01-plan/
 docs/02-architecture/
 docs/03-analysis/
-docs/04-review/
+docs/04-qa/
 docs/05-report/
-docs/code-review/
 # END DRIG GENERATED ARTIFACTS

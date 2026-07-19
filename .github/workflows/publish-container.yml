@@ -37,6 +37,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read release contract
+        id: release
+        run: |
+          echo "cli-template-version=$(jq -r '.cliTemplateVersion' release/version.json)" >> "$GITHUB_OUTPUT"
+          echo "connector-template-version=$(jq -r '.connectorTemplateVersion' release/version.json)" >> "$GITHUB_OUTPUT"
+          echo "mcp-schema-version=$(jq -r '.mcpSchemaVersion' release/version.json)" >> "$GITHUB_OUTPUT"
+
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -49,6 +56,9 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=AGPL-3.0-only
             org.opencontainers.image.revision=${{ github.sha }}
+            io.luthn.cli-template.version=${{ steps.release.outputs.cli-template-version }}
+            io.luthn.connector-template.version=${{ steps.release.outputs.connector-template-version }}
+            io.luthn.mcp-schema.version=${{ steps.release.outputs.mcp-schema-version }}
 
       - name: Build and publish multi-architecture image
         uses: docker/build-push-action@v6

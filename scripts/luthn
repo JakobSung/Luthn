@@ -17,7 +17,9 @@ connector_state_dir="${LUTHN_CONNECTOR_STATE_DIR:-$state_dir/connectors}"
 codex_state_file="${LUTHN_CODEX_STATE_FILE:-$connector_state_dir/codex.env}"
 codex_pending_state_file="${LUTHN_CODEX_PENDING_STATE_FILE:-$connector_state_dir/codex.pending.env}"
 codex_disconnect_pending_state_file="${LUTHN_CODEX_DISCONNECT_PENDING_STATE_FILE:-$connector_state_dir/codex.disconnect.pending.env}"
+cli_template_version="3"
 codex_connector_version="2"
+mcp_schema_version="2"
 distribution_ref="${LUTHN_DISTRIBUTION_REF:-main}"
 source_base_url="${LUTHN_SOURCE_BASE_URL:-https://raw.githubusercontent.com/JakobSung/Luthn/${distribution_ref}}"
 default_image="ghcr.io/jakobsung/luthn:main"
@@ -28,8 +30,11 @@ usage: luthn <command> [options]
 
 commands:
   install [--connect-codex]       Install Luthn and optionally configure Codex.
+  version [--json]                Show installed runtime and compatibility versions.
   status                          Show services, readiness, console, and image.
+  update check [--json]           Check the configured update channel without pulling.
   update [image]                  Back up, pull, migrate, restart, and verify.
+  doctor [--json]                 Diagnose runtime, update, and Codex integration state.
   reset --yes                     Delete data volumes and recreate the stack.
   uninstall                      Remove services and runtime; preserve data/config.
   uninstall --purge-data --yes   Remove services, data, config, backups, and CLI.
@@ -66,6 +71,266 @@ Start Docker Desktop or OrbStack, then verify the active context with:
 ERROR
     exit 1
   fi
+}
+
+is_immutable_image_ref() {
+  image_ref="$1"
+  [[ "$image_ref" =~ @sha256:[0-9a-fA-F]{64}$ \
+    || "$image_ref" =~ :sha-[0-9a-fA-F]{40}$ ]]
+}
+
+is_official_image_ref() {
+  [[ "$1" == ghcr.io/jakobsung/luthn:* || "$1" == ghcr.io/jakobsung/luthn@* ]]
+}
+
+image_label() {
+  image="$1"
+  label="$2"
+  docker image inspect --format "{{ index .Config.Labels \"$label\" }}" "$image" 2>/dev/null || true
+}
+
+image_digest() {
+  image="$1"
+  repo_digests="$(docker image inspect --format '{{join .RepoDigests ","}}' "$image" 2>/dev/null || true)"
+  printf '%s' "$repo_digests" | awk -F, '{ value=$NF; sub(/^.*@/, "", value); print value }'
+}
+
+stable_release_version() {
+  version="$1"
+  if [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+    printf '%s' "$version"
+  fi
+}
+
+parse_mcp_schema_version() {
+  local response="$1"
+  python3 - "$response" <<'PY'
+import json
+import sys
+
+for line in sys.argv[1].splitlines():
+    try:
+        payload = json.loads(line)
+        server_info = payload["result"]["serverInfo"]
+        version = server_info.get("schemaVersion") or server_info["version"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        continue
+    if isinstance(version, str) and version:
+        print(version)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+probe_mcp_schema_version() {
+  local response
+  [[ -f "$compose_file" && -f "$config_file" ]] || return 1
+  response="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    | compose_cmd --profile tools run --rm --no-deps -T mcp 2>/dev/null)" || return 1
+  parse_mcp_schema_version "$response"
+}
+
+probe_image_mcp_schema_version() {
+  local image="$1"
+  local response
+  response="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    | docker run --rm -i "$image" mcp 2>/dev/null)" || return 1
+  parse_mcp_schema_version "$response"
+}
+
+show_version() {
+  json=false
+  if [[ "${1:-}" == "--json" ]]; then
+    json=true
+    shift
+  fi
+  if (( $# > 0 )); then
+    echo "usage: luthn version [--json]" >&2
+    return 2
+  fi
+
+  image_ref="$(read_config LUTHN_IMAGE "$default_image")"
+  running_id=""
+  installed_digest=""
+  source_revision=""
+  release_version=""
+  installed_mcp_schema=""
+  if command -v docker >/dev/null 2>&1 && [[ -f "$compose_file" && -f "$config_file" ]]; then
+    running_id="$(image_id_for_container)"
+    if [[ -n "$running_id" ]]; then
+      installed_digest="$(image_digest "$running_id")"
+      source_revision="$(image_label "$running_id" org.opencontainers.image.revision)"
+      release_version="$(stable_release_version "$(image_label "$running_id" org.opencontainers.image.version)")"
+      installed_mcp_schema="$(image_label "$running_id" io.luthn.mcp-schema.version)"
+      if [[ -z "$installed_mcp_schema" ]] && command -v python3 >/dev/null 2>&1; then
+        installed_mcp_schema="$(probe_mcp_schema_version 2>/dev/null || true)"
+      fi
+    fi
+  fi
+
+  connector_version="$codex_connector_version"
+  helper="$(codex_helper_path)"
+  if [[ -f "$helper" ]] && command -v python3 >/dev/null 2>&1; then
+    detected_connector_version="$(python3 "$helper" version 2>/dev/null || true)"
+    [[ "$detected_connector_version" =~ ^[1-9][0-9]*$ ]] && connector_version="$detected_connector_version"
+  fi
+
+  if [[ "$json" == "true" ]]; then
+    require_command python3
+    python3 - "$image_ref" "$installed_digest" "$source_revision" \
+      "$cli_template_version" "$connector_version" "$installed_mcp_schema" \
+      "$release_version" <<'PY'
+import json
+import sys
+
+keys = (
+    "installedImageReference",
+    "imageDigest",
+    "sourceRevision",
+    "cliTemplateVersion",
+    "connectorTemplateVersion",
+    "mcpSchemaVersion",
+    "stableReleaseVersion",
+)
+values = [value if value else None for value in sys.argv[1:]]
+print(json.dumps(dict(zip(keys, values)), separators=(",", ":")))
+PY
+    return
+  fi
+
+  cat <<EOF
+Installed image: $image_ref
+Image digest: ${installed_digest:-unavailable}
+Source revision: ${source_revision:-unavailable}
+CLI template: $cli_template_version
+Connector template: $connector_version
+MCP schema: ${installed_mcp_schema:-unavailable}
+Stable release: ${release_version:-unavailable}
+EOF
+}
+
+read_remote_image_metadata() {
+  remote_image="$1"
+  remote_manifest_json="$(docker buildx imagetools inspect "$remote_image" --format '{{json .Manifest}}')" || return 1
+  remote_image_json="$(docker buildx imagetools inspect "$remote_image" --format '{{json .Image}}')" || return 1
+  python3 - "$remote_manifest_json" "$remote_image_json" <<'PY'
+import json
+import sys
+
+manifest = json.loads(sys.argv[1])
+images = json.loads(sys.argv[2])
+image = images[sorted(images)[0]] if images else {}
+labels = image.get("config", {}).get("Labels", {}) or {}
+values = (
+    manifest.get("digest", ""),
+    labels.get("org.opencontainers.image.revision", ""),
+    labels.get("org.opencontainers.image.version", ""),
+    labels.get("io.luthn.cli-template.version", ""),
+    labels.get("io.luthn.connector-template.version", ""),
+    labels.get("io.luthn.mcp-schema.version", ""),
+)
+print("\t".join(str(value or "") for value in values))
+PY
+}
+
+print_update_check_result() {
+  json="$1"
+  status="$2"
+  channel="$3"
+  current_digest="$4"
+  candidate_digest="$5"
+  current_revision="$6"
+  candidate_revision="$7"
+  message="$8"
+  if [[ "$json" == "true" ]]; then
+    python3 - "$status" "$channel" "$current_digest" "$candidate_digest" \
+      "$current_revision" "$candidate_revision" "$message" <<'PY'
+import json
+import sys
+
+keys = (
+    "status",
+    "channel",
+    "currentDigest",
+    "candidateDigest",
+    "currentRevision",
+    "candidateRevision",
+    "message",
+)
+values = [sys.argv[1], sys.argv[2], *[value if value else None for value in sys.argv[3:7]], sys.argv[7]]
+print(json.dumps(dict(zip(keys, values)), separators=(",", ":")))
+PY
+  else
+    cat <<EOF
+Update status: $status
+Channel: $channel
+Current digest: ${current_digest:-unavailable}
+Candidate digest: ${candidate_digest:-unavailable}
+Current revision: ${current_revision:-unavailable}
+Candidate revision: ${candidate_revision:-unavailable}
+$message
+EOF
+  fi
+}
+
+check_for_update() {
+  json=false
+  if [[ "${1:-}" == "--json" ]]; then
+    json=true
+    shift
+  fi
+  if (( $# > 0 )); then
+    echo "usage: luthn update check [--json]" >&2
+    return 2
+  fi
+  require_installation
+  require_docker
+  require_command python3
+
+  channel="$(read_config LUTHN_IMAGE "$default_image")"
+  running_id="$(image_id_for_container)"
+  current_digest=""
+  current_revision=""
+  if [[ -n "$running_id" ]]; then
+    current_digest="$(image_digest "$running_id")"
+    current_revision="$(image_label "$running_id" org.opencontainers.image.revision)"
+  fi
+
+  if is_immutable_image_ref "$channel"; then
+    print_update_check_result "$json" pinned "$channel" "$current_digest" "" \
+      "$current_revision" "" \
+      "The configured image is immutable. Select an explicit mutable channel or target to update."
+    return 0
+  fi
+  if ! is_official_image_ref "$channel"; then
+    print_update_check_result "$json" unavailable "$channel" "$current_digest" "" \
+      "$current_revision" "" \
+      "Automatic checks are available only for the official Luthn image channel."
+    return 0
+  fi
+
+  if ! remote_metadata="$(read_remote_image_metadata "$channel")"; then
+    print_update_check_result "$json" error "$channel" "$current_digest" "" \
+      "$current_revision" "" \
+      "The configured update channel could not be inspected. No local state was changed."
+    return 1
+  fi
+  IFS=$'\t' read -r candidate_digest candidate_revision candidate_release \
+    candidate_cli candidate_connector candidate_mcp <<<"$remote_metadata"
+  status=update-available
+  message="An update is available. Run 'luthn update' when you are ready."
+  identities_match=false
+  if [[ -n "$current_digest" && -n "$candidate_digest" ]]; then
+    [[ "$current_digest" == "$candidate_digest" ]] && identities_match=true
+  elif [[ -n "$current_revision" && "$current_revision" == "$candidate_revision" ]]; then
+    identities_match=true
+  fi
+  if [[ "$identities_match" == "true" ]]; then
+    status=current
+    message="The installed runtime matches the configured update channel."
+  fi
+  print_update_check_result "$json" "$status" "$channel" "$current_digest" \
+    "$candidate_digest" "$current_revision" "$candidate_revision" "$message"
 }
 
 ensure_directories() {
@@ -734,6 +999,170 @@ show_status() {
   if [[ -n "$image_id" && -n "$selected_id" && "$image_id" != "$selected_id" ]]; then
     echo "Runtime drift: a locally selected image is not running; run 'luthn update'."
   fi
+}
+
+doctor_add_check() {
+  doctor_checks+=("$1|$2|$3|$4|$5")
+  if [[ "$2" == "fail" && "$3" == "true" ]]; then
+    doctor_failed=true
+  fi
+}
+
+show_doctor() {
+  json=false
+  if [[ "${1:-}" == "--json" ]]; then
+    json=true
+    shift
+  fi
+  if (( $# > 0 )); then
+    echo "usage: luthn doctor [--json]" >&2
+    return 2
+  fi
+
+  doctor_checks=()
+  doctor_failed=false
+  if command -v docker >/dev/null 2>&1; then
+    doctor_add_check docker pass true "Docker CLI is available." ""
+    if docker compose version >/dev/null 2>&1; then
+      doctor_add_check compose pass true "Docker Compose is available." ""
+    else
+      doctor_add_check compose fail true "Docker Compose is unavailable." "Install the Docker Compose plugin."
+    fi
+    if docker info >/dev/null 2>&1; then
+      doctor_add_check docker-daemon pass true "Docker daemon is reachable." ""
+    else
+      doctor_add_check docker-daemon fail true "Docker daemon is not reachable." "Start Docker and verify the active Docker context."
+    fi
+  else
+    doctor_add_check docker fail true "Docker CLI is unavailable." "Install Docker Desktop or Docker Engine."
+    doctor_add_check compose fail true "Docker Compose could not be checked." "Install Docker with the Compose plugin."
+    doctor_add_check docker-daemon fail true "Docker daemon could not be checked." "Install and start Docker."
+  fi
+
+  if [[ -f "$compose_file" && -f "$config_file" && -f "$cli_path" ]]; then
+    doctor_add_check installation pass true "Installed runtime files are present." ""
+  else
+    doctor_add_check installation fail true "Installed runtime files are incomplete." "Run 'luthn install' to repair the installation."
+  fi
+
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  readiness_body=""
+  readiness_code=""
+  if command -v curl >/dev/null 2>&1 && curl -fsS "$base_url/healthz" >/dev/null 2>&1; then
+    doctor_add_check api-health pass true "API health check passed." ""
+  else
+    doctor_add_check api-health fail true "API health check failed." "Run 'luthn status' and inspect API logs."
+  fi
+  readiness_response=""
+  if command -v curl >/dev/null 2>&1 \
+    && readiness_response="$(curl -sS -w $'\n%{http_code}' "$base_url/readyz" 2>/dev/null)"; then
+    readiness_code="${readiness_response##*$'\n'}"
+    readiness_body="${readiness_response%$'\n'*}"
+  fi
+  if [[ "$readiness_code" =~ ^2[0-9][0-9]$ ]]; then
+    doctor_add_check api-readiness pass true "API readiness check passed." ""
+    doctor_add_check migrations pass true "Database migrations are current." ""
+  elif [[ "$readiness_body" == *"pending migrations"* ]]; then
+    doctor_add_check api-readiness fail true "API is not ready because migrations are pending." "Run 'luthn update' to apply the target migrations."
+    doctor_add_check migrations fail true "Database has pending migrations." "Run 'luthn update'."
+  else
+    doctor_add_check api-readiness fail true "API readiness check failed." "Run 'luthn status' and inspect API and migration logs."
+    doctor_add_check migrations warn false "Migration state could not be confirmed while readiness is unavailable." "Restore API readiness, then run 'luthn doctor' again."
+  fi
+
+  running_id=""
+  selected_id=""
+  if command -v docker >/dev/null 2>&1 && [[ -f "$compose_file" && -f "$config_file" ]]; then
+    running_id="$(image_id_for_container)"
+    selected_ref="$(read_config LUTHN_IMAGE "$default_image")"
+    selected_id="$(docker image inspect --format '{{.Id}}' "$selected_ref" 2>/dev/null || true)"
+  fi
+  if [[ -n "$running_id" && -n "$selected_id" && "$running_id" == "$selected_id" ]]; then
+    doctor_add_check runtime-drift pass true "The selected image is running." ""
+  elif [[ -n "$running_id" && -n "$selected_id" ]]; then
+    doctor_add_check runtime-drift fail true "The selected image is not running." "Run 'luthn update' to reconcile runtime drift."
+  else
+    doctor_add_check runtime-drift warn false "Runtime image identity could not be confirmed." "Start Luthn and run the doctor again."
+  fi
+
+  update_json=""
+  update_status="error"
+  if command -v python3 >/dev/null 2>&1 && update_json="$(check_for_update --json 2>/dev/null)"; then
+    update_status="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("status", "error"))' <<<"$update_json" 2>/dev/null || printf error)"
+    case "$update_status" in
+      current) doctor_add_check update-check pass false "The configured channel is current." "" ;;
+      update-available) doctor_add_check update-check warn false "An update is available." "Run 'luthn update' when ready." ;;
+      pinned) doctor_add_check update-check warn false "The installation is pinned to an immutable image." "Choose an explicit target to update." ;;
+      unavailable) doctor_add_check update-check warn false "Automatic update checks are unavailable for this image channel." "Check the custom registry manually." ;;
+      *) doctor_add_check update-check warn false "Update status could not be determined." "Run 'luthn update check' for details." ;;
+    esac
+  else
+    doctor_add_check update-check warn false "The configured update channel could not be checked." "Run 'luthn update check' after network access is restored."
+  fi
+
+  if has_codex_connector_state; then
+    helper="$(codex_helper_path)"
+    if [[ -f "$helper" ]]; then
+      doctor_add_check codex-helper pass true "Codex connector helper is present." ""
+    else
+      doctor_add_check codex-helper fail true "Codex connector helper is missing." "Run 'luthn connect codex'."
+    fi
+    hooks_file="$(codex_state_value HOOKS_FILE)"
+    [[ -n "$hooks_file" ]] || hooks_file="$(codex_hooks_path)"
+    if [[ -f "$helper" ]] && python3 "$helper" hooks check --path "$hooks_file" --command "$(codex_hook_command)" >/dev/null 2>&1; then
+      doctor_add_check codex-hook pass true "Codex Stop hook is configured." ""
+    else
+      doctor_add_check codex-hook fail true "Codex Stop hook is missing or changed." "Run 'luthn connect codex'."
+    fi
+    if [[ "$(codex_state_value AUTO_RECALL)" == "true" ]]; then
+      instructions_file="$(codex_state_value INSTRUCTIONS_FILE)"
+      [[ -n "$instructions_file" ]] || instructions_file="$(codex_instructions_path)"
+      if [[ -f "$helper" ]] && python3 "$helper" instructions check --path "$instructions_file" >/dev/null 2>&1; then
+        doctor_add_check auto-recall pass true "Codex auto-recall instructions are configured." ""
+      else
+        doctor_add_check auto-recall fail true "Codex auto-recall instructions are missing or changed." "Run 'luthn connect codex'."
+      fi
+    else
+      doctor_add_check auto-recall pass false "Codex auto-recall is intentionally disabled." ""
+    fi
+    if command -v codex >/dev/null 2>&1 && codex_mcp_registration_status; then
+      doctor_add_check codex-mcp pass true "Codex MCP registration matches Luthn." ""
+    else
+      doctor_add_check codex-mcp fail true "Codex MCP registration is missing or changed." "Run 'luthn connect codex'."
+    fi
+  else
+    doctor_add_check codex-helper warn false "Codex is not connected to Luthn." "Run 'luthn connect codex' when this host should use Luthn."
+  fi
+
+  overall=ready
+  [[ "$doctor_failed" == "true" ]] && overall=failed
+  if [[ "$json" == "true" ]]; then
+    require_command python3
+    python3 - "$overall" "${doctor_checks[@]}" <<'PY'
+import json
+import sys
+
+checks = []
+for encoded in sys.argv[2:]:
+    name, status, required, message, remediation = encoded.split("|", 4)
+    checks.append({
+        "name": name,
+        "status": status,
+        "required": required == "true",
+        "message": message,
+        "remediation": remediation or None,
+    })
+print(json.dumps({"status": sys.argv[1], "checks": checks}, separators=(",", ":")))
+PY
+  else
+    echo "Luthn doctor: $overall"
+    for encoded in "${doctor_checks[@]}"; do
+      IFS='|' read -r name status required message remediation <<<"$encoded"
+      printf '%-18s %-5s %s\n' "$name" "$status" "$message"
+      [[ -n "$remediation" ]] && printf '  remediation: %s\n' "$remediation"
+    done
+  fi
+  [[ "$doctor_failed" != "true" ]]
 }
 
 codex_helper_path() {
@@ -1490,12 +1919,29 @@ update_luthn() {
   require_installation
   require_docker
   require_command curl
-  target_image="${1:-$(read_config LUTHN_IMAGE "$default_image")}"
+  configured_image="$(read_config LUTHN_IMAGE "$default_image")"
+  explicit_target=false
+  if [[ -n "${1:-}" ]]; then
+    target_image="$1"
+    explicit_target=true
+  else
+    target_image="$configured_image"
+  fi
+  if [[ "$explicit_target" != "true" ]] && is_immutable_image_ref "$target_image"; then
+    echo "Update stopped because the configured image is immutable: $target_image" >&2
+    echo "Choose an explicit mutable channel or target: luthn update <image>" >&2
+    return 2
+  fi
   previous_ref="$(read_config LUTHN_IMAGE "$default_image")"
   previous_id="$(image_id_for_container)"
   previous_revision=""
+  previous_mcp_schema=""
   if [[ -n "$previous_id" ]]; then
     previous_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$previous_id" 2>/dev/null || true)"
+    previous_mcp_schema="$(image_label "$previous_id" io.luthn.mcp-schema.version)"
+    if [[ -z "$previous_mcp_schema" ]] && command -v python3 >/dev/null 2>&1; then
+      previous_mcp_schema="$(probe_image_mcp_schema_version "$previous_id" 2>/dev/null || true)"
+    fi
   fi
 
   ensure_directories
@@ -1510,6 +1956,10 @@ update_luthn() {
 
   target_id="$(docker image inspect --format '{{.Id}}' "$target_image")"
   target_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target_image" 2>/dev/null || true)"
+  target_mcp_schema="$(image_label "$target_id" io.luthn.mcp-schema.version)"
+  if [[ -z "$target_mcp_schema" ]] && command -v python3 >/dev/null 2>&1; then
+    target_mcp_schema="$(probe_image_mcp_schema_version "$target_id" 2>/dev/null || true)"
+  fi
   if ! operator_credential_slot_available "$target_image"; then
     echo "Update stopped because the local operator credential could not be configured." >&2
     return 1
@@ -1522,6 +1972,14 @@ update_luthn() {
   runtime_rollback_dir="$(mktemp -d "$state_dir/runtime-update.XXXXXX")"
   cp -p "$compose_file" "$runtime_rollback_dir/compose.yaml"
   cp -p "$cli_path" "$runtime_rollback_dir/luthn"
+  cp -p "$config_file" "$runtime_rollback_dir/luthn.env"
+  previous_operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
+  if [[ -f "$previous_operator_token_file" ]]; then
+    cp -p "$previous_operator_token_file" "$runtime_rollback_dir/operator-token"
+    operator_token_existed=true
+  else
+    operator_token_existed=false
+  fi
   helper="$(codex_helper_path)"
   [[ -f "$helper" ]] && cp -p "$helper" "$runtime_rollback_dir/luthn-codex-connector.py"
   hooks_file=""
@@ -1533,6 +1991,34 @@ update_luthn() {
     [[ -n "$instructions_file" ]] || instructions_file="$(codex_instructions_path)"
     [[ -f "$hooks_file" ]] && cp -p "$hooks_file" "$runtime_rollback_dir/hooks.json"
     [[ -f "$instructions_file" ]] && cp -p "$instructions_file" "$runtime_rollback_dir/AGENTS.md"
+    [[ -f "$codex_state_file" ]] && cp -p "$codex_state_file" "$runtime_rollback_dir/codex.env"
+    [[ -f "$codex_pending_state_file" ]] && cp -p "$codex_pending_state_file" "$runtime_rollback_dir/codex.pending.env"
+  fi
+  previous_connector_version="$(codex_state_value CONNECTOR_VERSION)"
+  previous_helper_digest="$(codex_state_value HELPER_DIGEST)"
+  previous_template_digest="$(codex_state_value TEMPLATE_DIGEST)"
+  if has_codex_connector_state; then
+    if ! ensure_connector_scopes; then
+      cp -p "$runtime_rollback_dir/luthn.env" "$config_file"
+      rm -rf "$runtime_rollback_dir"
+      record_state failed "$target_image" "$target_id" "$previous_id"
+      echo "Update stopped because the active Codex connector scopes could not be configured." >&2
+      return 1
+    fi
+  elif ! ensure_access_request_scope; then
+    echo "warning: access.request could not be added because the custom service-token scope table is full" >&2
+  fi
+  if ! ensure_operator_credential "$target_image"; then
+    cp -p "$runtime_rollback_dir/luthn.env" "$config_file"
+    if [[ "$operator_token_existed" == "true" ]]; then
+      cp -p "$runtime_rollback_dir/operator-token" "$previous_operator_token_file"
+    else
+      rm -f "$previous_operator_token_file"
+    fi
+    rm -rf "$runtime_rollback_dir"
+    record_state failed "$target_image" "$target_id" "$previous_id"
+    echo "Update stopped because the local operator credential could not be configured." >&2
+    return 1
   fi
   echo "Refreshing lifecycle runtime..."
   if ! download_runtime "$(runtime_source_for_image "$target_image" "$target_revision")"; then
@@ -1542,6 +2028,12 @@ update_luthn() {
       cp -p "$runtime_rollback_dir/luthn-codex-connector.py" "$helper"
     else
       rm -f "$helper"
+    fi
+    cp -p "$runtime_rollback_dir/luthn.env" "$config_file"
+    if [[ "$operator_token_existed" == "true" ]]; then
+      cp -p "$runtime_rollback_dir/operator-token" "$previous_operator_token_file"
+    else
+      rm -f "$previous_operator_token_file"
     fi
     rm -rf "$runtime_rollback_dir"
     record_state failed "$target_image" "$target_id" "$previous_id"
@@ -1566,26 +2058,80 @@ update_luthn() {
     else
       rm -f "$instructions_file"
     fi
+    if [[ -f "$runtime_rollback_dir/codex.env" ]]; then
+      cp -p "$runtime_rollback_dir/codex.env" "$codex_state_file"
+    else
+      rm -f "$codex_state_file"
+    fi
+    if [[ -f "$runtime_rollback_dir/codex.pending.env" ]]; then
+      cp -p "$runtime_rollback_dir/codex.pending.env" "$codex_pending_state_file"
+    else
+      rm -f "$codex_pending_state_file"
+    fi
+    cp -p "$runtime_rollback_dir/luthn.env" "$config_file"
+    if [[ "$operator_token_existed" == "true" ]]; then
+      cp -p "$runtime_rollback_dir/operator-token" "$previous_operator_token_file"
+    else
+      rm -f "$previous_operator_token_file"
+    fi
     rm -rf "$runtime_rollback_dir"
     record_state failed "$target_image" "$target_id" "$previous_id"
     echo "Update failed while reconciling the Codex connector. Runtime and managed Codex configuration were restored." >&2
     return 1
   fi
-  rm -rf "$runtime_rollback_dir"
+  compatibility_changed=false
   if has_codex_connector_state; then
-    if ! ensure_connector_scopes; then
-      record_state failed "$target_image" "$target_id" "$previous_id"
-      echo "Update stopped because the active Codex connector scopes could not be configured." >&2
-      return 1
+    current_connector_version="$(codex_state_value CONNECTOR_VERSION)"
+    current_helper_digest="$(codex_state_value HELPER_DIGEST)"
+    current_template_digest="$(codex_state_value TEMPLATE_DIGEST)"
+    if [[ "$previous_connector_version" != "$current_connector_version" \
+      || "$previous_helper_digest" != "$current_helper_digest" \
+      || "$previous_template_digest" != "$current_template_digest" \
+      || "$previous_mcp_schema" != "$target_mcp_schema" ]]; then
+      compatibility_changed=true
+      current_digest_mode=legacy
+      if [[ "$current_helper_digest" =~ ^[0-9a-f]{64}$ \
+        && "$current_template_digest" =~ ^[0-9a-f]{64}$ ]]; then
+        current_digest_mode=modern
+      fi
+      if ! record_codex_connector_state \
+        "$hooks_file" "$codex_state_file" configured true \
+        "$(codex_state_value AUTO_RECALL)" "$instructions_file" \
+        "$current_connector_version" "$current_helper_digest" \
+        "$current_template_digest" "$current_digest_mode"; then
+        cp -p "$runtime_rollback_dir/compose.yaml" "$compose_file"
+        cp -p "$runtime_rollback_dir/luthn" "$cli_path"
+        if [[ -f "$runtime_rollback_dir/luthn-codex-connector.py" ]]; then
+          cp -p "$runtime_rollback_dir/luthn-codex-connector.py" "$helper"
+        else
+          rm -f "$helper"
+        fi
+        [[ -f "$runtime_rollback_dir/hooks.json" ]] \
+          && cp -p "$runtime_rollback_dir/hooks.json" "$hooks_file" \
+          || rm -f "$hooks_file"
+        [[ -f "$runtime_rollback_dir/AGENTS.md" ]] \
+          && cp -p "$runtime_rollback_dir/AGENTS.md" "$instructions_file" \
+          || rm -f "$instructions_file"
+        [[ -f "$runtime_rollback_dir/codex.env" ]] \
+          && cp -p "$runtime_rollback_dir/codex.env" "$codex_state_file" \
+          || rm -f "$codex_state_file"
+        [[ -f "$runtime_rollback_dir/codex.pending.env" ]] \
+          && cp -p "$runtime_rollback_dir/codex.pending.env" "$codex_pending_state_file" \
+          || rm -f "$codex_pending_state_file"
+        cp -p "$runtime_rollback_dir/luthn.env" "$config_file"
+        if [[ "$operator_token_existed" == "true" ]]; then
+          cp -p "$runtime_rollback_dir/operator-token" "$previous_operator_token_file"
+        else
+          rm -f "$previous_operator_token_file"
+        fi
+        rm -rf "$runtime_rollback_dir"
+        record_state failed "$target_image" "$target_id" "$previous_id"
+        echo "Update failed while recording the Codex compatibility notice. Runtime and managed configuration were restored." >&2
+        return 1
+      fi
     fi
-  elif ! ensure_access_request_scope; then
-    echo "warning: access.request could not be added because the custom service-token scope table is full" >&2
   fi
-  if ! ensure_operator_credential "$target_image"; then
-    record_state failed "$target_image" "$target_id" "$previous_id"
-    echo "Update stopped because the local operator credential could not be configured." >&2
-    return 1
-  fi
+  rm -rf "$runtime_rollback_dir"
 
   compose_cmd up -d postgres
   wait_for_postgres
@@ -1638,8 +2184,9 @@ update_luthn() {
     echo "warning: updated Codex connector status could not be reported" >&2
   echo "Luthn update completed: $target_image"
   echo "Revision: ${previous_revision:-unavailable} -> ${target_revision:-unavailable}"
-  if has_codex_connector_state; then
-    echo "Restart Codex to reload the Luthn MCP transport and tool schema."
+  if [[ "$compatibility_changed" == "true" ]]; then
+    echo "Restart required: Luthn MCP compatibility changed (${previous_mcp_schema:-unknown} -> ${target_mcp_schema:-$mcp_schema_version})."
+    echo "Agent notice: restart the current Codex host before invoking Luthn tools again."
   fi
 }
 
@@ -1746,8 +2293,19 @@ run_mcp() {
 command="${1:-help}"
 case "$command" in
   install) shift; install_luthn "$@" ;;
+  version) shift; show_version "$@" ;;
   status|check) show_status ;;
-  update) shift; update_luthn "${1:-}" ;;
+  update)
+    shift
+    if [[ "${1:-}" == "check" ]]; then
+      shift
+      check_for_update "$@"
+    else
+      (( $# <= 1 )) || { echo "usage: luthn update [image]" >&2; exit 2; }
+      update_luthn "${1:-}"
+    fi
+    ;;
+  doctor) shift; show_doctor "$@" ;;
   reset) shift; reset_luthn "${1:-}" ;;
   uninstall) shift; uninstall_luthn "$@" ;;
   connect)

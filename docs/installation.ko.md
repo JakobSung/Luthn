@@ -115,28 +115,61 @@ $env:LUTHN_CODEX_COMMAND = 'C:\path\to\codex.exe'
 
 ```bash
 luthn status
+luthn version --json
+luthn update check --json
+luthn doctor --json
 ```
 
 Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를 보고합니다. 운영자 화면은 <http://127.0.0.1:8080/>이며 API port는 기본적으로 loopback에만 연결됩니다.
+
+`version`은 설치 image 참조·digest, source revision, CLI/connector template
+version, MCP schema version과 image에 존재하는 stable release version을
+보고합니다. `update check`는 설정된 공식 registry channel의 원격
+metadata만 확인하며 image pull, service 중지, 설정 변경, backup 생성을 하지
+않습니다. 고정 상태값은 `current`, `update-available`, `pinned`,
+`unavailable`, `error`입니다.
+
+`doctor`는 Docker/Compose, 설치 runtime 파일, health/readiness와 migration,
+runtime drift, update 가능 여부, Luthn 소유 Codex MCP·hook·auto-recall 상태를
+함께 진단합니다. 필수 항목 실패 시 nonzero로 종료합니다. 기본 출력은 사람이
+읽는 형식이고 `--json`은 비밀 값 없이 같은 계약을 에이전트와 자동화에
+제공합니다.
 
 ## 수명주기 명령
 
 macOS·Linux:
 
 ```bash
+luthn version --json
+luthn update check --json
 luthn update
+luthn doctor --json
 luthn reset --yes
 luthn uninstall
 luthn uninstall --purge-data --yes
 ```
 
-`update`는 volume과 설정을 보존하고 migration 전 backup을 만듭니다. `reset`은 `--yes`가 있을 때만 data volume을 다시 만들고, 완전 삭제는 `--purge-data --yes`가 모두 있을 때만 수행합니다. Windows는 현재 `status`, `update`, Codex 연결/상태/해제, `uninstall`을 지원하며 `reset`과 purge uninstall은 아직 제공하지 않습니다.
+`update`는 volume과 설정을 보존하고 migration 전 backup을 만듭니다. `reset`은 `--yes`가 있을 때만 data volume을 다시 만들고, 완전 삭제는 `--purge-data --yes`가 모두 있을 때만 수행합니다. Windows는 현재 `version`, `status`, `update check`, `update`, `doctor`, Codex 연결/상태/해제, `uninstall`을 지원하며 `reset`과 purge uninstall은 아직 제공하지 않습니다.
 
-`luthn update`는 대상 image·CLI·Compose를 받고, PostgreSQL을 확인하고, 쓰기 경로를 멈추고, 압축 backup과 이전 image id를 기록한 뒤, 대상 image로 migration과 API를 실행해 `/healthz`, `/readyz`가 모두 성공한 경우에만 완료합니다.
+`luthn update`는 mutable channel 또는 명시적 대상을 결정하고 target image를
+받은 뒤, 레거시 설치의 operator credential과 connector scope를 먼저
+조정합니다. 이전 설정과 관리 Codex 파일을 snapshot한 상태에서 target
+CLI·Compose·MCP schema를 검증한 다음 PostgreSQL 확인, 쓰기 경로 중지,
+압축 backup, migration, API 재시작을 수행합니다. `/healthz`, `/readyz`가
+모두 성공한 경우에만 완료합니다.
 
 ```bash
 luthn update ghcr.io/jakobsung/luthn:sha-<full-commit-sha>
 ```
+
+digest 또는 `sha-<full-commit-sha>`처럼 변경 불가능한 참조로 설치된 경우
+`update check`는 `pinned`를 반환합니다. 대상 없는 `luthn update`는 같은
+image를 다시 받지 않고 중단하므로, 이동할 image를 명시해야 합니다.
+
+성공한 update에서 MCP schema, connector template 또는 관리 Codex 지시문이
+바뀐 경우에만 운영자용 restart-required message와 다음 agent-safe notice가
+출력됩니다: `Agent notice: restart the current Codex host before invoking Luthn tools again.`
+일반 runtime-only update에는 이 알림이 나오지 않습니다.
 
 실패 시 자동 database 복원·내림을 하지 않습니다. 자세한 절차는 [운영](operations.ko.md)을 참고하세요.
 

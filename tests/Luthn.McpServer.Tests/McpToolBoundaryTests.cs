@@ -313,6 +313,7 @@ public sealed class McpToolBoundaryTests
         using var toolsJson = JsonDocument.Parse(tools!);
         Assert.Equal("2025-06-18", initializeJson.RootElement.GetProperty("result").GetProperty("protocolVersion").GetString());
         Assert.Equal("luthn-mcp-server", initializeJson.RootElement.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString());
+        Assert.Equal(McpJsonRpcServer.SchemaVersion, initializeJson.RootElement.GetProperty("result").GetProperty("serverInfo").GetProperty("schemaVersion").GetString());
 
         var tool = toolsJson.RootElement
             .GetProperty("result")
