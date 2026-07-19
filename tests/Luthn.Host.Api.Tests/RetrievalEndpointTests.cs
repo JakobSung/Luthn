@@ -1,4 +1,5 @@
 using Luthn.Core.Classification;
+using Luthn.Core.Context;
 using Luthn.Core.Persistence;
 using Luthn.Core.Search;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -52,6 +53,8 @@ public sealed class RetrievalEndpointTests
             new SafeSearchRequest("billing outage", ["runbook"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
+            new OperationalMetrics(),
+            TimeProvider.System,
             CancellationToken.None);
 
         var ok = Assert.IsType<Ok<SafeSearchResponse>>(result.Result);
@@ -61,6 +64,31 @@ public sealed class RetrievalEndpointTests
             ["wiki-title-match", "wiki-summary-match"],
             response.Results.Select(item => item.Id).ToArray());
         Assert.DoesNotContain(response.Results, item => item.Id == "wiki-confidential");
+        Assert.True(SearchTelemetry.IsValidRetrievalId(response.RetrievalId));
+    }
+
+    [Fact]
+    public async Task AgentSearchRecordsDeterministicLatencyAndZeroResults()
+    {
+        await using var db = CreateDbContext();
+        var timeProvider = new ManualTimeProvider();
+        var metrics = new OperationalMetrics();
+        var selector = new AdvancingCandidateSelector(timeProvider, TimeSpan.FromMilliseconds(25));
+
+        var result = await ClassificationEndpoints.SearchAgentContext(
+            new SafeSearchRequest("missing", ["missing"], 10),
+            new DeterministicRetrievalBackend(new SafeSearchIndex(timeProvider)),
+            selector,
+            metrics,
+            timeProvider,
+            CancellationToken.None);
+
+        var response = Assert.IsType<Ok<SafeSearchResponse>>(result.Result).Value!;
+        Assert.Empty(response.Results);
+        Assert.True(SearchTelemetry.IsValidRetrievalId(response.RetrievalId));
+        Assert.Equal(
+            new SearchRequestMetricSnapshot("agent_search", "zero_result", "not_applicable", 1, 25, 25, 0, 1),
+            Assert.Single(metrics.Snapshot().SearchRequests));
     }
 
     [Fact]
@@ -96,6 +124,8 @@ public sealed class RetrievalEndpointTests
             new SafeSearchRequest("needle", ["needle"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
+            new OperationalMetrics(),
+            TimeProvider.System,
             CancellationToken.None);
 
         var ok = Assert.IsType<Ok<SafeSearchResponse>>(result.Result);
@@ -110,5 +140,32 @@ public sealed class RetrievalEndpointTests
             .Options;
 
         return new LuthnDbContext(options);
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => 1_000;
+        public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+        public void Advance(TimeSpan duration) =>
+            Interlocked.Add(ref _timestamp, (long)duration.TotalMilliseconds);
+    }
+
+    private sealed class AdvancingCandidateSelector(
+        ManualTimeProvider timeProvider,
+        TimeSpan duration) : IRetrievalCandidateSelector
+    {
+        public Task<IReadOnlyList<ContextPackCandidate>> SelectAgentContextAsync(
+            SafeSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            timeProvider.Advance(duration);
+            return Task.FromResult<IReadOnlyList<ContextPackCandidate>>([]);
+        }
+
+        public Task<IReadOnlyList<ContextPackCandidate>> SelectSharedMemoryAsync(
+            SafeSearchRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<ContextPackCandidate>>([]);
     }
 }

@@ -51,11 +51,14 @@ public sealed class MemoryEndpointTests
         Assert.Equal(id, ok.Value!.Id);
         Assert.Equal("Public-safe deployment memory.", ok.Value.SafeSummary);
 
+        var metrics = new OperationalMetrics();
         var queryResult = await MemoryEndpoints.QueryMemoryItems(
             new MemoryQueryRequest("deployment", ["release"], 10, "LUTHN", "RELEASE", ["Delivery"]),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
+            metrics,
+            TimeProvider.System,
             CancellationToken.None);
         var queryOk = Assert.IsType<Ok<MemoryQueryResponse>>(queryResult.Result);
         var item = Assert.Single(queryOk.Value!.Items);
@@ -67,6 +70,8 @@ public sealed class MemoryEndpointTests
         Assert.Equal("luthn", item.ProjectKey);
         Assert.Equal("release", item.TaskKey);
         Assert.Equal(["delivery"], item.TopicTags);
+        Assert.Equal("memory_query", Assert.Single(metrics.Snapshot().SearchRequests).Surface);
+        Assert.True(SearchTelemetry.IsValidRetrievalId(queryOk.Value.RetrievalId));
         var audit = Assert.Single(await db.AuditEvents
             .Where(record => record.Action == "memory.item.classified")
             .ToArrayAsync());
@@ -130,6 +135,8 @@ public sealed class MemoryEndpointTests
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
+            new OperationalMetrics(),
+            TimeProvider.System,
             CancellationToken.None);
 
         Assert.IsType<NotFound>(read.Result);
@@ -298,6 +305,8 @@ public sealed class MemoryEndpointTests
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
+            new OperationalMetrics(),
+            TimeProvider.System,
             CancellationToken.None);
 
         Assert.IsType<NotFound>(privateRead.Result);
@@ -341,6 +350,8 @@ public sealed class MemoryEndpointTests
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
+            new OperationalMetrics(),
+            TimeProvider.System,
             CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequest<Microsoft.AspNetCore.Mvc.ProblemDetails>>(result.Result);
@@ -385,6 +396,8 @@ public sealed class MemoryEndpointTests
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
+            new OperationalMetrics(),
+            TimeProvider.System,
             CancellationToken.None);
 
         var ok = Assert.IsType<Ok<MemoryQueryResponse>>(result.Result);

@@ -287,9 +287,19 @@ These local operator endpoints require the `metrics.read` service-token scope.
 They return the same bounded JSON snapshot; `/export` supplies it as a download.
 The snapshot contains only aggregate, low-cardinality classification-provider
 attempt duration/outcome, sensitive-access request/decision throughput, and
-safe-search candidate-pressure values. It never contains query text, memory or
+safe-search candidate pressure, request latency/outcome/cache status/result
+count, zero-result count, and helpful/unhelpful feedback. Metrics are in-memory
+and reset when the API process restarts. It never contains query text, memory or
 source identifiers, actor identities, prompts, raw content, paths, or tokens,
 and it does not create an external-publication job.
+
+MCP reports its bounded cache and timeout outcomes through
+`POST /api/agent/search-telemetry/observations`; explicit feedback uses
+`POST /api/agent/search-telemetry/feedback`. Both require `metrics.write`.
+Observation accepts only allowlisted surface/outcome/cache values, duration,
+and result count. Feedback accepts only the opaque `retrievalId` returned by a
+safe retrieval response and `helpful` or `unhelpful`. Neither endpoint stores
+event rows, identifiers, query content, tags, or projection data.
 
 ## Source intake
 
@@ -393,6 +403,8 @@ allowed. When `projectKey` is present, matching and unscoped global records are
 eligible while other-project records are excluded before ranking. Exact task
 and topic matches and recent safe-projection timestamps receive bounded boosts.
 Returned items carry the optional metadata and `projectionTimestamp`.
+The response also carries an opaque `retrievalId` that can be used only for
+explicit aggregate feedback.
 
 The MCP `get_context_pack` tool also accepts optional lightweight-recall
 controls: `maxTokens`, `timeoutMs`, `cacheKey`, `cacheTtlSeconds`, and

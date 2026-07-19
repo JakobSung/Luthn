@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using Luthn.AgentConnector.Http;
 using Luthn.Sdk.Context;
+using Luthn.Sdk.Telemetry;
 
 namespace Luthn.McpServer.Tools;
 
@@ -13,6 +14,7 @@ public sealed class GetContextPackTool : ILuthnMcpTool
     private const int MaximumTimeoutMilliseconds = 5_000;
     private const int MaximumCacheTtlSeconds = 3_600;
     private const int MaximumCacheEntries = 128;
+    private const int TelemetryTimeoutMilliseconds = 250;
     private const int CandidatePoolMultiplier = 4;
     private const int MaximumCandidatePoolSize = 50;
 
@@ -32,6 +34,7 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         JsonElement arguments,
         CancellationToken cancellationToken = default)
     {
+        var startedAt = _utcNow();
         var query = ReadOptionalString(arguments, "query");
         var coreTags = ReadCoreTags(arguments);
         var projectKey = ReadOptionalString(arguments, "projectKey");
@@ -75,11 +78,18 @@ public sealed class GetContextPackTool : ILuthnMcpTool
                 taskKey,
                 topicTags);
         var now = _utcNow();
+        var cacheStatus = effectiveCacheKey is null ? "bypass" : "miss";
+        CacheEntry? cached = null;
         if (effectiveCacheKey is not null &&
-            _cache.TryGetValue(effectiveCacheKey, out var cached) &&
+            _cache.TryGetValue(effectiveCacheKey, out cached) &&
             cached.ExpiresAt > now)
         {
+            TryReportObservation(startedAt, "hit", cached.ContextPack);
             return cached.ContextPack;
+        }
+        if (effectiveCacheKey is not null && cached is not null)
+        {
+            cacheStatus = "expired";
         }
 
         using var timeoutSource = timeoutMs is null
@@ -104,14 +114,32 @@ public sealed class GetContextPackTool : ILuthnMcpTool
                     topicTags),
                 effectiveCancellationToken);
         }
+        catch (OperationCanceledException) when (
+            timeoutSource?.IsCancellationRequested == true &&
+            !cancellationToken.IsCancellationRequested)
+        {
+            TryReportObservation(startedAt, cacheStatus, "timeout", 0);
+            if (!failOpen)
+            {
+                throw;
+            }
+
+            return EmptyPack(coreTags, projectKey, taskKey, topicTags);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            TryReportObservation(startedAt, cacheStatus, "canceled", 0);
+            throw;
+        }
         catch (Exception) when (failOpen && !cancellationToken.IsCancellationRequested)
         {
-            return new ContextPackDto(coreTags, [])
-            {
-                ProjectKey = projectKey,
-                TaskKey = taskKey,
-                TopicTags = topicTags
-            };
+            TryReportObservation(startedAt, cacheStatus, "error", 0);
+            return EmptyPack(coreTags, projectKey, taskKey, topicTags);
+        }
+        catch
+        {
+            TryReportObservation(startedAt, cacheStatus, "error", 0);
+            throw;
         }
 
         var bounded = ApplyBounds(result, maxItems, maxTokens);
@@ -123,8 +151,21 @@ public sealed class GetContextPackTool : ILuthnMcpTool
                 now.AddSeconds(cacheTtlSeconds.GetValueOrDefault()));
         }
 
+        TryReportObservation(startedAt, cacheStatus, bounded);
         return bounded;
     }
+
+    private static ContextPackDto EmptyPack(
+        IReadOnlyList<string> coreTags,
+        string? projectKey,
+        string? taskKey,
+        IReadOnlyList<string> topicTags) =>
+        new(coreTags, [])
+        {
+            ProjectKey = projectKey,
+            TaskKey = taskKey,
+            TopicTags = topicTags
+        };
 
     private static ContextPackDto ApplyBounds(
         ContextPackDto contextPack,
@@ -174,10 +215,59 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         IReadOnlyList<ContextPackItemDto> items) =>
         new(source.CoreTags, items)
         {
+            RetrievalId = source.RetrievalId,
             ProjectKey = source.ProjectKey,
             TaskKey = source.TaskKey,
             TopicTags = source.TopicTags
         };
+
+    private void TryReportObservation(
+        DateTimeOffset startedAt,
+        string cacheStatus,
+        ContextPackDto pack) =>
+        TryReportObservation(
+            startedAt,
+            cacheStatus,
+            pack.Items.Count == 0 ? "zero_result" : "succeeded",
+            pack.Items.Count);
+
+    private void TryReportObservation(
+        DateTimeOffset startedAt,
+        string cacheStatus,
+        string outcome,
+        int resultCount)
+    {
+        try
+        {
+            var duration = _utcNow() - startedAt;
+            var request = new SearchObservationRequestDto(
+                "mcp_context_pack",
+                outcome,
+                cacheStatus,
+                Math.Clamp((long)Math.Ceiling(duration.TotalMilliseconds), 0, 60_000),
+                Math.Clamp(resultCount, 0, 50));
+            _ = ReportObservationAsync(request);
+        }
+        catch
+        {
+            // Telemetry is best-effort and must never affect recall.
+        }
+    }
+
+    private async Task ReportObservationAsync(SearchObservationRequestDto request)
+    {
+        try
+        {
+            using var timeoutSource = new CancellationTokenSource(
+                TimeSpan.FromMilliseconds(TelemetryTimeoutMilliseconds));
+            await _client.ReportSearchObservationAsync(request, timeoutSource.Token)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            // Telemetry is best-effort and must never affect recall.
+        }
+    }
 
     private static int EstimateTokens(ContextPackItemDto item)
     {

@@ -121,7 +121,7 @@ if ($args.Count -ge 1 -and $args[0] -ceq "info") {
 if ($args.Count -ge 3 -and $args[0] -ceq "buildx" -and $args[1] -ceq "imagetools" -and $args[2] -ceq "inspect") {
     if ($env:FAKE_DOCKER_REMOTE_FAIL -ceq "true") { exit 20 }
     if ($joined -match '\.Manifest') { '{"digest":"sha256:fake"}'; exit 0 }
-    if ($joined -match '\.Image') { '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"2","io.luthn.mcp-schema.version":"2"}}}}'; exit 0 }
+    if ($joined -match '\.Image') { '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"2","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 }
 }
 if ($args.Count -ge 1 -and $args[0] -ceq "pull") { if ($env:FAKE_DOCKER_PULL_FAIL -ceq "true") { exit 16 }; "pulled"; exit 0 }
 if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
@@ -164,7 +164,7 @@ if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
   [ "${FAKE_DOCKER_REMOTE_FAIL:-false}" = "true" ] && exit 20
   case "$joined" in
     *'.Manifest'*) printf '%s\n' '{"digest":"sha256:fake"}'; exit 0 ;;
-    *'.Image'*) printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"2","io.luthn.mcp-schema.version":"2"}}}}'; exit 0 ;;
+    *'.Image'*) printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"2","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 ;;
   esac
 fi
 if [ "$1" = "pull" ]; then [ "${FAKE_DOCKER_PULL_FAIL:-false}" = "true" ] && exit 16; echo "pulled"; exit 0; fi
@@ -359,6 +359,7 @@ esac
     Assert-True (-not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF)) "config should be UTF-8 without BOM"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "Luthn__Auth__Tokens__0__Sha256Digest=sha256:[0-9a-f]{64}") "config should preserve the token-digest sha256 prefix"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "new installs should provision the MCP sensitive-access request scope"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__8=metrics\.write$") "new installs should provision the MCP search telemetry write scope"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$") "new installs should provision a distinct local operator credential"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "the local operator credential should be decision-only"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_ENVIRONMENT=Production$") "new installs should use the Production environment"
@@ -535,6 +536,7 @@ esac
     $operatorDigest = ([IO.File]::ReadAllLines($configFile) | Where-Object { $_ -cmatch '^Luthn__Auth__Tokens__1__Sha256Digest=' }).Split('=', 2)[1]
     $legacyConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object {
         $_ -cne "Luthn__Auth__Tokens__0__Scopes__7=access.request" -and
+        $_ -cne "Luthn__Auth__Tokens__0__Scopes__8=metrics.write" -and
         $_ -cnotmatch '^Luthn__Auth__Tokens__1__'
     }) + @(
         "Luthn__Auth__Tokens__1__Name=existing-integration",
@@ -577,6 +579,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__8=metrics\.write$") "update should provision the MCP search telemetry write scope for legacy installs"
     Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
     $updatedConfig = [IO.File]::ReadAllText($configFile)
     Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "update should reuse the Compose-exposed operator slot"

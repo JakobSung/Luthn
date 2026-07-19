@@ -8,6 +8,7 @@ using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
 using Luthn.Sdk.Source;
+using Luthn.Sdk.Telemetry;
 using Luthn.Sdk.Wiki;
 
 namespace Luthn.AgentConnector.Tests;
@@ -64,6 +65,35 @@ public sealed class LuthnClientTests
         Assert.Equal("luthn", pack.ProjectKey);
         Assert.Equal("ranking", pack.TaskKey);
         Assert.Equal(["quality"], pack.TopicTags);
+    }
+
+    [Fact]
+    public async Task SearchTelemetryMethodsPostMetadataOnlyContracts()
+    {
+        using var observationHandler = new CapturingHandler("""{"accepted":true}""");
+        using var observationHttp = new HttpClient(observationHandler) { BaseAddress = new Uri("http://localhost:8080") };
+        var observationClient = new LuthnClient(observationHttp);
+
+        var observation = await observationClient.ReportSearchObservationAsync(
+            new SearchObservationRequestDto("mcp_context_pack", "succeeded", "hit", 4, 2));
+        var observationBody = await observationHandler.RequestContent!.ReadAsStringAsync();
+
+        Assert.True(observation.Accepted);
+        Assert.Equal("/api/agent/search-telemetry/observations", observationHandler.Request!.RequestUri!.AbsolutePath);
+        Assert.DoesNotContain("query", observationBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cacheKey", observationBody, StringComparison.OrdinalIgnoreCase);
+
+        using var feedbackHandler = new CapturingHandler("""{"accepted":true}""");
+        using var feedbackHttp = new HttpClient(feedbackHandler) { BaseAddress = new Uri("http://localhost:8080") };
+        var feedbackClient = new LuthnClient(feedbackHttp);
+        await feedbackClient.SubmitSearchFeedbackAsync(
+            new SearchFeedbackRequestDto("retrieval-0123456789abcdef0123456789abcdef", "helpful"));
+        var feedbackBody = await feedbackHandler.RequestContent!.ReadAsStringAsync();
+
+        Assert.Equal("/api/agent/search-telemetry/feedback", feedbackHandler.Request!.RequestUri!.AbsolutePath);
+        Assert.Contains("retrievalId", feedbackBody, StringComparison.Ordinal);
+        Assert.Contains("judgment", feedbackBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("safeSummary", feedbackBody, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

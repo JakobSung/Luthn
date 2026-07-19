@@ -8,6 +8,7 @@ using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
 using Luthn.Sdk.Source;
+using Luthn.Sdk.Telemetry;
 using Luthn.Sdk.Wiki;
 
 namespace Luthn.AgentConnector.Http;
@@ -221,6 +222,32 @@ public sealed class LuthnClient : ILuthnClient
         };
 
         return await SendJsonAsync<SharedMemoryQueryResponseDto>(httpRequest, cancellationToken);
+    }
+
+    public Task<SearchTelemetryAcceptedDto> ReportSearchObservationAsync(
+        SearchObservationRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        PostSearchTelemetryAsync("observations", request, cancellationToken);
+
+    public Task<SearchTelemetryAcceptedDto> SubmitSearchFeedbackAsync(
+        SearchFeedbackRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        PostSearchTelemetryAsync("feedback", request, cancellationToken);
+
+    private async Task<SearchTelemetryAcceptedDto> PostSearchTelemetryAsync<TRequest>(
+        string path,
+        TRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/agent/search-telemetry/{path}")
+        {
+            Content = JsonContent.Create(request, options: JsonOptions)
+        };
+
+        return await SendJsonAsync<SearchTelemetryAcceptedDto>(httpRequest, cancellationToken);
     }
 
     public async Task<SensitiveAccessRequestDto> CreateSensitiveAccessRequestAsync(

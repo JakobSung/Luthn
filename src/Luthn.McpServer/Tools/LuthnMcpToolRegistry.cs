@@ -73,6 +73,13 @@ public static class LuthnMcpToolRegistry
                 IntegerProperty("maxItems", "Maximum memory items to return.")
             ])),
         new(
+            "submit_search_feedback",
+            "Submit explicit helpful or unhelpful feedback for an opaque Luthn retrieval id. No query or result content is accepted.",
+            ToolSchema([
+                BoundedStringProperty("retrievalId", "Opaque retrieval id returned by a safe search or context pack.", 64, "^retrieval-[0-9a-f]{32}$"),
+                EnumStringProperty("judgment", "Feedback judgment.", ["helpful", "unhelpful"])
+            ], ["retrievalId", "judgment"])),
+        new(
             "get_shared_memory_item",
             "Read a safe shared-memory item by id.",
             ToolSchema([StringProperty("id", "Shared memory item id.")], ["id"])),
@@ -110,6 +117,7 @@ public static class LuthnMcpToolRegistry
             new ClassifyPreviewTool(client),
             new CreateSharedMemoryTool(client),
             new QuerySharedMemoryTool(client),
+            new SubmitSearchFeedbackTool(client),
             new GetSharedMemoryItemTool(client),
             new CreateSensitiveAccessRequestTool(client),
             new GetSensitiveAccessRequestTool(client),
@@ -134,6 +142,30 @@ public static class LuthnMcpToolRegistry
         {
             ["type"] = "string",
             ["description"] = description
+        });
+
+    private static KeyValuePair<string, object> BoundedStringProperty(
+        string name,
+        string description,
+        int maximumLength,
+        string pattern) =>
+        new(name, new Dictionary<string, object>
+        {
+            ["type"] = "string",
+            ["description"] = description,
+            ["maxLength"] = maximumLength,
+            ["pattern"] = pattern
+        });
+
+    private static KeyValuePair<string, object> EnumStringProperty(
+        string name,
+        string description,
+        IReadOnlyList<string> values) =>
+        new(name, new Dictionary<string, object>
+        {
+            ["type"] = "string",
+            ["description"] = description,
+            ["enum"] = values
         });
 
     private static KeyValuePair<string, object> IntegerProperty(

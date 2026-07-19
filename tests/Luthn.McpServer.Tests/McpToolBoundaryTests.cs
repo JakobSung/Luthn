@@ -8,6 +8,7 @@ using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
 using Luthn.Sdk.Source;
+using Luthn.Sdk.Telemetry;
 using Luthn.Sdk.Wiki;
 
 namespace Luthn.McpServer.Tests;
@@ -27,6 +28,7 @@ public sealed class McpToolBoundaryTests
             "classify_preview",
             "create_shared_memory",
             "query_shared_memory",
+            "submit_search_feedback",
             "get_shared_memory_item",
             "create_sensitive_access_request",
             "get_sensitive_access_request",
@@ -64,6 +66,9 @@ public sealed class McpToolBoundaryTests
         Assert.Equal(5, client.LastMaxItems);
         Assert.Equal("demo runbook", client.LastContextPackQuery);
         Assert.IsType<ContextPackDto>(result);
+        var observation = Assert.Single(client.SearchObservations);
+        Assert.Equal("bypass", observation.CacheStatus);
+        Assert.Equal("zero_result", observation.Outcome);
     }
 
     [Fact]
@@ -110,6 +115,7 @@ public sealed class McpToolBoundaryTests
         now = now.AddMinutes(11);
         await tool.InvokeAsync(firstArgs.RootElement);
         Assert.Equal(3, client.ContextPackCallCount);
+        Assert.Equal(["miss", "hit", "miss", "expired"], client.SearchObservations.Select(item => item.CacheStatus));
     }
 
     [Fact]
@@ -206,6 +212,7 @@ public sealed class McpToolBoundaryTests
         var timeoutResult = Assert.IsType<ContextPackDto>(
             await timeoutTool.InvokeAsync(timeoutArgs.RootElement));
         Assert.Empty(timeoutResult.Items);
+        Assert.Equal("timeout", Assert.Single(timeoutClient.SearchObservations).Outcome);
 
         var errorClient = new FakeLuthnClient
         {
@@ -217,6 +224,7 @@ public sealed class McpToolBoundaryTests
         var errorResult = Assert.IsType<ContextPackDto>(
             await errorTool.InvokeAsync(errorArgs.RootElement));
         Assert.Empty(errorResult.Items);
+        Assert.Equal("error", Assert.Single(errorClient.SearchObservations).Outcome);
     }
 
     [Fact]
@@ -231,6 +239,20 @@ public sealed class McpToolBoundaryTests
 
         await Assert.ThrowsAsync<HttpRequestException>(
             () => tool.InvokeAsync(args.RootElement));
+    }
+
+    [Fact]
+    public async Task ContextPackReportsCallerCancellationSeparately()
+    {
+        var client = new FakeLuthnClient { ContextPackDelay = TimeSpan.FromSeconds(1) };
+        var tool = new GetContextPackTool(client);
+        using var args = JsonDocument.Parse("{}");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => tool.InvokeAsync(args.RootElement, cancellation.Token));
+
+        Assert.Equal("canceled", Assert.Single(client.SearchObservations).Outcome);
     }
 
     [Fact]
@@ -309,6 +331,36 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task FeedbackToolAcceptsOnlyOpaqueIdAndJudgmentFields()
+    {
+        var client = new FakeLuthnClient();
+        using var args = JsonDocument.Parse(
+            """{"retrievalId":"retrieval-0123456789abcdef0123456789abcdef","judgment":"helpful"}""");
+
+        var result = await new SubmitSearchFeedbackTool(client).InvokeAsync(args.RootElement);
+
+        Assert.Equal("retrieval-0123456789abcdef0123456789abcdef", client.LastSearchFeedback?.RetrievalId);
+        Assert.Equal("helpful", client.LastSearchFeedback?.Judgment);
+        Assert.True(Assert.IsType<SearchTelemetryAcceptedDto>(result).Accepted);
+    }
+
+    [Fact]
+    public async Task TelemetryFailureNeverChangesContextPackResult()
+    {
+        var client = new FakeLuthnClient
+        {
+            ContextPackResult = ContextPack("memory-1", "Safe result"),
+            TelemetryException = new HttpRequestException("metrics unavailable")
+        };
+        var tool = new GetContextPackTool(client);
+        using var args = JsonDocument.Parse("{}");
+
+        var result = Assert.IsType<ContextPackDto>(await tool.InvokeAsync(args.RootElement));
+
+        Assert.Equal("memory-1", Assert.Single(result.Items).Id);
+    }
+
+    [Fact]
     public async Task SensitiveAccessToolsExposeRequestStatusAndResultWithoutDecisionTools()
     {
         var client = new FakeLuthnClient();
@@ -371,6 +423,17 @@ public sealed class McpToolBoundaryTests
             .GetProperty("expiresInSeconds");
         Assert.Equal(60, expiry.GetProperty("minimum").GetInt32());
         Assert.Equal(3_600, expiry.GetProperty("maximum").GetInt32());
+
+        var feedbackTool = toolsJson.RootElement
+            .GetProperty("result")
+            .GetProperty("tools")
+            .EnumerateArray()
+            .First(item => item.GetProperty("name").GetString() == "submit_search_feedback");
+        var feedbackProperties = feedbackTool.GetProperty("inputSchema").GetProperty("properties");
+        Assert.Equal(64, feedbackProperties.GetProperty("retrievalId").GetProperty("maxLength").GetInt32());
+        Assert.Equal(
+            ["helpful", "unhelpful"],
+            feedbackProperties.GetProperty("judgment").GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
     }
 
     [Fact]
@@ -418,9 +481,12 @@ public sealed class McpToolBoundaryTests
         public SharedMemoryQueryRequestDto? LastMemoryQueryRequest { get; private set; }
         public string? LastMemoryItemId { get; private set; }
         public int ContextPackCallCount { get; private set; }
+        public List<SearchObservationRequestDto> SearchObservations { get; } = [];
+        public SearchFeedbackRequestDto? LastSearchFeedback { get; private set; }
         public ContextPackDto ContextPackResult { get; init; } = new([], []);
         public TimeSpan ContextPackDelay { get; init; }
         public Exception? ContextPackException { get; init; }
+        public Exception? TelemetryException { get; init; }
 
         public async Task<ContextPackDto> GetContextPackAsync(
             IReadOnlyList<string> coreTags,
@@ -575,6 +641,24 @@ public sealed class McpToolBoundaryTests
                 SessionId = "session-1",
                 ExpiresAt = DateTimeOffset.UnixEpoch.AddMinutes(10)
             });
+
+        public Task<SearchTelemetryAcceptedDto> ReportSearchObservationAsync(
+            SearchObservationRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            SearchObservations.Add(request);
+            return TelemetryException is null
+                ? Task.FromResult(new SearchTelemetryAcceptedDto(true))
+                : Task.FromException<SearchTelemetryAcceptedDto>(TelemetryException);
+        }
+
+        public Task<SearchTelemetryAcceptedDto> SubmitSearchFeedbackAsync(
+            SearchFeedbackRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            LastSearchFeedback = request;
+            return Task.FromResult(new SearchTelemetryAcceptedDto(true));
+        }
 
         private static SharedMemoryItemDto MemoryItem() =>
             new(

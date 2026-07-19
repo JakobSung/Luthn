@@ -59,7 +59,7 @@ printf '%s' "$LUTHN_SERVICE_VALUE" \
   | dotnet run --project src/Luthn.Tools -- token-digest --stdin
 ```
 
-`X-Luthn-Operator`는 감사 actor를 구분하는 선택적 메타데이터이며 권한을 주지 않습니다. 지원 scope는 `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `external-publication.read`, `external-publication.write`, `source.write`, `memory.read`, `memory.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, 운영자용 `*`입니다.
+`X-Luthn-Operator`는 감사 actor를 구분하는 선택적 메타데이터이며 권한을 주지 않습니다. 지원 scope는 `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `external-publication.read`, `external-publication.write`, `source.write`, `memory.read`, `memory.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, `metrics.write`, 운영자용 `*`입니다.
 
 ## 분류 Provider 설정
 

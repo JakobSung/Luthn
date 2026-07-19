@@ -58,6 +58,7 @@ public sealed record SafeSearchResponse(
     IReadOnlyList<string> CoreTags,
     IReadOnlyList<SafeSearchResult> Results)
 {
+    public string? RetrievalId { get; init; }
     public string? ProjectKey { get; init; }
     public string? TaskKey { get; init; }
     public IReadOnlyList<string> TopicTags { get; init; } = [];

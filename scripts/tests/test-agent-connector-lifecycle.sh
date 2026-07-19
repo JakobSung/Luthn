@@ -296,6 +296,7 @@ grep -q '^Luthn__Auth__Tokens__0__Scopes__6=custom.write$' "$config_dir/luthn.en
 grep -q '^Luthn__Auth__Tokens__0__Scopes__7=agent.connection.read$' "$config_dir/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__8=agent.connection.write$' "$config_dir/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__9=access.request$' "$config_dir/luthn.env"
+grep -q '^Luthn__Auth__Tokens__0__Scopes__10=metrics.write$' "$config_dir/luthn.env"
 assert_hook_counts 1 1
 status_output="$(run_luthn connection status codex)"
 grep -q '^Local connector: configured$' <<<"$status_output"
@@ -991,7 +992,7 @@ EOF
     case "$2" in
       org.opencontainers.image.revision) printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
       org.opencontainers.image.version) printf '%s' main ;;
-      io.luthn.mcp-schema.version) printf '%s' 2 ;;
+      io.luthn.mcp-schema.version) printf '%s' 3 ;;
     esac
   }
   read_remote_image_metadata() {
@@ -1018,7 +1019,7 @@ assert set(version) == {
 }
 assert version["cliTemplateVersion"] == "3"
 assert version["connectorTemplateVersion"] == "2"
-assert version["mcpSchemaVersion"] == "2"
+assert version["mcpSchemaVersion"] == "3"
 assert update["status"] == "current"
 assert update["candidateRevision"] == "a" * 40
 assert available["status"] == "update-available"

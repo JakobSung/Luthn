@@ -70,6 +70,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.Equal("release", item.GetProperty("taskKey").GetString());
         Assert.Equal(["delivery"], item.GetProperty("topicTags").EnumerateArray().Select(tag => tag.GetString()));
         Assert.NotEqual(default, item.GetProperty("projectionTimestamp").GetDateTimeOffset());
+        Assert.True(SearchTelemetry.IsValidRetrievalId(contextBody.RootElement.GetProperty("retrievalId").GetString()));
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
@@ -96,6 +97,8 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             .ToArray();
         Assert.DoesNotContain(persistedStrings, value => value!.Contains("/private/workspace", StringComparison.Ordinal));
         Assert.DoesNotContain(persistedStrings, value => value!.Contains("transcript.jsonl", StringComparison.Ordinal));
+        var searchMetrics = factory.Services.GetRequiredService<IOperationalMetrics>().Snapshot().SearchRequests;
+        Assert.Equal("context_pack", Assert.Single(searchMetrics).Surface);
     }
 
     [Fact]

@@ -239,6 +239,8 @@ public static class ClassificationEndpoints
         ContextPackRequest request,
         ContextPackBuilder builder,
         IRetrievalCandidateSelector candidateSelector,
+        IOperationalMetrics metrics,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateSafeSearchRequest(
@@ -269,23 +271,48 @@ public static class ClassificationEndpoints
             recallMetadata.TaskKey,
             recallMetadata.TopicTags);
 
-        var candidates = await candidateSelector.SelectAgentContextAsync(
-            new SafeSearchRequest(
-                normalizedRequest.Query,
-                normalizedRequest.CoreTags,
-                normalizedRequest.MaxItems,
-                normalizedRequest.ProjectKey,
-                normalizedRequest.TaskKey,
-                normalizedRequest.TopicTags),
-            cancellationToken);
-
-        return TypedResults.Ok(builder.Build(normalizedRequest, candidates));
+        var telemetry = new SearchTelemetryScope(metrics, timeProvider, "context_pack");
+        try
+        {
+            var candidates = await candidateSelector.SelectAgentContextAsync(
+                new SafeSearchRequest(
+                    normalizedRequest.Query,
+                    normalizedRequest.CoreTags,
+                    normalizedRequest.MaxItems,
+                    normalizedRequest.ProjectKey,
+                    normalizedRequest.TaskKey,
+                    normalizedRequest.TopicTags),
+                cancellationToken);
+            var pack = builder.Build(normalizedRequest, candidates) with
+            {
+                RetrievalId = telemetry.RetrievalId
+            };
+            telemetry.Complete(pack.Items.Count);
+            return TypedResults.Ok(pack);
+        }
+        catch (TimeoutException)
+        {
+            telemetry.Timeout();
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            telemetry.Canceled();
+            throw;
+        }
+        catch
+        {
+            telemetry.Error();
+            throw;
+        }
     }
 
     public static async Task<Results<Ok<SafeSearchResponse>, BadRequest<ProblemDetails>>> SearchAgentContext(
         SafeSearchRequest request,
         IRetrievalBackend retrievalBackend,
         IRetrievalCandidateSelector candidateSelector,
+        IOperationalMetrics metrics,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateSafeSearchRequest(
@@ -315,9 +342,32 @@ public static class ClassificationEndpoints
                 error.Message));
         }
 
-        var candidates = await candidateSelector.SelectAgentContextAsync(normalizedRequest, cancellationToken);
-
-        return TypedResults.Ok(retrievalBackend.Search(normalizedRequest, candidates));
+        var telemetry = new SearchTelemetryScope(metrics, timeProvider, "agent_search");
+        try
+        {
+            var candidates = await candidateSelector.SelectAgentContextAsync(normalizedRequest, cancellationToken);
+            var search = retrievalBackend.Search(normalizedRequest, candidates) with
+            {
+                RetrievalId = telemetry.RetrievalId
+            };
+            telemetry.Complete(search.Results.Count);
+            return TypedResults.Ok(search);
+        }
+        catch (TimeoutException)
+        {
+            telemetry.Timeout();
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            telemetry.Canceled();
+            throw;
+        }
+        catch
+        {
+            telemetry.Error();
+            throw;
+        }
     }
 
     public static async Task<Results<ContentHttpResult, NotFound>> ReadWikiProposal(

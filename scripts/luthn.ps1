@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 
 $script:LuthnWindowsCliVersion = "3"
 $script:CodexConnectorTemplateVersion = "2"
-$script:McpSchemaVersion = "2"
+$script:McpSchemaVersion = "3"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
 $script:RootDir = if ($env:LUTHN_WINDOWS_ROOT) {
     $env:LUTHN_WINDOWS_ROOT
@@ -841,6 +841,7 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read",
         "Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write"
         "Luthn__Auth__Tokens__0__Scopes__7=access.request",
+        "Luthn__Auth__Tokens__0__Scopes__8=metrics.write",
         "Luthn__Auth__Tokens__1__Name=local-operator",
         "Luthn__Auth__Tokens__1__Sha256Digest=$OperatorDigest",
         "Luthn__Auth__Tokens__1__Scopes__0=access.decide"
@@ -1039,6 +1040,7 @@ function Install-Luthn {
             [IO.File]::Exists($script:CodexStateFile) -or
             [IO.File]::Exists($script:CodexPendingStateFile)
         Ensure-ServiceTokenScope "access.request" -Required:$accessScopeRequired
+        Ensure-ServiceTokenScope "metrics.write" -Required:$accessScopeRequired
     }
     Ensure-OperatorCredential -Image $image
 
@@ -1429,6 +1431,7 @@ function Update-Luthn {
     Write-Host "Refreshing Windows CLI and Compose runtime..."
     try {
         Ensure-ServiceTokenScope "access.request" -Required:$connectorWasConfigured
+        Ensure-ServiceTokenScope "metrics.write" -Required:$connectorWasConfigured
         Ensure-OperatorCredential -Image $targetImage
         Install-ComposeRuntime -RuntimeSource (Get-RuntimeSource -Image $targetImage -Revision $targetRevision) -IncludeCli
         $targetCliContent = [IO.File]::ReadAllText($installedCli)
