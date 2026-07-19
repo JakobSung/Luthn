@@ -128,8 +128,12 @@ automatic recall and explicit MCP reads.
 
 ## Provider Boundary
 
+- Fresh packaged installs use an explicit `unconfigured` state. Classification
+  fails with a bounded provider-unavailable response before raw content is
+  persisted or projected.
 - The mock classifier is local, credential-free, and limited to tests and local
-  experiments when no external provider is configured.
+  experiments. Both `Provider=mock` and `AllowMock=true` are required; a stored
+  mock selection remains blocked after upgrade without that explicit opt-in.
 - Operator-configured provider secrets are server-side only; console/API
   responses expose only whether a key is present.
 - External classification is explicit opt-in configuration.

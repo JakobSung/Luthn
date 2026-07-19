@@ -1,6 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY src/ src/
+COPY data/classification/golden-v1.json data/classification/golden-v1.json
 RUN dotnet restore src/Luthn.Host.Api/Luthn.Host.Api.csproj \
     && dotnet restore src/Luthn.Host.Worker/Luthn.Host.Worker.csproj \
     && dotnet restore src/Luthn.Tools/Luthn.Tools.csproj \

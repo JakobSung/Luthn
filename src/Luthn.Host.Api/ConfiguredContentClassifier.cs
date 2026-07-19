@@ -13,6 +13,7 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
     private readonly IOperatorClassificationSettingsStore _settingsStore;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ClassificationProviderRuntimeOptions _runtimeOptions;
+    private readonly ClassificationProviderOptions _classificationOptions;
     private readonly ILogger<ConfiguredContentClassifier> _logger;
     private readonly IOperationalMetrics _metrics;
 
@@ -28,6 +29,7 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
             settingsStore,
             httpClientFactory,
             Options.Create(new ClassificationProviderRuntimeOptions()),
+            Options.Create(new ClassificationProviderOptions { AllowMock = true, Provider = "mock" }),
             NullLogger<ConfiguredContentClassifier>.Instance,
             NullOperationalMetrics.Instance)
     {
@@ -37,17 +39,21 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
         IOperatorClassificationSettingsStore settingsStore,
         IHttpClientFactory httpClientFactory,
         IOptions<ClassificationProviderRuntimeOptions> runtimeOptions,
+        IOptions<ClassificationProviderOptions> classificationOptions,
         ILogger<ConfiguredContentClassifier> logger,
         IOperationalMetrics? metrics = null)
     {
         _settingsStore = settingsStore;
         _httpClientFactory = httpClientFactory;
         _runtimeOptions = runtimeOptions.Value;
+        _classificationOptions = classificationOptions.Value;
         _logger = logger;
         _metrics = metrics ?? NullOperationalMetrics.Instance;
     }
 
-    public ClassificationProviderBoundary Boundary => BoundaryFor(_settingsStore.Current);
+    public ClassificationProviderBoundary Boundary => BoundaryFor(
+        _settingsStore.Current,
+        _classificationOptions.AllowMock);
 
     public async ValueTask<ClassificationResult> ClassifyAsync(
         PublicRecordId sourceId,
@@ -58,8 +64,15 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
         var settings = _settingsStore.Current;
         return settings.Provider switch
         {
-            OperatorClassificationProviderKind.Mock => await new MockContentClassifier()
-                .ClassifyAsync(sourceId, content, sourceType, cancellationToken),
+            OperatorClassificationProviderKind.Unconfigured => throw new ClassificationProviderException(
+                ClassificationProviderOptions.ProviderRequiredMessage),
+            OperatorClassificationProviderKind.Mock when !_classificationOptions.AllowMock =>
+                throw new ClassificationProviderException(ClassificationProviderOptions.MockDisabledMessage),
+            OperatorClassificationProviderKind.Mock => await new MockContentClassifier().ClassifyAsync(
+                sourceId,
+                content,
+                sourceType,
+                cancellationToken),
             OperatorClassificationProviderKind.ExternalHttp => await ClassifyExternalHttpAsync(
                 settings,
                 sourceId,
@@ -299,13 +312,22 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
         return ToClassificationResult(sourceId, ParseClassifierJson(text));
     }
 
-    private static ClassificationProviderBoundary BoundaryFor(OperatorClassificationProviderSettings settings) =>
-        settings.Provider == OperatorClassificationProviderKind.Mock
-            ? new ClassificationProviderBoundary("mock", "local-classification-input", "local-only")
-            : new ClassificationProviderBoundary(
+    private static ClassificationProviderBoundary BoundaryFor(
+        OperatorClassificationProviderSettings settings,
+        bool mockAllowed) =>
+        settings.Provider switch
+        {
+            OperatorClassificationProviderKind.Unconfigured =>
+                new ClassificationProviderBoundary("unconfigured", "classification-input", "provider-unconfigured"),
+            OperatorClassificationProviderKind.Mock when !mockAllowed =>
+                new ClassificationProviderBoundary("mock", "local-classification-input", "mock-disabled"),
+            OperatorClassificationProviderKind.Mock =>
+                new ClassificationProviderBoundary("mock", "local-classification-input", "local-only"),
+            _ => new ClassificationProviderBoundary(
                 settings.Provider.ToString(),
                 settings.PayloadClass,
-                settings.RedactionState);
+                settings.RedactionState)
+        };
 
     private static void AddAuthorizationHeader(
         HttpRequestMessage request,

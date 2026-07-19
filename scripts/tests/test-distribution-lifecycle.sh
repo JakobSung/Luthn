@@ -70,10 +70,47 @@ if grep -Fq "$operator_token_before" "$LUTHN_CONFIG_DIR/luthn.env"; then
 fi
 grep -q '^Luthn__Auth__Tokens__1__Name=local-operator$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__1__Scopes__0=access.decide$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^LUTHN_ENVIRONMENT=Production$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Classification__Provider=unconfigured$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Classification__AllowMock=false$' "$LUTHN_CONFIG_DIR/luthn.env"
+evaluation_output="$(docker run --rm "$image" classification-eval)"
+grep -q '"datasetVersion": 1' <<<"$evaluation_output"
+grep -q '"provider": "mock"' <<<"$evaluation_output"
 curl -fsS "$base_url/healthz" >/dev/null
-curl -fsS "$base_url/readyz" >/dev/null
+fresh_ready_body="$test_root/fresh-ready.json"
+fresh_ready_status="$(curl -sS -o "$fresh_ready_body" -w '%{http_code}' "$base_url/readyz")"
+test "$fresh_ready_status" = "503"
+grep -q 'classification-provider' "$fresh_ready_body"
+grep -q 'No classification provider is configured' "$fresh_ready_body"
 console_html="$(curl -fsS "$base_url/")"
 grep -q '<title>Luthn Operator Console</title>' <<<"$console_html"
+fresh_preview_body="$test_root/fresh-preview.json"
+fresh_preview_status="$(curl -sS -o "$fresh_preview_body" -w '%{http_code}' -X POST "$base_url/api/classification/preview" \
+  -H 'content-type: application/json' \
+  -H "Authorization: Bearer $token_before" \
+  --data '{"sourceId":"lifecycle-preview","content":"Private lifecycle sentinel must not be echoed.","sourceType":"note"}')"
+test "$fresh_preview_status" = "503"
+grep -q 'No classification provider is configured' "$fresh_preview_body"
+! grep -q 'Private lifecycle sentinel' "$fresh_preview_body"
+
+sed -i.bak \
+  -e 's/^LUTHN_ENVIRONMENT=Production$/LUTHN_ENVIRONMENT=Development/' \
+  -e 's/^Luthn__Classification__Provider=unconfigured$/Luthn__Classification__Provider=mock/' \
+  -e 's/^Luthn__Classification__AllowMock=false$/Luthn__Classification__AllowMock=true/' \
+  "$LUTHN_CONFIG_DIR/luthn.env"
+rm -f "$LUTHN_CONFIG_DIR/luthn.env.bak"
+docker compose \
+  --project-name "$LUTHN_PROJECT_NAME" \
+  --env-file "$LUTHN_CONFIG_DIR/luthn.env" \
+  -f "$LUTHN_DATA_DIR/compose.yaml" \
+  up -d --force-recreate api >/dev/null
+for _ in $(seq 1 60); do
+  if curl -fsS "$base_url/readyz" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+curl -fsS "$base_url/readyz" >/dev/null
 preview_output="$(curl -fsS -X POST "$base_url/api/classification/preview" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_before" \

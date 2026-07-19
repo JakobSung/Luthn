@@ -11,7 +11,7 @@ Install and configure Luthn locally by following the instructions here:
 https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 ```
 
-에이전트는 운영체제를 확인해 해당 절차만 사용하고, 기존 Docker volume·Luthn/Codex 설정·hook·관계없는 MCP 등록을 보존해야 합니다. token이나 자격 증명 파일을 출력하면 안 됩니다. 완료 조건은 `luthn status`의 health/readiness가 모두 `ready`, 운영자 화면 URL 확인, `luthn mcp --list-tools`의 `get_context_pack` 확인, Codex MCP 등록 확인입니다. 사용자만 할 수 있는 재시작·hook Trust가 남으면 정확히 안내해야 합니다.
+에이전트는 운영체제를 확인해 해당 절차만 사용하고, 기존 Docker volume·Luthn/Codex 설정·hook·관계없는 MCP 등록을 보존해야 합니다. token이나 자격 증명 파일을 출력하면 안 됩니다. 새 설치의 완료 조건은 `luthn status`의 health가 `ready`이고 readiness가 분류 provider 설정 필요 상태를 정확히 보고하는 것, 운영자 화면 URL 확인, `luthn mcp --list-tools`의 `get_context_pack` 확인, Codex MCP 등록 확인입니다. 운영자가 실제 분류 provider를 설정한 뒤에는 readiness도 `ready`여야 합니다. 사용자만 할 수 있는 provider 선택·재시작·hook Trust가 남으면 정확히 안내해야 합니다.
 
 ## 요구 사항
 
@@ -50,7 +50,7 @@ docker compose version
 curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
 ```
 
-설치 과정은 `~/.local/bin/luthn` CLI와 원본 없는 Compose 묶음을 설치하고, `ghcr.io/jakobsung/luthn:main`을 내려받아 로컬 서비스 token을 만들며, PostgreSQL 시작·migration·공개 안전 예제 자료 입력·health/readiness 확인을 수행합니다. `--connect-codex`는 Codex hook, MCP, 기본 자동 회상도 설정합니다.
+설치 과정은 `~/.local/bin/luthn` CLI와 원본 없는 Compose 묶음을 설치하고, `ghcr.io/jakobsung/luthn:main`을 내려받아 로컬 서비스 token을 만들며, PostgreSQL 시작·migration·공개 안전 예제 자료 입력·health 확인을 수행합니다. 새 설치의 분류 상태는 명시적인 `unconfigured`이며 운영자가 실제 provider를 선택하기 전까지 `/readyz`는 `not_ready`입니다. `--connect-codex`는 Codex hook, MCP, 기본 자동 회상도 설정합니다.
 
 | 용도 | 기본 경로 |
 |---|---|
@@ -122,6 +122,12 @@ luthn doctor --json
 
 Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를 보고합니다. 운영자 화면은 <http://127.0.0.1:8080/>이며 API port는 기본적으로 loopback에만 연결됩니다.
 
+### 필수 분류 설정
+
+설치 후 운영자 화면에서 분류 provider를 설정합니다. 설정 전에는 분류가 필요한 쓰기가 제한된 503으로 실패하고, 제출한 원문은 투영되거나 저장되지 않으며, `/readyz`는 `classification-provider`가 남은 의존성임을 표시합니다.
+
+배포 설치는 mock 분류기를 켜지 않습니다. `Mock`은 개발·시험 선택지이며 `Luthn__Classification__AllowMock=true`를 명시하지 않으면 저장과 실행이 거절됩니다. 운영 배포에서는 이 값을 켜지 마세요. 업그레이드 전에 저장된 `Mock` 설정도 명시적 opt-in 없이는 실행되지 않으며, database나 저장된 provider 설정을 삭제하지 않고 운영자 화면에서 실제 provider로 교체할 수 있습니다.
+
 `version`은 설치 image 참조·digest, source revision, CLI/connector template
 version, MCP schema version과 image에 존재하는 stable release version을
 보고합니다. `update check`는 설정된 공식 registry channel의 원격
@@ -155,8 +161,10 @@ luthn uninstall --purge-data --yes
 받은 뒤, 레거시 설치의 operator credential과 connector scope를 먼저
 조정합니다. 이전 설정과 관리 Codex 파일을 snapshot한 상태에서 target
 CLI·Compose·MCP schema를 검증한 다음 PostgreSQL 확인, 쓰기 경로 중지,
-압축 backup, migration, API 재시작을 수행합니다. `/healthz`, `/readyz`가
-모두 성공한 경우에만 완료합니다.
+압축 backup, migration, API 재시작을 수행합니다. `/healthz`가 성공하고
+`/readyz`가 성공하거나 제한된 분류 provider 설정 필요 상태임을 확인한 경우에만
+완료합니다. migration, health 또는 분류 설정 외 readiness 실패는 완료로
+처리하지 않습니다.
 
 ```bash
 luthn update ghcr.io/jakobsung/luthn:sha-<full-commit-sha>

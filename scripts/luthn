@@ -425,7 +425,7 @@ write_initial_config() {
   cat >"$config_file" <<EOF
 LUTHN_IMAGE=$image
 LUTHN_PORT=$port
-LUTHN_ENVIRONMENT=Development
+LUTHN_ENVIRONMENT=Production
 LUTHN_BASE_URL=http://127.0.0.1:$port
 LUTHN_POSTGRES_VOLUME=$postgres_volume
 LUTHN_OPERATOR_VOLUME=$operator_volume
@@ -435,7 +435,8 @@ LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=l
 POSTGRES_DB=luthn
 POSTGRES_USER=luthn
 POSTGRES_HOST_AUTH_METHOD=trust
-Luthn__Classification__Provider=mock
+Luthn__Classification__Provider=unconfigured
+Luthn__Classification__AllowMock=false
 Luthn__Auth__RequireServiceToken=true
 Luthn__Auth__Tokens__0__Name=local-agent
 Luthn__Auth__Tokens__0__Sha256Digest=$digest
@@ -791,19 +792,54 @@ wait_for_postgres() {
   return 1
 }
 
+classification_setup_pending() {
+  local status_code="$1"
+  local body="$2"
+  [[ "$status_code" == "503" ]] \
+    && [[ "$body" == *"classification-provider"* ]] \
+    && { [[ "$body" == *"No classification provider is configured"* ]] \
+      || [[ "$body" == *"The mock classification provider is disabled"* ]] \
+      || [[ "$body" == *"Production classification requires an operator-configured non-mock provider"* ]]; }
+}
+
+classification_setup_required_by_config() {
+  local provider allow_mock
+  provider="$(read_config Luthn__Classification__Provider unconfigured)"
+  allow_mock="$(read_config Luthn__Classification__AllowMock false)"
+  if [[ "$provider" == "unconfigured" ]]; then
+    return 0
+  fi
+  if [[ "$provider" != "mock" ]]; then
+    return 1
+  fi
+  case "$allow_mock" in
+    true|True|TRUE) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 wait_for_api() {
   require_command curl
+  local base_url attempts readiness_response readiness_code readiness_body
   base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
   attempts=60
   while (( attempts > 0 )); do
-    if curl -fsS "$base_url/healthz" >/dev/null 2>&1 \
-      && curl -fsS "$base_url/readyz" >/dev/null 2>&1; then
-      return 0
+    if curl -fsS "$base_url/healthz" >/dev/null 2>&1; then
+      if curl -fsS "$base_url/readyz" >/dev/null 2>&1; then
+        return 0
+      fi
+      readiness_response="$(curl -sS -w $'\n%{http_code}' "$base_url/readyz" 2>/dev/null || true)"
+      readiness_code="${readiness_response##*$'\n'}"
+      readiness_body="${readiness_response%$'\n'*}"
+      if [[ "$readiness_code" =~ ^2[0-9][0-9]$ ]] \
+        || classification_setup_pending "$readiness_code" "$readiness_body"; then
+        return 0
+      fi
     fi
     attempts=$((attempts - 1))
     sleep 2
   done
-  echo "Luthn did not pass health and readiness checks." >&2
+  echo "Luthn did not reach a healthy or safely unconfigured state." >&2
   compose_cmd ps >&2 || true
   compose_cmd logs --tail 100 api migrate >&2 || true
   return 1
@@ -890,7 +926,7 @@ install_luthn() {
   else
     ensure_config_value LUTHN_IMAGE "$image"
     ensure_config_value LUTHN_PORT "${LUTHN_PORT:-8080}"
-    ensure_config_value LUTHN_ENVIRONMENT Development
+    ensure_config_value LUTHN_ENVIRONMENT Production
     ensure_config_value LUTHN_BASE_URL "http://127.0.0.1:$(read_config LUTHN_PORT 8080)"
     ensure_config_value LUTHN_POSTGRES_VOLUME "${LUTHN_POSTGRES_VOLUME:-luthn-postgres}"
     ensure_config_value LUTHN_OPERATOR_VOLUME "${LUTHN_OPERATOR_VOLUME:-luthn-operator}"
@@ -913,7 +949,8 @@ install_luthn() {
     ensure_config_value POSTGRES_DB luthn
     ensure_config_value POSTGRES_USER luthn
     ensure_config_value POSTGRES_HOST_AUTH_METHOD trust
-    ensure_config_value Luthn__Classification__Provider mock
+    ensure_config_value Luthn__Classification__Provider unconfigured
+    ensure_config_value Luthn__Classification__AllowMock false
     ensure_config_value Luthn__Auth__RequireServiceToken true
     ensure_config_value Luthn__Auth__Tokens__0__Name local-agent
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__0 agent.read
@@ -943,9 +980,14 @@ install_luthn() {
   refresh_codex_connection_observation || \
     echo "warning: installed Codex connector status could not be reported" >&2
 
+  echo
+  if classification_setup_required_by_config; then
+    echo "Luthn is running."
+    echo "Classification: setup required in the operator console."
+  else
+    echo "Luthn is ready."
+  fi
   cat <<EOF
-
-Luthn is ready.
 Console: $(read_config LUTHN_BASE_URL http://127.0.0.1:8080)/
 Status:  $cli_path status
 Config:  $config_file
@@ -989,6 +1031,9 @@ show_status() {
     echo "Readiness: ready"
   else
     echo "Readiness: not ready"
+  fi
+  if classification_setup_required_by_config; then
+    echo "Classification: setup required in the operator console"
   fi
   echo "Console: $base_url/"
   echo "Image: $image_ref"
@@ -1062,6 +1107,9 @@ show_doctor() {
   if [[ "$readiness_code" =~ ^2[0-9][0-9]$ ]]; then
     doctor_add_check api-readiness pass true "API readiness check passed." ""
     doctor_add_check migrations pass true "Database migrations are current." ""
+  elif classification_setup_pending "$readiness_code" "$readiness_body"; then
+    doctor_add_check api-readiness fail true "Classification provider setup is required." "Open the operator console and configure a production provider."
+    doctor_add_check migrations pass true "Database migrations are current; classification setup is pending." ""
   elif [[ "$readiness_body" == *"pending migrations"* ]]; then
     doctor_add_check api-readiness fail true "API is not ready because migrations are pending." "Run 'luthn update' to apply the target migrations."
     doctor_add_check migrations fail true "Database has pending migrations." "Run 'luthn update'."

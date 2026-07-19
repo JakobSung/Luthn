@@ -356,6 +356,7 @@ const changePublication = async (action) => {
 };
 
 const providerDefaults = {
+  Unconfigured: { model: "", endpoint: "", authHeaderName: "Authorization" },
   Mock: { model: "", endpoint: "", authHeaderName: "Authorization" },
   OpenAi: {
     model: "gpt-4.1-mini",
@@ -382,15 +383,17 @@ const providerDefaults = {
 
 const renderProviderSettings = (settings) => {
   const form = $("#providerForm");
+  const mockOption = form.provider.querySelector('option[value="Mock"]');
+  if (mockOption) {
+    mockOption.disabled = !settings.mockAllowed;
+  }
   form.provider.value = settings.provider;
   form.model.value = settings.model || "";
   form.endpoint.value = settings.endpoint || "";
   form.authHeaderName.value = settings.authHeaderName || "Authorization";
   form.apiKey.value = "";
   form.clearApiKey.checked = false;
-  $("#providerStatus").textContent = settings.hasApiKey
-    ? "Saved key present"
-    : "No saved key";
+  $("#providerStatus").textContent = settings.statusDetail;
   writeResult($("#providerOutput"), settings);
 };
 
@@ -406,7 +409,7 @@ const refreshProviderSettings = async () => {
 
 const applyProviderDefaults = () => {
   const form = $("#providerForm");
-  const defaults = providerDefaults[form.provider.value] || providerDefaults.Mock;
+  const defaults = providerDefaults[form.provider.value] || providerDefaults.Unconfigured;
   if (!form.model.value.trim()) {
     form.model.value = defaults.model;
   }

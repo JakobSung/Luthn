@@ -109,6 +109,7 @@ public static class ClassificationEndpoints
         IHostEnvironment environment,
         IOptions<LuthnAuthOptions> authOptions,
         IOptions<LuthnHostOperationalOptions> hostOptions,
+        IOptions<ClassificationProviderOptions> classificationOptions,
         IOperatorClassificationSettingsStore classificationSettings,
         CancellationToken cancellationToken)
     {
@@ -154,7 +155,10 @@ public static class ClassificationEndpoints
         string? providerIssue;
         try
         {
-            providerIssue = GetClassificationProviderReadinessIssue(environment, classificationSettings.Current);
+            providerIssue = GetClassificationProviderReadinessIssue(
+                environment,
+                classificationSettings.Current,
+                classificationOptions.Value);
         }
         catch (InvalidOperationException error)
         {
@@ -188,15 +192,26 @@ public static class ClassificationEndpoints
 
     private static string? GetClassificationProviderReadinessIssue(
         IHostEnvironment environment,
-        OperatorClassificationProviderSettings settings)
+        OperatorClassificationProviderSettings settings,
+        ClassificationProviderOptions options)
     {
-        if (!environment.IsProduction())
+        if (settings.Provider == OperatorClassificationProviderKind.Unconfigured)
         {
-            return null;
+            return ClassificationProviderOptions.ProviderRequiredMessage;
         }
 
         if (settings.Provider == OperatorClassificationProviderKind.Mock)
         {
+            if (!options.AllowMock)
+            {
+                return ClassificationProviderOptions.MockDisabledMessage;
+            }
+
+            if (!environment.IsProduction())
+            {
+                return null;
+            }
+
             return "Production classification requires an operator-configured non-mock provider.";
         }
 

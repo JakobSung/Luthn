@@ -34,9 +34,10 @@ services:
     command: api
     environment:
       ASPNETCORE_URLS: http://+:8080
-      ASPNETCORE_ENVIRONMENT: ${LUTHN_ENVIRONMENT:-Development}
+      ASPNETCORE_ENVIRONMENT: ${LUTHN_ENVIRONMENT:-Production}
       ConnectionStrings__LuthnDb: *luthn-database
-      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-mock}
+      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-unconfigured}
+      Luthn__Classification__AllowMock: ${Luthn__Classification__AllowMock:-false}
       Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
       Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
       Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}

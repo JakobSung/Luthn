@@ -106,7 +106,9 @@ curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/instal
 The bootstrap installs the CLI at `~/.local/bin/luthn`. It downloads the
 source-free Compose bundle, pulls `ghcr.io/jakobsung/luthn:main`, creates a
 local service token, starts PostgreSQL, applies migrations before API startup,
-seeds public-safe demo data, and waits for health and readiness.
+seeds public-safe demo data, and waits until the API is healthy. A fresh install
+starts with classification explicitly `unconfigured`; `/readyz` remains
+`not_ready` until the operator selects a production provider.
 With `--connect-codex`, the same bootstrap also configures the Codex hook, MCP
 registration, and default auto-recall, then prints the required restart and
 `/hooks` Trust steps.
@@ -189,8 +191,8 @@ try {
 The bootstrap validates Docker before replacing an existing CLI, installs a
 `luthn.cmd` shim, downloads the same Compose bundle used by macOS and Linux,
 creates a local service token, applies migrations, seeds demo data, and waits
-for health and readiness. It adds the CLI directory to the current user's
-`PATH`.
+for health and either operational readiness or the explicit classification
+setup-required state. It adds the CLI directory to the current user's `PATH`.
 
 An already-open parent terminal cannot receive a child process's updated
 `PATH`. Do not reinstall Luthn. Open a new terminal or repair only the current
@@ -287,6 +289,20 @@ same fields for agents and automation without secret values.
 Open the operator console at <http://127.0.0.1:8080/>. PostgreSQL is kept on the
 internal Compose network and the console/API port is loopback-bound by default.
 
+### Required classification setup
+
+Open the operator console after installation and configure a classification
+provider. Until then, classification-dependent writes return a bounded 503,
+the submitted raw content is not projected or stored, and `/readyz` identifies
+`classification-provider` as the pending dependency.
+
+Packaged installs do not enable the mock classifier. `Mock` is visible only as
+a development/test option and is rejected unless
+`Luthn__Classification__AllowMock=true` is set explicitly. Do not enable this
+flag for an operational deployment. Existing stored `Mock` selections are also
+blocked after upgrade until that explicit opt-in is present; replace them in
+the operator console without deleting the database or stored provider settings.
+
 ## Lifecycle Commands
 
 The following full lifecycle is currently available on macOS and Linux:
@@ -359,8 +375,9 @@ of unrelated Codex configuration, the two named Docker volumes, and
 5. stops API and active MCP/adapter write paths;
 6. creates a compressed `pg_dump` backup and records the current image ID and backup path;
 7. runs migrations from the same target image that will run the API;
-8. starts the API and requires both `/healthz` and `/readyz` to pass;
-9. records success only after readiness.
+8. starts the API and requires `/healthz` plus either full `/readyz` success or
+   the bounded classification-provider setup-required state;
+9. records success only after that runtime state is verified.
 
 Pin an immutable published image when needed:
 
@@ -378,7 +395,7 @@ Codex instructions changed. Runtime-only updates do not emit this restart
 notice. Restart the current Codex host before invoking Luthn tools again when
 the notice appears.
 
-Migration or readiness failure leaves the API stopped, preserves the backup,
+Migration, health, or any non-classification readiness failure leaves the API stopped, preserves the backup,
 and records the previous image ID. macOS/Linux records update state in
 `~/.local/state/luthn/install-state.env`; Windows records it in
 `%LOCALAPPDATA%\Luthn\state\update-windows.json`. Luthn does not automatically

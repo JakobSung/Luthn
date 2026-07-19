@@ -204,7 +204,15 @@ public sealed class PostgresIntegrationSmokeTests
             new FakeHostEnvironment("Development"),
             Options.Create(new LuthnAuthOptions()),
             Options.Create(new LuthnHostOperationalOptions()),
-            new StaticSettingsStore(new OperatorClassificationProviderSettings()),
+            Options.Create(new ClassificationProviderOptions
+            {
+                Provider = "mock",
+                AllowMock = true
+            }),
+            new StaticSettingsStore(new OperatorClassificationProviderSettings
+            {
+                Provider = OperatorClassificationProviderKind.Mock
+            }),
             CancellationToken.None);
         var ready = Assert.IsType<Ok<ReadinessResponse>>(readiness);
         var response = Assert.IsType<ReadinessResponse>(ready.Value);

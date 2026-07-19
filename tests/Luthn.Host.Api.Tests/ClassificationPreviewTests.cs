@@ -1,4 +1,5 @@
 using Luthn.Core.Classification;
+using Luthn.Core.Common;
 using Luthn.Core.Persistence;
 using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Hosting;
@@ -54,6 +55,8 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.OK, indexResponse.StatusCode);
         Assert.Contains("Luthn Operator Console", index, StringComparison.Ordinal);
         Assert.Contains("Classification provider", index, StringComparison.Ordinal);
+        Assert.Contains("Unconfigured — choose a provider", index, StringComparison.Ordinal);
+        Assert.Contains("Mock — development/test only", index, StringComparison.Ordinal);
         Assert.Contains("Access requests", index, StringComparison.Ordinal);
         Assert.Contains("Agent connections", index, StringComparison.Ordinal);
         Assert.Contains("Read-only agent connection status", index, StringComparison.Ordinal);
@@ -65,11 +68,13 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.OK, jsResponse.StatusCode);
         Assert.Contains("/api/agent-connections", script, StringComparison.Ordinal);
         Assert.Contains("/api/external-publication/status", script, StringComparison.Ordinal);
+        Assert.Contains("mockOption.disabled = !settings.mockAllowed", script, StringComparison.Ordinal);
+        Assert.Contains("settings.statusDetail", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/observations", script, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task OperatorProviderConfigurationDefaultsToMockWithoutExposingApiKey()
+    public async Task TestingProviderConfigurationExplicitlyAllowsMockWithoutExposingApiKey()
     {
         using var response = await _client.GetAsync("/api/operator/classification-provider");
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
@@ -77,7 +82,262 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("Mock", body.RootElement.GetProperty("provider").GetString());
         Assert.False(body.RootElement.GetProperty("hasApiKey").GetBoolean());
+        Assert.True(body.RootElement.GetProperty("mockAllowed").GetBoolean());
+        Assert.Equal("mock-non-production", body.RootElement.GetProperty("status").GetString());
+        Assert.Contains(
+            "development or test",
+            body.RootElement.GetProperty("statusDetail").GetString(),
+            StringComparison.Ordinal);
         Assert.False(body.RootElement.TryGetProperty("apiKey", out _));
+    }
+
+    [Fact]
+    public async Task UnconfiguredProviderIsNotReadyAndClassificationFailsWithoutEchoingContent()
+    {
+        const string submittedContent = "raw-content-must-not-be-echoed";
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
+            builder.UseSetting(
+                "Luthn:OperatorConfig:Directory",
+                Path.Combine(Path.GetTempPath(), "luthn-operator-tests", Guid.NewGuid().ToString("N")));
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Luthn:Classification:Provider"] = "unconfigured",
+                    ["Luthn:Classification:AllowMock"] = "false"
+                }));
+        });
+        using var client = factory.CreateClient();
+
+        using var configurationResponse = await client.GetAsync("/api/operator/classification-provider");
+        using var configurationBody = await JsonDocument.ParseAsync(
+            await configurationResponse.Content.ReadAsStreamAsync());
+        using var readinessResponse = await client.GetAsync("/readyz");
+        using var readinessBody = await JsonDocument.ParseAsync(await readinessResponse.Content.ReadAsStreamAsync());
+        using var previewResponse = await client.PostAsJsonAsync("/api/classification/preview", new
+        {
+            sourceId = "unconfigured-source",
+            content = submittedContent,
+            sourceType = "note"
+        });
+        var previewBody = await previewResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, configurationResponse.StatusCode);
+        Assert.Equal("Unconfigured", configurationBody.RootElement.GetProperty("provider").GetString());
+        Assert.False(configurationBody.RootElement.GetProperty("mockAllowed").GetBoolean());
+        Assert.Equal("unconfigured", configurationBody.RootElement.GetProperty("status").GetString());
+        Assert.Equal(
+            ClassificationProviderOptions.ProviderRequiredMessage,
+            configurationBody.RootElement.GetProperty("statusDetail").GetString());
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, readinessResponse.StatusCode);
+        Assert.Equal("classification-provider", readinessBody.RootElement.GetProperty("dependency").GetString());
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, previewResponse.StatusCode);
+        Assert.Contains("No classification provider is configured", previewBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(submittedContent, previewBody, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Empty(await db.ClassificationResults.ToListAsync());
+        Assert.Empty(await db.SourceEvents.ToListAsync());
+        var audit = Assert.Single(await db.AuditEvents.ToListAsync());
+        Assert.Equal("classification.provider.invoked", audit.Action);
+        Assert.Equal("provider-unconfigured", audit.RedactionState);
+    }
+
+    [Fact]
+    public async Task DisallowedMockIsNotReadyAndClassificationFailsWithoutPersistingContent()
+    {
+        const string submittedContent = "disabled-mock-content-must-not-be-echoed";
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
+            builder.UseSetting(
+                "Luthn:OperatorConfig:Directory",
+                Path.Combine(Path.GetTempPath(), "luthn-operator-tests", Guid.NewGuid().ToString("N")));
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Luthn:Classification:Provider"] = "mock",
+                    ["Luthn:Classification:AllowMock"] = "false"
+                }));
+        });
+        using var client = factory.CreateClient();
+
+        using var configurationResponse = await client.GetAsync("/api/operator/classification-provider");
+        using var configurationBody = await JsonDocument.ParseAsync(
+            await configurationResponse.Content.ReadAsStreamAsync());
+        using var readinessResponse = await client.GetAsync("/readyz");
+        using var readinessBody = await JsonDocument.ParseAsync(await readinessResponse.Content.ReadAsStreamAsync());
+        using var previewResponse = await client.PostAsJsonAsync("/api/classification/preview", new
+        {
+            sourceId = "disabled-mock-source",
+            content = submittedContent,
+            sourceType = "note"
+        });
+        var previewBody = await previewResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, configurationResponse.StatusCode);
+        Assert.Equal("Mock", configurationBody.RootElement.GetProperty("provider").GetString());
+        Assert.Equal("mock-disabled", configurationBody.RootElement.GetProperty("status").GetString());
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, readinessResponse.StatusCode);
+        Assert.Equal("classification-provider", readinessBody.RootElement.GetProperty("dependency").GetString());
+        Assert.Contains(ClassificationProviderOptions.MockDisabledMessage, readinessBody.RootElement.ToString(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, previewResponse.StatusCode);
+        Assert.Contains(ClassificationProviderOptions.MockDisabledMessage, previewBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(submittedContent, previewBody, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Empty(await db.ClassificationResults.ToListAsync());
+        Assert.Empty(await db.SourceEvents.ToListAsync());
+        var audit = Assert.Single(await db.AuditEvents.ToListAsync());
+        Assert.Equal("classification.provider.invoked", audit.Action);
+        Assert.Equal("mock-disabled", audit.RedactionState);
+    }
+
+    [Fact]
+    public async Task OperatorProviderConfigurationRejectsMockWithoutExplicitOptIn()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "luthn-operator-tests",
+            Guid.NewGuid().ToString("N"));
+        var store = new OperatorClassificationSettingsStore(
+            Options.Create(new OperatorConfigOptions { Directory = directory }),
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
+                new DirectoryInfo(Path.Combine(directory, "keys"))),
+            new ConfigurationBuilder().Build());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => store.SaveAsync(
+            new SaveClassificationProviderConfigurationRequest(
+                "Mock",
+                null,
+                null,
+                null,
+                null,
+                ClearApiKey: true)).AsTask());
+
+        Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, error.Message);
+        Assert.False(File.Exists(Path.Combine(directory, "classification-provider.json")));
+    }
+
+    [Fact]
+    public async Task OperatorProviderEndpointRejectsMockWithoutExplicitOptIn()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "luthn-operator-tests",
+            Guid.NewGuid().ToString("N"));
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
+            builder.UseSetting("Luthn:OperatorConfig:Directory", directory);
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Luthn:Classification:Provider"] = "unconfigured",
+                    ["Luthn:Classification:AllowMock"] = "false"
+                }));
+        });
+        using var client = factory.CreateClient();
+
+        using var response = await client.PutAsJsonAsync("/api/operator/classification-provider", new
+        {
+            provider = "Mock",
+            model = "",
+            endpoint = "",
+            authHeaderName = "Authorization",
+            apiKey = "",
+            clearApiKey = true
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            ClassificationProviderOptions.MockDisabledMessage,
+            body.RootElement.GetProperty("detail").GetString());
+        Assert.False(File.Exists(Path.Combine(directory, "classification-provider.json")));
+    }
+
+    [Fact]
+    public async Task PersistedMockIsBlockedAfterUpgradeAndCanBeReconfigured()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "luthn-operator-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(
+            Path.Combine(directory, "classification-provider.json"),
+            JsonSerializer.Serialize(new
+            {
+                provider = "Mock",
+                model = "",
+                endpoint = "",
+                authHeaderName = "Authorization",
+                protectedApiKey = "",
+                payloadClass = "local-classification-input",
+                redactionState = "local-only"
+            }));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Luthn:Classification:Provider"] = "unconfigured",
+                ["Luthn:Classification:AllowMock"] = "false"
+            })
+            .Build();
+        var store = new OperatorClassificationSettingsStore(
+            Options.Create(new OperatorConfigOptions { Directory = directory }),
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
+                new DirectoryInfo(Path.Combine(directory, "keys"))),
+            configuration);
+        var classifier = new ConfiguredContentClassifier(
+            store,
+            new StaticHttpClientFactory(new HttpClient()),
+            Options.Create(new ClassificationProviderRuntimeOptions()),
+            Options.Create(new ClassificationProviderOptions()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfiguredContentClassifier>.Instance);
+
+        Assert.Equal(OperatorClassificationProviderKind.Mock, store.Current.Provider);
+        var error = await Assert.ThrowsAsync<ClassificationProviderException>(() => classifier.ClassifyAsync(
+            new("upgrade-mock-source"),
+            "content that must not be classified by mock",
+            "note").AsTask());
+        var replacement = await store.SaveAsync(new SaveClassificationProviderConfigurationRequest(
+            "ExternalHttp",
+            "",
+            "http://127.0.0.1:5099/classify",
+            "Authorization",
+            null,
+            ClearApiKey: true));
+
+        Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, error.Message);
+        Assert.Equal(OperatorClassificationProviderKind.ExternalHttp, replacement.Provider);
+        Assert.Equal(OperatorClassificationProviderKind.ExternalHttp, (await store.ReadAsync()).Provider);
+    }
+
+    [Fact]
+    public async Task PersistedMockConfigurationReportsDisabledOperatorStatus()
+    {
+        var response = await OperatorConfigurationEndpoints.ReadClassificationProvider(
+            new StaticSettingsStore(new OperatorClassificationProviderSettings
+            {
+                Provider = OperatorClassificationProviderKind.Mock,
+                PayloadClass = "local-classification-input",
+                RedactionState = "local-only"
+            }),
+            Options.Create(new ClassificationProviderOptions { AllowMock = false }),
+            CancellationToken.None);
+
+        Assert.NotNull(response.Value);
+        Assert.Equal("Mock", response.Value.Provider);
+        Assert.False(response.Value.MockAllowed);
+        Assert.Equal("mock-disabled", response.Value.Status);
+        Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, response.Value.StatusDetail);
     }
 
     [Fact]
@@ -101,14 +361,16 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("OpenRouter", body.RootElement.GetProperty("provider").GetString());
         Assert.True(body.RootElement.GetProperty("hasApiKey").GetBoolean());
+        Assert.Equal("configured", body.RootElement.GetProperty("status").GetString());
         Assert.DoesNotContain("sk-or-test-secret", responseJson, StringComparison.Ordinal);
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         Assert.True(getBody.RootElement.GetProperty("hasApiKey").GetBoolean());
+        Assert.Equal("configured", getBody.RootElement.GetProperty("status").GetString());
         Assert.DoesNotContain("sk-or-test-secret", getJson, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task OperatorProviderConfigurationClearsSavedKeyWhenSwitchingToMock()
+    public async Task OperatorProviderConfigurationClearsSavedKeyWhenExplicitlySwitchingToMock()
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
@@ -118,7 +380,13 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             Options.Create(new OperatorConfigOptions { Directory = directory }),
             Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
                 new DirectoryInfo(Path.Combine(directory, "keys"))),
-            new ConfigurationBuilder().Build());
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Luthn:Classification:Provider"] = "mock",
+                    ["Luthn:Classification:AllowMock"] = "true"
+                })
+                .Build());
 
         var external = await store.SaveAsync(new SaveClassificationProviderConfigurationRequest(
             "OpenRouter",
@@ -465,18 +733,57 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
-    public void MockProviderIsAllowedOnlyWhenNoExternalProviderIsConfigured()
+    public void MockProviderRequiresExplicitOptInAndNoExternalProvider()
     {
         var options = new ClassificationProviderOptions
         {
             Provider = "mock",
+            AllowMock = true,
             ExternalHttp = new ExternalHttpClassificationProviderOptions()
         };
 
         Assert.Equal("mock", options.ResolveProvider());
+        options.EnsureMockAllowed();
         Assert.Equal(
             "MockContentClassifier is test and experiment only; production classification requires an external provider.",
             MockContentClassifier.UsageNotice);
+    }
+
+    [Fact]
+    public void ClassificationProviderDefaultsToUnconfiguredAndRejectsImplicitMock()
+    {
+        var options = new ClassificationProviderOptions();
+
+        Assert.Equal(ClassificationProviderOptions.UnconfiguredProvider, options.ResolveProvider());
+        var error = Assert.Throws<InvalidOperationException>(() => options.EnsureMockAllowed());
+        Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, error.Message);
+    }
+
+    [Theory]
+    [InlineData("unconfigured", ClassificationProviderOptions.ProviderRequiredMessage)]
+    [InlineData("mock", ClassificationProviderOptions.MockDisabledMessage)]
+    public async Task ServiceCollectionKeepsRuntimeAvailableWhileProviderIsBlocked(
+        string providerName,
+        string expectedMessage)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Luthn:Classification:Provider"] = providerName,
+                ["Luthn:Classification:AllowMock"] = "false"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLuthnClassification(configuration);
+        using var serviceProvider = services.BuildServiceProvider();
+        var classifier = serviceProvider.GetRequiredService<IContentClassifier>();
+
+        var error = await Assert.ThrowsAsync<ClassificationProviderException>(() => classifier.ClassifyAsync(
+            new PublicRecordId("blocked-provider"),
+            "content must not be classified",
+            "note").AsTask());
+
+        Assert.Equal(expectedMessage, error.Message);
     }
 
     [Fact]
@@ -663,6 +970,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
                 MaxAttempts = 2,
                 RetryDelayMilliseconds = 0
             }),
+            Options.Create(new ClassificationProviderOptions { Provider = "external-http" }),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfiguredContentClassifier>.Instance);
 
         var result = await classifier.ClassifyAsync(
@@ -693,6 +1001,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
                 MaxAttempts = 1,
                 RetryDelayMilliseconds = 0
             }),
+            Options.Create(new ClassificationProviderOptions { Provider = "external-http" }),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfiguredContentClassifier>.Instance);
 
         var error = await Assert.ThrowsAsync<ClassificationProviderException>(() => classifier.ClassifyAsync(
