@@ -15,6 +15,9 @@ public interface IOperationalMetrics
 
 public sealed class OperationalMetrics : IOperationalMetrics
 {
+    private static readonly long[] SearchDurationBucketUpperBoundsMilliseconds =
+        [10, 50, 100, 500, 1_000, 5_000, SearchTelemetry.MaximumDurationMilliseconds];
+
     private readonly ConcurrentDictionary<string, ProviderMetricAggregate> _providers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> _accessDecisions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SearchMetricAggregate> _search = new(StringComparer.Ordinal);
@@ -136,6 +139,8 @@ public sealed class OperationalMetrics : IOperationalMetrics
         private long _maxDurationMilliseconds;
         private long _totalResults;
         private long _zeroResultCount;
+        private readonly long[] _durationBucketCounts =
+            new long[SearchDurationBucketUpperBoundsMilliseconds.Length];
 
         public string Surface { get; } = surface;
         public string Outcome { get; } = outcome;
@@ -151,6 +156,14 @@ public sealed class OperationalMetrics : IOperationalMetrics
             Interlocked.Increment(ref _count);
             Interlocked.Add(ref _totalDurationMilliseconds, durationMilliseconds);
             Interlocked.Add(ref _totalResults, boundedResultCount);
+            for (var index = 0; index < SearchDurationBucketUpperBoundsMilliseconds.Length; index++)
+            {
+                if (durationMilliseconds <= SearchDurationBucketUpperBoundsMilliseconds[index])
+                {
+                    Interlocked.Increment(ref _durationBucketCounts[index]);
+                }
+            }
+
             if (Outcome == "zero_result")
             {
                 Interlocked.Increment(ref _zeroResultCount);
@@ -171,7 +184,12 @@ public sealed class OperationalMetrics : IOperationalMetrics
             Interlocked.Read(ref _totalDurationMilliseconds),
             Interlocked.Read(ref _maxDurationMilliseconds),
             Interlocked.Read(ref _totalResults),
-            Interlocked.Read(ref _zeroResultCount));
+            Interlocked.Read(ref _zeroResultCount),
+            SearchDurationBucketUpperBoundsMilliseconds
+                .Select((upperBound, index) => new SearchDurationBucketSnapshot(
+                    upperBound,
+                    Interlocked.Read(ref _durationBucketCounts[index])))
+                .ToArray());
     }
 }
 
@@ -205,5 +223,15 @@ public sealed record ProviderMetricSnapshot(string Provider, string Outcome, lon
 public sealed record SensitiveAccessMetricSnapshot(long Requests, IReadOnlyList<OutcomeCountSnapshot> Decisions);
 public sealed record OutcomeCountSnapshot(string Outcome, long Count);
 public sealed record SearchMetricSnapshot(string Source, long Observations, long TotalCandidates, long MaxCandidates);
-public sealed record SearchRequestMetricSnapshot(string Surface, string Outcome, string CacheStatus, long Count, long TotalDurationMilliseconds, long MaxDurationMilliseconds, long TotalResults, long ZeroResultCount);
+public sealed record SearchRequestMetricSnapshot(
+    string Surface,
+    string Outcome,
+    string CacheStatus,
+    long Count,
+    long TotalDurationMilliseconds,
+    long MaxDurationMilliseconds,
+    long TotalResults,
+    long ZeroResultCount,
+    IReadOnlyList<SearchDurationBucketSnapshot> DurationBuckets);
+public sealed record SearchDurationBucketSnapshot(long UpperBoundMilliseconds, long Count);
 public sealed record SearchFeedbackMetricSnapshot(string Judgment, long Count);

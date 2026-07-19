@@ -71,11 +71,18 @@ internal sealed class SearchTelemetryScope(
             return;
         }
 
-        metrics.RecordSearchRequest(
-            surface,
-            outcome,
-            cacheStatus,
-            timeProvider.GetElapsedTime(_startedAt),
-            resultCount);
+        try
+        {
+            metrics.RecordSearchRequest(
+                surface,
+                outcome,
+                cacheStatus,
+                timeProvider.GetElapsedTime(_startedAt),
+                resultCount);
+        }
+        catch
+        {
+            // Telemetry is best-effort and must never alter retrieval behavior.
+        }
     }
 }

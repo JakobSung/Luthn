@@ -86,9 +86,39 @@ public sealed class RetrievalEndpointTests
         var response = Assert.IsType<Ok<SafeSearchResponse>>(result.Result).Value!;
         Assert.Empty(response.Results);
         Assert.True(SearchTelemetry.IsValidRetrievalId(response.RetrievalId));
+        var request = Assert.Single(metrics.Snapshot().SearchRequests);
+        Assert.Equal(("agent_search", "zero_result", "not_applicable", 1L, 25L, 25L, 0L, 1L),
+            (request.Surface, request.Outcome, request.CacheStatus, request.Count,
+                request.TotalDurationMilliseconds, request.MaxDurationMilliseconds,
+                request.TotalResults, request.ZeroResultCount));
         Assert.Equal(
-            new SearchRequestMetricSnapshot("agent_search", "zero_result", "not_applicable", 1, 25, 25, 0, 1),
-            Assert.Single(metrics.Snapshot().SearchRequests));
+            new SearchDurationBucketSnapshot[]
+            {
+                new(10, 0),
+                new(50, 1),
+                new(100, 1),
+                new(500, 1),
+                new(1_000, 1),
+                new(5_000, 1),
+                new(60_000, 1)
+            },
+            request.DurationBuckets.ToArray());
+    }
+
+    [Fact]
+    public async Task AgentSearchRemainsSuccessfulWhenTelemetryRecordingFails()
+    {
+        var result = await ClassificationEndpoints.SearchAgentContext(
+            new SafeSearchRequest("missing", ["missing"], 10),
+            new DeterministicRetrievalBackend(new SafeSearchIndex()),
+            new AdvancingCandidateSelector(new ManualTimeProvider(), TimeSpan.Zero),
+            new ThrowingOperationalMetrics(),
+            TimeProvider.System,
+            CancellationToken.None);
+
+        var response = Assert.IsType<Ok<SafeSearchResponse>>(result.Result).Value!;
+        Assert.Empty(response.Results);
+        Assert.True(SearchTelemetry.IsValidRetrievalId(response.RetrievalId));
     }
 
     [Fact]
@@ -167,5 +197,17 @@ public sealed class RetrievalEndpointTests
             SafeSearchRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<ContextPackCandidate>>([]);
+    }
+
+    private sealed class ThrowingOperationalMetrics : IOperationalMetrics
+    {
+        public void RecordClassificationProviderRequest(string provider, string outcome, TimeSpan duration) { }
+        public void RecordSensitiveAccessRequest() { }
+        public void RecordSensitiveAccessDecision(string outcome) { }
+        public void RecordSafeSearchCandidates(string source, int count) { }
+        public void RecordSearchRequest(string surface, string outcome, string cacheStatus, TimeSpan duration, int resultCount) =>
+            throw new InvalidOperationException("simulated telemetry failure");
+        public void RecordSearchFeedback(string judgment) { }
+        public OperationalMetricsSnapshot Snapshot() => OperationalMetricsSnapshot.Empty;
     }
 }

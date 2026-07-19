@@ -43,16 +43,43 @@ public sealed class OperationalMetricsTests : IClassFixture<WebApplicationFactor
         Assert.Equal(1, snapshot.SensitiveAccess.Requests);
         Assert.Equal(new OutcomeCountSnapshot("approved", 1), Assert.Single(snapshot.SensitiveAccess.Decisions));
         Assert.Equal(new SearchMetricSnapshot("shared_memory_items", 1, 7, 7), Assert.Single(snapshot.SafeSearch));
-        Assert.Equal(
-            new SearchRequestMetricSnapshot("mcp_context_pack", "zero_result", "hit", 1, 13, 13, 0, 1),
-            snapshot.SearchRequests.Single(metric => metric.Outcome == "zero_result"));
-        Assert.Equal(
-            new SearchRequestMetricSnapshot("mcp_context_pack", "timeout", "miss", 1, 20, 20, 0, 0),
-            snapshot.SearchRequests.Single(metric => metric.Outcome == "timeout"));
-        Assert.Equal(
-            new SearchRequestMetricSnapshot("other", "other", "other", 1, 60_000, 60_000, 50, 0),
-            snapshot.SearchRequests.Single(metric => metric.Surface == "other"));
+        var zeroResult = snapshot.SearchRequests.Single(metric => metric.Outcome == "zero_result");
+        Assert.Equal(("mcp_context_pack", "hit", 1L, 13L, 13L, 0L, 1L),
+            (zeroResult.Surface, zeroResult.CacheStatus, zeroResult.Count,
+                zeroResult.TotalDurationMilliseconds, zeroResult.MaxDurationMilliseconds,
+                zeroResult.TotalResults, zeroResult.ZeroResultCount));
+        Assert.Equal(Buckets(0, 1, 1, 1, 1, 1, 1).ToArray(), zeroResult.DurationBuckets.ToArray());
+
+        var timeout = snapshot.SearchRequests.Single(metric => metric.Outcome == "timeout");
+        Assert.Equal(("mcp_context_pack", "miss", 1L, 20L, 20L, 0L, 0L),
+            (timeout.Surface, timeout.CacheStatus, timeout.Count,
+                timeout.TotalDurationMilliseconds, timeout.MaxDurationMilliseconds,
+                timeout.TotalResults, timeout.ZeroResultCount));
+        Assert.Equal(Buckets(0, 1, 1, 1, 1, 1, 1).ToArray(), timeout.DurationBuckets.ToArray());
+
+        var bounded = snapshot.SearchRequests.Single(metric => metric.Surface == "other");
+        Assert.Equal(("other", "other", 1L, 60_000L, 60_000L, 50L, 0L),
+            (bounded.Outcome, bounded.CacheStatus, bounded.Count,
+                bounded.TotalDurationMilliseconds, bounded.MaxDurationMilliseconds,
+                bounded.TotalResults, bounded.ZeroResultCount));
+        Assert.Equal(Buckets(0, 0, 0, 0, 0, 0, 1).ToArray(), bounded.DurationBuckets.ToArray());
         Assert.Equal(new SearchFeedbackMetricSnapshot("helpful", 1), Assert.Single(snapshot.SearchFeedback));
+    }
+
+    [Fact]
+    public void SearchDurationBucketsUseStableCumulativeBoundaries()
+    {
+        var metrics = new OperationalMetrics();
+        metrics.RecordSearchRequest("agent_search", "succeeded", "not_applicable", TimeSpan.FromMilliseconds(10), 1);
+        metrics.RecordSearchRequest("agent_search", "succeeded", "not_applicable", TimeSpan.FromMilliseconds(11), 1);
+        metrics.RecordSearchRequest("agent_search", "succeeded", "not_applicable", TimeSpan.FromMilliseconds(50), 1);
+        metrics.RecordSearchRequest("agent_search", "succeeded", "not_applicable", TimeSpan.FromMilliseconds(60_001), 1);
+
+        var request = Assert.Single(metrics.Snapshot().SearchRequests);
+
+        Assert.Equal(Buckets(1, 3, 3, 3, 3, 3, 4).ToArray(), request.DurationBuckets.ToArray());
+        Assert.Equal(60_071, request.TotalDurationMilliseconds);
+        Assert.Equal(60_000, request.MaxDurationMilliseconds);
     }
 
     [Fact]
@@ -175,4 +202,12 @@ public sealed class OperationalMetricsTests : IClassFixture<WebApplicationFactor
     }
 
     private static string Digest(string value) => "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private static IReadOnlyList<SearchDurationBucketSnapshot> Buckets(params long[] counts)
+    {
+        long[] upperBounds = [10, 50, 100, 500, 1_000, 5_000, 60_000];
+        return upperBounds
+            .Zip(counts, static (upperBound, count) => new SearchDurationBucketSnapshot(upperBound, count))
+            .ToArray();
+    }
 }

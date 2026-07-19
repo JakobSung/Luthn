@@ -288,7 +288,8 @@ They return the same bounded JSON snapshot; `/export` supplies it as a download.
 The snapshot contains only aggregate, low-cardinality classification-provider
 attempt duration/outcome, sensitive-access request/decision throughput, and
 safe-search candidate pressure, request latency/outcome/cache status/result
-count, zero-result count, and helpful/unhelpful feedback. Metrics are in-memory
+count, zero-result count, cumulative latency buckets (`10`, `50`, `100`, `500`,
+`1000`, `5000`, and `60000` ms), and helpful/unhelpful feedback. Metrics are in-memory
 and reset when the API process restarts. It never contains query text, memory or
 source identifiers, actor identities, prompts, raw content, paths, or tokens,
 and it does not create an external-publication job.

@@ -135,7 +135,8 @@ GET /api/operator/metrics/export
 동일한 bounded JSON 스냅샷을 반환하며, `/export`는 다운로드 응답입니다. 스냅샷에는
 저카디널리티 분류 provider 요청 시간·결과, 민감 접근 요청·결정 처리량, 안전 검색 후보
 압력, 요청 시간·결과·cache 상태·결과 수·0건 결과 수, helpful/unhelpful feedback의
-집계만 포함됩니다. 지표는 메모리에만 있고 API process 재시작 시 초기화됩니다. query 텍스트, memory/source 식별자, actor 식별값, prompt,
+집계와 누적 지연 bucket(`10`, `50`, `100`, `500`, `1000`, `5000`, `60000` ms)만
+포함됩니다. 지표는 메모리에만 있고 API process 재시작 시 초기화됩니다. query 텍스트, memory/source 식별자, actor 식별값, prompt,
 원문, 경로, token은 포함하지 않고 외부 공개 작업도 만들지 않습니다.
 
 MCP cache·timeout 결과는 `POST /api/agent/search-telemetry/observations`, 명시적
