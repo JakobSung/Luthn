@@ -355,6 +355,80 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
     }
 
     [Fact]
+    public async Task KoreanSensitiveTitleAloneBlocksPublicProjection()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/sources", new
+        {
+            sourceSystem = "local",
+            sourceType = "note",
+            content = "공개 가능한 배포 안내입니다.",
+            title = "운영 개인 키 교체",
+            safeSummary = "공개 가능한 배포 요약입니다.",
+            coreTags = new[] { "release" }
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal("Restricted", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("wikiProposalId").ValueKind);
+        Assert.False(body.RootElement.GetProperty("storageDecision").GetProperty("allowsAgentContext").GetBoolean());
+
+        using var scope = CreateScope(factory);
+        var db = GetDb(scope);
+        Assert.Empty(await db.WikiProposals.ToArrayAsync());
+        Assert.Single(await db.SensitiveRecordReferences.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task KoreanSensitiveTagAloneBlocksPublicProjection()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/sources", new
+        {
+            sourceSystem = "local",
+            sourceType = "note",
+            content = "공개 가능한 배포 안내입니다.",
+            title = "배포 안내",
+            safeSummary = "공개 가능한 배포 요약입니다.",
+            coreTags = new[] { "release", "주민등록번호" }
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal("Confidential", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("wikiProposalId").ValueKind);
+        Assert.False(body.RootElement.GetProperty("storageDecision").GetProperty("allowsAgentContext").GetBoolean());
+    }
+
+    [Fact]
+    public async Task KoreanSensitiveSafeSummaryAloneBlocksPublicProjection()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/sources", new
+        {
+            sourceSystem = "local",
+            sourceType = "note",
+            content = "공개 가능한 배포 안내입니다.",
+            title = "배포 안내",
+            safeSummary = "고객 계약서의 결제 조건입니다.",
+            coreTags = new[] { "release" }
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal("Confidential", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("wikiProposalId").ValueKind);
+        Assert.False(body.RootElement.GetProperty("storageDecision").GetProperty("allowsAgentContext").GetBoolean());
+    }
+
+    [Fact]
     public async Task OversizedCoreTagsReturnBadRequestBeforePersistence()
     {
         using var factory = CreateFactory();

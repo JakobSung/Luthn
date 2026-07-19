@@ -14,11 +14,11 @@ public sealed class ClassificationPreviewService(
         CancellationToken cancellationToken = default)
     {
         var sourceId = new PublicRecordId(request.SourceId);
-        var classification = await classifier.ClassifyAsync(
+        var classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
             sourceId,
             request.Content,
             request.SourceType,
-            cancellationToken);
+            cancellationToken));
         var decision = policyEngine.Decide(classification);
         var previewClassification = new ClassificationPreviewClassification(
             classification.Sensitivity,

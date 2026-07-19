@@ -39,6 +39,12 @@ public static class SourceIntakeEndpoints
         var sourceEventId = $"source-{Guid.NewGuid():N}";
         var receivedAt = DateTimeOffset.UtcNow;
         var sourceId = new PublicRecordId(sourceEventId);
+        var normalizedTags = NormalizeTags(request.CoreTags!);
+        var classificationInput = AgentVisibleClassificationInput.Compose(
+            request.Content,
+            request.Title,
+            request.SafeSummary,
+            normalizedTags);
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
         db.AuditEvents.Add(new AuditEventRecord
         {
@@ -55,19 +61,17 @@ public static class SourceIntakeEndpoints
         ClassificationResult classification;
         try
         {
-            classification = await classifier.ClassifyAsync(
+            classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
                 sourceId,
-                request.Content,
+                classificationInput,
                 request.SourceType,
-                cancellationToken);
+                cancellationToken));
         }
         catch (ClassificationProviderException error)
         {
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
         var decision = policyEngine.Decide(classification);
-        var normalizedTags = NormalizeTags(request.CoreTags!);
-
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = sourceEventId,

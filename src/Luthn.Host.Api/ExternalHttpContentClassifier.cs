@@ -22,20 +22,6 @@ public sealed class ExternalHttpContentClassifier : IContentClassifier
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private static readonly HashSet<string> SafeCategories = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "access key",
-        "contract",
-        "credential",
-        "customer",
-        "customer original",
-        "email",
-        "invoice",
-        "payment",
-        "private key",
-        "tax"
-    };
-
     public ExternalHttpContentClassifier(
         IHttpClientFactory httpClientFactory,
         IOptions<ClassificationProviderOptions> options)
@@ -126,16 +112,16 @@ public sealed class ExternalHttpContentClassifier : IContentClassifier
         var categories = (providerResponse.Categories ?? [])
             .Where(category => !string.IsNullOrWhiteSpace(category))
             .Select(category => category.Trim())
-            .Where(category => SafeCategories.Contains(category))
+            .Where(ClassificationTaxonomy.IsKnownCategory)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        return new ClassificationResult(
+        return ClassificationResultNormalizer.Normalize(new ClassificationResult(
             sourceId,
             sensitivity,
             Math.Clamp(providerResponse.Confidence, 0, 1),
             categories,
-            providerResponse.ContainsSensitiveMaterial);
+            providerResponse.ContainsSensitiveMaterial));
     }
 
     private static Uri ReadEndpoint(ExternalHttpClassificationProviderOptions external)
