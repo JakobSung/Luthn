@@ -53,11 +53,17 @@ public static class SensitiveAccessEndpoints
         string? status,
         int? limit,
         LuthnDbContext db,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var take = Math.Clamp(limit ?? 25, 1, 100);
-        await ExpirePendingRequestsAsync(db, requestId: null, cancellationToken);
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        await ExpirePendingRequestsAsync(db, requestId: null, principal, cancellationToken);
         var query = db.SensitiveAccessRequests.AsNoTracking();
+        if (!principal.IsOperator)
+        {
+            query = query.Where(record => record.OwnerUserId == principal.UserId);
+        }
         if (!string.IsNullOrWhiteSpace(status))
         {
             if (!Enum.TryParse<SensitiveAccessRequestStatus>(
@@ -104,10 +110,12 @@ public static class SensitiveAccessEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
         var reference = await db.SensitiveRecordReferences
             .AsNoTracking()
-            .Where(record => record.Id == request.SensitiveReferenceId.Trim())
-            .Select(record => new { record.Id })
+            .Where(record => record.Id == request.SensitiveReferenceId.Trim() &&
+                record.OwnerUserId == principal.UserId)
+            .Select(record => new { record.Id, record.OwnerUserId })
             .SingleOrDefaultAsync(cancellationToken);
         if (reference is null)
         {
@@ -130,7 +138,8 @@ public static class SensitiveAccessEndpoints
             Status = SensitiveAccessRequestStatus.Pending,
             CreatedAt = observedAt,
             ExpiresAt = observedAt.AddSeconds(expiresInSeconds),
-            UpdatedAt = observedAt
+            UpdatedAt = observedAt,
+            OwnerUserId = reference.OwnerUserId
         };
 
         db.SensitiveAccessRequests.Add(accessRequest);
@@ -156,11 +165,16 @@ public static class SensitiveAccessEndpoints
     public static async Task<Results<Ok<SensitiveAccessRequestResponse>, NotFound>> ReadRequest(
         string id,
         LuthnDbContext db,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        await ExpirePendingRequestsAsync(db, id, cancellationToken);
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
         var request = await db.SensitiveAccessRequests
-            .SingleOrDefaultAsync(record => record.Id == id, cancellationToken);
+            .SingleOrDefaultAsync(
+                record => record.Id == id &&
+                    (principal.IsOperator || record.OwnerUserId == principal.UserId),
+                cancellationToken);
 
         if (request is null)
         {
@@ -180,9 +194,13 @@ public static class SensitiveAccessEndpoints
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        await ExpirePendingRequestsAsync(db, id, cancellationToken);
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
         var request = await db.SensitiveAccessRequests
-            .SingleOrDefaultAsync(record => record.Id == id, cancellationToken);
+            .SingleOrDefaultAsync(
+                record => record.Id == id &&
+                    (principal.IsOperator || record.OwnerUserId == principal.UserId),
+                cancellationToken);
 
         if (request is not null)
         {
@@ -276,9 +294,13 @@ public static class SensitiveAccessEndpoints
         IOperationalMetrics metrics,
         CancellationToken cancellationToken)
     {
-        await ExpirePendingRequestsAsync(db, id, cancellationToken);
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
         var accessRequest = await db.SensitiveAccessRequests
-            .SingleOrDefaultAsync(record => record.Id == id, cancellationToken);
+            .SingleOrDefaultAsync(
+                record => record.Id == id &&
+                    (principal.IsOperator || record.OwnerUserId == principal.UserId),
+                cancellationToken);
         if (accessRequest is null)
         {
             return TypedResults.NotFound();
@@ -429,7 +451,7 @@ public static class SensitiveAccessEndpoints
 
             if (!transitioned)
             {
-                await ExpirePendingRequestsAsync(db, id, cancellationToken);
+                await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
                 return TypedResults.BadRequest(new ProblemDetails
                 {
                     Title = "Sensitive access request is already decided.",
@@ -665,6 +687,7 @@ public static class SensitiveAccessEndpoints
     private static async Task ExpirePendingRequestsAsync(
         LuthnDbContext db,
         string? requestId,
+        LuthnRequestPrincipal principal,
         CancellationToken cancellationToken)
     {
         var observedAt = DateTimeOffset.UtcNow;
@@ -673,6 +696,7 @@ public static class SensitiveAccessEndpoints
             .Where(request =>
                 request.Status == SensitiveAccessRequestStatus.Pending &&
                 request.ExpiresAt <= observedAt &&
+                (principal.IsOperator || request.OwnerUserId == principal.UserId) &&
                 (requestId == null || request.Id == requestId))
             .Select(request => request.Id)
             .ToArrayAsync(cancellationToken);

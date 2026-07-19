@@ -61,6 +61,32 @@ printf '%s' "$LUTHN_SERVICE_VALUE" \
 
 `X-Luthn-Operator`는 감사 actor를 구분하는 선택적 메타데이터이며 권한을 주지 않습니다. 지원 scope는 `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `external-publication.read`, `external-publication.write`, `source.write`, `memory.read`, `memory.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, `metrics.write`, 운영자용 `*`입니다.
 
+새 설치의 기본 identity 경계는 기존과 호환되는 단일 owner입니다.
+
+```bash
+Luthn__Identity__Mode=SingleOwner
+Luthn__Identity__SingleOwnerUserId=local-owner
+Luthn__Auth__Tokens__0__UserId=local-owner
+Luthn__Auth__Tokens__0__IsOperator=false
+```
+
+로컬 multi-user 배포는 mode를 바꾸고 모든 비운영자 product token에 하나의 제한된 user
+ID를 연결합니다. ID는 소문자로 정규화하며 첫 글자는 영문자·숫자여야 하고 전체 길이는
+128자 이하입니다. 허용 문자는 영문자, 숫자, `.`, `_`, `:`, `@`, `-`입니다. binding이
+없거나 잘못되면 `503`을 반환하며 caller JSON으로 덮어쓸 수 없습니다.
+
+```bash
+Luthn__Identity__Mode=MultiUser
+Luthn__Auth__Tokens__0__UserId=alice
+Luthn__Auth__Tokens__0__IsOperator=false
+Luthn__Auth__Tokens__1__Name=local-operator
+Luthn__Auth__Tokens__1__IsOperator=true
+```
+
+user 또는 connector마다 별도 최소권한 token을 사용합니다. `IsOperator=true`는 명시적인
+교차-owner 관리 역할이며 `X-Luthn-Operator` header는 계속 audit metadata일 뿐 역할을
+부여하지 않습니다. identity 설정 변경 뒤 `/readyz`를 확인합니다.
+
 ## 분류 Provider 설정
 
 운영자 화면의 `/api/operator/classification-provider`에서 `Mock`, `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, `External HTTP`를 선택하고 model·API key·연결 시험을 설정할 수 있습니다. API key는 server에 저장하며 응답이나 화면에 되돌려 보내지 않습니다.

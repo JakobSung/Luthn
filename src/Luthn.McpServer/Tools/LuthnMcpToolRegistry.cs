@@ -106,13 +106,15 @@ public static class LuthnMcpToolRegistry
     public static IReadOnlyList<string> AllowedToolNames { get; } =
         ToolDescriptors.Select(descriptor => descriptor.Name).ToArray();
 
-    public static IReadOnlyList<ILuthnMcpTool> CreateDefault(ILuthnAgentClient client)
+    public static IReadOnlyList<ILuthnMcpTool> CreateDefault(
+        ILuthnAgentClient client,
+        string principalCachePartition = "single-owner-local")
     {
         ArgumentNullException.ThrowIfNull(client);
 
         return
         [
-            new GetContextPackTool(client),
+            new GetContextPackTool(client, principalCachePartition: principalCachePartition),
             new SearchSafeContextTool(client),
             new GetWikiProposalTool(client),
             new ClassifyPreviewTool(client),

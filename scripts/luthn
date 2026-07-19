@@ -438,8 +438,12 @@ POSTGRES_HOST_AUTH_METHOD=trust
 Luthn__Classification__Provider=unconfigured
 Luthn__Classification__AllowMock=false
 Luthn__Auth__RequireServiceToken=true
+Luthn__Identity__Mode=SingleOwner
+Luthn__Identity__SingleOwnerUserId=local-owner
 Luthn__Auth__Tokens__0__Name=local-agent
 Luthn__Auth__Tokens__0__Sha256Digest=$digest
+Luthn__Auth__Tokens__0__UserId=local-owner
+Luthn__Auth__Tokens__0__IsOperator=false
 Luthn__Auth__Tokens__0__Scopes__0=agent.read
 Luthn__Auth__Tokens__0__Scopes__1=agent.write.summary
 Luthn__Auth__Tokens__0__Scopes__2=memory.write
@@ -451,6 +455,7 @@ Luthn__Auth__Tokens__0__Scopes__7=access.request
 Luthn__Auth__Tokens__0__Scopes__8=metrics.write
 Luthn__Auth__Tokens__1__Name=local-operator
 Luthn__Auth__Tokens__1__Sha256Digest=$operator_digest
+Luthn__Auth__Tokens__1__IsOperator=true
 Luthn__Auth__Tokens__1__Scopes__0=access.decide
 EOF
   chmod 0600 "$config_file"
@@ -524,6 +529,7 @@ ensure_operator_credential() {
   remove_config_prefix "$operator_prefix"
   set_config "${operator_prefix}Name" local-operator
   set_config "${operator_prefix}Sha256Digest" "$operator_digest"
+  set_config "${operator_prefix}IsOperator" true
   set_config "${operator_prefix}Scopes__0" access.decide
 }
 
@@ -976,7 +982,11 @@ install_luthn() {
     ensure_config_value Luthn__Classification__Provider unconfigured
     ensure_config_value Luthn__Classification__AllowMock false
     ensure_config_value Luthn__Auth__RequireServiceToken true
+    ensure_config_value Luthn__Identity__Mode SingleOwner
+    ensure_config_value Luthn__Identity__SingleOwnerUserId local-owner
     ensure_config_value Luthn__Auth__Tokens__0__Name local-agent
+    ensure_config_value Luthn__Auth__Tokens__0__UserId local-owner
+    ensure_config_value Luthn__Auth__Tokens__0__IsOperator false
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__0 agent.read
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__1 agent.write.summary
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__2 memory.write

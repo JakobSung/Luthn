@@ -13,7 +13,8 @@ var options = new LuthnClientOptions
     BearerToken = string.IsNullOrWhiteSpace(bearer) ? null : bearer
 };
 var client = new LuthnClient(options);
-var tools = LuthnMcpToolRegistry.CreateDefault(client);
+var principalCachePartition = PrincipalCachePartition.Create(bearer);
+var tools = LuthnMcpToolRegistry.CreateDefault(client, principalCachePartition);
 var command = args.FirstOrDefault()?.Trim().ToLowerInvariant();
 
 switch (command)

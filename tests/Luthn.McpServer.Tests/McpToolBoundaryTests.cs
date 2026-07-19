@@ -16,6 +16,23 @@ namespace Luthn.McpServer.Tests;
 public sealed class McpToolBoundaryTests
 {
     [Fact]
+    public void ContextPackCacheKeysArePartitionedByNonReversibleCredentialIdentity()
+    {
+        var alicePartition = PrincipalCachePartition.Create("alice-bearer-secret");
+        var bobPartition = PrincipalCachePartition.Create("bob-bearer-secret");
+        var aliceKey = GetContextPackTool.BuildCacheKey(
+            alicePartition, "project-task", "release", ["release"], 3, 600, "project", "task", ["topic"]);
+        var bobKey = GetContextPackTool.BuildCacheKey(
+            bobPartition, "project-task", "release", ["release"], 3, 600, "project", "task", ["topic"]);
+
+        Assert.NotEqual(alicePartition, bobPartition);
+        Assert.NotEqual(aliceKey, bobKey);
+        Assert.DoesNotContain("alice-bearer-secret", alicePartition, StringComparison.Ordinal);
+        Assert.DoesNotContain("alice-bearer-secret", aliceKey, StringComparison.Ordinal);
+        Assert.Equal("single-owner-local", PrincipalCachePartition.Create(null));
+    }
+
+    [Fact]
     public void DefaultRegistryContainsOnlySafeAgentTools()
     {
         var tools = LuthnMcpToolRegistry.CreateDefault(new FakeLuthnClient());
@@ -478,10 +495,13 @@ public sealed class McpToolBoundaryTests
     public void McpRegistryAcceptsOnlyAgentSafeConnectorContract()
     {
         var createDefault = typeof(LuthnMcpToolRegistry).GetMethod(nameof(LuthnMcpToolRegistry.CreateDefault));
-        var parameter = Assert.Single(createDefault!.GetParameters());
+        var parameters = createDefault!.GetParameters();
 
-        Assert.Equal(typeof(ILuthnAgentClient), parameter.ParameterType);
-        Assert.NotEqual(typeof(ILuthnClient), parameter.ParameterType);
+        Assert.Equal(2, parameters.Length);
+        Assert.Equal(typeof(ILuthnAgentClient), parameters[0].ParameterType);
+        Assert.NotEqual(typeof(ILuthnClient), parameters[0].ParameterType);
+        Assert.Equal(typeof(string), parameters[1].ParameterType);
+        Assert.True(parameters[1].HasDefaultValue);
     }
 
     [Fact]

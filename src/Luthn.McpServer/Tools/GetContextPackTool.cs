@@ -20,12 +20,19 @@ public sealed class GetContextPackTool : ILuthnMcpTool
 
     private readonly ILuthnAgentClient _client;
     private readonly Func<DateTimeOffset> _utcNow;
+    private readonly string _principalCachePartition;
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
 
-    public GetContextPackTool(ILuthnAgentClient client, Func<DateTimeOffset>? utcNow = null)
+    public GetContextPackTool(
+        ILuthnAgentClient client,
+        Func<DateTimeOffset>? utcNow = null,
+        string principalCachePartition = "single-owner-local")
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+        _principalCachePartition = string.IsNullOrWhiteSpace(principalCachePartition)
+            ? throw new ArgumentException("Principal cache partition is required.", nameof(principalCachePartition))
+            : principalCachePartition.Trim();
     }
 
     public string Name => "get_context_pack";
@@ -69,6 +76,7 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         var effectiveCacheKey = cacheKey is null || cacheTtlSeconds is null
             ? null
             : BuildCacheKey(
+                _principalCachePartition,
                 cacheKey,
                 query,
                 coreTags,
@@ -354,7 +362,8 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         return $"{prefix}…";
     }
 
-    private static string BuildCacheKey(
+    internal static string BuildCacheKey(
+        string principalCachePartition,
         string cacheKey,
         string? query,
         IReadOnlyList<string> coreTags,
@@ -365,6 +374,7 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         IReadOnlyList<string> topicTags) =>
         string.Join(
             '\u001f',
+            principalCachePartition,
             cacheKey,
             query ?? string.Empty,
             string.Join('\u001e', coreTags),

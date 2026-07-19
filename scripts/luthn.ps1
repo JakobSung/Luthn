@@ -831,8 +831,12 @@ function Write-InitialConfig {
         "Luthn__Classification__Provider=unconfigured",
         "Luthn__Classification__AllowMock=false",
         "Luthn__Auth__RequireServiceToken=true",
+        "Luthn__Identity__Mode=SingleOwner",
+        "Luthn__Identity__SingleOwnerUserId=local-owner",
         "Luthn__Auth__Tokens__0__Name=local-agent",
         "Luthn__Auth__Tokens__0__Sha256Digest=$Digest",
+        "Luthn__Auth__Tokens__0__UserId=local-owner",
+        "Luthn__Auth__Tokens__0__IsOperator=false",
         "Luthn__Auth__Tokens__0__Scopes__0=agent.read",
         "Luthn__Auth__Tokens__0__Scopes__1=agent.write.summary",
         "Luthn__Auth__Tokens__0__Scopes__2=memory.write",
@@ -844,6 +848,7 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Scopes__8=metrics.write",
         "Luthn__Auth__Tokens__1__Name=local-operator",
         "Luthn__Auth__Tokens__1__Sha256Digest=$OperatorDigest",
+        "Luthn__Auth__Tokens__1__IsOperator=true",
         "Luthn__Auth__Tokens__1__Scopes__0=access.decide"
     ) -join "`n"
     Write-Utf8File -Path $script:ConfigFile -Content ($content + "`n")
@@ -896,6 +901,7 @@ function Ensure-OperatorCredential {
     Remove-ConfigPrefix $operatorPrefix
     Set-ConfigValue "${operatorPrefix}Name" "local-operator"
     Set-ConfigValue "${operatorPrefix}Sha256Digest" $operatorDigest
+    Set-ConfigValue "${operatorPrefix}IsOperator" "true"
     Set-ConfigValue "${operatorPrefix}Scopes__0" "access.decide"
 }
 
@@ -1031,7 +1037,11 @@ function Install-Luthn {
         Ensure-ConfigValue "Luthn__Classification__Provider" "unconfigured"
         Ensure-ConfigValue "Luthn__Classification__AllowMock" "false"
         Ensure-ConfigValue "Luthn__Auth__RequireServiceToken" "true"
+        Ensure-ConfigValue "Luthn__Identity__Mode" "SingleOwner"
+        Ensure-ConfigValue "Luthn__Identity__SingleOwnerUserId" "local-owner"
         Ensure-ConfigValue "Luthn__Auth__Tokens__0__Name" "local-agent"
+        Ensure-ConfigValue "Luthn__Auth__Tokens__0__UserId" "local-owner"
+        Ensure-ConfigValue "Luthn__Auth__Tokens__0__IsOperator" "false"
         $scopes = @("agent.read", "agent.write.summary", "memory.write", "memory.read", "classification.preview", "agent.connection.read", "agent.connection.write")
         for ($index = 0; $index -lt $scopes.Count; $index++) {
             Ensure-ConfigValue "Luthn__Auth__Tokens__0__Scopes__$index" $scopes[$index]

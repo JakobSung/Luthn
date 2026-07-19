@@ -17,6 +17,7 @@ public sealed record CollectionProvenanceDto(
     [property: JsonPropertyName("sourceEventId")] string? SourceEventId,
     [property: JsonPropertyName("memoryItemId")] string? MemoryItemId,
     [property: JsonPropertyName("authenticatedActor")] string AuthenticatedActor,
+    [property: JsonPropertyName("authenticatedUserId")] string AuthenticatedUserId,
     [property: JsonPropertyName("actorTrust")] string ActorTrust,
     [property: JsonPropertyName("claimsTrust")] string ClaimsTrust,
     [property: JsonPropertyName("claimedUserId")] string? ClaimedUserId,

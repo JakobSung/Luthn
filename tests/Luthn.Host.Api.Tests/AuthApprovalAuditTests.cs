@@ -185,6 +185,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         var issue = ServiceTokenAuthorization.GetProductionReadinessIssue(
             new FakeHostEnvironment("Production"),
             new LuthnAuthOptions(),
+            new LuthnIdentityOptions(),
             DateTimeOffset.UtcNow);
 
         Assert.Equal("No active service tokens are configured.", issue);

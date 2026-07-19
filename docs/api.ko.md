@@ -6,6 +6,22 @@
 
 Core로 거른 맥락 선택에는 `coreTags`, 공개 원본 식별자에는 `sourceId`를 사용합니다. 예약된 예전 tag 별칭은 공개 API에 포함하지 않습니다. 기존 source intake 응답의 `sourceEventId`는 하위 호환 별칭이지만 새 API·SDK·connector·MCP 계약은 `sourceId`를 표준으로 사용합니다.
 
+## 서버가 정하는 소유권
+
+기본 identity mode인 `SingleOwner`는 모든 보호 record의 owner를 설정된 값으로
+결정하며 기본값은 `local-owner`입니다. `MultiUser`는 service-token 인증과 모든
+비운영자 token의 제한된 `userId` 설정이 필요합니다. 인증·인가 user는 일치한
+token에서 server가 정하며 request body, SDK, connector, MCP tool은 owner 덮어쓰기
+필드를 노출하지 않습니다.
+
+memory, source, wiki, 민감 접근, 외부 공개, 안전 검색, context pack, turn-summary
+idempotency는 모두 같은 owner 안에서만 동작합니다. `SharedAcrossAgents`는 같은 owner의
+agent 사이 공유를 뜻합니다. 명시적으로 운영자 역할이 설정된 token만 문서화된 제한적
+교차-owner 관리 작업을 할 수 있고 metadata-only audit 근거를 남깁니다. `/readyz`는
+`identity` 준비 상태를 service-token 상태와 분리해 보고합니다.
+기존 audit row에는 owner partition이 없으므로 `MultiUser` mode의 audit-event 목록은
+운영자 전용입니다. scope가 있는 비운영자 token의 same-owner provenance 조회는 유지합니다.
+
 ## 에이전트 Turn 요약 수집
 
 ```http
@@ -262,8 +278,8 @@ payload를 복호화하지 않습니다. `/readyz`는 `sensitive-memory-protecti
 
 이 값은 길이와 문자가 제한된 호출자 주장입니다. 식별자는 소문자로 정규화하고,
 원본 경로와 자유형 source metadata는 받지 않으며, server 수신 시각보다 5분을 넘게
-앞선 수집 시각은 거부합니다. 인증된 service-token actor와 `receivedAt`은 항상
-server가 정하며 호출자가 덮어쓸 수 없습니다.
+앞선 수집 시각은 거부합니다. 인증된 service-token actor, 인증 owner user,
+`receivedAt`은 항상 server가 정하며 호출자가 덮어쓸 수 없습니다.
 
 ## 수집 출처 정보
 
@@ -278,6 +294,9 @@ GET /api/provenance/memory-items/{memoryItemId}
 `actorTrust`는 `service-token`, `local-runtime`, `legacy-unknown`, `claimsTrust`는
 `caller-supplied`, `no-claims`, `legacy-unknown` 중 하나입니다. 기존 행은 migration에서
 주장을 알 수 없는 결정적 version-1 기록을 받습니다.
+`authenticatedUserId`는 server가 정한 신뢰 가능한 owner identity이고,
+`claimedUserId`는 호출자가 보고한 수집 맥락일 뿐입니다. 비운영자 `audit.read` token은
+자기 owner의 provenance만 읽을 수 있습니다.
 
 provenance는 수집 기원의 상태를, audit event는 시간에 따른 행위와 결정을 기록합니다.
 provenance를 audit payload, agent recall, search index, metric, 암호화 사용자 payload,
@@ -302,7 +321,12 @@ POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-기존 민감 참조에 대한 메타데이터 전용 요청을 만들고 결정합니다. 원본 Vault/source payload는 반환하지 않습니다. 목록·결정에는 별도의 신뢰된 `access.decide`, 생성·조회에는 `access.request` scope가 필요합니다. MCP는 생성·상태·결과만 제공하며 승인·거절 도구를 노출하지 않습니다.
+기존 민감 참조에 대한 메타데이터 전용 요청을 만들고 결정합니다. 원본 Vault/source
+payload는 반환하지 않습니다. 요청자는 server가 정한 자기 owner의 요청만 생성·조회할
+수 있습니다. 목록·결정에는 별도의 신뢰된 `access.decide`가 필요하며, 명시적 운영자는
+metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관리할 수 있습니다.
+생성·조회에는 `access.request` scope가 필요합니다. MCP는 생성·상태·결과만 제공하며
+승인·거절 도구를 노출하지 않습니다.
 
 새 호출자는 `sessionId`와 60–3600초 범위의 `expiresInSeconds`를 보내야 합니다. 만료 필드 도입 전의 버전 없는 계약과 호환하기 위해 두 값을 생략한 기존 호출에는 서버가 `legacy-...` session id와 600초 만료를 부여합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한, 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은 메타데이터 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며 `pending-approval`, `expired-no-output`, `denied-no-output`, `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를 사용하고 원문은 반환하지 않습니다. 만료는 `sensitive_access.expired` 메타데이터 감사 사건으로 기록되며 결과 조회는 `sensitive_access.result_read` 감사 사건을 만듭니다.
 

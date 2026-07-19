@@ -34,7 +34,7 @@ VaultRecord -> KnowledgeItem로 요약 -> WikiDocument로 투영
 
 모든 공유 기억은 `LocalOnly`로 시작합니다. 에이전트 가시성과 외부 공개는 별도 결정입니다. 운영자가 `ApprovedForExternal`로 바꾸기 전에는 외부 공개 대기열에 넣지 않습니다. `Revoked`는 새 revision과 본문 없는 tombstone을 만들어 미래 remote adapter가 이전 투영을 삭제할 수 있게 합니다.
 
-안전 동기화 envelope는 `originInstanceId`, 로컬 record id, revision, operation으로 식별하며 이 tuple이 중복 방지 경계입니다. 최초 upsert는 독립적으로 분류된 안전 요약, 제한된 정책 메타데이터, 시간, 선택적 provenance digest만 내보냅니다. `title`과 `coreTags`는 별도 안전 분류 경로가 생길 때까지 비워 둡니다. 원본, 비공개/Vault 내용, 자격 증명, prompt, 대화 기록, 로컬 경로를 위한 필드는 계약에 없습니다.
+안전 동기화 envelope는 `originInstanceId`, 로컬 record id, revision, operation으로 식별하며 이 tuple이 중복 방지 경계입니다. 최초 upsert는 독립적으로 분류된 안전 요약, 제한된 정책 메타데이터, 시간만 내보내고 provenance 필드와 digest는 제외합니다. `title`과 `coreTags`는 별도 안전 분류 경로가 생길 때까지 비워 둡니다. 원본, 비공개/Vault 내용, 자격 증명, prompt, 대화 기록, 로컬 경로를 위한 필드는 계약에 없습니다.
 
 공개 상태·감사 메타데이터·durable outbox row는 함께 커밋됩니다. Worker는 lease로 준비된 row를 가져와 backoff 재시도하고, 전송되지 않은 이전 revision을 `Superseded`로 만들며, acknowledgement/checkpoint와 취소 tombstone을 관리합니다. 이 저장소의 유일한 transport는 `disabled`이고 네트워크 요청을 하지 않습니다. 실제 cloud adapter와 tenant/auth, billing, 팀 data plane은 별도 상용 저장소 범위입니다.
 

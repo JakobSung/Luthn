@@ -76,10 +76,20 @@ public sealed class SafeProjectionPublicationService(
     public async Task<ExternalPublicationResult?> GetAsync(
         string memoryItemId,
         CancellationToken cancellationToken)
+        => await GetAsync(memoryItemId, "local-owner", isOperator: false, cancellationToken);
+
+    public async Task<ExternalPublicationResult?> GetAsync(
+        string memoryItemId,
+        string ownerUserId,
+        bool isOperator,
+        CancellationToken cancellationToken)
     {
         var memory = await db.SharedMemoryItems
             .AsNoTracking()
-            .SingleOrDefaultAsync(record => record.Id == memoryItemId, cancellationToken);
+            .SingleOrDefaultAsync(
+                record => record.Id == memoryItemId &&
+                    (isOperator || record.OwnerUserId == ownerUserId),
+                cancellationToken);
         if (memory is null)
         {
             return null;
@@ -94,9 +104,21 @@ public sealed class SafeProjectionPublicationService(
         string actor,
         DateTimeOffset now,
         CancellationToken cancellationToken)
+        => await ApproveAsync(memoryItemId, actor, now, "local-owner", isOperator: false, cancellationToken);
+
+    public async Task<ExternalPublicationResult> ApproveAsync(
+        string memoryItemId,
+        string actor,
+        DateTimeOffset now,
+        string ownerUserId,
+        bool isOperator,
+        CancellationToken cancellationToken)
     {
         var memory = await db.SharedMemoryItems
-            .SingleOrDefaultAsync(record => record.Id == memoryItemId, cancellationToken)
+            .SingleOrDefaultAsync(
+                record => record.Id == memoryItemId &&
+                    (isOperator || record.OwnerUserId == ownerUserId),
+                cancellationToken)
             ?? throw new KeyNotFoundException("Shared memory item was not found.");
 
         if (memory.ExternalPublicationState == ExternalPublicationState.Revoked)
@@ -140,7 +162,7 @@ public sealed class SafeProjectionPublicationService(
             memory.UpdatedAt,
             now,
             memory.ExpiresAt);
-        AddOutbox(envelope, now);
+        AddOutbox(envelope, memory.OwnerUserId, now);
         AddAudit(memory.Id, actor, "memory.external_publication.approved", now);
 
         await SavePublicationAsync(cancellationToken);
@@ -152,9 +174,21 @@ public sealed class SafeProjectionPublicationService(
         string actor,
         DateTimeOffset now,
         CancellationToken cancellationToken)
+        => await RevokeAsync(memoryItemId, actor, now, "local-owner", isOperator: false, cancellationToken);
+
+    public async Task<ExternalPublicationResult> RevokeAsync(
+        string memoryItemId,
+        string actor,
+        DateTimeOffset now,
+        string ownerUserId,
+        bool isOperator,
+        CancellationToken cancellationToken)
     {
         var memory = await db.SharedMemoryItems
-            .SingleOrDefaultAsync(record => record.Id == memoryItemId, cancellationToken)
+            .SingleOrDefaultAsync(
+                record => record.Id == memoryItemId &&
+                    (isOperator || record.OwnerUserId == ownerUserId),
+                cancellationToken)
             ?? throw new KeyNotFoundException("Shared memory item was not found.");
 
         if (memory.ExternalPublicationState == ExternalPublicationState.LocalOnly)
@@ -182,7 +216,7 @@ public sealed class SafeProjectionPublicationService(
             memory.CreatedAt,
             memory.UpdatedAt,
             now);
-        AddOutbox(envelope, now);
+        AddOutbox(envelope, memory.OwnerUserId, now);
         AddAudit(memory.Id, actor, "memory.external_publication.revoked", now);
 
         await SavePublicationAsync(cancellationToken);
@@ -202,7 +236,7 @@ public sealed class SafeProjectionPublicationService(
         }
     }
 
-    private void AddOutbox(SafeProjectionSyncEnvelope envelope, DateTimeOffset now)
+    private void AddOutbox(SafeProjectionSyncEnvelope envelope, string ownerUserId, DateTimeOffset now)
     {
         db.SafeProjectionSyncOutbox.Add(new SafeProjectionSyncOutboxRecord
         {
@@ -210,6 +244,7 @@ public sealed class SafeProjectionPublicationService(
             IdempotencyKey = SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope),
             OriginInstanceId = envelope.OriginInstanceId,
             LocalRecordId = envelope.LocalRecordId,
+            OwnerUserId = ownerUserId,
             Revision = envelope.Revision,
             Operation = envelope.Operation,
             ContractVersion = envelope.ContractVersion,

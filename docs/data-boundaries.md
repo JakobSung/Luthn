@@ -174,11 +174,30 @@ recovery set. Never commit, print, or copy key XML into ordinary logs or an
 unencrypted repository. Losing the key ring makes encrypted memory
 unrecoverable; generating a new key ring does not decrypt existing payloads.
 
+## Server-Trusted Ownership Boundary
+
+Authorization ownership is a server-side property, not collection metadata.
+`SingleOwner` maps existing anonymous and service-token operation to one
+normalized local owner. `MultiUser` fails closed unless each non-operator
+product token has a bounded configured user identity. Caller-supplied
+`provenance.userId`, request JSON, headers, agent names, application names, and
+connector metadata never select or change the owner.
+
+Owned source events, shared memory, wiki proposals, sensitive references and
+requests, provenance, and safe-sync outbox rows are stamped in the same write
+transaction. Every agent-safe read and ranking query filters by owner before
+selection. Turn-summary idempotency includes the owner partition, and MCP
+context-pack cache keys include a non-reversible credential partition. No user
+identity, bearer digest, or provenance claim enters safe projections or cache
+status output. Operators are explicit token configuration, not a caller
+header; their cross-owner actions stay limited to management routes and
+metadata-only audit records.
+
 ## Collection Provenance Boundary
 
 Every source event and shared-memory item has one versioned immutable
 `collection_provenance` row. It stores the server-derived authenticated ingest
-actor and receipt time separately from optional caller claims for user, agent,
+actor, authenticated owner user, and receipt time separately from optional caller claims for user, agent,
 application, plugin, connector, connector version, and client collection time.
 Caller claims are not authentication or tenancy evidence. Legacy rows use
 explicit `legacy-unknown` trust and null origin claims.

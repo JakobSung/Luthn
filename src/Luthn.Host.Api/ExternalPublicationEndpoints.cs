@@ -33,10 +33,16 @@ public static class ExternalPublicationEndpoints
     private static async Task<IResult> ReadStatus(
         LuthnDbContext db,
         ISafeProjectionSyncTransport transport,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        var counts = await db.SafeProjectionSyncOutbox
-            .AsNoTracking()
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        var outbox = db.SafeProjectionSyncOutbox.AsNoTracking();
+        if (!principal.IsOperator)
+        {
+            outbox = outbox.Where(record => record.OwnerUserId == principal.UserId);
+        }
+        var counts = await outbox
             .GroupBy(record => record.State)
             .Select(group => new { State = group.Key, Count = group.Count() })
             .ToArrayAsync(cancellationToken);
@@ -75,6 +81,7 @@ public static class ExternalPublicationEndpoints
     private static async Task<IResult> ReadMemoryStatus(
         string id,
         SafeProjectionPublicationService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var idError = ValidateId(id);
@@ -83,7 +90,12 @@ public static class ExternalPublicationEndpoints
             return TypedResults.BadRequest(idError);
         }
 
-        var result = await service.GetAsync(id.Trim(), cancellationToken);
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        var result = await service.GetAsync(
+            id.Trim(),
+            principal.UserId,
+            principal.IsOperator,
+            cancellationToken);
         return result is null
             ? TypedResults.NotFound()
             : TypedResults.Ok(ToResponse(result));
@@ -133,16 +145,21 @@ public static class ExternalPublicationEndpoints
 
         try
         {
+            var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
             var result = approve
                 ? await service.ApproveAsync(
                     id.Trim(),
                     ServiceTokenAuthorization.GetActor(httpContext),
                     timeProvider.GetUtcNow(),
+                    principal.UserId,
+                    principal.IsOperator,
                     cancellationToken)
                 : await service.RevokeAsync(
                     id.Trim(),
                     ServiceTokenAuthorization.GetActor(httpContext),
                     timeProvider.GetUtcNow(),
+                    principal.UserId,
+                    principal.IsOperator,
                     cancellationToken);
             return TypedResults.Ok(ToResponse(result));
         }

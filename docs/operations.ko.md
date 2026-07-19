@@ -38,6 +38,18 @@ constraint는 새 subject와 provenance가 함께 commit되도록 하고 databas
 포함하고, 연결된 subject와 같은 retention을 적용합니다. agent, sync, telemetry, audit
 payload로 export하지 않습니다.
 
+ownership migration도 같은 PostgreSQL schema transaction에서 실행합니다. 기존 source,
+memory, wiki, 민감 reference·request, provenance, safe-sync outbox를 모두
+`local-owner`로 backfill한 뒤 빈 owner를 막는 constraint와 owner 선두 index를 추가합니다.
+같은 migration에서 임시 backfill default를 제거하므로 이후 trusted owner 기록을 빠뜨린
+write는 조용히 `local-owner`가 되지 않고 실패합니다.
+`/readyz`에서 `identity`와 `database`가 모두 ready이고 same-owner/cross-owner 확인이
+통과할 때까지 migration 전 backup을 보존합니다. 되돌릴 때는 API·MCP·adapter 쓰기를
+멈추고, 이전 image가 확장 schema를 읽을 수 없으면 migration 전 database backup과 그에
+맞는 operator key volume을 복원한 뒤 같은 이전 image를 시작합니다. data가 생긴 뒤
+명시적 data migration 없이 `SingleOwnerUserId`를 바꾸면 안 됩니다. 설정 변경만으로 기존
+owner row가 다시 표시되지는 않습니다.
+
 ## 직접 호스팅 Migration 모형
 
 Schema 변경은 API 시작의 부수 효과가 아니라 명시적 유지 관리 단계입니다. 적용 전에 image와 migration 집합을 맞추고 migration script를 검토하며 저장소 밖에 backup을 만들고 임시 database로 복원 검증을 합니다. token·connection string은 secret 저장소나 runtime 환경에만 둡니다.

@@ -38,6 +38,28 @@ public sealed class LuthnServiceTokenOptions
     public string Sha256Digest { get; set; } = "";
     public List<string> Scopes { get; set; } = [];
     public DateTimeOffset? ExpiresAt { get; set; }
+    public string? UserId { get; set; }
+    public bool IsOperator { get; set; }
+}
+
+public enum LuthnIdentityMode
+{
+    SingleOwner,
+    MultiUser
+}
+
+public sealed class LuthnIdentityOptions
+{
+    public const string DefaultSingleOwnerUserId = "local-owner";
+
+    public LuthnIdentityMode Mode { get; set; } = LuthnIdentityMode.SingleOwner;
+    public string SingleOwnerUserId { get; set; } = DefaultSingleOwnerUserId;
+}
+
+public sealed record LuthnRequestPrincipal(string UserId, bool IsOperator)
+{
+    public bool CanAccess(string ownerUserId) =>
+        IsOperator || string.Equals(UserId, ownerUserId, StringComparison.Ordinal);
 }
 
 public static class ServiceTokenAuthorization
@@ -46,6 +68,7 @@ public static class ServiceTokenAuthorization
 
     private const string ActorItemKey = "Luthn.ServiceActor";
     private const string ServiceTokenAuthenticatedItemKey = "Luthn.ServiceTokenAuthenticated";
+    private const string PrincipalItemKey = "Luthn.RequestPrincipal";
     private const int MaxActorLength = 128;
     private const int MaxOperatorIdentityLength = 64;
 
@@ -83,6 +106,37 @@ public static class ServiceTokenAuthorization
         httpContext.Items.TryGetValue(ServiceTokenAuthenticatedItemKey, out var value) &&
         value is true;
 
+    public static LuthnRequestPrincipal GetPrincipal(HttpContext httpContext)
+    {
+        if (httpContext.Items.TryGetValue(PrincipalItemKey, out var value) &&
+            value is LuthnRequestPrincipal principal)
+        {
+            return principal;
+        }
+
+        return new LuthnRequestPrincipal(LuthnIdentityOptions.DefaultSingleOwnerUserId, IsOperator: false);
+    }
+
+    public static string? NormalizeUserId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        if (normalized.Length > 128 ||
+            !IsAsciiLetterOrDigit(normalized[0]) ||
+            normalized.Any(character =>
+                !IsAsciiLetterOrDigit(character) &&
+                character is not '.' and not '_' and not ':' and not '@' and not '-'))
+        {
+            return null;
+        }
+
+        return normalized;
+    }
+
     private static async ValueTask<object?> RequireScopeAsync(
         EndpointFilterInvocationContext context,
         EndpointFilterDelegate next,
@@ -93,10 +147,28 @@ public static class ServiceTokenAuthorization
         var authOptions = httpContext.RequestServices
             .GetRequiredService<IOptions<LuthnAuthOptions>>()
             .Value;
+        var identityOptions = httpContext.RequestServices
+            .GetRequiredService<IOptions<LuthnIdentityOptions>>()
+            .Value;
+        if (!Enum.IsDefined(identityOptions.Mode))
+        {
+            return IdentityConfigurationProblem("Identity mode is invalid.");
+        }
+        var singleOwnerUserId = NormalizeUserId(identityOptions.SingleOwnerUserId);
+        if (singleOwnerUserId is null)
+        {
+            return IdentityConfigurationProblem("Single-owner user identity is invalid.");
+        }
 
         if (!RequiresServiceToken(environment, authOptions))
         {
+            if (identityOptions.Mode == LuthnIdentityMode.MultiUser)
+            {
+                return IdentityConfigurationProblem("Multi-user mode requires authenticated service tokens.");
+            }
+
             httpContext.Items[ServiceTokenAuthenticatedItemKey] = false;
+            httpContext.Items[PrincipalItemKey] = new LuthnRequestPrincipal(singleOwnerUserId, IsOperator: true);
             httpContext.Items[ActorItemKey] = ComposeActor(
                 "local-anonymous",
                 httpContext.Request.Headers[OperatorHeaderName].ToString());
@@ -125,7 +197,22 @@ public static class ServiceTokenAuthorization
                 statusCode: StatusCodes.Status403Forbidden);
         }
 
+
+        var configuredUserId = NormalizeUserId(matchedToken.UserId);
+        if (identityOptions.Mode == LuthnIdentityMode.MultiUser &&
+            configuredUserId is null &&
+            !matchedToken.IsOperator)
+        {
+            return IdentityConfigurationProblem(
+                "Multi-user mode requires a valid server-configured userId for every non-operator token.");
+        }
+
         httpContext.Items[ServiceTokenAuthenticatedItemKey] = true;
+        httpContext.Items[PrincipalItemKey] = new LuthnRequestPrincipal(
+            identityOptions.Mode == LuthnIdentityMode.SingleOwner
+                ? singleOwnerUserId
+                : configuredUserId ?? singleOwnerUserId,
+            matchedToken.IsOperator);
         httpContext.Items[ActorItemKey] = ComposeActor(
             matchedToken.Name.Trim(),
             httpContext.Request.Headers[OperatorHeaderName].ToString());
@@ -152,8 +239,15 @@ public static class ServiceTokenAuthorization
     public static string? GetProductionReadinessIssue(
         IHostEnvironment environment,
         LuthnAuthOptions options,
+        LuthnIdentityOptions identityOptions,
         DateTimeOffset now)
     {
+        var identityIssue = GetIdentityReadinessIssue(environment, options, identityOptions, now);
+        if (identityIssue is not null)
+        {
+            return identityIssue;
+        }
+
         if (!RequiresServiceToken(environment, options))
         {
             return null;
@@ -182,7 +276,46 @@ public static class ServiceTokenAuthorization
             return "Every active service token must declare at least one scope.";
         }
 
+
+        if (identityOptions.Mode == LuthnIdentityMode.MultiUser &&
+            activeTokens.Any(token => !token.IsOperator && NormalizeUserId(token.UserId) is null))
+        {
+            return "Every active non-operator token requires a valid userId in multi-user mode.";
+        }
+
         return null;
+    }
+
+    public static string? GetIdentityReadinessIssue(
+        IHostEnvironment environment,
+        LuthnAuthOptions options,
+        LuthnIdentityOptions identityOptions,
+        DateTimeOffset now)
+    {
+        if (!Enum.IsDefined(identityOptions.Mode))
+        {
+            return "The configured identity mode is invalid.";
+        }
+
+        if (NormalizeUserId(identityOptions.SingleOwnerUserId) is null)
+        {
+            return "The configured single-owner user identity is invalid.";
+        }
+
+        if (identityOptions.Mode != LuthnIdentityMode.MultiUser)
+        {
+            return null;
+        }
+
+        if (!RequiresServiceToken(environment, options))
+        {
+            return "Multi-user identity mode requires service-token authentication.";
+        }
+
+        var activeTokens = options.Tokens.Where(token => !IsExpired(token, now));
+        return activeTokens.Any(token => !token.IsOperator && NormalizeUserId(token.UserId) is null)
+            ? "Every active non-operator token requires a valid userId in multi-user mode."
+            : null;
     }
 
     public static bool RequiresServiceToken(
@@ -323,6 +456,15 @@ public static class ServiceTokenAuthorization
         return leftBytes.Length == rightBytes.Length &&
             CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
     }
+
+    private static bool IsAsciiLetterOrDigit(char value) =>
+        value is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9';
+
+    private static ProblemHttpResult IdentityConfigurationProblem(string detail) =>
+        TypedResults.Problem(
+            title: "Identity configuration is not ready.",
+            detail: detail,
+            statusCode: StatusCodes.Status503ServiceUnavailable);
 
     private static ProblemHttpResult Unauthorized() =>
         TypedResults.Problem(

@@ -61,11 +61,13 @@ public static class MemoryEndpoints
         var createdAt = DateTimeOffset.UtcNow;
         var memoryId = $"memory-{Guid.NewGuid():N}";
         var actor = ServiceTokenAuthorization.GetActor(httpContext);
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
         var provenanceError = CollectionProvenance.TryCreate(
             sourceEventId: null,
             memoryId,
             request.Provenance,
             actor,
+            principal.UserId,
             ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
             createdAt,
             out var provenance);
@@ -132,7 +134,8 @@ public static class MemoryEndpoints
             AllowsAgentContext = allowsAgentContext,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
-            CreatedBy = actor
+            CreatedBy = actor,
+            OwnerUserId = principal.UserId
         };
         db.SharedMemoryItems.Add(record);
         db.CollectionProvenance.Add(provenance);
@@ -167,10 +170,14 @@ public static class MemoryEndpoints
     public static async Task<Results<Ok<MemoryItemResponse>, NotFound>> ReadMemoryItem(
         string id,
         LuthnDbContext db,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var record = await ReadAgentSafeMemoryItems(db, now)
+        var record = await ReadAgentSafeMemoryItems(
+                db,
+                now,
+                ServiceTokenAuthorization.GetPrincipal(httpContext).UserId)
             .Where(item => item.Id == id)
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -189,6 +196,7 @@ public static class MemoryEndpoints
         LuthnDbContext db,
         IOperationalMetrics metrics,
         TimeProvider timeProvider,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateQuery(request);
@@ -219,6 +227,7 @@ public static class MemoryEndpoints
         {
             var candidates = await candidateSelector.SelectSharedMemoryAsync(
                 searchRequest,
+                ServiceTokenAuthorization.GetPrincipal(httpContext).UserId,
                 cancellationToken);
             var search = retrievalBackend.Search(
                 searchRequest,
@@ -227,7 +236,10 @@ public static class MemoryEndpoints
             var now = timeProvider.GetUtcNow();
             var records = resultIds.Length == 0
                 ? []
-                : await ReadAgentSafeMemoryItems(db, now)
+                : await ReadAgentSafeMemoryItems(
+                        db,
+                        now,
+                        ServiceTokenAuthorization.GetPrincipal(httpContext).UserId)
                     .Where(record => resultIds.Contains(record.Id))
                     .ToArrayAsync(cancellationToken);
             var recordsById = records.ToDictionary(record => record.Id, StringComparer.Ordinal);
@@ -265,10 +277,12 @@ public static class MemoryEndpoints
 
     private static IQueryable<SharedMemoryItemRecord> ReadAgentSafeMemoryItems(
         LuthnDbContext db,
-        DateTimeOffset now) =>
+        DateTimeOffset now,
+        string ownerUserId) =>
         db.SharedMemoryItems
             .AsNoTracking()
-            .Where(record => record.AllowsAgentContext &&
+            .Where(record => record.OwnerUserId == ownerUserId &&
+                record.AllowsAgentContext &&
                 record.Sensitivity == SensitivityLevel.Public &&
                 (record.Visibility == MemoryVisibility.PublicSafe ||
                     record.Visibility == MemoryVisibility.SharedAcrossAgents) &&

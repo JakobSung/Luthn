@@ -31,6 +31,7 @@ public static class CollectionProvenance
         string? memoryItemId,
         CollectionProvenanceClaims? claims,
         string authenticatedActor,
+        string authenticatedUserId,
         bool isServiceTokenAuthenticated,
         DateTimeOffset receivedAt,
         out CollectionProvenanceRecord record,
@@ -89,6 +90,7 @@ public static class CollectionProvenance
             SourceEventId = sourceEventId,
             MemoryItemId = memoryItemId,
             AuthenticatedActor = authenticatedActor,
+            AuthenticatedUserId = authenticatedUserId,
             ActorTrust = isServiceTokenAuthenticated ? ServiceTokenActorTrust : LocalRuntimeActorTrust,
             ClaimsTrust = hasClaims ? CallerClaimsTrust : NoClaimsTrust,
             ClaimedUserId = normalized.UserId,
@@ -150,19 +152,32 @@ public static class CollectionProvenanceEndpoints
     private static Task<Results<Ok<CollectionProvenanceResponse>, NotFound>> ReadBySourceEvent(
         string sourceEventId,
         LuthnDbContext db,
+        HttpContext httpContext,
         CancellationToken cancellationToken) =>
-        ReadAsync(db.CollectionProvenance.Where(record => record.SourceEventId == sourceEventId), cancellationToken);
+        ReadAsync(
+            db.CollectionProvenance.Where(record => record.SourceEventId == sourceEventId),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
 
     private static Task<Results<Ok<CollectionProvenanceResponse>, NotFound>> ReadByMemoryItem(
         string memoryItemId,
         LuthnDbContext db,
+        HttpContext httpContext,
         CancellationToken cancellationToken) =>
-        ReadAsync(db.CollectionProvenance.Where(record => record.MemoryItemId == memoryItemId), cancellationToken);
+        ReadAsync(
+            db.CollectionProvenance.Where(record => record.MemoryItemId == memoryItemId),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
 
     private static async Task<Results<Ok<CollectionProvenanceResponse>, NotFound>> ReadAsync(
         IQueryable<CollectionProvenanceRecord> query,
+        LuthnRequestPrincipal principal,
         CancellationToken cancellationToken)
     {
+        if (!principal.IsOperator)
+        {
+            query = query.Where(record => record.AuthenticatedUserId == principal.UserId);
+        }
         var record = await query.AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         return record is null
             ? TypedResults.NotFound()
@@ -175,6 +190,7 @@ public static class CollectionProvenanceEndpoints
         record.SourceEventId,
         record.MemoryItemId,
         record.AuthenticatedActor,
+        record.AuthenticatedUserId,
         record.ActorTrust,
         record.ClaimsTrust,
         record.ClaimedUserId,
@@ -193,6 +209,7 @@ public sealed record CollectionProvenanceResponse(
     string? SourceEventId,
     string? MemoryItemId,
     string AuthenticatedActor,
+    string AuthenticatedUserId,
     string ActorTrust,
     string ClaimsTrust,
     string? ClaimedUserId,

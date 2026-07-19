@@ -2,6 +2,7 @@ using Luthn.Core.Classification;
 using Luthn.Core.Context;
 using Luthn.Core.Persistence;
 using Luthn.Core.Search;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
@@ -55,6 +56,7 @@ public sealed class RetrievalEndpointTests
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             new OperationalMetrics(),
             TimeProvider.System,
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var ok = Assert.IsType<Ok<SafeSearchResponse>>(result.Result);
@@ -81,6 +83,7 @@ public sealed class RetrievalEndpointTests
             selector,
             metrics,
             timeProvider,
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var response = Assert.IsType<Ok<SafeSearchResponse>>(result.Result).Value!;
@@ -114,6 +117,7 @@ public sealed class RetrievalEndpointTests
             new AdvancingCandidateSelector(new ManualTimeProvider(), TimeSpan.Zero),
             new ThrowingOperationalMetrics(),
             TimeProvider.System,
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var response = Assert.IsType<Ok<SafeSearchResponse>>(result.Result).Value!;
@@ -156,6 +160,7 @@ public sealed class RetrievalEndpointTests
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             new OperationalMetrics(),
             TimeProvider.System,
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var ok = Assert.IsType<Ok<SafeSearchResponse>>(result.Result);
@@ -187,6 +192,7 @@ public sealed class RetrievalEndpointTests
     {
         public Task<IReadOnlyList<ContextPackCandidate>> SelectAgentContextAsync(
             SafeSearchRequest request,
+            string ownerUserId,
             CancellationToken cancellationToken)
         {
             timeProvider.Advance(duration);
@@ -195,6 +201,7 @@ public sealed class RetrievalEndpointTests
 
         public Task<IReadOnlyList<ContextPackCandidate>> SelectSharedMemoryAsync(
             SafeSearchRequest request,
+            string ownerUserId,
             CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<ContextPackCandidate>>([]);
     }

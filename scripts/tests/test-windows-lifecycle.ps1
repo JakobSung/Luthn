@@ -358,9 +358,12 @@ esac
     $configBytes = [IO.File]::ReadAllBytes($configFile)
     Assert-True (-not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF)) "config should be UTF-8 without BOM"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "Luthn__Auth__Tokens__0__Sha256Digest=sha256:[0-9a-f]{64}") "config should preserve the token-digest sha256 prefix"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Identity__Mode=SingleOwner$" -and [IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Identity__SingleOwnerUserId=local-owner$") "new installs should preserve the single-owner compatibility boundary"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__UserId=local-owner$" -and [IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__IsOperator=false$") "new installs should bind the product token to the local owner"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "new installs should provision the MCP sensitive-access request scope"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__8=metrics\.write$") "new installs should provision the MCP search telemetry write scope"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$") "new installs should provision a distinct local operator credential"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__IsOperator=true$") "the local operator credential should have the explicit operator role"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "the local operator credential should be decision-only"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_ENVIRONMENT=Production$") "new installs should use the Production environment"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=unconfigured$") "new installs should not select the mock classifier"
@@ -456,6 +459,7 @@ esac
     $env:FAKE_DOCKER_INFO_FAIL = "true"
     $env:LUTHN_DOCKER_DESKTOP_COMMAND = $fakeDockerDesktop
     $daemonAutoStart = Invoke-InstallerProcess $installerPath
+    if ($env:LUTHN_TEST_TRACE -ceq "true" -and $daemonAutoStart.ExitCode -ne 0) { Write-Host $daemonAutoStart.Output }
     Assert-True ($daemonAutoStart.ExitCode -eq 0) "the bootstrap should start Docker Desktop and wait for its engine: $($daemonAutoStart.Output)"
     Assert-True ($daemonAutoStart.Output -match "Starting it and waiting") "automatic Docker Desktop startup should be reported"
     Remove-Item Env:LUTHN_DOCKER_DESKTOP_COMMAND
@@ -581,10 +585,12 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__8=metrics\.write$") "update should provision the MCP search telemetry write scope for legacy installs"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Identity__Mode=SingleOwner$" -and [IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Identity__SingleOwnerUserId=local-owner$") "update should provision the single-owner compatibility boundary for legacy installs"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__UserId=local-owner$" -and [IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__IsOperator=false$") "update should bind the legacy product token to the local owner"
     Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
     $updatedConfig = [IO.File]::ReadAllText($configFile)
     Assert-True ($updatedConfig -cmatch "(?m)^LUTHN_OPERATOR_VOLUME=luthn-operator$") "update should preserve the separate Data Protection key volume selection"
-    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "update should reuse the Compose-exposed operator slot"
+    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__IsOperator=true$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "update should reuse the Compose-exposed operator slot with the explicit operator role"
     Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__1__(?:Scopes__1|ExpiresAt)=") "update should normalize the managed operator slot to decision-only"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
     Assert-True ($backupFiles.Count -eq 1 -and $backupFiles[0].Length -gt 0) "update should create a non-empty PostgreSQL backup"
