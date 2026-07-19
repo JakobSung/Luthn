@@ -336,12 +336,16 @@ public sealed class McpToolBoundaryTests
         var client = new FakeLuthnClient();
         using var args = JsonDocument.Parse(
             """{"retrievalId":"retrieval-0123456789abcdef0123456789abcdef","judgment":"helpful"}""");
+        using var extraArgs = JsonDocument.Parse(
+            """{"retrievalId":"retrieval-0123456789abcdef0123456789abcdef","judgment":"helpful","query":"must not be accepted"}""");
+        var tool = new SubmitSearchFeedbackTool(client);
 
-        var result = await new SubmitSearchFeedbackTool(client).InvokeAsync(args.RootElement);
+        var result = await tool.InvokeAsync(args.RootElement);
 
         Assert.Equal("retrieval-0123456789abcdef0123456789abcdef", client.LastSearchFeedback?.RetrievalId);
         Assert.Equal("helpful", client.LastSearchFeedback?.Judgment);
         Assert.True(Assert.IsType<SearchTelemetryAcceptedDto>(result).Accepted);
+        await Assert.ThrowsAsync<ArgumentException>(() => tool.InvokeAsync(extraArgs.RootElement));
     }
 
     [Fact]
@@ -430,6 +434,7 @@ public sealed class McpToolBoundaryTests
             .EnumerateArray()
             .First(item => item.GetProperty("name").GetString() == "submit_search_feedback");
         var feedbackProperties = feedbackTool.GetProperty("inputSchema").GetProperty("properties");
+        Assert.False(feedbackTool.GetProperty("inputSchema").GetProperty("additionalProperties").GetBoolean());
         Assert.Equal(64, feedbackProperties.GetProperty("retrievalId").GetProperty("maxLength").GetInt32());
         Assert.Equal(
             ["helpful", "unhelpful"],

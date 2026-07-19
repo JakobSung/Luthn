@@ -78,7 +78,7 @@ public static class LuthnMcpToolRegistry
             ToolSchema([
                 BoundedStringProperty("retrievalId", "Opaque retrieval id returned by a safe search or context pack.", 64, "^retrieval-[0-9a-f]{32}$"),
                 EnumStringProperty("judgment", "Feedback judgment.", ["helpful", "unhelpful"])
-            ], ["retrievalId", "judgment"])),
+            ], ["retrievalId", "judgment"], allowAdditionalProperties: false)),
         new(
             "get_shared_memory_item",
             "Read a safe shared-memory item by id.",
@@ -127,8 +127,10 @@ public static class LuthnMcpToolRegistry
 
     private static Dictionary<string, object> ToolSchema(
         IReadOnlyList<KeyValuePair<string, object>> properties,
-        IReadOnlyList<string>? required = null) =>
-        new()
+        IReadOnlyList<string>? required = null,
+        bool allowAdditionalProperties = true)
+    {
+        var schema = new Dictionary<string, object>
         {
             ["type"] = "object",
             ["properties"] = properties.ToDictionary(
@@ -136,6 +138,13 @@ public static class LuthnMcpToolRegistry
                 property => property.Value),
             ["required"] = required ?? []
         };
+        if (!allowAdditionalProperties)
+        {
+            schema["additionalProperties"] = false;
+        }
+
+        return schema;
+    }
 
     private static KeyValuePair<string, object> StringProperty(string name, string description) =>
         new(name, new Dictionary<string, object>

@@ -12,6 +12,7 @@ public sealed class SubmitSearchFeedbackTool(ILuthnAgentClient client) : ILuthnM
         JsonElement arguments,
         CancellationToken cancellationToken = default)
     {
+        McpToolArguments.RejectUnknownProperties(arguments, "retrievalId", "judgment");
         var request = new SearchFeedbackRequestDto(
             McpToolArguments.ReadRequiredString(arguments, "retrievalId"),
             McpToolArguments.ReadRequiredString(arguments, "judgment"));
