@@ -7,6 +7,7 @@ namespace Luthn.McpServer;
 public sealed class McpJsonRpcServer(IReadOnlyList<ILuthnMcpTool> tools)
 {
     public const string ProtocolVersion = "2025-06-18";
+    public const string SchemaVersion = "2";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -163,7 +164,8 @@ public sealed class McpJsonRpcServer(IReadOnlyList<ILuthnMcpTool> tools)
         serverInfo = new
         {
             name = "luthn-mcp-server",
-            version = "0.1.0"
+            version = "0.1.0",
+            schemaVersion = SchemaVersion
         }
     };
 

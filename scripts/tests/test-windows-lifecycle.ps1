@@ -15,11 +15,27 @@ function Assert-True {
 
 function Invoke-LuthnProcess {
     param([string]$CliPath, [string[]]$Arguments)
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @("-NoProfile", "-File", $CliPath) + $Arguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
     try {
-        $output = & $CliPath @Arguments *>&1 | Out-String
-        return [pscustomobject]@{ ExitCode = 0; Output = $output }
-    } catch {
-        return [pscustomobject]@{ ExitCode = 1; Output = ($_ | Out-String) }
+        [void]$process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Output = $stdoutTask.GetAwaiter().GetResult() + $stderrTask.GetAwaiter().GetResult()
+        }
+    } finally {
+        $process.Dispose()
     }
 }
 
@@ -102,19 +118,29 @@ if ($args.Count -ge 1 -and $args[0] -ceq "info") {
     if ($env:FAKE_INSTALLER_DOCKER_OS) { $env:FAKE_INSTALLER_DOCKER_OS } else { "linux" }
     exit 0
 }
+if ($args.Count -ge 3 -and $args[0] -ceq "buildx" -and $args[1] -ceq "imagetools" -and $args[2] -ceq "inspect") {
+    if ($env:FAKE_DOCKER_REMOTE_FAIL -ceq "true") { exit 20 }
+    if ($joined -match '\.Manifest') { '{"digest":"sha256:fake"}'; exit 0 }
+    if ($joined -match '\.Image') { '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"2","io.luthn.mcp-schema.version":"2"}}}}'; exit 0 }
+}
 if ($args.Count -ge 1 -and $args[0] -ceq "pull") { if ($env:FAKE_DOCKER_PULL_FAIL -ceq "true") { exit 16 }; "pulled"; exit 0 }
 if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
-    if ($joined -match "org.opencontainers.image.revision") { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    if ($joined -match "io.luthn.mcp-schema.version") { }
+    elseif ($joined -match "org.opencontainers.image.revision") { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
     elseif ($joined -match "RepoDigests") { "ghcr.io/jakobsung/luthn@sha256:fake" }
     else { "sha256:fake" }
     exit 0
 }
 if ($args.Count -ge 1 -and $args[0] -ceq "inspect") { "sha256:fake"; exit 0 }
-if ($args.Count -ge 1 -and $args[0] -ceq "run") { "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; exit 0 }
+if ($args.Count -ge 1 -and $args[0] -ceq "run") {
+    if ($args[-1] -ceq "mcp") { [void][Console]::In.ReadToEnd(); '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0"}}}'; exit 0 }
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; exit 0
+}
 if ($args.Count -ge 1 -and $args[0] -ceq "ps") { exit 0 }
 if ($args.Count -ge 1 -and $args[0] -in @("stop", "kill")) { exit 0 }
 if ($args.Count -ge 1 -and $args[0] -ceq "compose") {
     if ($args -ccontains "--list-tools") { if ($env:FAKE_MCP_PROBE_FAIL -ceq "true") { exit 14 }; "get_context_pack"; "search_safe_context"; exit 0 }
+    if ($args[-1] -ceq "mcp") { [void][Console]::In.ReadToEnd(); '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0"}}}'; exit 0 }
     if ($args -ccontains "pg_isready") { exit 0 }
     if ($args -ccontains "pg_dump") { if ($env:FAKE_DOCKER_BACKUP_FAIL -ceq "true") { [Console]::Error.WriteLine("backup failed"); exit 17 }; "fake-postgres-backup"; exit 0 }
     if ($args -ccontains "migrate" -and $env:FAKE_DOCKER_MIGRATE_FAIL -ceq "true") { exit 18 }
@@ -134,9 +160,17 @@ if [ "$1" = "info" ]; then
   if [ "${FAKE_DOCKER_INFO_FAIL:-false}" = "true" ] && [ ! -f "$FAKE_DOCKER_READY_MARKER" ]; then exit 13; fi
   echo "${FAKE_INSTALLER_DOCKER_OS:-linux}"; exit 0
 fi
+if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
+  [ "${FAKE_DOCKER_REMOTE_FAIL:-false}" = "true" ] && exit 20
+  case "$joined" in
+    *'.Manifest'*) printf '%s\n' '{"digest":"sha256:fake"}'; exit 0 ;;
+    *'.Image'*) printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"2","io.luthn.mcp-schema.version":"2"}}}}'; exit 0 ;;
+  esac
+fi
 if [ "$1" = "pull" ]; then [ "${FAKE_DOCKER_PULL_FAIL:-false}" = "true" ] && exit 16; echo "pulled"; exit 0; fi
 if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
   case "$joined" in
+    *io.luthn.mcp-schema.version*) : ;;
     *org.opencontainers.image.revision*) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
     *RepoDigests*) echo "ghcr.io/jakobsung/luthn@sha256:fake" ;;
     *) echo "sha256:fake" ;;
@@ -144,12 +178,19 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
   exit 0
 fi
 if [ "$1" = "inspect" ]; then echo "sha256:fake"; exit 0; fi
-if [ "$1" = "run" ]; then echo "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; exit 0; fi
+if [ "$1" = "run" ]; then
+  case "$joined" in
+    *' mcp') cat >/dev/null; printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0"}}}' ;;
+    *) echo "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
+  esac
+  exit 0
+fi
 if [ "$1" = "ps" ]; then exit 0; fi
 if [ "$1" = "stop" ] || [ "$1" = "kill" ]; then exit 0; fi
 if [ "$1" = "compose" ]; then
   case "$joined" in
     *--list-tools*) [ "${FAKE_MCP_PROBE_FAIL:-false}" = "true" ] && exit 14; printf 'get_context_pack\nsearch_safe_context\n'; exit 0 ;;
+    *' mcp') cat >/dev/null; printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0"}}}'; exit 0 ;;
     *pg_isready*) exit 0 ;;
     *pg_dump*) [ "${FAKE_DOCKER_BACKUP_FAIL:-false}" = "true" ] && { echo "backup failed" >&2; exit 17; }; echo "fake-postgres-backup"; exit 0 ;;
     *migrate*) [ "${FAKE_DOCKER_MIGRATE_FAIL:-false}" = "true" ] && exit 18; exit 0 ;;
@@ -240,6 +281,7 @@ esac
     $env:LUTHN_DOCKER_COMMAND = $fakeDocker
     $env:LUTHN_INSTALLER_DOCKER_COMMAND = $fakeDocker
     $env:LUTHN_CODEX_COMMAND = $fakeCodex
+    $env:CODEX_HOME = $codexHome
     $env:LUTHN_CODEX_HOOKS_FILE = $codexHooksFile
     $env:LUTHN_CODEX_INSTRUCTIONS_FILE = $codexInstructionsFile
     $env:LUTHN_CODEX_SKIP_OBSERVATION = "true"
@@ -288,6 +330,7 @@ esac
 
     $installerPath = Join-Path $RepoRoot "scripts/install.ps1"
     $install = Invoke-InstallerProcess $installerPath -ConnectCodex
+    if ($env:LUTHN_TEST_TRACE -ceq "true" -and $install.ExitCode -ne 0) { Write-Host $install.Output }
     Assert-True ($install.ExitCode -eq 0) "bootstrap install and Codex connection should succeed: $($install.Output)"
     Assert-True ($install.Output -match "Codex connector files are configured") "one-step bootstrap should connect Codex"
     Assert-True ([IO.File]::Exists($installedCli)) "bootstrap should install luthn.ps1"
@@ -413,8 +456,9 @@ esac
     if ([IO.File]::Exists($fakeDockerReadyMarker)) { [IO.File]::Delete($fakeDockerReadyMarker) }
 
     $daemonUnavailable = Invoke-InstallerProcess $installerPath
+    if ($env:LUTHN_TEST_TRACE -ceq "true") { Write-Host $daemonUnavailable.Output }
     Assert-True ($daemonUnavailable.ExitCode -ne 0) "unreachable Docker daemon should fail preflight"
-    Assert-True ($daemonUnavailable.Output -match "Start Docker Desktop, wait for the engine, and retry") "daemon failure should explain the recovery action"
+    Assert-True ($daemonUnavailable.Output -match "Start Docker Desktop" -and $daemonUnavailable.Output -match "engine, and retry") "daemon failure should explain the recovery action"
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "daemon preflight failure should preserve the installed CLI"
     $env:FAKE_DOCKER_INFO_FAIL = "false"
 
@@ -433,6 +477,50 @@ esac
     Assert-True ($status.Output -match "Running revision: a{40}") "status should report the running image revision"
     Assert-True ($status.Output -match "Selected revision: a{40}") "status should report the selected image revision"
 
+    $versionResult = Invoke-LuthnProcess $installedCli @("version", "--json")
+    Assert-True ($versionResult.ExitCode -eq 0) "version --json should succeed: $($versionResult.Output)"
+    $version = $versionResult.Output | ConvertFrom-Json
+    Assert-True ($version.installedImageReference -ceq "ghcr.io/jakobsung/luthn:main") "version should report the installed image reference"
+    Assert-True ($version.cliTemplateVersion -ceq "3" -and $version.connectorTemplateVersion -ceq "2") "version should report CLI and connector template versions"
+    Assert-True ($version.mcpSchemaVersion -ceq "0.1.0") "version should fall back to the legacy MCP server version when the image label and schemaVersion field are absent"
+    Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($tokenFile))) "version JSON must not expose the service token"
+    Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($operatorTokenFile))) "version JSON must not expose the operator token"
+
+    $configBeforeUpdateCheck = [IO.File]::ReadAllText($configFile)
+    $hooksBeforeUpdateCheck = [IO.File]::ReadAllText($codexHooksFile)
+    $updateCheck = Invoke-LuthnProcess $installedCli @("update", "check", "--json")
+    Assert-True ($updateCheck.ExitCode -eq 0) "update check should succeed: $($updateCheck.Output)"
+    $updateCheckJson = $updateCheck.Output | ConvertFrom-Json
+    Assert-True ($updateCheckJson.status -ceq "current") "matching remote identity should report current"
+    Assert-True ([IO.File]::ReadAllText($configFile) -ceq $configBeforeUpdateCheck) "update check should not modify configuration"
+    Assert-True ([IO.File]::ReadAllText($codexHooksFile) -ceq $hooksBeforeUpdateCheck) "update check should not modify Codex configuration"
+
+    $pinnedImage = "ghcr.io/jakobsung/luthn@sha256:$('0' * 64)"
+    [IO.File]::WriteAllText($configFile, $configBeforeUpdateCheck.Replace("LUTHN_IMAGE=ghcr.io/jakobsung/luthn:main", "LUTHN_IMAGE=$pinnedImage"), [Text.UTF8Encoding]::new($false))
+    $pinnedConfig = [IO.File]::ReadAllText($configFile)
+    $dockerLogCountBeforePinnedUpdate = [IO.File]::ReadAllLines($fakeDockerLog).Count
+    $pinnedCheck = Invoke-LuthnProcess $installedCli @("update", "check", "--json")
+    Assert-True ($pinnedCheck.ExitCode -eq 0 -and ($pinnedCheck.Output | ConvertFrom-Json).status -ceq "pinned") "immutable image references should report pinned"
+    $pinnedUpdate = Invoke-LuthnProcess $installedCli @("update")
+    Assert-True ($pinnedUpdate.ExitCode -ne 0 -and $pinnedUpdate.Output -match "configured image is immutable") "implicit update should stop for an immutable pin"
+    Assert-True ([IO.File]::ReadAllText($configFile) -ceq $pinnedConfig) "pin checks should not modify configuration"
+    $pinnedDockerLog = @([IO.File]::ReadAllLines($fakeDockerLog) | Select-Object -Skip $dockerLogCountBeforePinnedUpdate)
+    Assert-True (-not ($pinnedDockerLog -match '^pull ')) "implicit pinned update must not pull"
+    [IO.File]::WriteAllText($configFile, $configBeforeUpdateCheck, [Text.UTF8Encoding]::new($false))
+
+    $env:FAKE_DOCKER_REMOTE_FAIL = "true"
+    $remoteFailureConfig = [IO.File]::ReadAllText($configFile)
+    $remoteFailure = Invoke-LuthnProcess $installedCli @("update", "check", "--json")
+    Assert-True ($remoteFailure.ExitCode -ne 0 -and $remoteFailure.Output -match '"status":"error"') "remote update-check failure should emit the error contract"
+    Assert-True ([IO.File]::ReadAllText($configFile) -ceq $remoteFailureConfig) "remote update-check failure should not modify configuration"
+    $env:FAKE_DOCKER_REMOTE_FAIL = "false"
+
+    $doctorResult = Invoke-LuthnProcess $installedCli @("doctor", "--json")
+    Assert-True ($doctorResult.ExitCode -eq 0) "doctor --json should pass for the healthy fixture: $($doctorResult.Output)"
+    $doctor = $doctorResult.Output | ConvertFrom-Json
+    Assert-True ($doctor.status -ceq "ready") "doctor should report ready for a healthy fixture"
+    $doctorNames = @($doctor.checks | ForEach-Object { $_.name })
+    Assert-True ($doctorNames -contains "migrations" -and $doctorNames -contains "update-check" -and @($doctorNames -match '^codex-').Count -gt 0) "doctor should cover migration, update, and Codex state"
     $updatedCliContent = [IO.File]::ReadAllText((Join-Path $RepoRoot "scripts/luthn.ps1")) + "`n# windows-update-test-fixture`n"
     [IO.File]::WriteAllText($updatedCli, $updatedCliContent, [Text.UTF8Encoding]::new($false))
     $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = $updatedCli
@@ -481,6 +569,7 @@ esac
     [IO.File]::WriteAllText($codexInstructionsFile, $originalInstructions, [Text.UTF8Encoding]::new($false))
     Assert-True ($update.Output -match "Luthn update completed") "successful update should report completion"
     Assert-True ($update.Output -match "Revision: a{40} -> a{40}") "successful update should report the revision transition"
+    Assert-True ($update.Output -notmatch "Restart required:" -and $update.Output -notmatch "Agent notice:") "runtime-only update should not emit a compatibility restart notice"
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
@@ -528,7 +617,7 @@ esac
     $env:FAKE_DOCKER_PULL_FAIL = "true"
     $pullFailure = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:pull-failure")
     Assert-True ($pullFailure.ExitCode -ne 0) "pull failure should stop update"
-    Assert-True ($pullFailure.Output -match "running API and previous image were preserved") "pull failure should report preservation"
+    Assert-True ($pullFailure.Output -match "running API and previous image were preserved") "pull failure should report preservation: $($pullFailure.Output)"
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $updatedHash) "pull failure should preserve the installed CLI"
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "pull failure should preserve the selected image"
     $env:FAKE_DOCKER_PULL_FAIL = "false"
@@ -618,24 +707,38 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $instructionsBeforeFailedProbe) "MCP probe failure should preserve instructions"
     $env:FAKE_MCP_PROBE_FAIL = "false"
 
-    $desktopCodexDir = Join-Path $env:LOCALAPPDATA "OpenAI/Codex/bin/test-runtime"
-    [void][IO.Directory]::CreateDirectory($desktopCodexDir)
-    $desktopCodexFixture = Join-Path $desktopCodexDir "codex-fixture.ps1"
-    [IO.File]::Copy($fakeCodex, $desktopCodexFixture, $true)
-    $desktopCodex = Join-Path $desktopCodexDir "codex.cmd"
-    [IO.File]::WriteAllText($desktopCodex, "@echo off`r`npwsh -NoProfile -File `"%~dp0codex-fixture.ps1`" %*`r`n", [Text.Encoding]::ASCII)
-    Remove-Item Env:LUTHN_CODEX_COMMAND
-    $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
+    if ($IsWindows) {
+        $desktopCodexDir = Join-Path $env:LOCALAPPDATA "OpenAI/Codex/bin/test-runtime"
+        [void][IO.Directory]::CreateDirectory($desktopCodexDir)
+        $desktopCodexFixture = Join-Path $desktopCodexDir "codex-fixture.ps1"
+        [IO.File]::Copy($fakeCodex, $desktopCodexFixture, $true)
+        $desktopCodex = Join-Path $desktopCodexDir "codex.cmd"
+        [IO.File]::WriteAllText($desktopCodex, "@echo off`r`npwsh -NoProfile -File `"%~dp0codex-fixture.ps1`" %*`r`n", [Text.Encoding]::ASCII)
+        Remove-Item Env:LUTHN_CODEX_COMMAND
+        $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
+    } else {
+        $env:LUTHN_CODEX_COMMAND = $fakeCodex
+    }
     $connect = Invoke-LuthnProcess $installedCli @("connect", "codex")
-    Assert-True ($connect.ExitCode -eq 0) "Codex Desktop CLI discovery should succeed: $($connect.Output)"
-    Assert-True ([IO.File]::ReadAllText($fakeCodexLog) -match "(?m)^--version$") "Codex discovery should verify that a candidate is runnable"
-    Remove-Item Env:CODEX_CLI_PATH
+    Assert-True ($connect.ExitCode -eq 0) "Codex connection should succeed: $($connect.Output)"
+    if ($IsWindows) {
+        Assert-True ([IO.File]::ReadAllText($fakeCodexLog) -match "(?m)^--version$") "Codex discovery should verify that a candidate is runnable"
+        Remove-Item Env:CODEX_CLI_PATH
+    }
     $env:LUTHN_CODEX_COMMAND = $fakeCodex
     Assert-True ([IO.File]::Exists($fakeCodexState)) "Codex MCP registration should exist"
     $registration = [IO.File]::ReadAllText($fakeCodexState) | ConvertFrom-Json
     Assert-True ($registration.transport.type -ceq "stdio") "Codex registration should be stdio"
     Assert-True (@($registration.transport.args) -ccontains "mcp") "Codex registration should invoke the mcp service"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "Codex registration should not contain the token"
+    $matchingRegistration = [IO.File]::ReadAllText($fakeCodexState)
+    $unrelatedDoctorRegistration = $matchingRegistration | ConvertFrom-Json
+    $unrelatedDoctorRegistration.transport.command = "unrelated-tool"
+    [IO.File]::WriteAllText($fakeCodexState, (($unrelatedDoctorRegistration | ConvertTo-Json -Depth 6) + "`n"), [Text.UTF8Encoding]::new($false))
+    $changedRegistrationDoctor = Invoke-LuthnProcess $installedCli @("doctor", "--json")
+    Assert-True ($changedRegistrationDoctor.ExitCode -ne 0) "doctor should fail when the luthn MCP registration points to an unrelated command"
+    Assert-True ($changedRegistrationDoctor.Output -match '"name":"codex-mcp","status":"fail"') "doctor should identify a changed Codex MCP registration"
+    [IO.File]::WriteAllText($fakeCodexState, $matchingRegistration, [Text.UTF8Encoding]::new($false))
     $installedHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
     $installedLuthnHook = @($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
     Assert-True ($installedLuthnHook.Count -eq 1) "the Windows hook command check should find one Luthn hook"
@@ -705,6 +808,8 @@ esac
     $connectorUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($connectorUpdate.ExitCode -eq 0) "update should reconcile a stale connector template: $($connectorUpdate.Output)"
     Assert-True ($connectorUpdate.Output -match "Reconciling Codex connector template version 2") "update should report connector template reconciliation"
+    Assert-True ($connectorUpdate.Output -match "Restart required: Luthn MCP compatibility changed") "connector template changes should require a Codex host restart"
+    Assert-True ($connectorUpdate.Output -match "Agent notice: restart the current Codex host before invoking Luthn tools again\.") "connector template changes should emit the bounded agent notice"
     $reconciledConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($reconciledConnectorState.connectorVersion -ceq "2") "successful update should record the current connector template version"
     Assert-True ($reconciledConnectorState.helperDigest -cmatch "^[0-9a-f]{64}$" -and $reconciledConnectorState.helperDigest -cne ("0" * 64)) "successful update should replace a same-version stale helper digest"
@@ -816,8 +921,12 @@ esac
     Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "helperDigest")) "legacy rollback state should not require a helper digest"
     Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "templateDigest")) "legacy rollback state should not require a template digest"
 
-    Remove-Item Env:LUTHN_CODEX_COMMAND
-    $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
+    if ($IsWindows) {
+        Remove-Item Env:LUTHN_CODEX_COMMAND
+        $env:CODEX_CLI_PATH = Join-Path $testRoot "missing-codex.exe"
+    } else {
+        $env:LUTHN_CODEX_COMMAND = $fakeCodex
+    }
     $env:Path = $pwshDirectory
     $env:FAKE_CODEX_REMOVE_FAIL = "true"
     $blockedUninstall = Invoke-LuthnProcess $installedCli @("uninstall")
@@ -829,7 +938,7 @@ esac
     $env:FAKE_CODEX_REMOVE_FAIL = "false"
 
     $uninstall = Invoke-LuthnProcess $installedCli @("uninstall")
-    Assert-True ($uninstall.ExitCode -eq 0) "default uninstall should discover Codex Desktop and succeed: $($uninstall.Output)"
+    Assert-True ($uninstall.ExitCode -eq 0) "default uninstall should clean up Codex and succeed: $($uninstall.Output)"
     Assert-True (-not [IO.Directory]::Exists((Join-Path $windowsRoot "data"))) "default uninstall should remove runtime data"
     Assert-True ([IO.File]::Exists($configFile)) "default uninstall should preserve config"
     Assert-True ([IO.File]::Exists($tokenFile)) "default uninstall should preserve token"
@@ -857,6 +966,7 @@ esac
     Remove-Item Env:LUTHN_CODEX_HOOK_TEST_THROW -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_CODEX_HOOK_INSTRUCTIONS_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_CODEX_HOOK_SYNCHRONOUS -ErrorAction SilentlyContinue
+    Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_CODEX_HOOKS_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_CODEX_INSTRUCTIONS_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_CODEX_SKIP_OBSERVATION -ErrorAction SilentlyContinue

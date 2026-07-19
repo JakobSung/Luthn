@@ -263,10 +263,26 @@ an inheritance-disabled, current-user-only NTFS ACL.
 
 ```bash
 luthn status
+luthn version --json
+luthn update check --json
+luthn doctor --json
 ```
 
 Status reports Compose service state, health, readiness, console URL, image
 reference, image ID, and registry digest when available.
+
+`version` reports the installed image reference and digest, source revision,
+CLI and connector template versions, MCP schema version, and a stable release
+version when the image carries one. `update check` inspects only the configured
+official registry channel and never pulls an image, stops a service, changes
+configuration, or creates a backup. Its stable statuses are `current`,
+`update-available`, `pinned`, `unavailable`, and `error`.
+
+`doctor` combines Docker and Compose prerequisites, installed runtime files,
+health/readiness and migration state, runtime drift, update availability, and
+the owned Codex MCP, hook, and auto-recall state. Required failures return a
+nonzero exit code. Human-readable output is the default; `--json` provides the
+same fields for agents and automation without secret values.
 
 Open the operator console at <http://127.0.0.1:8080/>. PostgreSQL is kept on the
 internal Compose network and the console/API port is loopback-bound by default.
@@ -297,8 +313,11 @@ metadata-only channel state after the API becomes ready.
 Windows currently supports:
 
 ```powershell
+luthn version --json
 luthn status
+luthn update check --json
 luthn update
+luthn doctor --json
 luthn connect codex
 luthn connect codex --auto-recall
 luthn connect codex --no-auto-recall
@@ -333,19 +352,31 @@ of unrelated Codex configuration, the two named Docker volumes, and
 
 `luthn update` performs this sequence:
 
-1. pulls the target image and downloads the matching CLI and Compose runtime;
-2. starts/checks PostgreSQL;
-3. stops API and active MCP/adapter write paths;
-4. creates a compressed `pg_dump` backup and records the current image ID and backup path;
-5. runs migrations from the same target image that will run the API;
-6. starts the API and requires both `/healthz` and `/readyz` to pass;
-7. records success only after readiness.
+1. resolves the configured mutable channel, or requires an explicit target when the installation is pinned;
+2. pulls the target image and verifies that legacy operator credentials and connector scopes can be reconciled;
+3. snapshots configuration and managed Codex files, installs the matching CLI and Compose runtime, and validates the target MCP schema;
+4. starts/checks PostgreSQL;
+5. stops API and active MCP/adapter write paths;
+6. creates a compressed `pg_dump` backup and records the current image ID and backup path;
+7. runs migrations from the same target image that will run the API;
+8. starts the API and requires both `/healthz` and `/readyz` to pass;
+9. records success only after readiness.
 
 Pin an immutable published image when needed:
 
 ```bash
 luthn update ghcr.io/jakobsung/luthn:sha-<full-commit-sha>
 ```
+
+An installed immutable digest or `sha-<full-commit-sha>` reference reports
+`pinned`. A bare `luthn update` stops instead of re-pulling the same immutable
+reference; pass an explicit target to move the installation.
+
+After a successful update, Luthn prints a restart-required operator message and
+an agent-safe notice only when the MCP schema, connector template, or managed
+Codex instructions changed. Runtime-only updates do not emit this restart
+notice. Restart the current Codex host before invoking Luthn tools again when
+the notice appears.
 
 Migration or readiness failure leaves the API stopped, preserves the backup,
 and records the previous image ID. macOS/Linux records update state in

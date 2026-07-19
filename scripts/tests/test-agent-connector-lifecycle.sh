@@ -667,6 +667,7 @@ before_scope_hash="$(rg '^Luthn__Auth__Tokens__0__Scopes__' "$full_scope_config"
   stop_write_paths() { :; }
   wait_for_api() { :; }
   record_state() { :; }
+  compute_token_digest() { printf 'sha256:%064d' 0; }
   docker() { :; }
   update_luthn test/luthn:new >/dev/null
 )
@@ -803,10 +804,13 @@ EOF
   stop_write_paths() { :; }
   wait_for_api() { :; }
   record_state() { :; }
+  compute_token_digest() { printf 'sha256:%064d' 0; }
   docker() {
     if [[ " $* " == *"{{.Id}}"* ]]; then printf '%s\n' sha256:target; fi
   }
-  update_luthn test/luthn:new >/dev/null
+  reconcile_output="$(update_luthn test/luthn:new)"
+  [[ "$reconcile_output" == *"Restart required: Luthn MCP compatibility changed"* ]]
+  [[ "$reconcile_output" == *"Agent notice: restart the current Codex host before invoking Luthn tools again."* ]]
 )
 grep -q '^CONNECTOR_VERSION=3$' "$reconcile_state/connectors/codex.env"
 python3 - "$reconcile_codex/hooks.json" <<'PY'
@@ -878,6 +882,7 @@ if (
     fi
   }
   record_state() { :; }
+  compute_token_digest() { printf 'sha256:%064d' 0; }
   docker() {
     if [[ " $* " == *"{{.Id}}"* ]]; then printf '%s\n' sha256:target; fi
   }
@@ -945,6 +950,7 @@ chmod 0700 "$reconcile_root/legacy-helper.py"
   stop_write_paths() { :; }
   wait_for_api() { :; }
   record_state() { :; }
+  compute_token_digest() { printf 'sha256:%064d' 0; }
   docker() {
     if [[ " $* " == *"{{.Id}}"* ]]; then printf '%s\n' sha256:target; fi
   }
@@ -953,5 +959,118 @@ chmod 0700 "$reconcile_root/legacy-helper.py"
 grep -q '^CONNECTOR_VERSION=1$' "$reconcile_state/connectors/codex.env"
 ! grep -q '^HELPER_DIGEST=' "$reconcile_state/connectors/codex.env"
 ! grep -q '^TEMPLATE_DIGEST=' "$reconcile_state/connectors/codex.env"
+
+echo "version, update-check, pin-policy, and doctor contracts"
+version_root="$tmp_root/version-management"
+mkdir -p "$version_root/data" "$version_root/config" "$version_root/state" "$version_root/bin"
+touch "$version_root/data/compose.yaml"
+cp "$repo_root/scripts/luthn" "$version_root/bin/luthn"
+chmod 0755 "$version_root/bin/luthn"
+cat >"$version_root/config/luthn.env" <<EOF
+LUTHN_IMAGE=ghcr.io/jakobsung/luthn:main
+LUTHN_BASE_URL=http://127.0.0.1:8080
+EOF
+(
+  export HOME="$home_dir"
+  export LUTHN_DATA_DIR="$version_root/data"
+  export LUTHN_CONFIG_DIR="$version_root/config"
+  export LUTHN_STATE_DIR="$version_root/state"
+  export LUTHN_BIN_DIR="$version_root/bin"
+  export LUTHN_COMPOSE_FILE="$version_root/data/compose.yaml"
+  export LUTHN_CONFIG_FILE="$version_root/config/luthn.env"
+  export LUTHN_CLI_PATH="$version_root/bin/luthn"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  require_docker() { :; }
+  image_id_for_container() { printf '%s' sha256:current; }
+  image_digest() { printf '%s' sha256:current; }
+  image_label() {
+    case "$2" in
+      org.opencontainers.image.revision) printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+      org.opencontainers.image.version) printf '%s' main ;;
+      io.luthn.mcp-schema.version) printf '%s' 2 ;;
+    esac
+  }
+  read_remote_image_metadata() {
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+      sha256:current aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa main 3 2 2
+  }
+  version_json="$(show_version --json)"
+  update_json="$(check_for_update --json)"
+  read_remote_image_metadata() {
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+      sha256:candidate bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb main 3 2 2
+  }
+  available_json="$(check_for_update --json)"
+  python3 - "$version_json" "$update_json" "$available_json" <<'PY'
+import json
+import sys
+version = json.loads(sys.argv[1])
+update = json.loads(sys.argv[2])
+available = json.loads(sys.argv[3])
+assert set(version) == {
+    "installedImageReference", "imageDigest", "sourceRevision",
+    "cliTemplateVersion", "connectorTemplateVersion", "mcpSchemaVersion",
+    "stableReleaseVersion",
+}
+assert version["cliTemplateVersion"] == "3"
+assert version["connectorTemplateVersion"] == "2"
+assert version["mcpSchemaVersion"] == "2"
+assert update["status"] == "current"
+assert update["candidateRevision"] == "a" * 40
+assert available["status"] == "update-available"
+assert available["candidateRevision"] == "b" * 40
+PY
+
+  printf 'LUTHN_IMAGE=ghcr.io/jakobsung/luthn@sha256:%064d\n' 0 >"$config_file"
+  before_hash="$(shasum -a 256 "$config_file" | awk '{print $1}')"
+  pinned_json="$(check_for_update --json)"
+  after_hash="$(shasum -a 256 "$config_file" | awk '{print $1}')"
+  [[ "$before_hash" == "$after_hash" ]]
+  python3 - "$pinned_json" <<'PY'
+import json
+import sys
+assert json.loads(sys.argv[1])["status"] == "pinned"
+PY
+  pull_image() { touch "$version_root/unexpected-pull"; }
+  if update_luthn >/dev/null 2>&1; then
+    echo "expected implicit update to stop for immutable pin" >&2
+    exit 1
+  fi
+  [[ ! -e "$version_root/unexpected-pull" ]]
+
+  printf 'LUTHN_IMAGE=ghcr.io/jakobsung/luthn:main\nLUTHN_BASE_URL=http://127.0.0.1:8080\n' >"$config_file"
+  docker() {
+    if [[ " $* " == *" image inspect "* && " $* " == *"{{.Id}}"* ]]; then
+      printf '%s\n' sha256:current
+    fi
+  }
+  curl() {
+    if [[ " $* " == *"/readyz"* ]]; then
+      printf '%s\n%s' '{"status":"ready"}' 200
+    else
+      printf '%s' '{"status":"ok"}'
+    fi
+  }
+  check_for_update() { printf '%s\n' '{"status":"current"}'; }
+  docker() {
+    if [[ " $* " == *" run --rm -i "* && " $* " == *" mcp "* ]]; then
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0","schemaVersion":"1"}}}'
+    elif [[ " $* " == *" image inspect "* && " $* " == *"{{.Id}}"* ]]; then
+      printf '%s\n' sha256:current
+    fi
+  }
+  [[ "$(probe_image_mcp_schema_version sha256:legacy)" == "1" ]]
+  doctor_json="$(show_doctor --json)"
+  python3 - "$doctor_json" <<'PY'
+import json
+import sys
+doctor = json.loads(sys.argv[1])
+assert doctor["status"] == "ready"
+names = {check["name"] for check in doctor["checks"]}
+assert {"docker", "compose", "docker-daemon", "installation", "api-health", "api-readiness", "migrations", "runtime-drift", "update-check"} <= names
+PY
+)
 
 echo "Agent connector lifecycle tests passed."

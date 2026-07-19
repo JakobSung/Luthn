@@ -12,7 +12,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:LuthnWindowsCliVersion = "2"
+$script:LuthnWindowsCliVersion = "3"
+$script:CodexConnectorTemplateVersion = "2"
+$script:McpSchemaVersion = "2"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
 $script:RootDir = if ($env:LUTHN_WINDOWS_ROOT) {
     $env:LUTHN_WINDOWS_ROOT
@@ -93,11 +95,13 @@ function Show-Usage {
 usage: luthn <command> [options]
 
 commands:
-  version                    Show the installed Windows CLI template version.
+  version [--json]           Show installed runtime and compatibility versions.
   manifest                   Show versioned connector template digests as JSON.
   install [--connect-codex]  Install Luthn and optionally connect Codex.
   status                     Show services, readiness, console, and image.
+  update check [--json]      Check the configured update channel without pulling.
   update [image]             Back up, pull, migrate, restart, and verify.
+  doctor [--json]            Diagnose runtime, update, and Codex integration state.
   connect codex [--no-auto-recall]
                              Configure Codex; recall is enabled by default.
   connection status codex    Show local and server Codex connection state.
@@ -473,10 +477,224 @@ function Get-WindowsManagedTemplateDigest {
 function Get-CurrentWindowsCliManifest {
     $cliPath = [IO.Path]::GetFullPath($PSCommandPath)
     return [ordered]@{
-        version = $script:LuthnWindowsCliVersion
+        version = $script:CodexConnectorTemplateVersion
+        cliVersion = $script:LuthnWindowsCliVersion
         helperDigest = Get-Sha256Hex -Bytes ([IO.File]::ReadAllBytes($cliPath))
         templateDigest = Get-WindowsManagedTemplateDigest
     }
+}
+
+function Test-ImmutableImageReference {
+    param([Parameter(Mandatory = $true)][string]$Image)
+    return $Image -cmatch '@sha256:[0-9a-f]{64}$' -or $Image -cmatch ':sha-[0-9a-f]{40}$'
+}
+
+function Test-OfficialImageReference {
+    param([Parameter(Mandatory = $true)][string]$Image)
+    return $Image -clike 'ghcr.io/jakobsung/luthn:*' -or $Image -clike 'ghcr.io/jakobsung/luthn@*'
+}
+
+function Get-ImageLabel {
+    param(
+        [Parameter(Mandatory = $true)][string]$Image,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    $result = Invoke-ToolCapture -Tool (Get-DockerTool) -Arguments @(
+        "image", "inspect", "--format", "{{ index .Config.Labels `"$Label`" }}", $Image)
+    if ($result.ExitCode -ne 0) { return "" }
+    return $result.StdOut.Trim()
+}
+
+function Get-ImageDigest {
+    param([Parameter(Mandatory = $true)][string]$Image)
+    $result = Invoke-ToolCapture -Tool (Get-DockerTool) -Arguments @(
+        "image", "inspect", "--format", "{{join .RepoDigests `",`"}}", $Image)
+    if ($result.ExitCode -ne 0 -or -not $result.StdOut.Trim()) { return "" }
+    $last = @($result.StdOut.Trim() -split ',')[-1]
+    return @($last -split '@')[-1]
+}
+
+function Get-StableReleaseVersion {
+    param([string]$Version)
+    if ($Version -cmatch '^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') { return $Version }
+    return ""
+}
+
+function Get-McpSchemaVersionFromOutput {
+    param([AllowEmptyString()][string]$Output)
+    foreach ($line in @($Output -split "`r?`n")) {
+        try {
+            $payload = $line | ConvertFrom-Json
+            $serverInfo = $payload.result.serverInfo
+            $schemaProperty = $serverInfo.PSObject.Properties["schemaVersion"]
+            $versionProperty = $serverInfo.PSObject.Properties["version"]
+            $version = if ($schemaProperty -and [string]$schemaProperty.Value) {
+                [string]$schemaProperty.Value
+            } elseif ($versionProperty) {
+                [string]$versionProperty.Value
+            } else {
+                ""
+            }
+            if ($version) { return $version }
+        } catch {}
+    }
+    return ""
+}
+
+function Get-McpSchemaVersionFromRuntime {
+    if (-not [IO.File]::Exists($script:ComposeFile) -or -not [IO.File]::Exists($script:ConfigFile)) { return "" }
+    $request = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' + "`n"
+    $result = Invoke-ToolCapture -Tool (Get-DockerTool) -Arguments (Get-ComposeArguments @(
+        "--profile", "tools", "run", "--rm", "--no-deps", "-T", "mcp")) -StandardInput $request
+    if ($result.ExitCode -ne 0) { return "" }
+    return (Get-McpSchemaVersionFromOutput -Output $result.StdOut)
+}
+
+function Get-McpSchemaVersionFromImage {
+    param([Parameter(Mandatory = $true)][string]$Image)
+    $request = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' + "`n"
+    $result = Invoke-ToolCapture -Tool (Get-DockerTool) -Arguments @(
+        "run", "--rm", "-i", $Image, "mcp") -StandardInput $request
+    if ($result.ExitCode -ne 0) { return "" }
+    return (Get-McpSchemaVersionFromOutput -Output $result.StdOut)
+}
+
+function Get-VersionInformation {
+    $imageReference = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+    $imageId = ""
+    $digest = ""
+    $revision = ""
+    $releaseVersion = ""
+    $mcpSchemaVersion = ""
+    if ([IO.File]::Exists($script:ComposeFile) -and [IO.File]::Exists($script:ConfigFile)) {
+        try { $imageId = Get-ApiImageId } catch { $imageId = "" }
+        if ($imageId) {
+            $digest = Get-ImageDigest -Image $imageId
+            $revision = Get-ImageLabel -Image $imageId -Label "org.opencontainers.image.revision"
+            $releaseVersion = Get-StableReleaseVersion (Get-ImageLabel -Image $imageId -Label "org.opencontainers.image.version")
+            $reportedMcpSchema = Get-ImageLabel -Image $imageId -Label "io.luthn.mcp-schema.version"
+            if ($reportedMcpSchema) { $mcpSchemaVersion = $reportedMcpSchema }
+            else { $mcpSchemaVersion = Get-McpSchemaVersionFromRuntime }
+        }
+    }
+    return [ordered]@{
+        installedImageReference = $imageReference
+        imageDigest = $(if ($digest) { $digest } else { $null })
+        sourceRevision = $(if ($revision) { $revision } else { $null })
+        cliTemplateVersion = $script:LuthnWindowsCliVersion
+        connectorTemplateVersion = $script:CodexConnectorTemplateVersion
+        mcpSchemaVersion = $(if ($mcpSchemaVersion) { $mcpSchemaVersion } else { $null })
+        stableReleaseVersion = $(if ($releaseVersion) { $releaseVersion } else { $null })
+    }
+}
+
+function Show-VersionInformation {
+    param([string[]]$Arguments)
+    if ($Arguments.Count -gt 1 -or ($Arguments.Count -eq 1 -and $Arguments[0] -cne "--json")) {
+        throw "usage: luthn version [--json]"
+    }
+    $information = Get-VersionInformation
+    if ($Arguments.Count -eq 1) {
+        $information | ConvertTo-Json -Compress
+        return
+    }
+    Write-Host "Installed image: $($information.installedImageReference)"
+    Write-Host "Image digest: $(if ($information.imageDigest) { $information.imageDigest } else { 'unavailable' })"
+    Write-Host "Source revision: $(if ($information.sourceRevision) { $information.sourceRevision } else { 'unavailable' })"
+    Write-Host "CLI template: $($information.cliTemplateVersion)"
+    Write-Host "Connector template: $($information.connectorTemplateVersion)"
+    Write-Host "MCP schema: $(if ($information.mcpSchemaVersion) { $information.mcpSchemaVersion } else { 'unavailable' })"
+    Write-Host "Stable release: $(if ($information.stableReleaseVersion) { $information.stableReleaseVersion } else { 'unavailable' })"
+}
+
+function Get-RemoteImageMetadata {
+    param([Parameter(Mandatory = $true)][string]$Image)
+    $docker = Get-DockerTool
+    $manifestResult = Invoke-ToolCapture -Tool $docker -Arguments @(
+        "buildx", "imagetools", "inspect", $Image, "--format", "{{json .Manifest}}")
+    Assert-ToolSuccess $manifestResult "remote image manifest inspection"
+    $imageResult = Invoke-ToolCapture -Tool $docker -Arguments @(
+        "buildx", "imagetools", "inspect", $Image, "--format", "{{json .Image}}")
+    Assert-ToolSuccess $imageResult "remote image configuration inspection"
+    $manifest = $manifestResult.StdOut | ConvertFrom-Json -AsHashtable
+    $images = $imageResult.StdOut | ConvertFrom-Json -AsHashtable
+    $firstPlatform = @($images.Keys | Sort-Object | Select-Object -First 1)[0]
+    $labels = if ($firstPlatform) { $images[$firstPlatform]["config"]["Labels"] } else { @{} }
+    return [ordered]@{
+        digest = [string]$manifest["digest"]
+        revision = [string]$labels["org.opencontainers.image.revision"]
+        releaseVersion = [string]$labels["org.opencontainers.image.version"]
+        cliTemplateVersion = [string]$labels["io.luthn.cli-template.version"]
+        connectorTemplateVersion = [string]$labels["io.luthn.connector-template.version"]
+        mcpSchemaVersion = [string]$labels["io.luthn.mcp-schema.version"]
+    }
+}
+
+function Invoke-UpdateCheck {
+    param([string[]]$Arguments)
+    if ($Arguments.Count -gt 1 -or ($Arguments.Count -eq 1 -and $Arguments[0] -cne "--json")) {
+        throw "usage: luthn update check [--json]"
+    }
+    Require-Installation
+    Test-DockerPreflight
+    $asJson = $Arguments.Count -eq 1
+    $channel = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+    $currentId = Get-ApiImageId
+    $currentDigest = if ($currentId) { Get-ImageDigest -Image $currentId } else { "" }
+    $currentRevision = if ($currentId) { Get-ImageLabel -Image $currentId -Label "org.opencontainers.image.revision" } else { "" }
+    $candidateDigest = ""
+    $candidateRevision = ""
+    $exitCode = 0
+    if (Test-ImmutableImageReference $channel) {
+        $status = "pinned"
+        $message = "The configured image is immutable. Select an explicit mutable channel or target to update."
+    } elseif (-not (Test-OfficialImageReference $channel)) {
+        $status = "unavailable"
+        $message = "Automatic checks are available only for the official Luthn image channel."
+    } else {
+        try {
+            $candidate = Get-RemoteImageMetadata -Image $channel
+            $candidateDigest = $candidate.digest
+            $candidateRevision = $candidate.revision
+            $identitiesMatch = if ($currentDigest -and $candidateDigest) {
+                $currentDigest -ceq $candidateDigest
+            } else {
+                $currentRevision -and $currentRevision -ceq $candidateRevision
+            }
+            if ($identitiesMatch) {
+                $status = "current"
+                $message = "The installed runtime matches the configured update channel."
+            } else {
+                $status = "update-available"
+                $message = "An update is available. Run 'luthn update' when you are ready."
+            }
+        } catch {
+            $status = "error"
+            $message = "The configured update channel could not be inspected. No local state was changed."
+            $exitCode = 1
+        }
+    }
+    $result = [ordered]@{
+        status = $status
+        channel = $channel
+        currentDigest = $(if ($currentDigest) { $currentDigest } else { $null })
+        candidateDigest = $(if ($candidateDigest) { $candidateDigest } else { $null })
+        currentRevision = $(if ($currentRevision) { $currentRevision } else { $null })
+        candidateRevision = $(if ($candidateRevision) { $candidateRevision } else { $null })
+        message = $message
+    }
+    if ($asJson) {
+        $result | ConvertTo-Json -Compress
+    } else {
+        Write-Host "Update status: $status"
+        Write-Host "Channel: $channel"
+        Write-Host "Current digest: $(if ($currentDigest) { $currentDigest } else { 'unavailable' })"
+        Write-Host "Candidate digest: $(if ($candidateDigest) { $candidateDigest } else { 'unavailable' })"
+        Write-Host "Current revision: $(if ($currentRevision) { $currentRevision } else { 'unavailable' })"
+        Write-Host "Candidate revision: $(if ($candidateRevision) { $candidateRevision } else { 'unavailable' })"
+        Write-Host $message
+    }
+    if ($exitCode -ne 0) { throw $message }
 }
 
 function Invoke-ToolToFile {
@@ -700,6 +918,24 @@ function Test-HttpReady {
     }
 }
 
+function Get-HttpDiagnostic {
+    param([string]$Url)
+    if ($env:LUTHN_HTTP_CHECK_COMMAND) {
+        $healthTool = Get-ToolSpec -Name "health-check" -OverrideVariable "LUTHN_HTTP_CHECK_COMMAND"
+        $healthResult = Invoke-ToolCapture -Tool $healthTool -Arguments @($Url)
+        return [pscustomobject]@{
+            StatusCode = $(if ($healthResult.ExitCode -eq 0) { 200 } else { 503 })
+            Body = $healthResult.StdOut
+        }
+    }
+    try {
+        $response = Invoke-WebRequest -Uri $Url -TimeoutSec 5 -SkipHttpErrorCheck
+        return [pscustomobject]@{ StatusCode = [int]$response.StatusCode; Body = [string]$response.Content }
+    } catch {
+        return [pscustomobject]@{ StatusCode = 0; Body = "" }
+    }
+}
+
 function Wait-ForApi {
     $baseUrl = Read-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:8080"
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -845,6 +1081,153 @@ function Show-Status {
     }
 }
 
+function Add-DoctorCheck {
+    param(
+        [AllowEmptyCollection()][Parameter(Mandatory = $true)][Collections.Generic.List[object]]$Checks,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][ValidateSet("pass", "warn", "fail")][string]$Status,
+        [Parameter(Mandatory = $true)][bool]$Required,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [string]$Remediation = ""
+    )
+    $Checks.Add([ordered]@{
+        name = $Name
+        status = $Status
+        required = $Required
+        message = $Message
+        remediation = $(if ($Remediation) { $Remediation } else { $null })
+    })
+}
+
+function Invoke-Doctor {
+    param([string[]]$Arguments)
+    if ($Arguments.Count -gt 1 -or ($Arguments.Count -eq 1 -and $Arguments[0] -cne "--json")) {
+        throw "usage: luthn doctor [--json]"
+    }
+    $asJson = $Arguments.Count -eq 1
+    $checks = [Collections.Generic.List[object]]::new()
+    try {
+        $docker = Get-DockerTool
+        Add-DoctorCheck $checks "docker" "pass" $true "Docker CLI is available."
+        $compose = Invoke-ToolCapture -Tool $docker -Arguments @("compose", "version")
+        if ($compose.ExitCode -eq 0) {
+            Add-DoctorCheck $checks "compose" "pass" $true "Docker Compose is available."
+        } else {
+            Add-DoctorCheck $checks "compose" "fail" $true "Docker Compose is unavailable." "Install the Docker Compose plugin."
+        }
+        $daemon = Invoke-ToolCapture -Tool $docker -Arguments @("info", "--format", "{{.OSType}}")
+        if ($daemon.ExitCode -eq 0 -and $daemon.StdOut.Trim() -ceq "linux") {
+            Add-DoctorCheck $checks "docker-daemon" "pass" $true "Docker Linux engine is reachable."
+        } else {
+            Add-DoctorCheck $checks "docker-daemon" "fail" $true "Docker Linux engine is not reachable." "Start Docker Desktop and switch to Linux containers."
+        }
+    } catch {
+        Add-DoctorCheck $checks "docker" "fail" $true "Docker CLI is unavailable." "Install Docker Desktop."
+        Add-DoctorCheck $checks "compose" "fail" $true "Docker Compose could not be checked." "Install Docker with Compose."
+        Add-DoctorCheck $checks "docker-daemon" "fail" $true "Docker daemon could not be checked." "Install and start Docker Desktop."
+    }
+
+    if ([IO.File]::Exists($script:ComposeFile) -and [IO.File]::Exists($script:ConfigFile) -and
+        [IO.File]::Exists((Join-Path $script:BinDir "luthn.ps1"))) {
+        Add-DoctorCheck $checks "installation" "pass" $true "Installed runtime files are present."
+    } else {
+        Add-DoctorCheck $checks "installation" "fail" $true "Installed runtime files are incomplete." "Run 'luthn install' to repair the installation."
+    }
+
+    $baseUrl = Read-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:8080"
+    if (Test-HttpReady "$baseUrl/healthz") {
+        Add-DoctorCheck $checks "api-health" "pass" $true "API health check passed."
+    } else {
+        Add-DoctorCheck $checks "api-health" "fail" $true "API health check failed." "Run 'luthn status' and inspect API logs."
+    }
+    $readiness = Get-HttpDiagnostic "$baseUrl/readyz"
+    if ($readiness.StatusCode -ge 200 -and $readiness.StatusCode -lt 300) {
+        Add-DoctorCheck $checks "api-readiness" "pass" $true "API readiness check passed."
+        Add-DoctorCheck $checks "migrations" "pass" $true "Database migrations are current."
+    } elseif ($readiness.Body -match "pending migrations") {
+        Add-DoctorCheck $checks "api-readiness" "fail" $true "API is not ready because migrations are pending." "Run 'luthn update' to apply the target migrations."
+        Add-DoctorCheck $checks "migrations" "fail" $true "Database has pending migrations." "Run 'luthn update'."
+    } else {
+        Add-DoctorCheck $checks "api-readiness" "fail" $true "API readiness check failed." "Run 'luthn status' and inspect API and migration logs."
+        Add-DoctorCheck $checks "migrations" "warn" $false "Migration state could not be confirmed while readiness is unavailable." "Restore API readiness, then run 'luthn doctor' again."
+    }
+
+    $runningId = ""
+    $selectedId = ""
+    try {
+        $runningId = Get-ApiImageId
+        $selectedRef = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+        $selected = Invoke-ToolCapture -Tool (Get-DockerTool) -Arguments @("image", "inspect", "--format", "{{.Id}}", $selectedRef)
+        if ($selected.ExitCode -eq 0) { $selectedId = $selected.StdOut.Trim() }
+    } catch {}
+    if ($runningId -and $selectedId -and $runningId -ceq $selectedId) {
+        Add-DoctorCheck $checks "runtime-drift" "pass" $true "The selected image is running."
+    } elseif ($runningId -and $selectedId) {
+        Add-DoctorCheck $checks "runtime-drift" "fail" $true "The selected image is not running." "Run 'luthn update' to reconcile runtime drift."
+    } else {
+        Add-DoctorCheck $checks "runtime-drift" "warn" $false "Runtime image identity could not be confirmed." "Start Luthn and run the doctor again."
+    }
+
+    try {
+        $updateResult = (Invoke-UpdateCheck @("--json")) | ConvertFrom-Json
+        switch -CaseSensitive ([string]$updateResult.status) {
+            "current" { Add-DoctorCheck $checks "update-check" "pass" $false "The configured channel is current." }
+            "update-available" { Add-DoctorCheck $checks "update-check" "warn" $false "An update is available." "Run 'luthn update' when ready." }
+            "pinned" { Add-DoctorCheck $checks "update-check" "warn" $false "The installation is pinned to an immutable image." "Choose an explicit target to update." }
+            "unavailable" { Add-DoctorCheck $checks "update-check" "warn" $false "Automatic update checks are unavailable for this image channel." "Check the custom registry manually." }
+            default { Add-DoctorCheck $checks "update-check" "warn" $false "Update status could not be determined." "Run 'luthn update check' for details." }
+        }
+    } catch {
+        Add-DoctorCheck $checks "update-check" "warn" $false "The configured update channel could not be checked." "Run 'luthn update check' after network access is restored."
+    }
+
+    $connectorStatePath = if ([IO.File]::Exists($script:CodexStateFile)) { $script:CodexStateFile } elseif ([IO.File]::Exists($script:CodexPendingStateFile)) { $script:CodexPendingStateFile } else { "" }
+    if ($connectorStatePath) {
+        try {
+            $state = [IO.File]::ReadAllText($connectorStatePath) | ConvertFrom-Json -AsHashtable
+            if (Test-CodexHookInstalled -Path ([string]$state["hooksFile"]) -Command ([string]$state["hookCommand"])) {
+                Add-DoctorCheck $checks "codex-hook" "pass" $true "Codex Stop hook is configured."
+            } else {
+                Add-DoctorCheck $checks "codex-hook" "fail" $true "Codex Stop hook is missing or changed." "Run 'luthn connect codex'."
+            }
+            if ([bool]$state["autoRecall"]) {
+                if (Test-CodexAutoRecallInstalled -Path ([string]$state["instructionsFile"])) {
+                    Add-DoctorCheck $checks "auto-recall" "pass" $true "Codex auto-recall instructions are configured."
+                } else {
+                    Add-DoctorCheck $checks "auto-recall" "fail" $true "Codex auto-recall instructions are missing or changed." "Run 'luthn connect codex'."
+                }
+            } else {
+                Add-DoctorCheck $checks "auto-recall" "pass" $false "Codex auto-recall is intentionally disabled."
+            }
+            $doctorDocker = Get-DockerTool
+            $doctorMcpArguments = @($doctorDocker.PrefixArguments) + @(Get-McpDockerArguments)
+            $registration = Get-CodexRegistration (Get-CodexTool)
+            if (Test-RegistrationMatches $registration $doctorDocker.FilePath $doctorMcpArguments) {
+                Add-DoctorCheck $checks "codex-mcp" "pass" $true "Codex MCP registration matches Luthn."
+            } else {
+                Add-DoctorCheck $checks "codex-mcp" "fail" $true "Codex MCP registration is missing or changed." "Run 'luthn connect codex'."
+            }
+        } catch {
+            Add-DoctorCheck $checks "codex-integration" "fail" $true "Codex integration state could not be verified." "Run 'luthn connect codex'."
+        }
+    } else {
+        Add-DoctorCheck $checks "codex-integration" "warn" $false "Codex is not connected to Luthn." "Run 'luthn connect codex' when this host should use Luthn."
+    }
+
+    $failed = @($checks | Where-Object { $_["required"] -and $_["status"] -ceq "fail" }).Count -gt 0
+    $result = [ordered]@{ status = $(if ($failed) { "failed" } else { "ready" }); checks = @($checks) }
+    if ($asJson) {
+        $result | ConvertTo-Json -Compress -Depth 5
+    } else {
+        Write-Host "Luthn doctor: $($result.status)"
+        foreach ($check in $checks) {
+            Write-Host ("{0,-18} {1,-5} {2}" -f $check["name"], $check["status"], $check["message"])
+            if ($check["remediation"]) { Write-Host "  remediation: $($check['remediation'])" }
+        }
+    }
+    if ($failed) { throw "One or more required Luthn doctor checks failed." }
+}
+
 function Get-ApiImageId {
     $docker = Get-DockerTool
     $container = Invoke-ComposeCapture @("ps", "-q", "api")
@@ -935,12 +1318,18 @@ function Update-Luthn {
     $docker = Get-DockerTool
     $targetImage = if ($Arguments.Count -eq 1) { $Arguments[0] } else { Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage }
     if (-not $targetImage) { throw "usage: luthn update [image]" }
+    if ($Arguments.Count -eq 0 -and (Test-ImmutableImageReference $targetImage)) {
+        throw "Update stopped because the configured image is immutable: $targetImage. Choose an explicit mutable channel or target: luthn update <image>"
+    }
     $previousImageRef = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
     $previousImageId = Get-ApiImageId
     $previousRevision = ""
+    $previousMcpSchema = ""
     if ($previousImageId) {
         $previousRevisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $previousImageId)
         if ($previousRevisionResult.ExitCode -eq 0) { $previousRevision = $previousRevisionResult.StdOut.Trim() }
+        $previousMcpSchema = Get-ImageLabel -Image $previousImageId -Label "io.luthn.mcp-schema.version"
+        if (-not $previousMcpSchema) { $previousMcpSchema = Get-McpSchemaVersionFromImage -Image $previousImageId }
     }
 
     Ensure-Directories
@@ -960,12 +1349,17 @@ function Update-Luthn {
     $targetImageId = $targetIdResult.StdOut.Trim()
     $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $targetImage)
     $targetRevision = if ($revisionResult.ExitCode -eq 0) { $revisionResult.StdOut.Trim() } else { "" }
+    $targetMcpSchema = Get-ImageLabel -Image $targetImageId -Label "io.luthn.mcp-schema.version"
+    if (-not $targetMcpSchema) { $targetMcpSchema = Get-McpSchemaVersionFromImage -Image $targetImageId }
     Assert-OperatorCredentialSlotAvailable -Image $targetImage
 
     $installedCli = Join-Path $script:BinDir "luthn.ps1"
+    $configuredOperatorTokenFile = Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
     $runtimeSnapshots = @(
         Get-CodexFileSnapshot -Path $script:ComposeFile
         Get-CodexFileSnapshot -Path $installedCli
+        Get-CodexFileSnapshot -Path $script:ConfigFile
+        Get-CodexFileSnapshot -Path $configuredOperatorTokenFile
     )
     $connectorSnapshots = @()
     $connectorWasConfigured = $false
@@ -994,8 +1388,11 @@ function Update-Luthn {
         )
     }
 
+    $compatibilityChanged = $false
     Write-Host "Refreshing Windows CLI and Compose runtime..."
     try {
+        Ensure-ServiceTokenScope "access.request" -Required:$connectorWasConfigured
+        Ensure-OperatorCredential -Image $targetImage
         Install-ComposeRuntime -RuntimeSource (Get-RuntimeSource -Image $targetImage -Revision $targetRevision) -IncludeCli
         $targetCliContent = [IO.File]::ReadAllText($installedCli)
         $targetHasManifest = $targetCliContent -match '"manifest"\s*\{'
@@ -1023,6 +1420,10 @@ function Update-Luthn {
                     $previousHelperDigest -cne $targetHelperDigest -or
                     $previousTemplateDigest -cne $targetTemplateDigest
             }
+            if ($previousMcpSchema -cne $targetMcpSchema) {
+                $connectorChanged = $true
+            }
+            $compatibilityChanged = $connectorChanged
             $connectorAction = if ($connectorChanged) { "Reconciling" } else { "Validating" }
             Write-Host "$connectorAction Codex connector template version $targetConnectorVersion..."
             $connectArguments = @("connect", "codex")
@@ -1033,8 +1434,6 @@ function Update-Luthn {
                 throw "Codex connector reconciliation failed: $detail"
             }
         }
-        Ensure-ServiceTokenScope "access.request" -Required:$connectorWasConfigured
-        Ensure-OperatorCredential -Image $targetImage
     } catch {
         $restoreErrors = @()
         foreach ($snapshot in @($runtimeSnapshots) + @($connectorSnapshots)) {
@@ -1111,8 +1510,9 @@ function Update-Luthn {
     Write-UpdateState -Status "ready" -TargetImage $targetImage -TargetImageId $currentImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId -BackupPath $backupPath
     Write-Host "Luthn update completed: $targetImage"
     Write-Host "Revision: $(if ($previousRevision) { $previousRevision } else { 'unavailable' }) -> $(if ($targetRevision) { $targetRevision } else { 'unavailable' })"
-    if ([IO.File]::Exists($script:CodexStateFile) -or [IO.File]::Exists($script:CodexPendingStateFile)) {
-        Write-Host "Restart Codex to reload the Luthn MCP transport and tool schema."
+    if ($compatibilityChanged) {
+        Write-Host "Restart required: Luthn MCP compatibility changed ($(if ($previousMcpSchema) { $previousMcpSchema } else { 'unknown' }) -> $(if ($targetMcpSchema) { $targetMcpSchema } else { $script:McpSchemaVersion }))."
+        Write-Host "Agent notice: restart the current Codex host before invoking Luthn tools again."
     }
 }
 
@@ -1470,7 +1870,7 @@ function Send-CodexObservation {
     $payload = [ordered]@{
         agentName = "Codex"
         integrationKind = "host-hook-mcp"
-        connectorVersion = $script:LuthnWindowsCliVersion
+        connectorVersion = $script:CodexConnectorTemplateVersion
         channels = $Channels
     }
     [void](Invoke-LuthnApiRequest -Method "POST" -Url "$($credentials.BaseUrl)/api/agent-connections/codex/observations" -Token $credentials.Token -Payload $payload)
@@ -1576,7 +1976,7 @@ function Write-ConnectorState {
     $manifest = Get-CurrentWindowsCliManifest
     $content = [ordered]@{
         version = 2
-        connectorVersion = $script:LuthnWindowsCliVersion
+        connectorVersion = $script:CodexConnectorTemplateVersion
         helperDigest = $manifest.helperDigest
         templateDigest = $manifest.templateDigest
         integration = "host-hook-mcp"
@@ -1845,11 +2245,18 @@ function Uninstall-Luthn {
 
 try {
     switch -CaseSensitive ($Command.ToLowerInvariant()) {
-        "version" { Write-Output $script:LuthnWindowsCliVersion }
+        "version" { Show-VersionInformation $CommandArguments }
         "manifest" { Get-CurrentWindowsCliManifest | ConvertTo-Json -Compress }
         "install" { Install-Luthn $CommandArguments }
         "status" { Show-Status }
-        "update" { Update-Luthn $CommandArguments }
+        "update" {
+            if ($CommandArguments.Count -ge 1 -and $CommandArguments[0] -ceq "check") {
+                Invoke-UpdateCheck @($CommandArguments | Select-Object -Skip 1)
+            } else {
+                Update-Luthn $CommandArguments
+            }
+        }
+        "doctor" { Invoke-Doctor $CommandArguments }
         "connect" {
             if ($CommandArguments.Count -lt 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn connect codex [--no-auto-recall]" }
             Connect-Codex @($CommandArguments | Select-Object -Skip 1)
