@@ -136,6 +136,7 @@ if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
 if ($args.Count -ge 1 -and $args[0] -ceq "inspect") { "sha256:fake"; exit 0 }
 if ($args.Count -ge 1 -and $args[0] -ceq "run") {
     if ($args[-1] -ceq "mcp") { [void][Console]::In.ReadToEnd(); '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0"}}}'; exit 0 }
+    [void][Console]::In.ReadToEnd()
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; exit 0
 }
 if ($args.Count -ge 1 -and $args[0] -ceq "ps") { exit 0 }
@@ -183,7 +184,7 @@ if [ "$1" = "inspect" ]; then echo "sha256:fake"; exit 0; fi
 if [ "$1" = "run" ]; then
   case "$joined" in
     *' mcp') cat >/dev/null; printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0"}}}' ;;
-    *) echo "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
+    *) cat >/dev/null; echo "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
   esac
   exit 0
 fi
