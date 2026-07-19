@@ -38,8 +38,6 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             coreTags = new[] { "release", "codex" },
             title = "Codex release note",
             idempotencyKey = "summary-safe-1",
-            projectPath = "/private/workspace/Luthn",
-            sourceMetadata = new Dictionary<string, string> { ["transcript_path"] = "/private/transcript.jsonl" },
             projectKey = " LUTHN ",
             taskKey = " RELEASE ",
             topicTags = new[] { " Delivery ", "delivery" },
@@ -106,17 +104,32 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.Equal("luthn.hook", provenance.PluginId);
         Assert.Equal("luthn.codex.connector", provenance.ConnectorId);
         Assert.Equal("2", provenance.ConnectorVersion);
-        var persistedStrings = db.ChangeTracker.Entries()
-            .Select(entry => entry.Entity)
-            .SelectMany(record => record.GetType().GetProperties()
-                .Where(property => property.PropertyType == typeof(string))
-                .Select(property => property.GetValue(record) as string))
-            .Where(value => value is not null)
-            .ToArray();
-        Assert.DoesNotContain(persistedStrings, value => value!.Contains("/private/workspace", StringComparison.Ordinal));
-        Assert.DoesNotContain(persistedStrings, value => value!.Contains("transcript.jsonl", StringComparison.Ordinal));
         var searchMetrics = factory.Services.GetRequiredService<IOperationalMetrics>().Snapshot().SearchRequests;
         Assert.Equal("context_pack", Assert.Single(searchMetrics).Surface);
+    }
+
+    [Fact]
+    public async Task RawProjectPathAndFreeFormSourceMetadataAreRejected()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-private-metadata",
+            sourceAgent = "codex",
+            summary = "Public-safe summary.",
+            coreTags = new[] { "privacy" },
+            projectPath = "/private/workspace/Luthn",
+            sourceMetadata = new Dictionary<string, string> { ["transcript_path"] = "/private/transcript.jsonl" }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Empty(await db.SourceEvents.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await db.SharedMemoryItems.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await db.CollectionProvenance.AsNoTracking().ToArrayAsync());
     }
 
     [Fact]

@@ -30,7 +30,6 @@ Request:
   "sessionId": "session-1",
   "turnId": "turn-12",
   "sourceAgent": "codex",
-  "projectPath": "/path/to/project",
   "summary": "Published release note for external contributors.",
   "coreTags": ["release", "codex"],
   "contentDigest": "sha256:...",
@@ -38,6 +37,9 @@ Request:
   "title": "Codex release note"
 }
 ```
+
+Raw project paths and free-form `sourceMetadata` are rejected. Use the bounded
+`projectKey`, `taskKey`, `topicTags`, and structured `provenance` fields instead.
 
 Response:
 

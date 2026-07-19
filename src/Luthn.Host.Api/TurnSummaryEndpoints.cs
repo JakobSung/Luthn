@@ -373,7 +373,6 @@ public static class TurnSummaryEndpoints
         return ValidateOptionalPublicId(request.TurnId, "turnId", title) ??
             ValidateOptionalPublicId(request.IdempotencyKey, "idempotencyKey", title) ??
             ValidateOptionalBoundedText(request.TurnRange, "turnRange", ApiValidation.SourceTextMaxLength, title) ??
-            ValidateOptionalBoundedText(request.ProjectPath, "projectPath", 512, title) ??
             ValidateOptionalBoundedText(request.Title, "title", ApiValidation.TitleMaxLength, title) ??
             ValidateOptionalDigest(request.ContentDigest, title);
     }
@@ -459,7 +458,6 @@ public sealed record TurnSummaryIntakeRequest
     public string? TurnId { get; init; }
     public string? TurnRange { get; init; }
     public string SourceAgent { get; init; } = "codex";
-    public string? ProjectPath { get; init; }
     public string? ProjectKey { get; init; }
     public string? TaskKey { get; init; }
     public IReadOnlyList<string>? TopicTags { get; init; }
@@ -467,7 +465,6 @@ public sealed record TurnSummaryIntakeRequest
     public IReadOnlyList<string>? CoreTags { get; init; }
     public string? ContentDigest { get; init; }
     public string? IdempotencyKey { get; init; }
-    public IReadOnlyDictionary<string, string>? SourceMetadata { get; init; }
     public string? Title { get; init; }
     public CollectionProvenanceClaims? Provenance { get; init; }
 }

@@ -299,6 +299,8 @@ public sealed class SdkContractTests
         Assert.Contains("\"sessionId\"", json, StringComparison.Ordinal);
         Assert.Contains("\"sourceAgent\"", json, StringComparison.Ordinal);
         Assert.Contains("\"coreTags\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("projectPath", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("sourceMetadata", json, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", json, StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(response);
         Assert.Equal("turn-summary-1", response.SummaryId);

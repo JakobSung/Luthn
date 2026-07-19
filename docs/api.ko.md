@@ -19,7 +19,6 @@ POST /api/agent/turn-summaries
   "sessionId": "session-1",
   "turnId": "turn-12",
   "sourceAgent": "codex",
-  "projectPath": "/path/to/project",
   "summary": "Published release note for external contributors.",
   "coreTags": ["release", "codex"],
   "contentDigest": "sha256:...",
@@ -27,6 +26,8 @@ POST /api/agent/turn-summaries
   "title": "Codex release note"
 }
 ```
+
+원본 프로젝트 경로와 자유 형식 `sourceMetadata`는 거부합니다. 대신 제한된 `projectKey`, `taskKey`, `topicTags`와 구조화된 `provenance` 필드를 사용합니다.
 
 응답은 `summaryId`, `sourceEventId`, `classificationResultId`, `memoryItemId`, `auditEventId`, `allowsAgentContext`, `duplicate`, `classification`, `storageDecision`을 반환합니다. 공개 안전 요약은 `SharedAcrossAgents` 기억이 될 수 있고, 민감 요약은 기본 에이전트 API에서 반환하지 않습니다. `idempotencyKey`가 재시도 중복 쓰기를 막습니다.
 
