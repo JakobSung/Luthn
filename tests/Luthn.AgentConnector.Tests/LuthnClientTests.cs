@@ -47,6 +47,26 @@ public sealed class LuthnClientTests
     }
 
     [Fact]
+    public async Task GetContextPackRequestOverloadPostsRecallMetadata()
+    {
+        using var handler = new CapturingHandler(
+            """{"coreTags":["recall"],"projectKey":"luthn","taskKey":"ranking","topicTags":["quality"],"items":[]}""");
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
+        var client = new LuthnClient(http);
+
+        var pack = await client.GetContextPackAsync(
+            new ContextPackRequestDto(["recall"], 3, "recall", "luthn", "ranking", ["quality"]));
+        var body = await handler.RequestContent!.ReadAsStringAsync();
+
+        Assert.Contains("\"projectKey\":\"luthn\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"taskKey\":\"ranking\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"topicTags\":[\"quality\"]", body, StringComparison.Ordinal);
+        Assert.Equal("luthn", pack.ProjectKey);
+        Assert.Equal("ranking", pack.TaskKey);
+        Assert.Equal(["quality"], pack.TopicTags);
+    }
+
+    [Fact]
     public async Task SearchPostsQueryAndCoreTagsToSafeAgentSearchEndpoint()
     {
         using var handler = new CapturingHandler("""

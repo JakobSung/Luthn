@@ -37,7 +37,10 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
             content,
             title = "Contributor onboarding",
             safeSummary = "Public onboarding checklist for local contributors.",
-            coreTags = new[] { "onboarding", "public" }
+            coreTags = new[] { "onboarding", "public" },
+            projectKey = " LUTHN ",
+            taskKey = " ONBOARDING ",
+            topicTags = new[] { " Docs ", "docs" }
         });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -50,6 +53,9 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
         Assert.False(string.IsNullOrWhiteSpace(wikiProposalId));
         Assert.Equal("Public", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
         Assert.True(body.RootElement.GetProperty("storageDecision").GetProperty("allowsAgentContext").GetBoolean());
+        Assert.Equal("luthn", body.RootElement.GetProperty("projectKey").GetString());
+        Assert.Equal("onboarding", body.RootElement.GetProperty("taskKey").GetString());
+        Assert.Equal(["docs"], body.RootElement.GetProperty("topicTags").EnumerateArray().Select(item => item.GetString()));
 
         using var scope = CreateScope(factory);
         var db = GetDb(scope);
@@ -73,6 +79,9 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
         Assert.Equal("Contributor onboarding", proposal.Title);
         Assert.Equal("Public onboarding checklist for local contributors.", proposal.SafeSummary);
         Assert.Equal(["onboarding", "public"], proposal.CoreTags);
+        Assert.Equal("luthn", proposal.ProjectKey);
+        Assert.Equal("onboarding", proposal.TaskKey);
+        Assert.Equal(["docs"], proposal.TopicTags);
         Assert.True(proposal.AllowsAgentContext);
         Assert.Equal(SensitivityLevel.Public, proposal.Sensitivity);
 
@@ -85,6 +94,28 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
         Assert.Equal(sourceEventId, audit.SubjectId);
         Assert.Equal("metadata-only", audit.PayloadClass);
         Assert.Equal("safe-projection-only", audit.RedactionState);
+    }
+
+    [Fact]
+    public async Task SourceIntakeRejectsRawPathRecallMetadataBeforePersistence()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/sources", new
+        {
+            sourceSystem = "local",
+            sourceType = "note",
+            content = "Published onboarding checklist.",
+            title = "Contributor onboarding",
+            safeSummary = "Public onboarding checklist.",
+            coreTags = new[] { "onboarding" },
+            projectKey = "/Users/example/private-project"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = CreateScope(factory);
+        Assert.Empty(await GetDb(scope).SourceEvents.ToArrayAsync());
     }
 
     [Fact]

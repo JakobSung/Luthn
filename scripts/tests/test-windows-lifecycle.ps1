@@ -838,6 +838,7 @@ esac
     Assert-True ($instructionText.Contains("exactly one commentary line") -and $instructionText.Contains("``Luthn 메모리 N개 참고``")) "auto-recall should describe the single positive recall commentary"
     Assert-True ($instructionText.Contains("zero actual memory") -and $instructionText.Contains("times out, returns an error, cannot be parsed") -and $instructionText.Contains("uses any fail-open path")) "auto-recall should suppress commentary for empty and failed recall"
     Assert-True ($instructionText.Contains("when ``get_context_pack`` was not called") -and $instructionText.Contains("at most once per user turn")) "auto-recall should suppress uncalled recall and duplicate commentary"
+    Assert-True ($instructionText.Contains("``projectKey``, ``taskKey``, and ``topicTags``") -and $instructionText.Contains("Never send a raw workspace path") -and $instructionText.Contains("transcript path")) "auto-recall should limit optional recall metadata to non-sensitive normalized keys"
     Assert-True ($instructionText.Contains("memory titles, content, IDs, queries, scores, sources") -and $instructionText.Contains("normal assistant response or final response")) "auto-recall should protect memory details and response channels"
 
     $connectionStatus = Invoke-LuthnProcess $installedCli @("connection", "status", "codex")

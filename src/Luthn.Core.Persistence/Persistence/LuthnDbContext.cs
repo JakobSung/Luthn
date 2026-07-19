@@ -56,6 +56,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.SafeSummary).HasMaxLength(4000).IsRequired();
             entity.Property(record => record.Sensitivity).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.CoreTags).HasColumnType("jsonb");
+            entity.Property(record => record.ProjectKey).HasMaxLength(128);
+            entity.Property(record => record.TaskKey).HasMaxLength(128);
+            entity.Property(record => record.TopicTags).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
             entity.Property(record => record.SearchTerms).HasColumnType("text").HasDefaultValue("||");
             entity.Property(record => record.SearchTagKeys).HasColumnType("text").HasDefaultValue("||");
             entity.HasIndex(record => new
@@ -64,6 +67,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.Sensitivity,
                 record.CreatedAt
             });
+            entity.HasIndex(record => new { record.ProjectKey, record.TaskKey, record.CreatedAt });
             entity.HasOne(record => record.SourceEvent)
                 .WithMany()
                 .HasForeignKey(record => record.SourceEventId)
@@ -131,6 +135,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.SafeSummary).HasMaxLength(4000).IsRequired();
             entity.Property(record => record.Sensitivity).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.CoreTags).HasColumnType("jsonb");
+            entity.Property(record => record.ProjectKey).HasMaxLength(128);
+            entity.Property(record => record.TaskKey).HasMaxLength(128);
+            entity.Property(record => record.TopicTags).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
             entity.Property(record => record.SearchTerms).HasColumnType("text").HasDefaultValue("||");
             entity.Property(record => record.SearchTagKeys).HasColumnType("text").HasDefaultValue("||");
             entity.Property(record => record.Visibility).HasConversion<string>().HasMaxLength(64);
@@ -151,6 +158,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.Visibility,
                 record.ExpiresAt
             });
+            entity.HasIndex(record => new { record.ProjectKey, record.TaskKey, record.UpdatedAt });
         });
 
         modelBuilder.Entity<LocalInstallationStateRecord>(entity =>
@@ -247,8 +255,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                      .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
         {
             entry.Entity.SearchTerms = SafeSearchText.BuildTokenIndex(
-                [entry.Entity.Title, entry.Entity.SafeSummary],
-                entry.Entity.CoreTags);
+                [entry.Entity.Title, entry.Entity.SafeSummary, entry.Entity.ProjectKey, entry.Entity.TaskKey],
+                entry.Entity.CoreTags,
+                entry.Entity.TopicTags);
             entry.Entity.SearchTagKeys = SafeSearchText.BuildTagKeyIndex(entry.Entity.CoreTags);
         }
 
@@ -256,8 +265,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                      .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
         {
             entry.Entity.SearchTerms = SafeSearchText.BuildTokenIndex(
-                [entry.Entity.Title, entry.Entity.SafeSummary],
-                entry.Entity.CoreTags);
+                [entry.Entity.Title, entry.Entity.SafeSummary, entry.Entity.ProjectKey, entry.Entity.TaskKey],
+                entry.Entity.CoreTags,
+                entry.Entity.TopicTags);
             entry.Entity.SearchTagKeys = SafeSearchText.BuildTagKeyIndex(entry.Entity.CoreTags);
         }
     }

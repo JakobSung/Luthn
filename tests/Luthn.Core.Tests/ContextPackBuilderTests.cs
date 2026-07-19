@@ -84,4 +84,36 @@ public sealed class ContextPackBuilderTests
 
         Assert.Equal(["wiki-title-match", "wiki-summary-match"], pack.Items.Select(item => item.Id).ToArray());
     }
+
+    [Fact]
+    public void BuilderCarriesNormalizedRecallMetadataAndProjectionTimestamp()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-07-19T12:00:00Z");
+        var candidate = new ContextPackCandidate(
+            "memory-1",
+            "Recall plan",
+            "Public-safe recall plan.",
+            SensitivityLevel.Public,
+            ["recall"],
+            AllowsAgentContext: true)
+        {
+            ProjectKey = "luthn",
+            TaskKey = "ranking",
+            TopicTags = ["quality"],
+            ProjectionTimestamp = timestamp
+        };
+
+        var pack = new ContextPackBuilder().Build(
+            new ContextPackRequest(["recall"], 3, "recall", "LUTHN", "RANKING", ["Quality"]),
+            [candidate]);
+
+        var item = Assert.Single(pack.Items);
+        Assert.Equal("luthn", pack.ProjectKey);
+        Assert.Equal("ranking", pack.TaskKey);
+        Assert.Equal(["quality"], pack.TopicTags);
+        Assert.Equal(candidate.ProjectKey, item.ProjectKey);
+        Assert.Equal(candidate.TaskKey, item.TaskKey);
+        Assert.Equal(candidate.TopicTags, item.TopicTags);
+        Assert.Equal(timestamp, item.ProjectionTimestamp);
+    }
 }

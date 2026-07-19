@@ -37,7 +37,13 @@ public sealed class DbBackedRetrievalCandidateSelector(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var normalizedRequest = new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems);
+        var normalizedRequest = new SafeSearchRequest(
+            request.Query,
+            request.CoreTags,
+            request.MaxItems,
+            request.ProjectKey,
+            request.TaskKey,
+            request.TopicTags);
         var wikiCandidates = await SelectWikiAsync(normalizedRequest, cancellationToken);
         var memoryCandidates = await SelectMemoryAsync(normalizedRequest, cancellationToken);
 
@@ -60,7 +66,13 @@ public sealed class DbBackedRetrievalCandidateSelector(
         ArgumentNullException.ThrowIfNull(request);
 
         var candidates = await SelectMemoryAsync(
-            new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems),
+            new SafeSearchRequest(
+                request.Query,
+                request.CoreTags,
+                request.MaxItems,
+                request.ProjectKey,
+                request.TaskKey,
+                request.TopicTags),
             cancellationToken);
         LuthnHostMetrics.SafeSearchCandidateCount.Record(
             candidates.Length,
@@ -81,7 +93,9 @@ public sealed class DbBackedRetrievalCandidateSelector(
         query = ApplySearchFilters(query, request);
 
         return await query
-            .OrderBy(record => record.Title.ToLower())
+            .OrderByDescending(record => request.TaskKey != null && record.TaskKey == request.TaskKey)
+            .ThenByDescending(record => record.CreatedAt)
+            .ThenBy(record => record.Title.ToLower())
             .ThenBy(record => record.Id)
             .Take(RetrievalCandidateLimits.MaxCandidatesPerCorpus)
             .Select(record => new ContextPackCandidate(
@@ -90,7 +104,13 @@ public sealed class DbBackedRetrievalCandidateSelector(
                 record.SafeSummary,
                 record.Sensitivity,
                 record.CoreTags,
-                record.AllowsAgentContext))
+                record.AllowsAgentContext)
+            {
+                ProjectKey = record.ProjectKey,
+                TaskKey = record.TaskKey,
+                TopicTags = record.TopicTags,
+                ProjectionTimestamp = record.CreatedAt
+            })
             .ToArrayAsync(cancellationToken);
     }
 
@@ -110,7 +130,9 @@ public sealed class DbBackedRetrievalCandidateSelector(
         query = ApplySearchFilters(query, request);
 
         return await query
-            .OrderBy(record => record.Title.ToLower())
+            .OrderByDescending(record => request.TaskKey != null && record.TaskKey == request.TaskKey)
+            .ThenByDescending(record => record.UpdatedAt)
+            .ThenBy(record => record.Title.ToLower())
             .ThenBy(record => record.Id)
             .Take(RetrievalCandidateLimits.MaxCandidatesPerCorpus)
             .Select(record => new ContextPackCandidate(
@@ -119,7 +141,13 @@ public sealed class DbBackedRetrievalCandidateSelector(
                 record.SafeSummary,
                 record.Sensitivity,
                 record.CoreTags,
-                record.AllowsAgentContext))
+                record.AllowsAgentContext)
+            {
+                ProjectKey = record.ProjectKey,
+                TaskKey = record.TaskKey,
+                TopicTags = record.TopicTags,
+                ProjectionTimestamp = record.UpdatedAt
+            })
             .ToArrayAsync(cancellationToken);
     }
 
@@ -127,6 +155,11 @@ public sealed class DbBackedRetrievalCandidateSelector(
         IQueryable<WikiProposalRecord> query,
         SafeSearchRequest request)
     {
+        if (request.ProjectKey is not null)
+        {
+            query = query.Where(record => record.ProjectKey == null || record.ProjectKey == request.ProjectKey);
+        }
+
         var tagMarkers = request.CoreTags
             .Select(SafeSearchText.BuildTagKey)
             .Select(SafeSearchText.ToIndexMarker)
@@ -150,6 +183,11 @@ public sealed class DbBackedRetrievalCandidateSelector(
         IQueryable<SharedMemoryItemRecord> query,
         SafeSearchRequest request)
     {
+        if (request.ProjectKey is not null)
+        {
+            query = query.Where(record => record.ProjectKey == null || record.ProjectKey == request.ProjectKey);
+        }
+
         var tagMarkers = request.CoreTags
             .Select(SafeSearchText.BuildTagKey)
             .Select(SafeSearchText.ToIndexMarker)

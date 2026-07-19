@@ -378,7 +378,10 @@ Request:
 {
   "query": "release runbook",
   "coreTags": ["runbook"],
-  "maxItems": 20
+  "maxItems": 20,
+  "projectKey": "luthn",
+  "taskKey": "release",
+  "topicTags": ["delivery"]
 }
 ```
 
@@ -386,12 +389,16 @@ Request:
 configured safe retrieval backend used by agent search. The default backend is
 deterministic in-process ranking. The endpoint returns only public wiki
 proposals and public shared-memory records where agent context is explicitly
-allowed.
+allowed. When `projectKey` is present, matching and unscoped global records are
+eligible while other-project records are excluded before ranking. Exact task
+and topic matches and recent safe-projection timestamps receive bounded boosts.
+Returned items carry the optional metadata and `projectionTimestamp`.
 
 The MCP `get_context_pack` tool also accepts optional lightweight-recall
 controls: `maxTokens`, `timeoutMs`, `cacheKey`, `cacheTtlSeconds`, and
 `failOpen`. These controls bound and cache the already safe API response inside
 the MCP process; they do not widen the API corpus or expose private records.
+Project, task, and topic metadata is part of the cache identity.
 
 ## Agent safe search
 
@@ -405,7 +412,10 @@ Request:
 {
   "query": "release runbook",
   "coreTags": ["runbook"],
-  "maxItems": 20
+  "maxItems": 20,
+  "projectKey": "luthn",
+  "taskKey": "release",
+  "topicTags": ["delivery"]
 }
 ```
 
@@ -422,6 +432,10 @@ Response:
       "safeSummary": "Public-safe release steps.",
       "sensitivity": "Public",
       "coreTags": ["runbook"],
+      "projectKey": "luthn",
+      "taskKey": "release",
+      "topicTags": ["delivery"],
+      "projectionTimestamp": "2026-07-19T12:00:00Z",
       "score": 1240
     }
   ]
@@ -429,7 +443,8 @@ Response:
 ```
 
 Search uses the configured safe retrieval backend over public, agent-allowed
-wiki proposal and shared-memory titles, safe summaries, and `coreTags`. The
+wiki proposal and shared-memory titles, safe summaries, `coreTags`, and safe
+recall metadata. The
 default backend is deterministic in-process ranking. `pgvector` is the first
 planned vector provider, but it must index only public-safe projected records.
 Search does not search or return raw Vault/source records.
@@ -448,6 +463,9 @@ POST /api/memory/query
 ```
 
 `POST /api/memory/items` persists metadata-only shared memory. It accepts safe
+optional `projectKey`, `taskKey`, and `topicTags` values in addition to the
+existing fields. These values are normalized, included in complete-projection
+classification, and must not contain raw paths or sensitive identifiers.
 summaries and Core tags, not raw source content:
 
 ```json

@@ -43,6 +43,9 @@ public sealed class PersistenceContractTests
             SafeSummary = "Public-safe release steps.",
             Sensitivity = SensitivityLevel.Public,
             CoreTags = ["runbook"],
+            ProjectKey = "luthn",
+            TaskKey = "persistence",
+            TopicTags = ["recall"],
             AllowsAgentContext = true,
             CreatedAt = receivedAt
         });
@@ -73,6 +76,9 @@ public sealed class PersistenceContractTests
             SafeSummary = "Public-safe memory summary.",
             Sensitivity = SensitivityLevel.Public,
             CoreTags = ["runbook"],
+            ProjectKey = "luthn",
+            TaskKey = "persistence",
+            TopicTags = ["recall"],
             Visibility = MemoryVisibility.SharedAcrossAgents,
             RetentionKind = MemoryRetentionKind.Durable,
             AllowsAgentContext = true,
@@ -105,6 +111,11 @@ public sealed class PersistenceContractTests
         Assert.Equal(1, await db.ClassificationResults.CountAsync());
         var proposal = await db.WikiProposals.SingleAsync();
         Assert.Equal(["runbook"], proposal.CoreTags);
+        Assert.Equal("luthn", proposal.ProjectKey);
+        Assert.Equal("persistence", proposal.TaskKey);
+        Assert.Equal(["recall"], proposal.TopicTags);
+        Assert.Contains(SafeSearchText.ToIndexMarker("luthn"), proposal.SearchTerms, StringComparison.Ordinal);
+        Assert.Contains(SafeSearchText.ToIndexMarker("recall"), proposal.SearchTerms, StringComparison.Ordinal);
         Assert.Contains(SafeSearchText.ToIndexMarker("release"), proposal.SearchTerms, StringComparison.Ordinal);
         Assert.Contains(
             SafeSearchText.ToIndexMarker(SafeSearchText.BuildTagKey("runbook")),
@@ -113,6 +124,9 @@ public sealed class PersistenceContractTests
         Assert.Equal(1, await db.SensitiveRecordReferences.CountAsync());
         var memory = await db.SharedMemoryItems.SingleAsync();
         Assert.Equal(["runbook"], memory.CoreTags);
+        Assert.Equal("luthn", memory.ProjectKey);
+        Assert.Equal("persistence", memory.TaskKey);
+        Assert.Equal(["recall"], memory.TopicTags);
         Assert.Contains(SafeSearchText.ToIndexMarker("memory"), memory.SearchTerms, StringComparison.Ordinal);
         Assert.Contains(
             SafeSearchText.ToIndexMarker(SafeSearchText.BuildTagKey("runbook")),
@@ -183,6 +197,12 @@ public sealed class PersistenceContractTests
         Assert.Contains("\"CoreTags\"", script, StringComparison.Ordinal);
         Assert.Contains("\"SearchTerms\"", script, StringComparison.Ordinal);
         Assert.Contains("\"SearchTagKeys\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"ProjectKey\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"TaskKey\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"TopicTags\"", script, StringComparison.Ordinal);
+        Assert.Contains("DEFAULT ('[]'::jsonb)", script, StringComparison.Ordinal);
+        Assert.Contains("IX_wiki_proposals_ProjectKey_TaskKey_CreatedAt", script, StringComparison.Ordinal);
+        Assert.Contains("IX_shared_memory_items_ProjectKey_TaskKey_UpdatedAt", script, StringComparison.Ordinal);
         Assert.Contains("regexp_split_to_table", script, StringComparison.Ordinal);
         Assert.Contains("jsonb_array_elements_text", script, StringComparison.Ordinal);
         Assert.Contains("IX_wiki_proposals_AllowsAgentContext_Sensitivity_CreatedAt", script, StringComparison.Ordinal);

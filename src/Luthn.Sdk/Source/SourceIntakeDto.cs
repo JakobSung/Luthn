@@ -9,7 +9,10 @@ public sealed record SourceIntakeRequestDto(
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("title")] string Title,
     [property: JsonPropertyName("safeSummary")] string SafeSummary,
-    [property: JsonPropertyName("coreTags")] IReadOnlyList<string> CoreTags);
+    [property: JsonPropertyName("coreTags")] IReadOnlyList<string> CoreTags,
+    [property: JsonPropertyName("projectKey")] string? ProjectKey = null,
+    [property: JsonPropertyName("taskKey")] string? TaskKey = null,
+    [property: JsonPropertyName("topicTags")] IReadOnlyList<string>? TopicTags = null);
 
 public sealed record SourceIntakeResponseDto(
     [property: JsonPropertyName("sourceId")] string SourceId,
@@ -19,4 +22,14 @@ public sealed record SourceIntakeResponseDto(
     [property: JsonPropertyName("sensitiveReferenceId")] string? SensitiveReferenceId,
     [property: JsonPropertyName("auditEventId")] string AuditEventId,
     [property: JsonPropertyName("classification")] ClassificationResultDto Classification,
-    [property: JsonPropertyName("storageDecision")] StorageDecisionDto StorageDecision);
+    [property: JsonPropertyName("storageDecision")] StorageDecisionDto StorageDecision)
+{
+    [JsonPropertyName("projectKey")]
+    public string? ProjectKey { get; init; }
+
+    [JsonPropertyName("taskKey")]
+    public string? TaskKey { get; init; }
+
+    [JsonPropertyName("topicTags")]
+    public IReadOnlyList<string> TopicTags { get; init; } = [];
+}

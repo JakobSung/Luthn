@@ -23,9 +23,14 @@ internal static class McpToolArguments
             ? element.GetString()
             : null;
 
-    public static IReadOnlyList<string> ReadCoreTags(JsonElement arguments)
+    public static IReadOnlyList<string> ReadCoreTags(JsonElement arguments) =>
+        ReadTags(arguments, "coreTags");
+
+    public static IReadOnlyList<string> ReadTags(
+        JsonElement arguments,
+        string propertyName)
     {
-        if (!arguments.TryGetProperty("coreTags", out var tagsElement) ||
+        if (!arguments.TryGetProperty(propertyName, out var tagsElement) ||
             tagsElement.ValueKind is not JsonValueKind.Array)
         {
             return [];

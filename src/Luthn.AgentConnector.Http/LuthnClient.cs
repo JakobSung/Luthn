@@ -45,17 +45,23 @@ public sealed class LuthnClient : ILuthnClient
         int maxItems = 20,
         string? query = null,
         CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(coreTags);
+        => await GetContextPackAsync(
+            new ContextPackRequestDto(coreTags, maxItems, query),
+            cancellationToken);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/agent/context-packs")
+    public async Task<ContextPackDto> GetContextPackAsync(
+        ContextPackRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.CoreTags);
+
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/agent/context-packs")
         {
-            Content = JsonContent.Create(
-                new ContextPackRequestDto(coreTags, maxItems, query),
-                options: JsonOptions)
+            Content = JsonContent.Create(request, options: JsonOptions)
         };
 
-        return await SendJsonAsync<ContextPackDto>(request, cancellationToken);
+        return await SendJsonAsync<ContextPackDto>(httpRequest, cancellationToken);
     }
 
     public async Task<SafeSearchResponseDto> SearchAsync(
@@ -63,17 +69,23 @@ public sealed class LuthnClient : ILuthnClient
         IReadOnlyList<string> coreTags,
         int maxItems = 20,
         CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(coreTags);
+        => await SearchAsync(
+            new SafeSearchRequestDto(query, coreTags, maxItems),
+            cancellationToken);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/agent/search")
+    public async Task<SafeSearchResponseDto> SearchAsync(
+        SafeSearchRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.CoreTags);
+
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/agent/search")
         {
-            Content = JsonContent.Create(
-                new SafeSearchRequestDto(query, coreTags, maxItems),
-                options: JsonOptions)
+            Content = JsonContent.Create(request, options: JsonOptions)
         };
 
-        return await SendJsonAsync<SafeSearchResponseDto>(request, cancellationToken);
+        return await SendJsonAsync<SafeSearchResponseDto>(httpRequest, cancellationToken);
     }
 
     public async Task<WikiProposalDto> GetWikiProposalAsync(

@@ -15,7 +15,10 @@ public sealed class QuerySharedMemoryTool(ILuthnAgentClient client) : ILuthnMcpT
         var request = new SharedMemoryQueryRequestDto(
             McpToolArguments.ReadOptionalString(arguments, "query"),
             McpToolArguments.ReadCoreTags(arguments),
-            McpToolArguments.ReadMaxItems(arguments));
+            McpToolArguments.ReadMaxItems(arguments),
+            McpToolArguments.ReadOptionalString(arguments, "projectKey"),
+            McpToolArguments.ReadOptionalString(arguments, "taskKey"),
+            McpToolArguments.ReadTags(arguments, "topicTags"));
 
         return await client.QuerySharedMemoryAsync(request, cancellationToken);
     }

@@ -178,10 +178,10 @@ POST /api/agent/context-packs
 ```
 
 ```json
-{ "query": "release runbook", "coreTags": ["runbook"], "maxItems": 20 }
+{ "query": "release runbook", "coreTags": ["runbook"], "maxItems": 20, "projectKey": "luthn", "taskKey": "release", "topicTags": ["delivery"] }
 ```
 
-`query`는 선택 사항이며 설정된 안전 검색 backend로 순위를 정합니다. 공개·에이전트 허용 위키 후보와 공유 기억만 반환합니다. MCP `get_context_pack`은 `maxTokens`, `timeoutMs`, `cacheKey`, `cacheTtlSeconds`, `failOpen`도 받습니다. 이는 MCP process 안에서 이미 안전한 응답의 크기·시간·cache를 제한할 뿐 조회 범위를 넓히지 않습니다.
+`query`는 선택 사항이며 설정된 안전 검색 backend로 순위를 정합니다. 공개·에이전트 허용 위키 후보와 공유 기억만 반환합니다. `projectKey`가 있으면 같은 프로젝트와 전역 기록만 후보가 되고 다른 프로젝트 기록은 순위 계산 전에 제외됩니다. 정확한 작업·주제 일치와 최근 안전 투영에는 제한된 점수를 주며, 항목은 선택 메타데이터와 `projectionTimestamp`를 반환합니다. MCP `get_context_pack`은 `maxTokens`, `timeoutMs`, `cacheKey`, `cacheTtlSeconds`, `failOpen`도 받습니다. 이는 MCP process 안에서 이미 안전한 응답의 크기·시간·cache를 제한할 뿐 조회 범위를 넓히지 않으며 프로젝트·작업·주제는 cache identity에 포함됩니다.
 
 ## 에이전트 안전 검색
 
@@ -193,11 +193,14 @@ POST /api/agent/search
 {
   "query": "release runbook",
   "coreTags": ["runbook"],
-  "maxItems": 20
+  "maxItems": 20,
+  "projectKey": "luthn",
+  "taskKey": "release",
+  "topicTags": ["delivery"]
 }
 ```
 
-공개·에이전트 허용 위키 후보와 공유 기억의 `title`, `safeSummary`, `coreTags`만 검색합니다. 기본은 결정적 process 내부 순위이며 첫 계획 vector provider는 `pgvector`입니다. 원본 Vault/source는 검색·반환하지 않습니다. 외부 기억 adapter도 `public-agent-allowed-safe-projections`, `metadata-only`, `safe-projection-only` 경계를 따릅니다.
+공개·에이전트 허용 위키 후보와 공유 기억의 `title`, `safeSummary`, `coreTags`, 안전 회상 메타데이터만 검색합니다. 기본은 결정적 process 내부 순위이며 첫 계획 vector provider는 `pgvector`입니다. 원본 Vault/source는 검색·반환하지 않습니다. 외부 기억 adapter도 `public-agent-allowed-safe-projections`, `metadata-only`, `safe-projection-only` 경계를 따릅니다.
 
 ## 안전 기억 항목
 
@@ -220,7 +223,7 @@ POST /api/memory/query
 }
 ```
 
-메타데이터 전용 공유 기억을 저장하며 원문은 받지 않습니다. 읽기·조회는 공개·미만료·에이전트 허용 투영만 반환합니다. 쓰기는 저장 전에 `title`, `safeSummary`, 모든 `coreTags` 항목을 함께 분류하며 어느 필드든 민감하다고 판단되면 비공개 기억 경계 뒤에 둡니다.
+메타데이터 전용 공유 기억을 저장하며 원문은 받지 않습니다. 선택적 `projectKey`, `taskKey`, `topicTags`는 정규화한 뒤 전체 투영 분류에 포함하며 원본 경로나 민감 식별자를 넣으면 안 됩니다. 읽기·조회는 공개·미만료·에이전트 허용 투영만 반환합니다. 쓰기는 저장 전에 `title`, `safeSummary`, 모든 `coreTags`와 회상 메타데이터를 함께 분류하며 어느 필드든 민감하다고 판단되면 비공개 기억 경계 뒤에 둡니다.
 
 ## 위키 안전 후보
 

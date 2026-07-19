@@ -89,7 +89,10 @@ future explicit policy workflow, not an implicit model default.
 Safe memory APIs persist shared memory as metadata-only records in local or
 PostgreSQL storage. API reads expose only public, non-expired,
 agent-allowed projections; private, restricted, and raw source/Vault content
-remain outside the default read surface.
+remain outside the default read surface. Optional normalized project, task, and
+topic metadata is persisted on wiki and shared-memory safe projections. Recall
+filters project scope before ranking, preselects bounded candidates newest-first,
+and uses `CreatedAt` or `UpdatedAt` for deterministic bounded recency scoring.
 
 ## Cloud-Ready Local-First Foundation
 

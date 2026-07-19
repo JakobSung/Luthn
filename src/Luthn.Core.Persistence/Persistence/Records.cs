@@ -33,6 +33,9 @@ public sealed class WikiProposalRecord
     public string SafeSummary { get; set; } = "";
     public SensitivityLevel Sensitivity { get; set; }
     public List<string> CoreTags { get; set; } = [];
+    public string? ProjectKey { get; set; }
+    public string? TaskKey { get; set; }
+    public List<string> TopicTags { get; set; } = [];
     public string SearchTerms { get; set; } = "||";
     public string SearchTagKeys { get; set; } = "||";
     public bool AllowsAgentContext { get; set; }
@@ -104,6 +107,9 @@ public sealed class SharedMemoryItemRecord
     public string SafeSummary { get; set; } = "";
     public SensitivityLevel Sensitivity { get; set; }
     public List<string> CoreTags { get; set; } = [];
+    public string? ProjectKey { get; set; }
+    public string? TaskKey { get; set; }
+    public List<string> TopicTags { get; set; } = [];
     public string SearchTerms { get; set; } = "||";
     public string SearchTagKeys { get; set; } = "||";
     public MemoryVisibility Visibility { get; set; }

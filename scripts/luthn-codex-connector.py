@@ -36,7 +36,10 @@ AUTO_RECALL_INSTRUCTION = f"""{INSTRUCTION_START_MARKER}
 
 For a new task or a material topic change, call the Luthn MCP
 `get_context_pack` tool once before substantial work. Use a short task query
-and non-sensitive project/task cache key with these bounds:
+and non-sensitive project/task cache key with these bounds. When known, also
+send only normalized non-sensitive `projectKey`, `taskKey`, and `topicTags`.
+Never send a raw workspace path, transcript path, transcript content, or other
+sensitive data as recall metadata:
 
 - `maxItems`: 3
 - `maxTokens`: 600
