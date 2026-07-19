@@ -519,7 +519,13 @@ raw Vault/source data, or participant-specific private context.
 Memory writes are classified before storage. The classifier receives the
 combined `title`, `safeSummary`, and every `coreTags` entry. If any field is
 sensitive, Luthn keeps the record behind the private memory boundary instead of
-making it agent-visible.
+making it agent-visible. Sensitive or otherwise non-agent-visible user fields
+are stored only as an authenticated protected payload in the separate
+`sensitive_memory_payloads` table. The ordinary row, write response, and search
+indexes use `[protected-memory]` / `[protected-payload]` placeholders with empty
+tags and recall metadata. No public API returns the ciphertext or decrypts this
+payload. `/readyz` reports `sensitive-memory-protection`; protected API routes
+return `503` when the key ring or existing ciphertext cannot be verified.
 
 ## Wiki-safe proposal
 

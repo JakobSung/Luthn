@@ -34,6 +34,21 @@ Do not use `docker compose down -v` during install, status, or update. Volume
 deletion belongs only to `luthn reset --yes` and
 `luthn uninstall --purge-data --yes`.
 
+The `luthn-operator` volume contains the Data Protection key ring required to
+decrypt sensitive shared-memory payloads. PostgreSQL backups are not complete
+recovery artifacts by themselves. Preserve a protected backup or storage-level
+snapshot of `luthn-operator` with the database backup, keep both under the same
+retention policy, and restore the matching pair. Do not print or commit key-ring
+XML. `update` and ordinary `uninstall` preserve the operator volume; `reset` and
+purge deletion intentionally destroy both data and key material.
+
+The automatic database backup taken before the first encryption-aware upgrade
+can still contain legacy sensitive plaintext because it precedes the protected
+payload conversion. Handle that backup as sensitive source data. After the
+upgrade reaches ready state, create and verify a new paired database/operator
+recovery set, then retire the legacy plaintext backup according to the
+operator's retention policy.
+
 ## Self-Host Migration Model
 
 Luthn uses EF Core migrations against PostgreSQL. Operators should treat schema

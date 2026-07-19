@@ -34,6 +34,7 @@ public sealed class SafeProjectionPublicationTests
         Assert.Empty(envelope.RootElement.GetProperty("coreTags").EnumerateArray());
         Assert.DoesNotContain("private-title-token", outbox.SafeEnvelopeJson, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-tag", outbox.SafeEnvelopeJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("protectedPayload", outbox.SafeEnvelopeJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(propertyNames, name =>
             name.Contains("raw", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("secret", StringComparison.OrdinalIgnoreCase) ||

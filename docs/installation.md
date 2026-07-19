@@ -128,7 +128,7 @@ Installed state uses stable locations independent of the current directory:
 | Connector runtime | `~/.local/share/luthn/runtime/` |
 | Connector state | `~/.local/state/luthn/connectors/` |
 | PostgreSQL volume | `luthn-postgres` |
-| Operator configuration volume | `luthn-operator` |
+| Operator configuration and Data Protection key volume | `luthn-operator` |
 
 ## Install On Windows
 
@@ -256,7 +256,7 @@ Windows state uses these stable locations by default:
 | Codex instructions | `%CODEX_HOME%\AGENTS.md` or `%USERPROFILE%\.codex\AGENTS.md` |
 | Update state and backups | `%LOCALAPPDATA%\Luthn\state\update-windows.json`, `%LOCALAPPDATA%\Luthn\state\backups\` |
 | PostgreSQL volume | `luthn-postgres` |
-| Operator configuration volume | `luthn-operator` |
+| Operator configuration and Data Protection key volume | `luthn-operator` |
 
 The token and configuration files are written as UTF-8 without BOM and receive
 an inheritance-disabled, current-user-only NTFS ACL.

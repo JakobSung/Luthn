@@ -17,6 +17,19 @@ luthn uninstall
 
 `update`는 현재 image id를 기록하고 대상 image를 받아 runtime을 갱신한 뒤 API와 쓰기 경로를 멈추고 PostgreSQL backup, migration, API 시작, health/readiness 확인을 수행합니다. install·status·update 중 `docker compose down -v`를 사용하지 않습니다. volume 삭제는 `reset --yes` 또는 `uninstall --purge-data --yes`에서만 합니다.
 
+`luthn-operator` volume에는 민감 shared-memory payload 복호화에 필요한 Data
+Protection key ring이 있습니다. PostgreSQL backup만으로는 완전한 복구 자료가
+아닙니다. database backup과 같은 시점의 `luthn-operator` 보호 backup 또는 storage
+snapshot을 함께 보존하고 일치하는 쌍으로 복원해야 합니다. key-ring XML은 출력하거나
+commit하지 않습니다. `update`와 일반 `uninstall`은 operator volume을 보존하지만,
+`reset`과 purge 삭제는 data와 key 자료를 의도적으로 함께 제거합니다.
+
+암호화 기능을 처음 적용하는 upgrade 직전의 자동 database backup에는 보호 payload
+전환 전의 기존 민감 평문이 남을 수 있습니다. 이 backup은 민감 원본으로 취급해야
+합니다. upgrade가 ready 상태에 도달한 뒤 database와 operator volume의 새 복구 세트를
+함께 만들고 검증한 다음, 기존 평문 backup은 운영자의 retention 정책에 따라
+폐기합니다.
+
 ## 직접 호스팅 Migration 모형
 
 Schema 변경은 API 시작의 부수 효과가 아니라 명시적 유지 관리 단계입니다. 적용 전에 image와 migration 집합을 맞추고 migration script를 검토하며 저장소 밖에 backup을 만들고 임시 database로 복원 검증을 합니다. token·connection string은 secret 저장소나 runtime 환경에만 둡니다.

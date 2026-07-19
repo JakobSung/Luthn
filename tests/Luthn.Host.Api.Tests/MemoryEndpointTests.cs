@@ -32,6 +32,7 @@ public sealed class MemoryEndpointTests
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             httpContext,
             CancellationToken.None);
@@ -92,11 +93,11 @@ public sealed class MemoryEndpointTests
             CoreTags = ["restricted"],
             Visibility = MemoryVisibility.SharedAcrossAgents
         };
-
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -116,11 +117,13 @@ public sealed class MemoryEndpointTests
             CoreTags = ["security"],
             Visibility = MemoryVisibility.SharedAcrossAgents
         };
+        var protector = TestSensitiveMemoryProtection.Create();
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            protector,
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -128,6 +131,18 @@ public sealed class MemoryEndpointTests
         var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result);
         Assert.False(created.Value!.AllowsAgentContext);
         Assert.Equal(MemoryVisibility.PrivateToOwner, created.Value.Visibility);
+        Assert.Equal(SensitiveMemoryPersistence.ProtectedTitle, created.Value.Title);
+        Assert.Equal(SensitiveMemoryPersistence.ProtectedSummary, created.Value.SafeSummary);
+        var stored = await db.SharedMemoryItems.AsNoTracking().SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.AsNoTracking().SingleAsync();
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(stored));
+        Assert.DoesNotContain("Credential", encrypted.ProtectedPayload, StringComparison.OrdinalIgnoreCase);
+        var plaintext = protector.Unprotect(stored.Id, encrypted.ProtectedPayload);
+        Assert.Equal(request.Title, plaintext.Title);
+        Assert.Equal(request.SafeSummary, plaintext.SafeSummary);
+        var audit = await db.AuditEvents.SingleAsync(record => record.Action == "memory.item.classified");
+        Assert.Equal("metadata-only", audit.PayloadClass);
+        Assert.Equal("encrypted-payload-only", audit.RedactionState);
 
         var read = await MemoryEndpoints.ReadMemoryItem(created.Value.Id, db, CancellationToken.None);
         var query = await MemoryEndpoints.QueryMemoryItems(
@@ -160,6 +175,7 @@ public sealed class MemoryEndpointTests
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -188,6 +204,7 @@ public sealed class MemoryEndpointTests
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -214,6 +231,7 @@ public sealed class MemoryEndpointTests
             request,
             new UnavailableContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -242,6 +260,7 @@ public sealed class MemoryEndpointTests
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -267,6 +286,7 @@ public sealed class MemoryEndpointTests
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -331,6 +351,7 @@ public sealed class MemoryEndpointTests
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -413,6 +434,7 @@ public sealed class MemoryEndpointTests
             request,
             new MockContentClassifier(),
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
