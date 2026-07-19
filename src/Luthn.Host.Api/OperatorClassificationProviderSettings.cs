@@ -39,7 +39,10 @@ public sealed record ClassificationProviderConfigurationResponse(
     bool HasApiKey,
     bool MockAllowed,
     string Status,
-    string StatusDetail);
+    string StatusDetail,
+    string ProviderBoundary,
+    bool LocalSensitiveDataGuardActive,
+    string LocalSensitiveDataGuardVersion);
 
 public sealed record SaveClassificationProviderConfigurationRequest(
     string Provider,

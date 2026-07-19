@@ -39,8 +39,11 @@ builder.Services.AddHttpClient(nameof(ConfiguredContentClassifier), client =>
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
 builder.Services.AddScoped<ConfiguredContentClassifier>();
+builder.Services.AddSingleton<DeterministicSensitiveDataDetector>();
 builder.Services.AddScoped<IContentClassifier>(provider =>
-    provider.GetRequiredService<ConfiguredContentClassifier>());
+    new HybridContentClassifier(
+        provider.GetRequiredService<ConfiguredContentClassifier>(),
+        provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
 builder.Services.Configure<ClassificationProviderOptions>(builder.Configuration.GetSection("Luthn:Classification"));
 builder.Services.AddSingleton<IPolicyEngine, PolicyEngine>();
 builder.Services.AddScoped<ClassificationPreviewService>();

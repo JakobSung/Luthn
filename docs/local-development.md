@@ -211,6 +211,14 @@ dotnet run --project src/Luthn.Tools -- classification-eval \
   --output artifacts/classification-eval.json
 ```
 
+Exercise the local deterministic guard combined with the mock baseline, still
+without making a network request:
+
+```bash
+dotnet run --project src/Luthn.Tools -- classification-eval \
+  --provider guarded-mock
+```
+
 To evaluate the API's currently configured classifier, start the API and opt in
 explicitly to the possible external transfer. Pass only an environment variable
 name for a protected API token; do not place the token value on the command
@@ -227,6 +235,11 @@ dotnet run --project src/Luthn.Tools -- classification-eval \
 
 The report intentionally omits corpus text and reports bounded case IDs,
 per-case classification/routing comparisons, and aggregate mismatch counts.
+
+The runtime combines every configured provider result with local secret/PII
+guard version `1`. `ExternalHttp` is the self-hosted-capable provider boundary;
+provider failures remain fail-closed and do not fall back to detector-only
+storage.
 
 External classification is opt-in and uses the `external-http` provider. When
 `Luthn__Classification__ExternalHttp__Endpoint` is configured, the API must not

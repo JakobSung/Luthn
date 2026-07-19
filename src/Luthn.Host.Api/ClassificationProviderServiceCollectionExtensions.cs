@@ -15,6 +15,7 @@ internal static class ClassificationProviderServiceCollectionExtensions
         services.Configure<ClassificationProviderOptions>(section);
         services.Configure<ClassificationProviderRuntimeOptions>(
             configuration.GetSection("Luthn:Classification:Runtime"));
+        services.AddSingleton<DeterministicSensitiveDataDetector>();
 
         var provider = options.ResolveProvider();
 
@@ -23,13 +24,15 @@ internal static class ClassificationProviderServiceCollectionExtensions
             ClassificationProviderOptions.UnconfiguredProvider,
             StringComparison.OrdinalIgnoreCase))
         {
-            services.AddSingleton<IContentClassifier>(
-                new UnavailableContentClassifier(
-                    ClassificationProviderOptions.ProviderRequiredMessage,
-                    new ClassificationProviderBoundary(
-                        "Unconfigured",
-                        "classification-input",
-                        "provider-unconfigured")));
+            services.AddSingleton<IContentClassifier>(provider =>
+                new HybridContentClassifier(
+                    new UnavailableContentClassifier(
+                        ClassificationProviderOptions.ProviderRequiredMessage,
+                        new ClassificationProviderBoundary(
+                            "Unconfigured",
+                            "classification-input",
+                            "provider-unconfigured")),
+                    provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
             return services;
         }
 
@@ -37,17 +40,23 @@ internal static class ClassificationProviderServiceCollectionExtensions
         {
             if (!options.AllowMock)
             {
-                services.AddSingleton<IContentClassifier>(
-                    new UnavailableContentClassifier(
-                        ClassificationProviderOptions.MockDisabledMessage,
-                        new ClassificationProviderBoundary(
-                            "Mock",
-                            "local-classification-input",
-                            "mock-disabled")));
+                services.AddSingleton<IContentClassifier>(provider =>
+                    new HybridContentClassifier(
+                        new UnavailableContentClassifier(
+                            ClassificationProviderOptions.MockDisabledMessage,
+                            new ClassificationProviderBoundary(
+                                "Mock",
+                                "local-classification-input",
+                                "mock-disabled")),
+                        provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
                 return services;
             }
 
-            services.AddSingleton<IContentClassifier, MockContentClassifier>();
+            services.AddSingleton<MockContentClassifier>();
+            services.AddSingleton<IContentClassifier>(provider =>
+                new HybridContentClassifier(
+                    provider.GetRequiredService<MockContentClassifier>(),
+                    provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
             return services;
         }
 
@@ -57,7 +66,11 @@ internal static class ClassificationProviderServiceCollectionExtensions
             {
                 client.Timeout = Timeout.InfiniteTimeSpan;
             });
-            services.AddSingleton<IContentClassifier, ExternalHttpContentClassifier>();
+            services.AddSingleton<ExternalHttpContentClassifier>();
+            services.AddSingleton<IContentClassifier>(provider =>
+                new HybridContentClassifier(
+                    provider.GetRequiredService<ExternalHttpContentClassifier>(),
+                    provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
             return services;
         }
 

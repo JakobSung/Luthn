@@ -169,7 +169,14 @@ public static class ClassificationEndpoints
             checks.Add(new ReadinessCheck("classification-provider", "not_ready", providerIssue));
             return NotReady("classification-provider", checks);
         }
-        checks.Add(new ReadinessCheck("classification-provider", "ready", "Classification provider configuration is ready for the current environment."));
+        var providerDetail = classificationSettings.Current.Provider == OperatorClassificationProviderKind.ExternalHttp
+            ? "Self-hosted-capable ExternalHttp provider configuration is ready for the current environment."
+            : "Classification provider configuration is ready for the current environment.";
+        checks.Add(new ReadinessCheck("classification-provider", "ready", providerDetail));
+        checks.Add(new ReadinessCheck(
+            "classification-guard",
+            "ready",
+            $"Local secret/PII guard version {DeterministicSensitiveDataDetector.Version} is active."));
 
         var transportStatus = environment.IsProduction() &&
             (!hostOptions.Value.EnforceHttps && !hostOptions.Value.EnableForwardedHeaders ||

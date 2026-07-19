@@ -65,7 +65,7 @@ public static class OperatorConfigurationEndpoints
     public static async Task<Results<Ok<TestClassificationProviderConfigurationResponse>, BadRequest<ProblemDetails>>> TestClassificationProvider(
         TestClassificationProviderConfigurationRequest request,
         IOperatorClassificationSettingsStore settingsStore,
-        ConfiguredContentClassifier classifier,
+        IContentClassifier classifier,
         IPolicyEngine policyEngine,
         IOptions<ClassificationProviderOptions> options,
         LuthnDbContext db,
@@ -125,7 +125,10 @@ public static class OperatorConfigurationEndpoints
             settings.HasApiKey,
             options.AllowMock,
             StatusFor(settings, options),
-            StatusDetailFor(settings, options));
+            StatusDetailFor(settings, options),
+            ProviderBoundaryFor(settings),
+            true,
+            DeterministicSensitiveDataDetector.Version);
 
     private static string StatusFor(
         OperatorClassificationProviderSettings settings,
@@ -147,7 +150,18 @@ public static class OperatorConfigurationEndpoints
             OperatorClassificationProviderKind.Mock when !options.AllowMock => ClassificationProviderOptions.MockDisabledMessage,
             OperatorClassificationProviderKind.Mock =>
                 "Mock classification is enabled for explicit development or test use only.",
+            OperatorClassificationProviderKind.ExternalHttp =>
+                "ExternalHttp classification is configured for a self-hosted or operator-approved endpoint. The local secret/PII guard is active.",
             _ => $"{settings.Provider} classification is configured."
+        };
+
+    private static string ProviderBoundaryFor(OperatorClassificationProviderSettings settings) =>
+        settings.Provider switch
+        {
+            OperatorClassificationProviderKind.Unconfigured => "unconfigured",
+            OperatorClassificationProviderKind.Mock => "local-non-production",
+            OperatorClassificationProviderKind.ExternalHttp => "self-hosted-capable-external-http",
+            _ => "operator-configured-remote"
         };
 
     private static AuditEventRecord CreateAudit(

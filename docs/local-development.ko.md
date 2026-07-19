@@ -93,6 +93,14 @@ dotnet run --project src/Luthn.Tools -- classification-eval \
   --output artifacts/classification-eval.json
 ```
 
+network 요청 없이 mock 기준값과 로컬 결정론적 guard를 결합한 경로도 평가할 수
+있습니다.
+
+```bash
+dotnet run --project src/Luthn.Tools -- classification-eval \
+  --provider guarded-mock
+```
+
 API에 현재 설정된 분류기를 평가하려면 API를 실행하고 외부 전송 가능성을
 명시적으로 허용해야 합니다. 보호 API token 값은 command line에 넣지 말고
 환경 변수 이름만 전달합니다.
@@ -108,6 +116,10 @@ dotnet run --project src/Luthn.Tools -- classification-eval \
 
 결과에는 corpus 원문을 넣지 않고 제한된 case ID, case별 분류·저장 경로 비교,
 불일치 합계만 기록합니다.
+
+runtime은 모든 설정된 provider 결과에 로컬 secret/PII guard 버전 `1`을
+결합합니다. `ExternalHttp`는 self-hosted 연결이 가능한 provider 경계이고,
+provider 실패를 detector 단독 저장으로 대체하지 않습니다.
 
 ```bash
 Luthn__Classification__Provider=external-http
