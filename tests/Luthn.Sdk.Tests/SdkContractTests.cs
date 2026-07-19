@@ -118,13 +118,22 @@ public sealed class SdkContractTests
     [Fact]
     public void ContextPackRequestSerializesCoreTagsContract()
     {
-        var request = new ContextPackRequestDto(["runbook", "demo"], 5, "billing outage");
+        var request = new ContextPackRequestDto(
+            ["runbook", "demo"],
+            5,
+            "billing outage",
+            "luthn",
+            "ranking",
+            ["quality"]);
 
         var json = JsonSerializer.Serialize(request);
 
         Assert.Contains("\"query\"", json, StringComparison.Ordinal);
         Assert.Contains("\"coreTags\"", json, StringComparison.Ordinal);
         Assert.Contains("\"maxItems\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"projectKey\":\"luthn\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"taskKey\":\"ranking\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"topicTags\":[\"quality\"]", json, StringComparison.Ordinal);
         Assert.DoesNotContain("CoreTags", json, StringComparison.Ordinal);
         Assert.DoesNotContain("ontology", json, StringComparison.OrdinalIgnoreCase);
     }
@@ -141,6 +150,23 @@ public sealed class SdkContractTests
         Assert.Contains("\"maxItems\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("ontology", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("raw", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LegacyContextPackResponseDeserializesWithEmptyOptionalMetadata()
+    {
+        var response = JsonSerializer.Deserialize<ContextPackDto>(
+            """{"coreTags":["runbook"],"items":[{"id":"wiki-1","title":"Runbook","safeSummary":"Safe summary.","sensitivity":"Public","coreTags":["runbook"]}]}""");
+
+        Assert.NotNull(response);
+        Assert.Null(response.ProjectKey);
+        Assert.Null(response.TaskKey);
+        Assert.Empty(response.TopicTags);
+        var item = Assert.Single(response.Items);
+        Assert.Null(item.ProjectKey);
+        Assert.Null(item.TaskKey);
+        Assert.Empty(item.TopicTags);
+        Assert.Equal(default, item.ProjectionTimestamp);
     }
 
     [Fact]

@@ -67,6 +67,26 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task ContextPackToolPassesMetadataAndIsolatesCacheByScope()
+    {
+        var client = new FakeLuthnClient();
+        var tool = new GetContextPackTool(client);
+        using var luthnArgs = JsonDocument.Parse(
+            """{"query":"recall","projectKey":"luthn","taskKey":"ranking","topicTags":["quality"],"cacheKey":"recall","cacheTtlSeconds":600}""");
+        using var otherArgs = JsonDocument.Parse(
+            """{"query":"recall","projectKey":"other","taskKey":"ranking","topicTags":["quality"],"cacheKey":"recall","cacheTtlSeconds":600}""");
+
+        await tool.InvokeAsync(luthnArgs.RootElement);
+        await tool.InvokeAsync(luthnArgs.RootElement);
+        await tool.InvokeAsync(otherArgs.RootElement);
+
+        Assert.Equal(2, client.ContextPackCallCount);
+        Assert.Equal("other", client.LastContextPackRequest?.ProjectKey);
+        Assert.Equal("ranking", client.LastContextPackRequest?.TaskKey);
+        Assert.Equal(["quality"], client.LastContextPackRequest?.TopicTags);
+    }
+
+    [Fact]
     public async Task LightweightContextPackCachesWithinTtlAndRefreshesForTopicOrExpiry()
     {
         var now = DateTimeOffset.UnixEpoch;
@@ -255,11 +275,14 @@ public sealed class McpToolBoundaryTests
               "title": "Release memory",
               "safeSummary": "Public-safe release summary.",
               "coreTags": ["release", "runbook"],
-              "sourceSessionId": "session-1"
+              "sourceSessionId": "session-1",
+              "projectKey": "luthn",
+              "taskKey": "release",
+              "topicTags": ["delivery"]
             }
             """);
         using var queryArgs = JsonDocument.Parse(
-            """{"query":"release","coreTags":["runbook"],"maxItems":5}""");
+            """{"query":"release","coreTags":["runbook"],"maxItems":5,"projectKey":"luthn","taskKey":"release","topicTags":["delivery"]}""");
         using var readArgs = JsonDocument.Parse("""{"id":"memory-1"}""");
 
         var created = await new CreateSharedMemoryTool(client).InvokeAsync(createArgs.RootElement);
@@ -270,9 +293,15 @@ public sealed class McpToolBoundaryTests
         Assert.Equal("Public-safe release summary.", client.LastCreateMemoryRequest?.SafeSummary);
         Assert.Equal(["release", "runbook"], client.LastCreateMemoryRequest?.CoreTags);
         Assert.Equal("session-1", client.LastCreateMemoryRequest?.SourceSessionId);
+        Assert.Equal("luthn", client.LastCreateMemoryRequest?.ProjectKey);
+        Assert.Equal("release", client.LastCreateMemoryRequest?.TaskKey);
+        Assert.Equal(["delivery"], client.LastCreateMemoryRequest?.TopicTags);
         Assert.Equal("release", client.LastMemoryQueryRequest?.Query);
         Assert.Equal(["runbook"], client.LastMemoryQueryRequest?.CoreTags);
         Assert.Equal(5, client.LastMemoryQueryRequest?.MaxItems);
+        Assert.Equal("luthn", client.LastMemoryQueryRequest?.ProjectKey);
+        Assert.Equal("release", client.LastMemoryQueryRequest?.TaskKey);
+        Assert.Equal(["delivery"], client.LastMemoryQueryRequest?.TopicTags);
         Assert.Equal("memory-1", client.LastMemoryItemId);
         Assert.IsType<SharedMemoryItemDto>(created);
         Assert.IsType<SharedMemoryQueryResponseDto>(query);
@@ -327,6 +356,9 @@ public sealed class McpToolBoundaryTests
         Assert.Equal(5_000, properties.GetProperty("timeoutMs").GetProperty("maximum").GetInt32());
         Assert.Equal(3_600, properties.GetProperty("cacheTtlSeconds").GetProperty("maximum").GetInt32());
         Assert.Equal("boolean", properties.GetProperty("failOpen").GetProperty("type").GetString());
+        Assert.Equal("string", properties.GetProperty("projectKey").GetProperty("type").GetString());
+        Assert.Equal("string", properties.GetProperty("taskKey").GetProperty("type").GetString());
+        Assert.Equal("array", properties.GetProperty("topicTags").GetProperty("type").GetString());
 
         var sensitiveAccessTool = toolsJson.RootElement
             .GetProperty("result")
@@ -374,6 +406,7 @@ public sealed class McpToolBoundaryTests
     private sealed class FakeLuthnClient : ILuthnClient
     {
         public IReadOnlyList<string>? LastCoreTags { get; private set; }
+        public ContextPackRequestDto? LastContextPackRequest { get; private set; }
         public int? LastMaxItems { get; private set; }
         public string? LastContextPackQuery { get; private set; }
         public string? LastSearchQuery { get; private set; }
@@ -408,6 +441,18 @@ public sealed class McpToolBoundaryTests
                 throw ContextPackException;
             }
             return ContextPackResult with { CoreTags = coreTags };
+        }
+
+        public Task<ContextPackDto> GetContextPackAsync(
+            ContextPackRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            LastContextPackRequest = request;
+            return GetContextPackAsync(
+                request.CoreTags,
+                request.MaxItems,
+                request.Query,
+                cancellationToken);
         }
 
         public Task<SafeSearchResponseDto> SearchAsync(
@@ -560,5 +605,9 @@ public sealed class McpToolBoundaryTests
                 item.SafeSummary.Length +
                 item.Sensitivity.Length +
                 item.CoreTags.Sum(tag => tag.Length + 3) +
+                (item.ProjectKey?.Length ?? 0) +
+                (item.TaskKey?.Length ?? 0) +
+                item.TopicTags.Sum(tag => tag.Length + 3) +
+                item.ProjectionTimestamp.ToString("O").Length +
                 2) / 3));
 }

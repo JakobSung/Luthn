@@ -12,6 +12,9 @@ public static class LuthnMcpToolRegistry
             ToolSchema([
                 StringProperty("query", "Optional retrieval query."),
                 TagsProperty(),
+                ProjectKeyProperty(),
+                TaskKeyProperty(),
+                TopicTagsProperty(),
                 IntegerProperty("maxItems", "Maximum context items to return."),
                 IntegerProperty("maxTokens", "Optional conservative token budget for returned items.", 4_000),
                 IntegerProperty("timeoutMs", "Optional retrieval deadline in milliseconds.", 5_000),
@@ -25,6 +28,9 @@ public static class LuthnMcpToolRegistry
             ToolSchema([
                 StringProperty("query", "Optional retrieval query."),
                 TagsProperty(),
+                ProjectKeyProperty(),
+                TaskKeyProperty(),
+                TopicTagsProperty(),
                 IntegerProperty("maxItems", "Maximum search results to return.")
             ])),
         new(
@@ -46,6 +52,9 @@ public static class LuthnMcpToolRegistry
                 StringProperty("title", "Short memory title."),
                 StringProperty("safeSummary", "Bounded summary candidate; Luthn treats this as untrusted."),
                 TagsProperty(),
+                ProjectKeyProperty(),
+                TaskKeyProperty(),
+                TopicTagsProperty(),
                 StringProperty("visibility", "Visibility, defaults to SharedAcrossAgents."),
                 StringProperty("retentionKind", "Retention kind, defaults to Durable."),
                 StringProperty("expiresAt", "Expiration timestamp for non-durable memory."),
@@ -58,6 +67,9 @@ public static class LuthnMcpToolRegistry
             ToolSchema([
                 StringProperty("query", "Optional retrieval query."),
                 TagsProperty(),
+                ProjectKeyProperty(),
+                TaskKeyProperty(),
+                TopicTagsProperty(),
                 IntegerProperty("maxItems", "Maximum memory items to return.")
             ])),
         new(
@@ -149,6 +161,25 @@ public static class LuthnMcpToolRegistry
         {
             ["type"] = "array",
             ["description"] = "Optional Core tags used for safe retrieval.",
+            ["items"] = new Dictionary<string, object>
+            {
+                ["type"] = "string"
+            }
+        });
+
+    private static KeyValuePair<string, object> ProjectKeyProperty() =>
+        StringProperty(
+            "projectKey",
+            "Optional normalized non-sensitive project key. Do not send a raw path.");
+
+    private static KeyValuePair<string, object> TaskKeyProperty() =>
+        StringProperty("taskKey", "Optional normalized non-sensitive task key.");
+
+    private static KeyValuePair<string, object> TopicTagsProperty() =>
+        new("topicTags", new Dictionary<string, object>
+        {
+            ["type"] = "array",
+            ["description"] = "Optional normalized non-sensitive topic tags.",
             ["items"] = new Dictionary<string, object>
             {
                 ["type"] = "string"

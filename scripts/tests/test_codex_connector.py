@@ -194,6 +194,9 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             self.assertIn("times out, returns an error, cannot be parsed", installed)
             self.assertIn("uses any fail-open path", installed)
             self.assertIn("when `get_context_pack` was not called", installed)
+            self.assertIn("`projectKey`, `taskKey`, and `topicTags`", installed)
+            self.assertIn("Never send a raw workspace path", installed)
+            self.assertIn("transcript path", installed)
             self.assertIn("at most once per user turn", installed)
             self.assertIn(
                 "memory titles, content, IDs, queries, scores, sources", installed

@@ -20,7 +20,10 @@ public sealed class CreateSharedMemoryTool(ILuthnAgentClient client) : ILuthnMcp
             McpToolArguments.ReadOptionalString(arguments, "retentionKind") ?? "Durable",
             McpToolArguments.ReadOptionalDateTimeOffset(arguments, "expiresAt"),
             McpToolArguments.ReadOptionalString(arguments, "sourceSessionId"),
-            McpToolArguments.ReadOptionalString(arguments, "sensitivity") ?? "Public");
+            McpToolArguments.ReadOptionalString(arguments, "sensitivity") ?? "Public",
+            McpToolArguments.ReadOptionalString(arguments, "projectKey"),
+            McpToolArguments.ReadOptionalString(arguments, "taskKey"),
+            McpToolArguments.ReadTags(arguments, "topicTags"));
 
         return await client.CreateSharedMemoryItemAsync(request, cancellationToken);
     }

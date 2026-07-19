@@ -46,6 +46,17 @@ public static class MemoryEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
+        var metadataError = RecallMetadataValidation.TryNormalize(
+            request.ProjectKey,
+            request.TaskKey,
+            request.TopicTags,
+            "Invalid memory item request.",
+            out var recallMetadata);
+        if (metadataError is not null)
+        {
+            return TypedResults.BadRequest(metadataError);
+        }
+
         var createdAt = DateTimeOffset.UtcNow;
         var memoryId = $"memory-{Guid.NewGuid():N}";
         var sourceId = new PublicRecordId(memoryId);
@@ -54,7 +65,10 @@ public static class MemoryEndpoints
             content: null,
             request.Title,
             request.SafeSummary,
-            normalizedTags);
+            normalizedTags,
+            recallMetadata.ProjectKey,
+            recallMetadata.TaskKey,
+            recallMetadata.TopicTags);
         ClassificationResult classification;
         try
         {
@@ -94,6 +108,9 @@ public static class MemoryEndpoints
             SafeSummary = item.SafeSummary.Trim(),
             Sensitivity = item.Sensitivity,
             CoreTags = item.CoreTags.ToList(),
+            ProjectKey = recallMetadata.ProjectKey,
+            TaskKey = recallMetadata.TaskKey,
+            TopicTags = recallMetadata.TopicTags.ToList(),
             Visibility = item.Visibility,
             RetentionKind = item.Retention.Kind,
             ExpiresAt = item.Retention.ExpiresAt,
@@ -128,7 +145,10 @@ public static class MemoryEndpoints
             item.Retention.ExpiresAt,
             item.SourceSessionId?.Value,
             allowsAgentContext,
-            createdAt);
+            createdAt,
+            recallMetadata.ProjectKey,
+            recallMetadata.TaskKey,
+            recallMetadata.TopicTags);
 
         return TypedResults.Created($"/api/memory/items/{memoryId}", response);
     }
@@ -164,7 +184,23 @@ public static class MemoryEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
-        var searchRequest = new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems);
+        SafeSearchRequest searchRequest;
+        try
+        {
+            searchRequest = new SafeSearchRequest(
+                request.Query,
+                request.CoreTags,
+                request.MaxItems,
+                request.ProjectKey,
+                request.TaskKey,
+                request.TopicTags);
+        }
+        catch (ArgumentException error)
+        {
+            return TypedResults.BadRequest(ApiValidation.CreateProblem(
+                "Invalid memory query request.",
+                error.Message));
+        }
         var candidates = await candidateSelector.SelectSharedMemoryAsync(
             searchRequest,
             cancellationToken);
@@ -184,7 +220,12 @@ public static class MemoryEndpoints
             .Select(result => ToResponse(recordsById[result.Id]))
             .ToArray();
 
-        return TypedResults.Ok(new MemoryQueryResponse(search.Query, search.CoreTags, items));
+        return TypedResults.Ok(new MemoryQueryResponse(search.Query, search.CoreTags, items)
+        {
+            ProjectKey = search.ProjectKey,
+            TaskKey = search.TaskKey,
+            TopicTags = search.TopicTags
+        });
     }
 
     private static IQueryable<SharedMemoryItemRecord> ReadAgentSafeMemoryItems(
@@ -339,7 +380,10 @@ public static class MemoryEndpoints
             record.ExpiresAt,
             record.SourceSessionId,
             record.AllowsAgentContext,
-            record.CreatedAt);
+            record.CreatedAt,
+            record.ProjectKey,
+            record.TaskKey,
+            record.TopicTags);
 
     private static MemoryItemResponse ToResponse(
         string id,
@@ -352,7 +396,10 @@ public static class MemoryEndpoints
         DateTimeOffset? expiresAt,
         string? sourceSessionId,
         bool allowsAgentContext,
-        DateTimeOffset createdAt) =>
+        DateTimeOffset createdAt,
+        string? projectKey,
+        string? taskKey,
+        IReadOnlyList<string> topicTags) =>
         new(
             id,
             title,
@@ -364,7 +411,12 @@ public static class MemoryEndpoints
             expiresAt,
             sourceSessionId,
             allowsAgentContext,
-            createdAt);
+            createdAt)
+        {
+            ProjectKey = projectKey,
+            TaskKey = taskKey,
+            TopicTags = topicTags
+        };
 }
 
 public sealed record CreateMemoryItemRequest
@@ -377,17 +429,28 @@ public sealed record CreateMemoryItemRequest
     public MemoryRetentionKind RetentionKind { get; init; } = MemoryRetentionKind.Durable;
     public DateTimeOffset? ExpiresAt { get; init; }
     public string? SourceSessionId { get; init; }
+    public string? ProjectKey { get; init; }
+    public string? TaskKey { get; init; }
+    public IReadOnlyList<string>? TopicTags { get; init; }
 }
 
 public sealed record MemoryQueryRequest(
     string? Query = null,
     IReadOnlyList<string>? CoreTags = null,
-    int MaxItems = 20);
+    int MaxItems = 20,
+    string? ProjectKey = null,
+    string? TaskKey = null,
+    IReadOnlyList<string>? TopicTags = null);
 
 public sealed record MemoryQueryResponse(
     string? Query,
     IReadOnlyList<string> CoreTags,
-    IReadOnlyList<MemoryItemResponse> Items);
+    IReadOnlyList<MemoryItemResponse> Items)
+{
+    public string? ProjectKey { get; init; }
+    public string? TaskKey { get; init; }
+    public IReadOnlyList<string> TopicTags { get; init; } = [];
+}
 
 public sealed record MemoryItemResponse(
     string Id,
@@ -400,4 +463,9 @@ public sealed record MemoryItemResponse(
     DateTimeOffset? ExpiresAt,
     string? SourceSessionId,
     bool AllowsAgentContext,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt)
+{
+    public string? ProjectKey { get; init; }
+    public string? TaskKey { get; init; }
+    public IReadOnlyList<string> TopicTags { get; init; } = [];
+}

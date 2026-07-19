@@ -81,12 +81,91 @@ public sealed class SafeSearchIndexTests
         Assert.DoesNotContain("Raw vault", result.SafeSummary, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void SearchScopesProjectsAndBoostsTaskTopicAndRecentMatches()
+    {
+        var now = DateTimeOffset.Parse("2026-07-19T12:00:00Z");
+        var index = new SafeSearchIndex(new FixedTimeProvider(now));
+        var candidates = new[]
+        {
+            Candidate("other", "Recall note", "Relevant recall note.", ["recall"], projectKey: "other"),
+            Candidate("global", "Recall note", "Relevant recall note.", ["recall"], timestamp: now.AddHours(-2)),
+            Candidate("stale", "Recall note", "Relevant recall note.", ["recall"], projectKey: "luthn", timestamp: now.AddDays(-90)),
+            Candidate(
+                "matched",
+                "Recall note",
+                "Relevant recall note.",
+                ["recall"],
+                projectKey: "luthn",
+                taskKey: "ranking",
+                topicTags: ["quality"],
+                timestamp: now.AddHours(-1))
+        };
+
+        var response = index.Search(
+            new SafeSearchRequest("recall", ["recall"], 10, "LUTHN", "RANKING", ["Quality"]),
+            candidates);
+
+        Assert.Equal(["matched", "stale", "global"], response.Results.Select(result => result.Id));
+        Assert.DoesNotContain(response.Results, result => result.Id == "other");
+        Assert.Equal("luthn", response.ProjectKey);
+        Assert.Equal("ranking", response.TaskKey);
+        Assert.Equal(["quality"], response.TopicTags);
+        Assert.Equal(now.AddHours(-1), response.Results[0].ProjectionTimestamp);
+    }
+
+    [Fact]
+    public void RecencyTreatsFutureAndStaleTimestampsConservatively()
+    {
+        var now = DateTimeOffset.Parse("2026-07-19T12:00:00Z");
+        var index = new SafeSearchIndex(new FixedTimeProvider(now));
+        var candidates = new[]
+        {
+            Candidate("future", "Recall", "Recall.", ["recall"], timestamp: now.AddMinutes(1)),
+            Candidate("stale", "Recall", "Recall.", ["recall"], timestamp: now.AddDays(-31)),
+            Candidate("recent", "Recall", "Recall.", ["recall"], timestamp: now.AddHours(-1))
+        };
+
+        var response = index.Search(new SafeSearchRequest("recall", ["recall"], 10), candidates);
+
+        Assert.Equal("recent", response.Results[0].Id);
+        Assert.Equal(
+            response.Results.Single(result => result.Id == "future").Score,
+            response.Results.Single(result => result.Id == "stale").Score);
+    }
+
+    [Fact]
+    public void RecallMetadataNormalizesAndRejectsPathsOrUnboundedValues()
+    {
+        Assert.Equal("luthn:search", RecallMetadata.NormalizeKey(" LUTHN:Search "));
+        Assert.Equal(["quality", "검색"], RecallMetadata.NormalizeTopicTags([" Quality ", "quality", "검색"]));
+        Assert.Throws<ArgumentException>(() => RecallMetadata.NormalizeKey("/Users/example/project"));
+        Assert.Throws<ArgumentException>(() => RecallMetadata.NormalizeTopicTags(["raw/path"]));
+        Assert.Throws<ArgumentException>(() => RecallMetadata.NormalizeTopicTags(
+            Enumerable.Range(0, RecallMetadata.MaximumTopicTags + 1).Select(index => $"tag-{index}")));
+    }
+
     private static ContextPackCandidate Candidate(
         string id,
         string title,
         string safeSummary,
         IReadOnlyList<string> coreTags,
         SensitivityLevel sensitivity = SensitivityLevel.Public,
-        bool allowsAgentContext = true) =>
-        new(id, title, safeSummary, sensitivity, coreTags, allowsAgentContext);
+        bool allowsAgentContext = true,
+        string? projectKey = null,
+        string? taskKey = null,
+        IReadOnlyList<string>? topicTags = null,
+        DateTimeOffset timestamp = default) =>
+        new ContextPackCandidate(id, title, safeSummary, sensitivity, coreTags, allowsAgentContext)
+        {
+            ProjectKey = projectKey,
+            TaskKey = taskKey,
+            TopicTags = topicTags ?? [],
+            ProjectionTimestamp = timestamp
+        };
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
 }

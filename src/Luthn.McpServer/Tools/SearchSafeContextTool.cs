@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Luthn.AgentConnector.Http;
+using Luthn.Sdk.Context;
 
 namespace Luthn.McpServer.Tools;
 
@@ -22,12 +23,30 @@ public sealed class SearchSafeContextTool(ILuthnAgentClient client) : ILuthnMcpT
                 ? value
                 : 20;
 
-        return await client.SearchAsync(query, coreTags, maxItems, cancellationToken);
+        return await client.SearchAsync(
+            new SafeSearchRequestDto(
+                query,
+                coreTags,
+                maxItems,
+                ReadOptionalString(arguments, "projectKey"),
+                ReadOptionalString(arguments, "taskKey"),
+                ReadTags(arguments, "topicTags")),
+            cancellationToken);
     }
 
     private static IReadOnlyList<string> ReadCoreTags(JsonElement arguments)
+        => ReadTags(arguments, "coreTags");
+
+    private static string? ReadOptionalString(JsonElement arguments, string name) =>
+        arguments.TryGetProperty(name, out var element) &&
+        element.ValueKind is JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(element.GetString())
+            ? element.GetString()!.Trim()
+            : null;
+
+    private static IReadOnlyList<string> ReadTags(JsonElement arguments, string name)
     {
-        if (!arguments.TryGetProperty("coreTags", out var tagsElement) ||
+        if (!arguments.TryGetProperty(name, out var tagsElement) ||
             tagsElement.ValueKind is not JsonValueKind.Array)
         {
             return [];

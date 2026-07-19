@@ -36,6 +36,17 @@ public static class SourceIntakeEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
+        var metadataError = RecallMetadataValidation.TryNormalize(
+            request.ProjectKey,
+            request.TaskKey,
+            request.TopicTags,
+            "Invalid source intake request.",
+            out var recallMetadata);
+        if (metadataError is not null)
+        {
+            return TypedResults.BadRequest(metadataError);
+        }
+
         var sourceEventId = $"source-{Guid.NewGuid():N}";
         var receivedAt = DateTimeOffset.UtcNow;
         var sourceId = new PublicRecordId(sourceEventId);
@@ -44,7 +55,10 @@ public static class SourceIntakeEndpoints
             request.Content,
             request.Title,
             request.SafeSummary,
-            normalizedTags);
+            normalizedTags,
+            recallMetadata.ProjectKey,
+            recallMetadata.TaskKey,
+            recallMetadata.TopicTags);
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
         db.AuditEvents.Add(new AuditEventRecord
         {
@@ -108,6 +122,9 @@ public static class SourceIntakeEndpoints
                 SafeSummary = request.SafeSummary.Trim(),
                 Sensitivity = classification.Sensitivity,
                 CoreTags = normalizedTags,
+                ProjectKey = recallMetadata.ProjectKey,
+                TaskKey = recallMetadata.TaskKey,
+                TopicTags = recallMetadata.TopicTags.ToList(),
                 AllowsAgentContext = decision.AllowsAgentContext,
                 CreatedAt = receivedAt
             });
@@ -156,7 +173,12 @@ public static class SourceIntakeEndpoints
                 classification.Confidence,
                 classification.Categories,
                 classification.ContainsSensitiveMaterial),
-            decision);
+            decision)
+        {
+            ProjectKey = recallMetadata.ProjectKey,
+            TaskKey = recallMetadata.TaskKey,
+            TopicTags = recallMetadata.TopicTags
+        };
 
         return TypedResults.Created($"/api/sources/{sourceEventId}", response);
     }
@@ -257,6 +279,9 @@ public sealed record SourceIntakeRequest
     public string Title { get; init; } = "";
     public string SafeSummary { get; init; } = "";
     public IReadOnlyList<string>? CoreTags { get; init; }
+    public string? ProjectKey { get; init; }
+    public string? TaskKey { get; init; }
+    public IReadOnlyList<string>? TopicTags { get; init; }
 }
 
 public sealed record SourceIntakeResponse(
@@ -267,4 +292,9 @@ public sealed record SourceIntakeResponse(
     string? SensitiveReferenceId,
     string AuditEventId,
     ClassificationPreviewClassification Classification,
-    StorageDecision StorageDecision);
+    StorageDecision StorageDecision)
+{
+    public string? ProjectKey { get; init; }
+    public string? TaskKey { get; init; }
+    public IReadOnlyList<string> TopicTags { get; init; } = [];
+}

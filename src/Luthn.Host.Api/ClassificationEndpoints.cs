@@ -250,11 +250,36 @@ public static class ClassificationEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
+        var metadataError = RecallMetadataValidation.TryNormalize(
+            request.ProjectKey,
+            request.TaskKey,
+            request.TopicTags,
+            "Invalid context pack request.",
+            out var recallMetadata);
+        if (metadataError is not null)
+        {
+            return TypedResults.BadRequest(metadataError);
+        }
+
+        var normalizedRequest = new ContextPackRequest(
+            request.CoreTags,
+            request.MaxItems,
+            request.Query,
+            recallMetadata.ProjectKey,
+            recallMetadata.TaskKey,
+            recallMetadata.TopicTags);
+
         var candidates = await candidateSelector.SelectAgentContextAsync(
-            new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems),
+            new SafeSearchRequest(
+                normalizedRequest.Query,
+                normalizedRequest.CoreTags,
+                normalizedRequest.MaxItems,
+                normalizedRequest.ProjectKey,
+                normalizedRequest.TaskKey,
+                normalizedRequest.TopicTags),
             cancellationToken);
 
-        return TypedResults.Ok(builder.Build(request, candidates));
+        return TypedResults.Ok(builder.Build(normalizedRequest, candidates));
     }
 
     public static async Task<Results<Ok<SafeSearchResponse>, BadRequest<ProblemDetails>>> SearchAgentContext(
@@ -272,9 +297,27 @@ public static class ClassificationEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
-        var candidates = await candidateSelector.SelectAgentContextAsync(request, cancellationToken);
+        SafeSearchRequest normalizedRequest;
+        try
+        {
+            normalizedRequest = new SafeSearchRequest(
+                request.Query,
+                request.CoreTags,
+                request.MaxItems,
+                request.ProjectKey,
+                request.TaskKey,
+                request.TopicTags);
+        }
+        catch (ArgumentException error)
+        {
+            return TypedResults.BadRequest(ApiValidation.CreateProblem(
+                "Invalid agent search request.",
+                error.Message));
+        }
 
-        return TypedResults.Ok(retrievalBackend.Search(request, candidates));
+        var candidates = await candidateSelector.SelectAgentContextAsync(normalizedRequest, cancellationToken);
+
+        return TypedResults.Ok(retrievalBackend.Search(normalizedRequest, candidates));
     }
 
     public static async Task<Results<ContentHttpResult, NotFound>> ReadWikiProposal(

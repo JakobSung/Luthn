@@ -120,7 +120,10 @@ unavailable Luthn service does not block completion of a Codex turn.
 Default auto-recall does not expose the private store. It asks the scoped MCP
 surface for one small agent-safe context pack at a new task or material topic
 change. The same classification, policy, and safe-projection rules apply to
-automatic recall and explicit MCP reads.
+automatic recall and explicit MCP reads. Optional `projectKey`, `taskKey`, and
+`topicTags` values are normalized, bounded, classified with the complete safe
+projection, and may contain only non-sensitive identifiers. Raw workspace and
+transcript paths are neither recall metadata nor persisted capture fields.
 
 ## Public-Safe Knowledge May Contain
 

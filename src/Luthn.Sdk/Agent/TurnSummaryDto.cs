@@ -14,7 +14,10 @@ public sealed record TurnSummaryIntakeRequestDto(
     [property: JsonPropertyName("contentDigest")] string? ContentDigest = null,
     [property: JsonPropertyName("idempotencyKey")] string? IdempotencyKey = null,
     [property: JsonPropertyName("sourceMetadata")] IReadOnlyDictionary<string, string>? SourceMetadata = null,
-    [property: JsonPropertyName("title")] string? Title = null);
+    [property: JsonPropertyName("title")] string? Title = null,
+    [property: JsonPropertyName("projectKey")] string? ProjectKey = null,
+    [property: JsonPropertyName("taskKey")] string? TaskKey = null,
+    [property: JsonPropertyName("topicTags")] IReadOnlyList<string>? TopicTags = null);
 
 public sealed record TurnSummaryIntakeResponseDto(
     [property: JsonPropertyName("summaryId")] string SummaryId,

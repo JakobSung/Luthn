@@ -32,7 +32,9 @@ explicit shared-memory writes.
 
 Lightweight auto-recall fetches one small context pack when a new task or
 material topic begins. It is enabled by default when Codex is connected and
-reuses that context during the task instead of querying on every turn.
+reuses that context during the task instead of querying on every turn. Optional
+non-sensitive project, task, and topic keys scope and rank recall; recent safe
+projections receive a bounded ranking bonus.
 
 ```text
 completed turn -> bounded capsule -> classify and store safe context

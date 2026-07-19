@@ -34,6 +34,9 @@ public sealed class GetContextPackTool : ILuthnMcpTool
     {
         var query = ReadOptionalString(arguments, "query");
         var coreTags = ReadCoreTags(arguments);
+        var projectKey = ReadOptionalString(arguments, "projectKey");
+        var taskKey = ReadOptionalString(arguments, "taskKey");
+        var topicTags = ReadTags(arguments, "topicTags");
         var maxItems = ReadBoundedInteger(arguments, "maxItems", 20, 1, 50);
         var maxTokens = ReadOptionalBoundedInteger(
             arguments,
@@ -62,7 +65,15 @@ public sealed class GetContextPackTool : ILuthnMcpTool
 
         var effectiveCacheKey = cacheKey is null || cacheTtlSeconds is null
             ? null
-            : BuildCacheKey(cacheKey, query, coreTags, maxItems, maxTokens);
+            : BuildCacheKey(
+                cacheKey,
+                query,
+                coreTags,
+                maxItems,
+                maxTokens,
+                projectKey,
+                taskKey,
+                topicTags);
         var now = _utcNow();
         if (effectiveCacheKey is not null &&
             _cache.TryGetValue(effectiveCacheKey, out var cached) &&
@@ -84,14 +95,23 @@ public sealed class GetContextPackTool : ILuthnMcpTool
                 ? maxItems
                 : Math.Min(MaximumCandidatePoolSize, maxItems * CandidatePoolMultiplier);
             result = await _client.GetContextPackAsync(
-                coreTags,
-                candidateMaxItems,
-                query,
+                new ContextPackRequestDto(
+                    coreTags,
+                    candidateMaxItems,
+                    query,
+                    projectKey,
+                    taskKey,
+                    topicTags),
                 effectiveCancellationToken);
         }
         catch (Exception) when (failOpen && !cancellationToken.IsCancellationRequested)
         {
-            return new ContextPackDto(coreTags, []);
+            return new ContextPackDto(coreTags, [])
+            {
+                ProjectKey = projectKey,
+                TaskKey = taskKey,
+                TopicTags = topicTags
+            };
         }
 
         var bounded = ApplyBounds(result, maxItems, maxTokens);
@@ -114,7 +134,7 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         var candidates = contextPack.Items.ToArray();
         if (maxTokens is null)
         {
-            return new ContextPackDto(contextPack.CoreTags, candidates.Take(maxItems).ToArray());
+            return CopyPack(contextPack, candidates.Take(maxItems).ToArray());
         }
 
         for (var desiredItems = Math.Min(maxItems, candidates.Length); desiredItems > 0; desiredItems--)
@@ -142,12 +162,22 @@ public sealed class GetContextPackTool : ILuthnMcpTool
 
             if (items.Count == desiredItems)
             {
-                return new ContextPackDto(contextPack.CoreTags, items);
+                return CopyPack(contextPack, items);
             }
         }
 
-        return new ContextPackDto(contextPack.CoreTags, []);
+        return CopyPack(contextPack, []);
     }
+
+    private static ContextPackDto CopyPack(
+        ContextPackDto source,
+        IReadOnlyList<ContextPackItemDto> items) =>
+        new(source.CoreTags, items)
+        {
+            ProjectKey = source.ProjectKey,
+            TaskKey = source.TaskKey,
+            TopicTags = source.TopicTags
+        };
 
     private static int EstimateTokens(ContextPackItemDto item)
     {
@@ -163,7 +193,11 @@ public sealed class GetContextPackTool : ILuthnMcpTool
             item.Title.Length +
             item.SafeSummary.Length +
             item.Sensitivity.Length +
-            item.CoreTags.Sum(tag => tag.Length + 3);
+            item.CoreTags.Sum(tag => tag.Length + 3) +
+            (item.ProjectKey?.Length ?? 0) +
+            (item.TaskKey?.Length ?? 0) +
+            item.TopicTags.Sum(tag => tag.Length + 3) +
+            item.ProjectionTimestamp.ToString("O", CultureInfo.InvariantCulture).Length;
     }
 
     private static ContextPackItemDto? FitWithinTokenBudget(
@@ -235,14 +269,20 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         string? query,
         IReadOnlyList<string> coreTags,
         int maxItems,
-        int? maxTokens) =>
+        int? maxTokens,
+        string? projectKey,
+        string? taskKey,
+        IReadOnlyList<string> topicTags) =>
         string.Join(
             '\u001f',
             cacheKey,
             query ?? string.Empty,
             string.Join('\u001e', coreTags),
             maxItems.ToString(CultureInfo.InvariantCulture),
-            maxTokens?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+            maxTokens?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            projectKey ?? string.Empty,
+            taskKey ?? string.Empty,
+            string.Join('\u001e', topicTags));
 
     private void PruneCache(DateTimeOffset now)
     {
@@ -295,9 +335,12 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         return value;
     }
 
-    private static IReadOnlyList<string> ReadCoreTags(JsonElement arguments)
+    private static IReadOnlyList<string> ReadCoreTags(JsonElement arguments) =>
+        ReadTags(arguments, "coreTags");
+
+    private static IReadOnlyList<string> ReadTags(JsonElement arguments, string name)
     {
-        if (!arguments.TryGetProperty("coreTags", out var tagsElement) ||
+        if (!arguments.TryGetProperty(name, out var tagsElement) ||
             tagsElement.ValueKind is not JsonValueKind.Array)
         {
             return [];

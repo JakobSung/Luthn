@@ -66,12 +66,35 @@ public sealed class PostgresIntegrationSmokeTests
                 ("Id", "SensitiveRecordReferenceId", "RequestedBy", "RequestReason", "Status", "CreatedAt", "UpdatedAt")
             VALUES
                 ('access-legacy-approved', 'sensitive-ref-legacy-approved', 'postgres-smoke', 'Verify approved result survives migration.', 'Approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
+            INSERT INTO source_events
+                ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial")
+            VALUES
+                ('source-legacy-recall', 'test', 'postgres-smoke', CURRENT_TIMESTAMP, 'sha256:legacy-recall', FALSE);
+
+            INSERT INTO wiki_proposals
+                ("Id", "SourceEventId", "Title", "SafeSummary", "Sensitivity", "CoreTags", "AllowsAgentContext", "CreatedAt")
+            VALUES
+                ('wiki-legacy-recall', 'source-legacy-recall', 'Legacy recall', 'Legacy safe projection.', 'Public', '["legacy"]'::jsonb, TRUE, CURRENT_TIMESTAMP);
+
+            INSERT INTO shared_memory_items
+                ("Id", "Title", "SafeSummary", "Sensitivity", "CoreTags", "Visibility", "RetentionKind", "AllowsAgentContext", "CreatedAt", "UpdatedAt", "CreatedBy")
+            VALUES
+                ('memory-legacy-recall', 'Legacy memory', 'Legacy safe memory.', 'Public', '["legacy"]'::jsonb, 'SharedAcrossAgents', 'Durable', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'postgres-smoke');
             """);
         await migrator.MigrateAsync();
 
         var migratedRequest = await db.SensitiveAccessRequests
             .SingleAsync(record => record.Id == "access-legacy-approved");
         Assert.Equal("Reviewed legacy output.", migratedRequest.RedactedSummary);
+        var migratedWiki = await db.WikiProposals.SingleAsync(record => record.Id == "wiki-legacy-recall");
+        Assert.Null(migratedWiki.ProjectKey);
+        Assert.Null(migratedWiki.TaskKey);
+        Assert.Empty(migratedWiki.TopicTags);
+        var migratedMemory = await db.SharedMemoryItems.SingleAsync(record => record.Id == "memory-legacy-recall");
+        Assert.Null(migratedMemory.ProjectKey);
+        Assert.Null(migratedMemory.TaskKey);
+        Assert.Empty(migratedMemory.TopicTags);
         var migratedResult = await SensitiveAccessEndpoints.ReadRequestResult(
             "access-legacy-approved",
             db,

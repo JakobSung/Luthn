@@ -102,6 +102,12 @@ unrelated user instructions. That block asks Codex to:
 - refresh after 10 minutes when the task continues;
 - avoid automatic lookup on every turn.
 
+When known, Codex may send normalized non-sensitive `projectKey`, `taskKey`,
+and `topicTags`. A project-scoped request includes matching and global records,
+excludes records assigned to another project, and applies bounded task, topic,
+and recency boosts. Never use a raw workspace path, transcript path, transcript
+content, credential, or customer identifier as recall metadata.
+
 Use `search_safe_context` or `query_shared_memory` explicitly when a task needs
 deeper recall.
 

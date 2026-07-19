@@ -38,6 +38,17 @@ public static class TurnSummaryEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
+        var metadataError = RecallMetadataValidation.TryNormalize(
+            request.ProjectKey,
+            request.TaskKey,
+            request.TopicTags,
+            "Invalid turn summary intake request.",
+            out var recallMetadata);
+        if (metadataError is not null)
+        {
+            return TypedResults.BadRequest(metadataError);
+        }
+
         var normalizedTags = NormalizeTags(request.CoreTags!);
         var contentDigest = NormalizeDigest(request.ContentDigest) ?? ComputeSha256Digest(request.Summary);
         var summaryId = CreateStableSummaryId(request, contentDigest);
@@ -57,7 +68,10 @@ public static class TurnSummaryEndpoints
             content: null,
             ResolveTitle(request),
             request.Summary,
-            normalizedTags);
+            normalizedTags,
+            recallMetadata.ProjectKey,
+            recallMetadata.TaskKey,
+            recallMetadata.TopicTags);
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
         db.AuditEvents.Add(new AuditEventRecord
         {
@@ -133,6 +147,9 @@ public static class TurnSummaryEndpoints
             SafeSummary = memory.SafeSummary.Trim(),
             Sensitivity = memory.Sensitivity,
             CoreTags = memory.CoreTags.ToList(),
+            ProjectKey = recallMetadata.ProjectKey,
+            TaskKey = recallMetadata.TaskKey,
+            TopicTags = recallMetadata.TopicTags.ToList(),
             Visibility = memory.Visibility,
             RetentionKind = memory.Retention.Kind,
             ExpiresAt = memory.Retention.ExpiresAt,
@@ -416,6 +433,9 @@ public sealed record TurnSummaryIntakeRequest
     public string? TurnRange { get; init; }
     public string SourceAgent { get; init; } = "codex";
     public string? ProjectPath { get; init; }
+    public string? ProjectKey { get; init; }
+    public string? TaskKey { get; init; }
+    public IReadOnlyList<string>? TopicTags { get; init; }
     public string Summary { get; init; } = "";
     public IReadOnlyList<string>? CoreTags { get; init; }
     public string? ContentDigest { get; init; }

@@ -37,7 +37,12 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             summary = "Published release note for external contributors.",
             coreTags = new[] { "release", "codex" },
             title = "Codex release note",
-            idempotencyKey = "summary-safe-1"
+            idempotencyKey = "summary-safe-1",
+            projectPath = "/private/workspace/Luthn",
+            sourceMetadata = new Dictionary<string, string> { ["transcript_path"] = "/private/transcript.jsonl" },
+            projectKey = " LUTHN ",
+            taskKey = " RELEASE ",
+            topicTags = new[] { " Delivery ", "delivery" }
         });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -50,7 +55,10 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         {
             query = "release note",
             coreTags = new[] { "release" },
-            maxItems = 10
+            maxItems = 10,
+            projectKey = "luthn",
+            taskKey = "release",
+            topicTags = new[] { "delivery" }
         });
         using var contextBody = await JsonDocument.ParseAsync(await contextResponse.Content.ReadAsStreamAsync());
 
@@ -58,6 +66,10 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         var item = Assert.Single(contextBody.RootElement.GetProperty("items").EnumerateArray());
         Assert.StartsWith("memory-turn-summary-", item.GetProperty("id").GetString(), StringComparison.Ordinal);
         Assert.Equal("Codex release note", item.GetProperty("title").GetString());
+        Assert.Equal("luthn", item.GetProperty("projectKey").GetString());
+        Assert.Equal("release", item.GetProperty("taskKey").GetString());
+        Assert.Equal(["delivery"], item.GetProperty("topicTags").EnumerateArray().Select(tag => tag.GetString()));
+        Assert.NotEqual(default, item.GetProperty("projectionTimestamp").GetDateTimeOffset());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
@@ -72,6 +84,18 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.Equal(MemoryVisibility.SharedAcrossAgents, memory.Visibility);
         Assert.True(memory.AllowsAgentContext);
         Assert.Equal("session-safe-1", memory.SourceSessionId);
+        Assert.Equal("luthn", memory.ProjectKey);
+        Assert.Equal("release", memory.TaskKey);
+        Assert.Equal(["delivery"], memory.TopicTags);
+        var persistedStrings = db.ChangeTracker.Entries()
+            .Select(entry => entry.Entity)
+            .SelectMany(record => record.GetType().GetProperties()
+                .Where(property => property.PropertyType == typeof(string))
+                .Select(property => property.GetValue(record) as string))
+            .Where(value => value is not null)
+            .ToArray();
+        Assert.DoesNotContain(persistedStrings, value => value!.Contains("/private/workspace", StringComparison.Ordinal));
+        Assert.DoesNotContain(persistedStrings, value => value!.Contains("transcript.jsonl", StringComparison.Ordinal));
     }
 
     [Fact]

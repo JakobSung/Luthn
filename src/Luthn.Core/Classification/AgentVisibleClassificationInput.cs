@@ -12,7 +12,10 @@ public static class AgentVisibleClassificationInput
         string? content,
         string? title,
         string? safeSummary,
-        IEnumerable<string>? coreTags)
+        IEnumerable<string>? coreTags,
+        string? projectKey = null,
+        string? taskKey = null,
+        IEnumerable<string>? topicTags = null)
     {
         var builder = new StringBuilder();
         AppendField(builder, "content", content);
@@ -24,6 +27,16 @@ public static class AgentVisibleClassificationInput
             foreach (var tag in coreTags.Where(tag => !string.IsNullOrWhiteSpace(tag)))
             {
                 AppendField(builder, "coreTag", tag);
+            }
+        }
+
+        AppendField(builder, "projectKey", projectKey);
+        AppendField(builder, "taskKey", taskKey);
+        if (topicTags is not null)
+        {
+            foreach (var tag in topicTags.Where(tag => !string.IsNullOrWhiteSpace(tag)))
+            {
+                AppendField(builder, "topicTag", tag);
             }
         }
 

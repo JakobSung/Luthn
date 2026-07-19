@@ -22,7 +22,10 @@ public sealed class MemoryEndpointTests
             Title = "Release guide memory",
             SafeSummary = "Public-safe deployment memory.",
             CoreTags = [" guide ", "Guide", "release"],
-            Visibility = MemoryVisibility.SharedAcrossAgents
+            Visibility = MemoryVisibility.SharedAcrossAgents,
+            ProjectKey = " LUTHN ",
+            TaskKey = " RELEASE ",
+            TopicTags = [" Delivery ", "delivery"]
         };
 
         var createResult = await MemoryEndpoints.CreateMemoryItem(
@@ -37,6 +40,9 @@ public sealed class MemoryEndpointTests
 
         Assert.True(created.Value.AllowsAgentContext);
         Assert.Equal(["guide", "release"], created.Value.CoreTags);
+        Assert.Equal("luthn", created.Value.ProjectKey);
+        Assert.Equal("release", created.Value.TaskKey);
+        Assert.Equal(["delivery"], created.Value.TopicTags);
         Assert.DoesNotContain("raw", created.Value.SafeSummary, StringComparison.OrdinalIgnoreCase);
 
         var readResult = await MemoryEndpoints.ReadMemoryItem(id, db, CancellationToken.None);
@@ -46,7 +52,7 @@ public sealed class MemoryEndpointTests
         Assert.Equal("Public-safe deployment memory.", ok.Value.SafeSummary);
 
         var queryResult = await MemoryEndpoints.QueryMemoryItems(
-            new MemoryQueryRequest("deployment", ["release"], 10),
+            new MemoryQueryRequest("deployment", ["release"], 10, "LUTHN", "RELEASE", ["Delivery"]),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
             new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
             db,
@@ -55,6 +61,12 @@ public sealed class MemoryEndpointTests
         var item = Assert.Single(queryOk.Value!.Items);
 
         Assert.Equal(id, item.Id);
+        Assert.Equal("luthn", queryOk.Value.ProjectKey);
+        Assert.Equal("release", queryOk.Value.TaskKey);
+        Assert.Equal(["delivery"], queryOk.Value.TopicTags);
+        Assert.Equal("luthn", item.ProjectKey);
+        Assert.Equal("release", item.TaskKey);
+        Assert.Equal(["delivery"], item.TopicTags);
         var audit = Assert.Single(await db.AuditEvents
             .Where(record => record.Action == "memory.item.classified")
             .ToArrayAsync());

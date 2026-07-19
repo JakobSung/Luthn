@@ -10,17 +10,31 @@ public sealed record CreateSharedMemoryItemRequestDto(
     [property: JsonPropertyName("retentionKind")] string RetentionKind = "Durable",
     [property: JsonPropertyName("expiresAt")] DateTimeOffset? ExpiresAt = null,
     [property: JsonPropertyName("sourceSessionId")] string? SourceSessionId = null,
-    [property: JsonPropertyName("sensitivity")] string Sensitivity = "Public");
+    [property: JsonPropertyName("sensitivity")] string Sensitivity = "Public",
+    [property: JsonPropertyName("projectKey")] string? ProjectKey = null,
+    [property: JsonPropertyName("taskKey")] string? TaskKey = null,
+    [property: JsonPropertyName("topicTags")] IReadOnlyList<string>? TopicTags = null);
 
 public sealed record SharedMemoryQueryRequestDto(
     [property: JsonPropertyName("query")] string? Query,
     [property: JsonPropertyName("coreTags")] IReadOnlyList<string> CoreTags,
-    [property: JsonPropertyName("maxItems")] int MaxItems = 20);
+    [property: JsonPropertyName("maxItems")] int MaxItems = 20,
+    [property: JsonPropertyName("projectKey")] string? ProjectKey = null,
+    [property: JsonPropertyName("taskKey")] string? TaskKey = null,
+    [property: JsonPropertyName("topicTags")] IReadOnlyList<string>? TopicTags = null);
 
 public sealed record SharedMemoryQueryResponseDto(
     [property: JsonPropertyName("query")] string? Query,
     [property: JsonPropertyName("coreTags")] IReadOnlyList<string> CoreTags,
-    [property: JsonPropertyName("items")] IReadOnlyList<SharedMemoryItemDto> Items);
+    [property: JsonPropertyName("items")] IReadOnlyList<SharedMemoryItemDto> Items)
+{
+    [JsonPropertyName("projectKey")]
+    public string? ProjectKey { get; init; }
+    [JsonPropertyName("taskKey")]
+    public string? TaskKey { get; init; }
+    [JsonPropertyName("topicTags")]
+    public IReadOnlyList<string> TopicTags { get; init; } = [];
+}
 
 public sealed record SharedMemoryItemDto(
     [property: JsonPropertyName("id")] string Id,
@@ -33,4 +47,12 @@ public sealed record SharedMemoryItemDto(
     [property: JsonPropertyName("expiresAt")] DateTimeOffset? ExpiresAt,
     [property: JsonPropertyName("sourceSessionId")] string? SourceSessionId,
     [property: JsonPropertyName("allowsAgentContext")] bool AllowsAgentContext,
-    [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt);
+    [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt)
+{
+    [JsonPropertyName("projectKey")]
+    public string? ProjectKey { get; init; }
+    [JsonPropertyName("taskKey")]
+    public string? TaskKey { get; init; }
+    [JsonPropertyName("topicTags")]
+    public IReadOnlyList<string> TopicTags { get; init; } = [];
+}

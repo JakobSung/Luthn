@@ -93,10 +93,70 @@ public sealed class RetrievalCandidateSelectorTests
         Assert.Equal(["wiki-needle"], candidates.Select(candidate => candidate.Id).ToArray());
     }
 
+    [Fact]
+    public async Task ProjectScopeIncludesMatchingAndGlobalButExcludesOtherProjects()
+    {
+        await using var db = CreateDbContext();
+        db.WikiProposals.AddRange(
+            Wiki("wiki-matching", SensitivityLevel.Public, true, projectKey: "luthn"),
+            Wiki("wiki-global", SensitivityLevel.Public, true),
+            Wiki("wiki-other", SensitivityLevel.Public, true, projectKey: "other"));
+        await db.SaveChangesAsync();
+
+        var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
+        var candidates = await selector.SelectAgentContextAsync(
+            new SafeSearchRequest("needle", ["needle"], 20, "luthn"),
+            CancellationToken.None);
+
+        Assert.Equal(
+            ["wiki-global", "wiki-matching"],
+            candidates.Select(candidate => candidate.Id).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task NewestFirstPreselectionKeepsRecentCandidateBeyondAlphabeticalLimit()
+    {
+        await using var db = CreateDbContext();
+        var now = DateTimeOffset.Parse("2026-07-19T12:00:00Z");
+        db.WikiProposals.AddRange(Enumerable.Range(0, RetrievalCandidateLimits.MaxCandidatesPerCorpus)
+            .Select(index => new WikiProposalRecord
+            {
+                Id = $"wiki-old-{index:D4}",
+                SourceEventId = $"source-old-{index:D4}",
+                Title = $"A old recall {index:D4}",
+                SafeSummary = "Common recall projection.",
+                Sensitivity = SensitivityLevel.Public,
+                CoreTags = ["recall"],
+                AllowsAgentContext = true,
+                CreatedAt = now.AddDays(-30)
+            }));
+        db.WikiProposals.Add(new WikiProposalRecord
+        {
+            Id = "wiki-recent-z",
+            SourceEventId = "source-recent-z",
+            Title = "Z recent recall",
+            SafeSummary = "Common recall projection.",
+            Sensitivity = SensitivityLevel.Public,
+            CoreTags = ["recall"],
+            AllowsAgentContext = true,
+            CreatedAt = now
+        });
+        await db.SaveChangesAsync();
+
+        var selector = new DbBackedRetrievalCandidateSelector(db, new FixedTimeProvider(now));
+        var candidates = await selector.SelectAgentContextAsync(
+            new SafeSearchRequest("recall", ["recall"], 20),
+            CancellationToken.None);
+
+        Assert.Equal(RetrievalCandidateLimits.MaxCandidatesPerCorpus, candidates.Count);
+        Assert.Contains(candidates, candidate => candidate.Id == "wiki-recent-z");
+    }
+
     private static WikiProposalRecord Wiki(
         string id,
         SensitivityLevel sensitivity,
-        bool allowsAgentContext) => new()
+        bool allowsAgentContext,
+        string? projectKey = null) => new()
         {
             Id = id,
             SourceEventId = $"source-{id}",
@@ -104,6 +164,7 @@ public sealed class RetrievalCandidateSelectorTests
             SafeSummary = "Needle public-safe projection.",
             Sensitivity = sensitivity,
             CoreTags = ["needle"],
+            ProjectKey = projectKey,
             AllowsAgentContext = allowsAgentContext,
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -135,5 +196,10 @@ public sealed class RetrievalCandidateSelectorTests
             .Options;
 
         return new LuthnDbContext(options);
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }

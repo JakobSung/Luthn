@@ -22,7 +22,13 @@ public sealed class ContextPackBuilder
         ArgumentNullException.ThrowIfNull(candidates);
 
         var search = retrievalBackend.Search(
-            new SafeSearchRequest(request.Query, request.CoreTags, request.MaxItems),
+            new SafeSearchRequest(
+                request.Query,
+                request.CoreTags,
+                request.MaxItems,
+                request.ProjectKey,
+                request.TaskKey,
+                request.TopicTags),
             candidates);
 
         var items = search.Results
@@ -31,9 +37,20 @@ public sealed class ContextPackBuilder
                 result.Title,
                 result.SafeSummary,
                 result.Sensitivity,
-                result.CoreTags))
+                result.CoreTags)
+            {
+                ProjectKey = result.ProjectKey,
+                TaskKey = result.TaskKey,
+                TopicTags = result.TopicTags,
+                ProjectionTimestamp = result.ProjectionTimestamp
+            })
             .ToArray();
 
-        return new ContextPack(search.CoreTags, items);
+        return new ContextPack(search.CoreTags, items)
+        {
+            ProjectKey = search.ProjectKey,
+            TaskKey = search.TaskKey,
+            TopicTags = search.TopicTags
+        };
     }
 }

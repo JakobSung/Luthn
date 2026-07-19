@@ -28,7 +28,7 @@ VaultRecord -> KnowledgeItem로 요약 -> WikiDocument로 투영
 - `MemoryVisibility`: owner 전용, 참여자 공유, 에이전트 공유, 공개 안전 가시성
 - `MemoryRetentionPolicy`: 임시/session 기억은 만료해야 하고 durable 기억에는 만료를 두지 않음
 
-제한된 기억은 기본적으로 owner에게만 보입니다. 더 넓은 공유는 명시적 정책 절차여야 합니다. 안전 기억 API는 메타데이터 기록만 로컬 또는 PostgreSQL에 저장하고, 공개·미만료·에이전트 허용 투영만 반환합니다.
+제한된 기억은 기본적으로 owner에게만 보입니다. 더 넓은 공유는 명시적 정책 절차여야 합니다. 안전 기억 API는 메타데이터 기록만 로컬 또는 PostgreSQL에 저장하고, 공개·미만료·에이전트 허용 투영만 반환합니다. 선택적인 정규화 프로젝트·작업·주제 메타데이터는 wiki와 공유 기억 안전 투영에 저장합니다. 회상은 순위 계산 전에 프로젝트 범위를 제한하고 최신 기록부터 후보 수를 제한하며 `CreatedAt` 또는 `UpdatedAt`으로 결정적이고 제한된 최신성 점수를 계산합니다.
 
 ## Cloud 준비형 Local-First 기반
 

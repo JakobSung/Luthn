@@ -12,6 +12,15 @@ namespace Luthn.AgentConnector.Http;
 public interface ILuthnAgentClient
 {
     Task<ContextPackDto> GetContextPackAsync(
+        ContextPackRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        GetContextPackAsync(
+            request.CoreTags,
+            request.MaxItems,
+            request.Query,
+            cancellationToken);
+
+    Task<ContextPackDto> GetContextPackAsync(
         IReadOnlyList<string> coreTags,
         int maxItems = 20,
         string? query = null,
@@ -22,6 +31,15 @@ public interface ILuthnAgentClient
         IReadOnlyList<string> coreTags,
         int maxItems = 20,
         CancellationToken cancellationToken = default);
+
+    Task<SafeSearchResponseDto> SearchAsync(
+        SafeSearchRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        SearchAsync(
+            request.Query,
+            request.CoreTags,
+            request.MaxItems,
+            cancellationToken);
 
     Task<WikiProposalDto> GetWikiProposalAsync(
         string id,
