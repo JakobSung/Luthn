@@ -189,7 +189,9 @@ transaction. Every agent-safe read and ranking query filters by owner before
 selection. Turn-summary idempotency includes the owner partition, and MCP
 context-pack cache keys include a non-reversible credential partition. No user
 identity, bearer digest, or provenance claim enters safe projections or cache
-status output. Operators are explicit token configuration, not a caller
+status output. Sensitive-access status polling uses the same partition with a
+one-second bounded cache so state changes cannot remain stale beyond that
+window. Operators are explicit token configuration, not a caller
 header; their cross-owner actions stay limited to management routes and
 metadata-only audit records.
 

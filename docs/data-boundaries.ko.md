@@ -149,7 +149,8 @@ outbox의 owner는 같은 write transaction에서 기록합니다. 모든 agent-
 후보 선택 전에 owner를 거릅니다. turn-summary idempotency에는 owner partition을 넣고 MCP
 context-pack cache key에는 역으로 token을 알아낼 수 없는 credential partition을 넣습니다.
 user identity, bearer digest, provenance claim은 안전 투영이나 cache 상태 출력에 들어가지
-않습니다. 운영자 권한은 호출자 header가 아니라 명시적 token 설정이며, 교차-owner 작업은
+않습니다. 민감 접근 상태 polling도 같은 partition을 사용하는 1초짜리 제한 cache라서
+상태 변경이 그보다 오래 stale하지 않습니다. 운영자 권한은 호출자 header가 아니라 명시적 token 설정이며, 교차-owner 작업은
 관리 route와 metadata-only audit record로 제한합니다.
 
 ## 수집 출처 경계

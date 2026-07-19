@@ -123,7 +123,7 @@ public static class LuthnMcpToolRegistry
             new SubmitSearchFeedbackTool(client),
             new GetSharedMemoryItemTool(client),
             new CreateSensitiveAccessRequestTool(client),
-            new GetSensitiveAccessRequestTool(client),
+            new GetSensitiveAccessRequestTool(client, principalCachePartition),
             new GetSensitiveAccessResultTool(client)
         ];
     }

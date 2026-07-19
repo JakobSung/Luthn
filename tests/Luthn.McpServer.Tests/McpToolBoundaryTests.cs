@@ -422,6 +422,27 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task SensitiveAccessStatusCacheIsShortLivedAndPrincipalPartitioned()
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var client = new FakeLuthnClient();
+        var tool = new GetSensitiveAccessRequestTool(client, "principal-alice", () => now);
+        using var args = JsonDocument.Parse("""{"id":"access-1"}""");
+
+        await tool.InvokeAsync(args.RootElement);
+        await tool.InvokeAsync(args.RootElement);
+        Assert.Equal(1, client.SensitiveAccessStatusCallCount);
+
+        Assert.NotEqual(
+            GetSensitiveAccessRequestTool.BuildCacheKey("principal-alice", "access-1"),
+            GetSensitiveAccessRequestTool.BuildCacheKey("principal-bob", "access-1"));
+
+        now = now.AddSeconds(2);
+        await tool.InvokeAsync(args.RootElement);
+        Assert.Equal(2, client.SensitiveAccessStatusCallCount);
+    }
+
+    [Fact]
     public async Task JsonRpcServerInitializesAndListsToolSchemas()
     {
         var server = new McpJsonRpcServer(LuthnMcpToolRegistry.CreateDefault(new FakeLuthnClient()));
@@ -539,6 +560,7 @@ public sealed class McpToolBoundaryTests
         public SharedMemoryQueryRequestDto? LastMemoryQueryRequest { get; private set; }
         public string? LastMemoryItemId { get; private set; }
         public int ContextPackCallCount { get; private set; }
+        public int SensitiveAccessStatusCallCount { get; private set; }
         public List<SearchObservationRequestDto> SearchObservations { get; } = [];
         public SearchFeedbackRequestDto? LastSearchFeedback { get; private set; }
         public ContextPackDto ContextPackResult { get; init; } = new([], []);
@@ -684,8 +706,10 @@ public sealed class McpToolBoundaryTests
 
         public Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
             string id,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new SensitiveAccessRequestDto(
+            CancellationToken cancellationToken = default)
+        {
+            SensitiveAccessStatusCallCount++;
+            return Task.FromResult(new SensitiveAccessRequestDto(
                 id,
                 "sensitive-ref-1",
                 "Pending",
@@ -699,6 +723,7 @@ public sealed class McpToolBoundaryTests
                 SessionId = "session-1",
                 ExpiresAt = DateTimeOffset.UnixEpoch.AddMinutes(10)
             });
+        }
 
         public Task<SearchTelemetryAcceptedDto> ReportSearchObservationAsync(
             SearchObservationRequestDto request,
