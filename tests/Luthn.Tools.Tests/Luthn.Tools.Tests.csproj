@@ -19,7 +19,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Luthn.Sdk\Luthn.Sdk.csproj" />
     <ProjectReference Include="..\..\src\Luthn.Tools\Luthn.Tools.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\data\classification\golden-v1.json"
+             Link="data\classification\golden-v1.json"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -191,6 +191,39 @@ and safe-search candidate counts:
 Use these metrics to decide when deterministic full-corpus ranking needs the
 next `pgvector` or DB-backed candidate-selection slice.
 
+### Classification golden evaluation
+
+Run the versioned synthetic Korean-majority corpus against the local mock with
+no network request:
+
+```bash
+dotnet run --project src/Luthn.Tools -- classification-eval
+```
+
+Write the same stable JSON report to a file when an artifact is needed:
+
+```bash
+dotnet run --project src/Luthn.Tools -- classification-eval \
+  --output artifacts/classification-eval.json
+```
+
+To evaluate the API's currently configured classifier, start the API and opt in
+explicitly to the possible external transfer. Pass only an environment variable
+name for a protected API token; do not place the token value on the command
+line:
+
+```bash
+export LUTHN_EVAL_TOKEN='<operator-provided-token>'
+dotnet run --project src/Luthn.Tools -- classification-eval \
+  --provider configured-api \
+  --api-url http://127.0.0.1:5089 \
+  --allow-external-provider \
+  --token-env LUTHN_EVAL_TOKEN
+```
+
+The report intentionally omits corpus text and reports bounded case IDs,
+per-case classification/routing comparisons, and aggregate mismatch counts.
+
 External classification is opt-in and uses the `external-http` provider. When
 `Luthn__Classification__ExternalHttp__Endpoint` is configured, the API must not
 run the mock provider; set `Luthn__Classification__Provider=external-http`.

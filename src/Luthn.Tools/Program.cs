@@ -18,6 +18,12 @@ switch (command)
     case "preview":
         await RunPreview(args);
         break;
+    case "classification-eval":
+        Environment.ExitCode = await new ClassificationEvaluationCommand().ExecuteAsync(
+            args.Skip(1).ToArray(),
+            Console.Out,
+            Console.Error);
+        break;
     case "context":
         RunContext();
         break;
@@ -214,6 +220,8 @@ static void PrintUsage()
 {
     Console.WriteLine("Usage:");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- preview [source-id] [content]");
+    Console.WriteLine("  dotnet run --project src/Luthn.Tools -- classification-eval [--dataset path] [--output path]");
+    Console.WriteLine("    [--provider mock|configured-api] [--api-url url] [--allow-external-provider] [--token-env name]");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- context");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- wiki-render");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- seed-demo");
