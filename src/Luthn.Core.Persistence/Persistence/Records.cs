@@ -225,6 +225,7 @@ public enum AgentConnectionActivityState
 public sealed class AgentConnectionChannelRecord
 {
     public string Id { get; set; } = "";
+    public string OwnerUserId { get; set; } = "";
     public string AgentId { get; set; } = "";
     public string AgentName { get; set; } = "";
     public string IntegrationKind { get; set; } = "";

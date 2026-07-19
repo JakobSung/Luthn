@@ -205,6 +205,11 @@ const createChannelSummary = (channel) => {
 const createConnectionRow = (connection) => {
   const row = document.createElement("tr");
 
+  const ownerCell = createConnectionCell("Owner");
+  const owner = document.createElement("code");
+  owner.textContent = boundedText(connection?.ownerUserId, 128, "Unknown owner");
+  ownerCell.appendChild(owner);
+
   const agentCell = createConnectionCell("Agent");
   const identity = document.createElement("div");
   identity.className = "agent-identity";
@@ -245,6 +250,7 @@ const createConnectionRow = (connection) => {
   versionCell.appendChild(version);
 
   row.append(
+    ownerCell,
     agentCell,
     integrationCell,
     stateCell,
@@ -259,7 +265,7 @@ const renderConnectionMessage = (message) => {
   const row = document.createElement("tr");
   row.className = "connection-message-row";
   const cell = document.createElement("td");
-  cell.colSpan = 6;
+  cell.colSpan = 7;
   cell.textContent = message;
   row.appendChild(cell);
   $("#connectionRows").replaceChildren(row);

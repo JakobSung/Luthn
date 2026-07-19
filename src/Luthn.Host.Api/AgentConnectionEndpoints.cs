@@ -28,16 +28,25 @@ public static partial class AgentConnectionEndpoints
 
     public static async Task<Ok<AgentConnectionListResponse>> ListConnections(
         LuthnDbContext db,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        var records = await db.AgentConnectionChannels
-            .AsNoTracking()
-            .OrderBy(record => record.AgentId)
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        var query = db.AgentConnectionChannels.AsNoTracking();
+        if (!principal.IsOperator)
+        {
+            query = query.Where(record => record.OwnerUserId == principal.UserId);
+        }
+
+        var records = await query
+            .OrderBy(record => record.OwnerUserId)
+            .ThenBy(record => record.AgentId)
             .ThenBy(record => record.Channel)
             .ToListAsync(cancellationToken);
 
         var connections = records
-            .GroupBy(record => record.AgentId, StringComparer.Ordinal)
+            .GroupBy(
+                record => new { record.OwnerUserId, record.AgentId })
             .Select(ToConnectionResponse)
             .ToArray();
 
@@ -48,6 +57,7 @@ public static partial class AgentConnectionEndpoints
         string agentId,
         AgentConnectionObservationRequest request,
         LuthnDbContext db,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var validationError = Validate(agentId, request);
@@ -56,6 +66,7 @@ public static partial class AgentConnectionEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
+        var ownerUserId = ServiceTokenAuthorization.GetPrincipal(httpContext).UserId;
         var normalizedAgentId = agentId.Trim();
         var observedAt = DateTimeOffset.UtcNow;
         var requestedChannels = request.Channels!
@@ -68,6 +79,7 @@ public static partial class AgentConnectionEndpoints
         {
             await UpsertAsync(
                 db,
+                ownerUserId,
                 normalizedAgentId,
                 request,
                 requestedChannels,
@@ -80,6 +92,7 @@ public static partial class AgentConnectionEndpoints
             db.ChangeTracker.Clear();
             await UpsertAsync(
                 db,
+                ownerUserId,
                 normalizedAgentId,
                 request,
                 requestedChannels,
@@ -90,8 +103,11 @@ public static partial class AgentConnectionEndpoints
 
         var records = await db.AgentConnectionChannels
             .AsNoTracking()
-            .Where(record => record.AgentId == normalizedAgentId)
-            .OrderBy(record => record.Channel)
+            .Where(record =>
+                record.OwnerUserId == ownerUserId &&
+                record.AgentId == normalizedAgentId)
+            .OrderBy(record => record.AgentId)
+            .ThenBy(record => record.Channel)
             .ToListAsync(cancellationToken);
 
         return TypedResults.Ok(ToConnectionResponse(records));
@@ -99,6 +115,7 @@ public static partial class AgentConnectionEndpoints
 
     private static async Task UpsertAsync(
         LuthnDbContext db,
+        string ownerUserId,
         string agentId,
         AgentConnectionObservationRequest request,
         IReadOnlyList<AgentConnectionChannelObservation> requestedChannels,
@@ -107,7 +124,10 @@ public static partial class AgentConnectionEndpoints
         CancellationToken cancellationToken)
     {
         var existing = await db.AgentConnectionChannels
-            .Where(record => record.AgentId == agentId && channelNames.Contains(record.Channel))
+            .Where(record =>
+                record.OwnerUserId == ownerUserId &&
+                record.AgentId == agentId &&
+                channelNames.Contains(record.Channel))
             .ToDictionaryAsync(record => record.Channel, StringComparer.Ordinal, cancellationToken);
 
         foreach (var channel in requestedChannels)
@@ -116,7 +136,8 @@ public static partial class AgentConnectionEndpoints
             {
                 record = new AgentConnectionChannelRecord
                 {
-                    Id = $"{agentId}:{channel.Channel}",
+                    Id = $"agent-connection:{Guid.NewGuid():N}",
+                    OwnerUserId = ownerUserId,
                     AgentId = agentId,
                     Channel = channel.Channel,
                     ConfigurationOwner = ConfigurationOwner,
@@ -200,6 +221,7 @@ public static partial class AgentConnectionEndpoints
             record.UpdatedAt)).ToArray();
 
         return new AgentConnectionResponse(
+            latest.OwnerUserId,
             latest.AgentId,
             latest.AgentName,
             latest.IntegrationKind,
@@ -497,6 +519,7 @@ public sealed record AgentConnectionListResponse(
     IReadOnlyList<AgentConnectionResponse> Connections);
 
 public sealed record AgentConnectionResponse(
+    string OwnerUserId,
     string AgentId,
     string AgentName,
     string IntegrationKind,

@@ -145,8 +145,10 @@ fail-closed합니다. 호출자가 보낸 `provenance.userId`, request JSON, hea
 connector metadata는 owner를 선택하거나 바꾸지 못합니다.
 
 source event, shared memory, wiki proposal, 민감 reference·request, provenance, safe-sync
-outbox의 owner는 같은 write transaction에서 기록합니다. 모든 agent-safe read와 ranking은
-후보 선택 전에 owner를 거릅니다. turn-summary idempotency에는 owner partition을 넣고 MCP
+outbox와 agent-connection 상태의 owner는 해당 write transaction에서 기록합니다. 모든
+agent-safe read와 ranking은 후보 선택 전에 owner를 거릅니다. agent-connection upsert와
+상태 묶음은 owner+agent+channel을 사용하며 명시적 운영자만 제한된 owner 표시와 함께
+전체 owner를 조회합니다. turn-summary idempotency에는 owner partition을 넣고 MCP
 context-pack cache key에는 역으로 token을 알아낼 수 없는 credential partition을 넣습니다.
 user identity, bearer digest, provenance claim은 안전 투영이나 cache 상태 출력에 들어가지
 않습니다. 민감 접근 상태 polling도 같은 partition을 사용하는 1초짜리 제한 cache라서

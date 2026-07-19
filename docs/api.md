@@ -99,8 +99,12 @@ POST /api/agent-connections/{agentId}/observations
 ```
 
 Agent connectors report metadata-only state for each supported channel. The
-API replaces the latest row for an agent/channel pair; it is a status surface,
-not a connection event log.
+API replaces the latest row for an owner/agent/channel tuple; it is a status
+surface, not a connection event log. Ownership is derived from the matched
+service token and is never accepted from the observation body. Non-operator
+callers can read and update only their own rows. An operator token can list all
+owners, and `ownerUserId` keeps otherwise identical agent IDs unambiguous.
+`SingleOwner` continues to use the configured local owner.
 
 Observation request:
 
@@ -139,6 +143,7 @@ List response:
 {
   "connections": [
     {
+      "ownerUserId": "local-owner",
       "agentId": "codex",
       "agentName": "Codex",
       "integrationKind": "host-hook-mcp",

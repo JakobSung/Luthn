@@ -54,7 +54,11 @@ GET  /api/agent-connections
 POST /api/agent-connections/{agentId}/observations
 ```
 
-connector가 channel별 메타데이터 상태를 보고합니다. agent/channel의 최신 row를 교체하는 상태 표면이며 사건 기록이 아닙니다.
+connector가 channel별 메타데이터 상태를 보고합니다. owner/agent/channel 조합의 최신
+row를 교체하는 상태 표면이며 사건 기록이 아닙니다. owner는 일치한 service token에서
+server가 정하고 관측 body에서는 받지 않습니다. 비운영자는 자기 row만 읽고 갱신하며,
+운영자 token은 모든 owner를 조회할 수 있습니다. 응답의 `ownerUserId`가 같은 agent ID를
+owner별로 구분합니다. `SingleOwner`는 계속 설정된 local owner를 사용합니다.
 
 ```json
 {

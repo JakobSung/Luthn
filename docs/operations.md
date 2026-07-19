@@ -60,7 +60,7 @@ export it to agent, sync, telemetry, or audit payloads.
 
 The ownership migration runs in the same PostgreSQL schema transaction. It
 backfills every legacy source, memory, wiki, sensitive reference/request,
-provenance, and safe-sync outbox row to `local-owner`, then adds non-empty
+provenance, safe-sync outbox, and agent-connection row to `local-owner`, then adds non-empty
 constraints and owner-leading indexes. The temporary backfill defaults are
 removed in the same migration so later writes missing trusted owner stamping
 fail instead of silently becoming `local-owner`. Keep the pre-migration database backup
@@ -71,6 +71,12 @@ read the expanded schema, restoring the matching operator key volume, and
 starting the matching previous image. Do not change `SingleOwnerUserId` after
 data exists without an explicit data migration; the setting does not relabel
 persisted owners.
+
+The agent-connection migration replaces global agent/channel uniqueness with
+owner/agent/channel uniqueness. Identically named connectors can therefore
+coexist for different owners after upgrade. SDK and connector requests do not
+gain an owner selector; identity continues to come only from their service
+token.
 
 ## Self-Host Migration Model
 

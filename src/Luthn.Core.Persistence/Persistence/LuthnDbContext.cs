@@ -282,7 +282,11 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         {
             entity.ToTable("agent_connection_channels");
             entity.HasKey(record => record.Id);
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_agent_connection_channels_owner_user_id",
+                "\"OwnerUserId\" <> ''"));
             entity.Property(record => record.Id).HasMaxLength(160);
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.AgentId).HasMaxLength(64).IsRequired();
             entity.Property(record => record.AgentName).HasMaxLength(128).IsRequired();
             entity.Property(record => record.IntegrationKind).HasMaxLength(64).IsRequired();
@@ -292,7 +296,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.VerificationState).HasConversion<string>().HasMaxLength(32);
             entity.Property(record => record.ActivityState).HasConversion<string>().HasMaxLength(32);
             entity.Property(record => record.FailureCode).HasMaxLength(64);
-            entity.HasIndex(record => new { record.AgentId, record.Channel }).IsUnique();
+            entity.HasIndex(record => new { record.OwnerUserId, record.AgentId, record.Channel }).IsUnique();
             entity.HasIndex(record => record.UpdatedAt);
         });
 

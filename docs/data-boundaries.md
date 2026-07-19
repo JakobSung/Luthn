@@ -184,9 +184,11 @@ product token has a bounded configured user identity. Caller-supplied
 connector metadata never select or change the owner.
 
 Owned source events, shared memory, wiki proposals, sensitive references and
-requests, provenance, and safe-sync outbox rows are stamped in the same write
-transaction. Every agent-safe read and ranking query filters by owner before
-selection. Turn-summary idempotency includes the owner partition, and MCP
+requests, provenance, safe-sync outbox rows, and agent-connection state are
+stamped in their write transaction. Every agent-safe read and ranking query
+filters by owner before selection. Agent-connection upsert and status grouping
+use owner plus agent plus channel; only explicit operators can list all owners,
+with bounded owner attribution. Turn-summary idempotency includes the owner partition, and MCP
 context-pack cache keys include a non-reversible credential partition. No user
 identity, bearer digest, or provenance claim enters safe projections or cache
 status output. Sensitive-access status polling uses the same partition with a
