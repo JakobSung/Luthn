@@ -36,6 +36,7 @@ public static class MemoryEndpoints
         CreateMemoryItemRequest request,
         IContentClassifier classifier,
         IPolicyEngine policyEngine,
+        ISensitiveMemoryPayloadProtector payloadProtector,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -101,7 +102,7 @@ public static class MemoryEndpoints
                 : new PublicRecordId(request.SourceSessionId.Trim()));
 
         var allowsAgentContext = decision.AllowsAgentContext && AllowsAgentContext(item, createdAt);
-        db.SharedMemoryItems.Add(new SharedMemoryItemRecord
+        var record = new SharedMemoryItemRecord
         {
             Id = item.Id.Value,
             Title = item.Title.Trim(),
@@ -119,7 +120,17 @@ public static class MemoryEndpoints
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
             CreatedBy = ServiceTokenAuthorization.GetActor(httpContext)
-        });
+        };
+        db.SharedMemoryItems.Add(record);
+        if (SensitiveMemoryPersistence.RequiresProtection(record))
+        {
+            var payload = SensitiveMemoryPersistence.FromRecord(record);
+            db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.Protect(
+                record,
+                payload,
+                payloadProtector,
+                createdAt));
+        }
 
         db.AuditEvents.Add(new AuditEventRecord
         {
@@ -129,26 +140,12 @@ public static class MemoryEndpoints
             Action = "memory.item.classified",
             SubjectId = item.Id.Value,
             PayloadClass = "metadata-only",
-            RedactionState = allowsAgentContext ? "safe-projection-only" : "memory-boundary-only"
+            RedactionState = allowsAgentContext ? "safe-projection-only" : "encrypted-payload-only"
         });
 
         await db.SaveChangesAsync(cancellationToken);
 
-        var response = ToResponse(
-            item.Id.Value,
-            item.Title,
-            item.SafeSummary,
-            item.Sensitivity,
-            item.CoreTags,
-            item.Visibility,
-            item.Retention.Kind,
-            item.Retention.ExpiresAt,
-            item.SourceSessionId?.Value,
-            allowsAgentContext,
-            createdAt,
-            recallMetadata.ProjectKey,
-            recallMetadata.TaskKey,
-            recallMetadata.TopicTags);
+        var response = ToResponse(record);
 
         return TypedResults.Created($"/api/memory/items/{memoryId}", response);
     }

@@ -94,7 +94,7 @@ public static class ServiceTokenAuthorization
             httpContext.Items[ActorItemKey] = ComposeActor(
                 "local-anonymous",
                 httpContext.Request.Headers[OperatorHeaderName].ToString());
-            return await next(context);
+            return await ContinueWhenSensitiveMemoryProtectionIsReady(context, next);
         }
 
         var authorization = httpContext.Request.Headers.Authorization.ToString();
@@ -122,7 +122,24 @@ public static class ServiceTokenAuthorization
         httpContext.Items[ActorItemKey] = ComposeActor(
             matchedToken.Name.Trim(),
             httpContext.Request.Headers[OperatorHeaderName].ToString());
-        return await next(context);
+        return await ContinueWhenSensitiveMemoryProtectionIsReady(context, next);
+    }
+
+    private static ValueTask<object?> ContinueWhenSensitiveMemoryProtectionIsReady(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next)
+    {
+        var protectionState = context.HttpContext.RequestServices
+            .GetRequiredService<SensitiveMemoryProtectionState>();
+        if (!protectionState.IsReady)
+        {
+            return ValueTask.FromResult<object?>(TypedResults.Problem(
+                title: "Sensitive memory protection is not ready.",
+                detail: "Product traffic is blocked until the protected payload store and key ring verify successfully.",
+                statusCode: StatusCodes.Status503ServiceUnavailable));
+        }
+
+        return next(context);
     }
 
     public static string? GetProductionReadinessIssue(

@@ -13,6 +13,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public DbSet<SensitiveAccessRequestRecord> SensitiveAccessRequests => Set<SensitiveAccessRequestRecord>();
     public DbSet<SensitiveAccessDecisionRecord> SensitiveAccessDecisions => Set<SensitiveAccessDecisionRecord>();
     public DbSet<SharedMemoryItemRecord> SharedMemoryItems => Set<SharedMemoryItemRecord>();
+    public DbSet<SensitiveMemoryPayloadRecord> SensitiveMemoryPayloads => Set<SensitiveMemoryPayloadRecord>();
     public DbSet<LocalInstallationStateRecord> LocalInstallationStates => Set<LocalInstallationStateRecord>();
     public DbSet<SafeProjectionSyncOutboxRecord> SafeProjectionSyncOutbox => Set<SafeProjectionSyncOutboxRecord>();
     public DbSet<SafeProjectionSyncCheckpointRecord> SafeProjectionSyncCheckpoints => Set<SafeProjectionSyncCheckpointRecord>();
@@ -159,6 +160,20 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.ExpiresAt
             });
             entity.HasIndex(record => new { record.ProjectKey, record.TaskKey, record.UpdatedAt });
+        });
+
+        modelBuilder.Entity<SensitiveMemoryPayloadRecord>(entity =>
+        {
+            entity.ToTable("sensitive_memory_payloads");
+            entity.HasKey(record => record.MemoryItemId);
+            entity.Property(record => record.MemoryItemId).HasMaxLength(128);
+            entity.Property(record => record.ContractVersion).HasDefaultValue(1);
+            entity.Property(record => record.ProtectionScheme).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.ProtectedPayload).HasColumnType("text").IsRequired();
+            entity.HasOne<SharedMemoryItemRecord>()
+                .WithOne()
+                .HasForeignKey<SensitiveMemoryPayloadRecord>(record => record.MemoryItemId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<LocalInstallationStateRecord>(entity =>

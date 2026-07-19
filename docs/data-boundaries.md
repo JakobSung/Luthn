@@ -147,6 +147,33 @@ summaries, result identifiers, raw errors, and free-form feedback are excluded.
 - unredacted incident logs containing private operational data
 - any record that policy marks as private-only
 
+## Sensitive Shared-Memory Encryption
+
+Shared-memory content that is sensitive or not eligible for agent context uses
+a separate `sensitive_memory_payloads` table. Its title, summary, tags,
+project/task/topic metadata, and source-session correlation are serialized as a
+versioned payload and protected with authenticated ASP.NET Core Data Protection
+using a purpose bound to the memory record ID. The ordinary
+`shared_memory_items` row contains only fixed inert placeholders and routing
+metadata; its search fields contain no user text. Ciphertext is not returned by
+agent APIs and is not copied into recall, sync, publication, audit, logs, or
+metrics.
+
+The Data Protection key ring lives in the separate `luthn-operator` volume,
+not PostgreSQL. This protects a database dump or PostgreSQL-volume-only
+compromise. It does not protect against host administrator/root access or an
+attacker who obtains both the PostgreSQL data and operator key volume. Existing
+private or sensitive rows are converted transactionally before product traffic
+is admitted. A missing key ring, wrong purpose, unsupported payload version, or
+invalid ciphertext leaves the data unchanged, makes `/readyz` fail, and blocks
+product routes while `/healthz` stays available.
+
+Database recovery therefore requires the matching operator key volume. Back up
+and restore the PostgreSQL database and `luthn-operator` key material as one
+recovery set. Never commit, print, or copy key XML into ordinary logs or an
+unencrypted repository. Losing the key ring makes encrypted memory
+unrecoverable; generating a new key ring does not decrypt existing payloads.
+
 ## Provider Boundary
 
 - Fresh packaged installs use an explicit `unconfigured` state. Classification

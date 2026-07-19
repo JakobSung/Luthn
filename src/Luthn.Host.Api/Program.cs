@@ -30,6 +30,9 @@ var hostOptions = builder.Configuration
 
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(operatorConfigDirectory, "keys")));
+builder.Services.AddSingleton<ISensitiveMemoryPayloadProtector, DataProtectionSensitiveMemoryPayloadProtector>();
+builder.Services.AddSingleton<SensitiveMemoryProtectionState>();
+builder.Services.AddScoped<SensitiveMemoryPayloadMigrator>();
 builder.Services.Configure<OperatorConfigOptions>(builder.Configuration.GetSection("Luthn:OperatorConfig"));
 builder.Services.AddSingleton<IOperatorClassificationSettingsStore, OperatorClassificationSettingsStore>();
 builder.Services.Configure<LuthnHostOperationalOptions>(builder.Configuration.GetSection("Luthn:Host"));
@@ -133,6 +136,20 @@ if (app.Environment.IsEnvironment("Testing"))
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
     db.Database.EnsureCreated();
+}
+
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    try
+    {
+        await scope.ServiceProvider
+            .GetRequiredService<SensitiveMemoryPayloadMigrator>()
+            .MigrateAndVerifyAsync();
+    }
+    catch (InvalidOperationException)
+    {
+        // Liveness and readiness stay observable, but product traffic is gated below.
+    }
 }
 
 app.MapLuthnApi();

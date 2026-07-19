@@ -28,6 +28,7 @@ public static class TurnSummaryEndpoints
         TurnSummaryIntakeRequest request,
         IContentClassifier classifier,
         IPolicyEngine policyEngine,
+        ISensitiveMemoryPayloadProtector payloadProtector,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -140,7 +141,7 @@ public static class TurnSummaryEndpoints
             ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial,
             StorageDecision = decision.Kind
         });
-        db.SharedMemoryItems.Add(new SharedMemoryItemRecord
+        var memoryRecord = new SharedMemoryItemRecord
         {
             Id = memory.Id.Value,
             Title = memory.Title.Trim(),
@@ -158,7 +159,17 @@ public static class TurnSummaryEndpoints
             CreatedAt = receivedAt,
             UpdatedAt = receivedAt,
             CreatedBy = ServiceTokenAuthorization.GetActor(httpContext)
-        });
+        };
+        db.SharedMemoryItems.Add(memoryRecord);
+        if (SensitiveMemoryPersistence.RequiresProtection(memoryRecord))
+        {
+            var payload = SensitiveMemoryPersistence.FromRecord(memoryRecord);
+            db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.Protect(
+                memoryRecord,
+                payload,
+                payloadProtector,
+                receivedAt));
+        }
         db.AuditEvents.Add(new AuditEventRecord
         {
             Id = auditEventId,
@@ -167,7 +178,7 @@ public static class TurnSummaryEndpoints
             Action = "turn_summary.intake.classified",
             SubjectId = sourceEventId,
             PayloadClass = "metadata-only",
-            RedactionState = allowsAgentContext ? "safe-projection-only" : "memory-boundary-only"
+            RedactionState = allowsAgentContext ? "safe-projection-only" : "encrypted-payload-only"
         });
         try
         {

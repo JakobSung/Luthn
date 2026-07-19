@@ -62,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/instal
 | connector runtime | `~/.local/share/luthn/runtime/` |
 | connector 상태 | `~/.local/state/luthn/connectors/` |
 | PostgreSQL volume | `luthn-postgres` |
-| 운영자 설정 volume | `luthn-operator` |
+| 운영자 설정·Data Protection key volume | `luthn-operator` |
 
 ## Windows 설치
 

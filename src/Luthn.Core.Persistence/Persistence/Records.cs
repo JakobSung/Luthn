@@ -126,6 +126,16 @@ public sealed class SharedMemoryItemRecord
     public string? ExternalPublicationDecidedBy { get; set; }
 }
 
+public sealed class SensitiveMemoryPayloadRecord
+{
+    public string MemoryItemId { get; set; } = "";
+    public int ContractVersion { get; set; } = 1;
+    public string ProtectionScheme { get; set; } = "";
+    public string ProtectedPayload { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
 public sealed class LocalInstallationStateRecord
 {
     public const string SingletonId = "local";

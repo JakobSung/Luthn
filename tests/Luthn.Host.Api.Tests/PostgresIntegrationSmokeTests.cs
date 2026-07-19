@@ -4,10 +4,12 @@ using Luthn.Core.Persistence;
 using Luthn.Core.Search;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Luthn.Host.Api.Tests;
 
@@ -81,8 +83,24 @@ public sealed class PostgresIntegrationSmokeTests
                 ("Id", "Title", "SafeSummary", "Sensitivity", "CoreTags", "Visibility", "RetentionKind", "AllowsAgentContext", "CreatedAt", "UpdatedAt", "CreatedBy")
             VALUES
                 ('memory-legacy-recall', 'Legacy memory', 'Legacy safe memory.', 'Public', '["legacy"]'::jsonb, 'SharedAcrossAgents', 'Durable', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'postgres-smoke');
+
+            INSERT INTO shared_memory_items
+                ("Id", "Title", "SafeSummary", "Sensitivity", "CoreTags", "Visibility", "RetentionKind", "AllowsAgentContext", "CreatedAt", "UpdatedAt", "CreatedBy")
+            VALUES
+                ('memory-legacy-sensitive', 'Legacy database secret', 'Legacy plaintext sensitive summary.', 'Restricted', '["database-secret"]'::jsonb, 'PrivateToOwner', 'Durable', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'postgres-smoke');
             """);
         await migrator.MigrateAsync();
+
+        var payloadProtector = new DataProtectionSensitiveMemoryPayloadProtector(
+            new EphemeralDataProtectionProvider());
+        var protectionState = new SensitiveMemoryProtectionState();
+        var payloadMigrator = new SensitiveMemoryPayloadMigrator(
+            db,
+            payloadProtector,
+            protectionState,
+            TimeProvider.System,
+            NullLogger<SensitiveMemoryPayloadMigrator>.Instance);
+        await payloadMigrator.MigrateAndVerifyAsync();
 
         var migratedRequest = await db.SensitiveAccessRequests
             .SingleAsync(record => record.Id == "access-legacy-approved");
@@ -95,6 +113,26 @@ public sealed class PostgresIntegrationSmokeTests
         Assert.Null(migratedMemory.ProjectKey);
         Assert.Null(migratedMemory.TaskKey);
         Assert.Empty(migratedMemory.TopicTags);
+        var migratedSensitiveMemory = await db.SharedMemoryItems
+            .AsNoTracking()
+            .SingleAsync(record => record.Id == "memory-legacy-sensitive");
+        var migratedSensitivePayload = await db.SensitiveMemoryPayloads
+            .AsNoTracking()
+            .SingleAsync(record => record.MemoryItemId == "memory-legacy-sensitive");
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(migratedSensitiveMemory));
+        Assert.DoesNotContain("Legacy", migratedSensitivePayload.ProtectedPayload, StringComparison.Ordinal);
+        Assert.Equal(
+            "Legacy plaintext sensitive summary.",
+            payloadProtector.Unprotect(
+                migratedSensitiveMemory.Id,
+                migratedSensitivePayload.ProtectedPayload).SafeSummary);
+        Assert.True(protectionState.IsReady);
+        Assert.Equal(1, protectionState.MigratedRecords);
+        await db.SharedMemoryItems
+            .Where(record => record.Id == "memory-legacy-sensitive")
+            .ExecuteDeleteAsync();
+        Assert.False(await db.SensitiveMemoryPayloads
+            .AnyAsync(record => record.MemoryItemId == "memory-legacy-sensitive"));
         var migratedResult = await SensitiveAccessEndpoints.ReadRequestResult(
             "access-legacy-approved",
             db,
@@ -236,6 +274,7 @@ public sealed class PostgresIntegrationSmokeTests
             {
                 Provider = OperatorClassificationProviderKind.Mock
             }),
+            protectionState,
             CancellationToken.None);
         var ready = Assert.IsType<Ok<ReadinessResponse>>(readiness);
         var response = Assert.IsType<ReadinessResponse>(ready.Value);

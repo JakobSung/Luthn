@@ -136,9 +136,18 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
         var memory = await db.SharedMemoryItems.SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.SingleAsync();
         Assert.Equal(SensitivityLevel.Restricted, memory.Sensitivity);
         Assert.Equal(MemoryVisibility.PrivateToOwner, memory.Visibility);
         Assert.False(memory.AllowsAgentContext);
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(memory));
+        Assert.DoesNotContain("credential", encrypted.ProtectedPayload, StringComparison.OrdinalIgnoreCase);
+        var protector = factory.Services.GetRequiredService<ISensitiveMemoryPayloadProtector>();
+        var plaintext = protector.Unprotect(memory.Id, encrypted.ProtectedPayload);
+        Assert.Equal("Customer credential and private key rotation detail.", plaintext.SafeSummary);
+        var audit = await db.AuditEvents.SingleAsync(record => record.Action == "turn_summary.intake.classified");
+        Assert.Equal("metadata-only", audit.PayloadClass);
+        Assert.Equal("encrypted-payload-only", audit.RedactionState);
     }
 
     [Fact]
@@ -186,6 +195,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             },
             classifier,
             new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);

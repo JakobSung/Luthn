@@ -50,6 +50,14 @@ trap cleanup EXIT HUP INT TERM
 cli="$LUTHN_CLI_PATH"
 base_url="http://127.0.0.1:$port"
 
+operator_key_manifest() {
+  docker run --rm \
+    --volume "$LUTHN_OPERATOR_VOLUME:/operator:ro" \
+    --entrypoint sh \
+    "$image" \
+    -c 'find /operator/keys -maxdepth 1 -type f -name "key-*.xml" -exec sha256sum {} \; | sort'
+}
+
 echo "[1/8] install"
 "$repo_root/scripts/install.sh"
 token_before="$(cat "$LUTHN_SERVICE_TOKEN_FILE")"
@@ -71,6 +79,8 @@ fi
 grep -q '^Luthn__Auth__Tokens__1__Name=local-operator$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__1__Scopes__0=access.decide$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__8=metrics.write$' "$LUTHN_CONFIG_DIR/luthn.env"
+operator_key_manifest_before="$(operator_key_manifest)"
+test -n "$operator_key_manifest_before"
 grep -q '^LUTHN_ENVIRONMENT=Production$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Classification__Provider=unconfigured$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Classification__AllowMock=false$' "$LUTHN_CONFIG_DIR/luthn.env"
@@ -255,6 +265,7 @@ token_after="$(cat "$LUTHN_SERVICE_TOKEN_FILE")"
 operator_token_after="$(cat "$LUTHN_OPERATOR_TOKEN_FILE")"
 test "$token_before" = "$token_after"
 test "$operator_token_before" = "$operator_token_after"
+test "$operator_key_manifest_before" = "$(operator_key_manifest)"
 backup_path="$(awk -F= '$1 == "BACKUP_PATH" { print $2 }' "$LUTHN_STATE_DIR/install-state.env")"
 test -s "$backup_path"
 grep -q '^Luthn__Auth__Tokens__0__Scopes__4=classification.preview$' "$LUTHN_CONFIG_DIR/luthn.env"

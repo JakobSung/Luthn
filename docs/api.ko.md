@@ -234,6 +234,14 @@ POST /api/memory/query
 
 메타데이터 전용 공유 기억을 저장하며 원문은 받지 않습니다. 선택적 `projectKey`, `taskKey`, `topicTags`는 정규화한 뒤 전체 투영 분류에 포함하며 원본 경로나 민감 식별자를 넣으면 안 됩니다. 읽기·조회는 공개·미만료·에이전트 허용 투영만 반환합니다. 쓰기는 저장 전에 `title`, `safeSummary`, 모든 `coreTags`와 회상 메타데이터를 함께 분류하며 어느 필드든 민감하다고 판단되면 비공개 기억 경계 뒤에 둡니다.
 
+민감하거나 그 밖의 이유로 agent에 보이지 않는 사용자 필드는 별도
+`sensitive_memory_payloads` table의 인증된 보호 payload로만 저장합니다. 일반 행,
+쓰기 응답, search index에는 `[protected-memory]` / `[protected-payload]`
+placeholder와 빈 tag·회상 metadata만 남습니다. 공개 API는 암호문을 반환하거나 이
+payload를 복호화하지 않습니다. `/readyz`는 `sensitive-memory-protection` 상태를
+보고하며 key ring 또는 기존 암호문을 검증할 수 없으면 보호 API route가 `503`을
+반환합니다.
+
 ## 위키 안전 후보
 
 ```http

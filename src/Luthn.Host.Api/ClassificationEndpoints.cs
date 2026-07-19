@@ -111,6 +111,7 @@ public static class ClassificationEndpoints
         IOptions<LuthnHostOperationalOptions> hostOptions,
         IOptions<ClassificationProviderOptions> classificationOptions,
         IOperatorClassificationSettingsStore classificationSettings,
+        SensitiveMemoryProtectionState sensitiveMemoryProtection,
         CancellationToken cancellationToken)
     {
         var checks = new List<ReadinessCheck>();
@@ -151,6 +152,19 @@ public static class ClassificationEndpoints
             return NotReady("service-token", checks);
         }
         checks.Add(new ReadinessCheck("service-token", "ready", "Service token configuration is ready for the current environment."));
+
+        if (!sensitiveMemoryProtection.IsReady)
+        {
+            checks.Add(new ReadinessCheck(
+                "sensitive-memory-protection",
+                "not_ready",
+                "Sensitive memory key-ring and encrypted payload verification has not completed."));
+            return NotReady("sensitive-memory-protection", checks);
+        }
+        checks.Add(new ReadinessCheck(
+            "sensitive-memory-protection",
+            "ready",
+            "Sensitive memory payload protection and separate key-ring verification are ready."));
 
         string? providerIssue;
         try

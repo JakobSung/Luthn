@@ -78,6 +78,10 @@ Runtime projects:
   default.
 - Keep sensitive-access and audit responses metadata-only unless a future
   generated plan explicitly implements limited redacted output.
+- Keep sensitive or non-agent-visible shared-memory user fields in the
+  authenticated protected payload store. Keep its key ring outside PostgreSQL,
+  and never expose ciphertext through agent, sync, publication, audit, log, or
+  metric contracts.
 - Keep `Luthn.McpServer` connector-side over HTTP; do not wire it directly to
   Core.
 - Do not add one-off console apps. Prefer API endpoints, hosted services, MCP

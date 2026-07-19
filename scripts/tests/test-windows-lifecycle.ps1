@@ -365,6 +365,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_ENVIRONMENT=Production$") "new installs should use the Production environment"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=unconfigured$") "new installs should not select the mock classifier"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__AllowMock=false$") "new installs should disable mock classification"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_OPERATOR_VOLUME=luthn-operator$") "new installs should use the separate persistent Data Protection key volume"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($operatorToken))) "Docker arguments and logs should not contain the operator token"
     Assert-True (-not (([IO.File]::ReadAllText($fakeCodexState)).Contains($token))) "one-step Codex registration should not contain the token"
@@ -582,6 +583,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__8=metrics\.write$") "update should provision the MCP search telemetry write scope for legacy installs"
     Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
     $updatedConfig = [IO.File]::ReadAllText($configFile)
+    Assert-True ($updatedConfig -cmatch "(?m)^LUTHN_OPERATOR_VOLUME=luthn-operator$") "update should preserve the separate Data Protection key volume selection"
     Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "update should reuse the Compose-exposed operator slot"
     Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__1__(?:Scopes__1|ExpiresAt)=") "update should normalize the managed operator slot to decision-only"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
