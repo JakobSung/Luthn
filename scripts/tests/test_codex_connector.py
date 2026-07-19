@@ -480,6 +480,14 @@ class TurnCapsuleTests(unittest.TestCase):
 
         self.assertEqual(0, result)
         self.assertEqual(2, request_json.call_count)
+        capsule = request_json.call_args_list[0].args[3]
+        self.assertEqual("codex", capsule["provenance"]["agentId"])
+        self.assertEqual("codex", capsule["provenance"]["applicationId"])
+        self.assertEqual(
+            "luthn-codex-connector", capsule["provenance"]["connectorId"]
+        )
+        self.assertEqual("1", capsule["provenance"]["connectorVersion"])
+        self.assertNotIn("userId", capsule["provenance"])
         observation = request_json.call_args_list[1].args[3]
         self.assertEqual("Succeeded", observation["channels"][0]["activityState"])
 

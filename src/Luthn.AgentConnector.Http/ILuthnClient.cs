@@ -4,6 +4,7 @@ using Luthn.Sdk.AgentConnections;
 using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
+using Luthn.Sdk.Provenance;
 using Luthn.Sdk.Source;
 using Luthn.Sdk.Telemetry;
 using Luthn.Sdk.Wiki;
@@ -114,6 +115,16 @@ public interface ILuthnAgentClient
 
 public interface ILuthnClient : ILuthnAgentClient
 {
+    Task<CollectionProvenanceDto> GetSourceEventProvenanceAsync(
+        string sourceEventId,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement operator provenance reads.");
+
+    Task<CollectionProvenanceDto> GetMemoryItemProvenanceAsync(
+        string memoryItemId,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement operator provenance reads.");
+
     Task<ContextPackDto> ILuthnAgentClient.GetContextPackAsync(
         IReadOnlyList<string> coreTags,
         int maxItems,

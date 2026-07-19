@@ -7,6 +7,7 @@ using Luthn.Sdk.AgentConnections;
 using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
+using Luthn.Sdk.Provenance;
 using Luthn.Sdk.Source;
 using Luthn.Sdk.Telemetry;
 using Luthn.Sdk.Wiki;
@@ -381,13 +382,19 @@ public sealed class LuthnClientTests
                 "Release memory",
                 "Public-safe release summary.",
                 ["release", "runbook"],
-                SourceSessionId: "session-1"));
+                SourceSessionId: "session-1",
+                Provenance: new CollectionProvenanceClaimsDto(
+                    UserId: "owner.one",
+                    AgentId: "codex",
+                    ConnectorId: "luthn.codex.connector")));
         var body = await handler.RequestContent!.ReadAsStringAsync();
 
         Assert.Equal(HttpMethod.Post, handler.Request!.Method);
         Assert.Equal("/api/memory/items", handler.Request.RequestUri!.AbsolutePath);
         Assert.Contains("\"safeSummary\"", body, StringComparison.Ordinal);
         Assert.Contains("\"coreTags\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"provenance\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"userId\":\"owner.one\"", body, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("vault", handler.Request.RequestUri.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("memory-1", response.Id);
@@ -432,6 +439,39 @@ public sealed class LuthnClientTests
         Assert.DoesNotContain("raw", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("vault", handler.Request.RequestUri.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("memory-1", Assert.Single(response.Items).Id);
+    }
+
+    [Fact]
+    public async Task OperatorClientReadsMemoryProvenanceFromDedicatedEndpoint()
+    {
+        using var handler = new CapturingHandler("""
+            {
+              "id": "provenance-1",
+              "contractVersion": 1,
+              "sourceEventId": null,
+              "memoryItemId": "memory-1",
+              "authenticatedActor": "operator-service",
+              "actorTrust": "service-token",
+              "claimsTrust": "caller-supplied",
+              "claimedUserId": "owner.one",
+              "agentId": "codex",
+              "applicationId": "codex.desktop",
+              "pluginId": null,
+              "connectorId": "luthn.codex.connector",
+              "connectorVersion": "2",
+              "collectedAt": null,
+              "receivedAt": "2026-07-19T00:00:00+00:00"
+            }
+            """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
+        var client = new LuthnClient(http);
+
+        var response = await client.GetMemoryItemProvenanceAsync("memory-1");
+
+        Assert.Equal(HttpMethod.Get, handler.Request!.Method);
+        Assert.Equal("/api/provenance/memory-items/memory-1", handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal("operator-service", response.AuthenticatedActor);
+        Assert.Equal("owner.one", response.ClaimedUserId);
     }
 
     [Fact]

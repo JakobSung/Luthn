@@ -64,6 +64,22 @@ public static class TurnSummaryEndpoints
         }
 
         var receivedAt = DateTimeOffset.UtcNow;
+        var memoryItemId = $"memory-{sourceEventId}";
+        var actor = ServiceTokenAuthorization.GetActor(httpContext);
+        var provenanceError = CollectionProvenance.TryCreate(
+            sourceEventId,
+            memoryItemId,
+            request.Provenance,
+            actor,
+            ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
+            receivedAt,
+            out var provenance,
+            fallbackAgentId: request.SourceAgent,
+            fallbackApplicationId: request.SourceAgent);
+        if (provenanceError is not null)
+        {
+            return TypedResults.BadRequest(provenanceError);
+        }
         var sourceId = new PublicRecordId(sourceEventId);
         var classificationInput = AgentVisibleClassificationInput.Compose(
             content: null,
@@ -78,7 +94,7 @@ public static class TurnSummaryEndpoints
         {
             Id = providerAuditEventId,
             OccurredAt = receivedAt,
-            Actor = ServiceTokenAuthorization.GetActor(httpContext),
+            Actor = actor,
             Action = "turn_summary.classification_provider.invoked",
             SubjectId = sourceEventId,
             PayloadClass = classifier.Boundary.PayloadClass,
@@ -105,7 +121,6 @@ public static class TurnSummaryEndpoints
             classification.Sensitivity == SensitivityLevel.Public &&
             !classification.ContainsSensitiveMaterial;
         var classificationResultId = $"classification-{sourceEventId}";
-        var memoryItemId = $"memory-{sourceEventId}";
         var auditEventId = $"audit-{Guid.NewGuid():N}";
         var visibility = allowsAgentContext
             ? MemoryVisibility.SharedAcrossAgents
@@ -129,6 +144,7 @@ public static class TurnSummaryEndpoints
             ContentDigest = contentDigest,
             ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial
         });
+        db.CollectionProvenance.Add(provenance);
         db.ClassificationResults.Add(new ClassificationResultRecord
         {
             Id = classificationResultId,
@@ -158,7 +174,7 @@ public static class TurnSummaryEndpoints
             AllowsAgentContext = allowsAgentContext,
             CreatedAt = receivedAt,
             UpdatedAt = receivedAt,
-            CreatedBy = ServiceTokenAuthorization.GetActor(httpContext)
+            CreatedBy = actor
         };
         db.SharedMemoryItems.Add(memoryRecord);
         if (SensitiveMemoryPersistence.RequiresProtection(memoryRecord))
@@ -174,7 +190,7 @@ public static class TurnSummaryEndpoints
         {
             Id = auditEventId,
             OccurredAt = receivedAt,
-            Actor = ServiceTokenAuthorization.GetActor(httpContext),
+            Actor = actor,
             Action = "turn_summary.intake.classified",
             SubjectId = sourceEventId,
             PayloadClass = "metadata-only",
@@ -357,7 +373,6 @@ public static class TurnSummaryEndpoints
         return ValidateOptionalPublicId(request.TurnId, "turnId", title) ??
             ValidateOptionalPublicId(request.IdempotencyKey, "idempotencyKey", title) ??
             ValidateOptionalBoundedText(request.TurnRange, "turnRange", ApiValidation.SourceTextMaxLength, title) ??
-            ValidateOptionalBoundedText(request.ProjectPath, "projectPath", 512, title) ??
             ValidateOptionalBoundedText(request.Title, "title", ApiValidation.TitleMaxLength, title) ??
             ValidateOptionalDigest(request.ContentDigest, title);
     }
@@ -443,7 +458,6 @@ public sealed record TurnSummaryIntakeRequest
     public string? TurnId { get; init; }
     public string? TurnRange { get; init; }
     public string SourceAgent { get; init; } = "codex";
-    public string? ProjectPath { get; init; }
     public string? ProjectKey { get; init; }
     public string? TaskKey { get; init; }
     public IReadOnlyList<string>? TopicTags { get; init; }
@@ -451,8 +465,8 @@ public sealed record TurnSummaryIntakeRequest
     public IReadOnlyList<string>? CoreTags { get; init; }
     public string? ContentDigest { get; init; }
     public string? IdempotencyKey { get; init; }
-    public IReadOnlyDictionary<string, string>? SourceMetadata { get; init; }
     public string? Title { get; init; }
+    public CollectionProvenanceClaims? Provenance { get; init; }
 }
 
 public sealed record TurnSummaryIntakeResponse(

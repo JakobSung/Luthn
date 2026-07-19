@@ -136,6 +136,22 @@ XML을 commit·출력하거나 암호화되지 않은 저장소와 일반 log에
 key ring을 잃으면 암호화 memory는 복구할 수 없고 새 key 생성으로 기존 payload를
 복호화할 수 없습니다.
 
+## 수집 출처 경계
+
+모든 source event와 shared-memory item은 versioned 불변 `collection_provenance` 행을
+하나 가집니다. server가 정한 인증 ingest actor·수신 시각과, 호출자가 주장한 선택적
+user·agent·application·plugin·connector·connector version·client 수집 시각을 분리해
+저장합니다. 호출자 주장은 인증이나 tenant 권한 증거가 아닙니다. 기존 행은 명시적인
+`legacy-unknown` trust와 비어 있는 origin claim을 사용합니다.
+
+provenance 식별자는 길이와 문자가 제한되고 정규화됩니다. 원본 workspace·transcript
+경로, device fingerprint, prompt, query, 자격 증명, 자유형 source metadata, source
+원문은 제외합니다. provenance는 연결된 source 또는 memory의 retention 수명주기를
+따르며 수정·삭제 API가 없습니다. `audit.read`로 보호된 operator route에서만 읽을 수
+있고 agent recall, search index, 암호화 사용자 payload, safe sync, publication, audit
+payload, log, metric에는 포함하지 않습니다. audit는 행위·결정의 사건 이력이고,
+provenance는 불변 수집 기원 기록입니다.
+
 ## Provider 경계
 
 - 새 배포 설치는 명시적인 `unconfigured` 상태를 사용합니다. 분류는 원문을 저장하거나 투영하기 전에 제한된 provider-unavailable 응답으로 안전하게 실패합니다.

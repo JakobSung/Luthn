@@ -40,7 +40,15 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
             coreTags = new[] { "onboarding", "public" },
             projectKey = " LUTHN ",
             taskKey = " ONBOARDING ",
-            topicTags = new[] { " Docs ", "docs" }
+            topicTags = new[] { " Docs ", "docs" },
+            provenance = new
+            {
+                userId = "Owner.One",
+                applicationId = "Notes.App",
+                pluginId = "Local.Notes.Plugin",
+                connectorId = "Luthn.Source.Connector",
+                connectorVersion = "1"
+            }
         });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -66,6 +74,14 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
         Assert.False(source.ContainsSensitiveMaterial);
         Assert.StartsWith("sha256:", source.ContentDigest, StringComparison.Ordinal);
         Assert.DoesNotContain(content, source.ContentDigest, StringComparison.Ordinal);
+        var provenance = await db.CollectionProvenance.SingleAsync();
+        Assert.Equal(sourceEventId, provenance.SourceEventId);
+        Assert.Null(provenance.MemoryItemId);
+        Assert.Equal("owner.one", provenance.ClaimedUserId);
+        Assert.Equal("notes.app", provenance.ApplicationId);
+        Assert.Equal("local.notes.plugin", provenance.PluginId);
+        Assert.Equal("luthn.source.connector", provenance.ConnectorId);
+        Assert.Equal("1", provenance.ConnectorVersion);
 
         var classification = await db.ClassificationResults.SingleAsync();
         Assert.Equal(sourceEventId, classification.SourceEventId);

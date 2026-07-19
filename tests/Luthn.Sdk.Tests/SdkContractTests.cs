@@ -4,6 +4,7 @@ using Luthn.Sdk.Agent;
 using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
+using Luthn.Sdk.Provenance;
 using Luthn.Sdk.Plugins;
 using Luthn.Sdk.Source;
 using Luthn.Sdk.Sync;
@@ -58,8 +59,7 @@ public sealed class SdkContractTests
             DateTimeOffset.Parse("2026-07-12T00:00:00Z"),
             DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
             DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
-            DateTimeOffset.Parse("2027-07-13T00:00:00Z"),
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            DateTimeOffset.Parse("2027-07-13T00:00:00Z"));
 
         var json = JsonSerializer.Serialize(envelope);
         using var document = JsonDocument.Parse(json);
@@ -72,8 +72,7 @@ public sealed class SdkContractTests
         {
             "contractVersion", "originInstanceId", "localRecordId", "revision", "operation",
             "title", "safeSummary", "coreTags", "projectionKind", "payloadClass",
-            "redactionState", "createdAt", "updatedAt", "decidedAt", "expiresAt",
-            "provenanceDigest"
+            "redactionState", "createdAt", "updatedAt", "decidedAt", "expiresAt"
         }.OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
         Assert.Equal(expectedProperties, actualProperties);
@@ -105,7 +104,6 @@ public sealed class SdkContractTests
             DateTimeOffset.Parse("2026-07-12T00:00:00Z"),
             DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
             DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
-            null,
             null);
 
         var json = JsonSerializer.Serialize(envelope);
@@ -301,6 +299,8 @@ public sealed class SdkContractTests
         Assert.Contains("\"sessionId\"", json, StringComparison.Ordinal);
         Assert.Contains("\"sourceAgent\"", json, StringComparison.Ordinal);
         Assert.Contains("\"coreTags\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("projectPath", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("sourceMetadata", json, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", json, StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(response);
         Assert.Equal("turn-summary-1", response.SummaryId);
@@ -313,7 +313,14 @@ public sealed class SdkContractTests
         var create = new CreateSharedMemoryItemRequestDto(
             "Release memory",
             "Public-safe release summary.",
-            ["release", "runbook"]);
+            ["release", "runbook"],
+            Provenance: new CollectionProvenanceClaimsDto(
+                "owner.one",
+                "codex",
+                "codex.desktop",
+                "luthn.plugin",
+                "luthn.codex.connector",
+                "2"));
         var query = new SharedMemoryQueryRequestDto("release", ["runbook"], 5);
         var item = new SharedMemoryItemDto(
             "memory-1",
@@ -333,6 +340,8 @@ public sealed class SdkContractTests
         Assert.Contains("\"safeSummary\"", json, StringComparison.Ordinal);
         Assert.Contains("\"coreTags\"", json, StringComparison.Ordinal);
         Assert.Contains("\"allowsAgentContext\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"provenance\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"connectorId\":\"luthn.codex.connector\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("vault", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private", json, StringComparison.OrdinalIgnoreCase);

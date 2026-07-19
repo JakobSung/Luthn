@@ -17,8 +17,7 @@ public sealed record SafeProjectionSyncEnvelopeDto(
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("updatedAt")] DateTimeOffset UpdatedAt,
     [property: JsonPropertyName("decidedAt")] DateTimeOffset DecidedAt,
-    [property: JsonPropertyName("expiresAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? ExpiresAt,
-    [property: JsonPropertyName("provenanceDigest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProvenanceDigest);
+    [property: JsonPropertyName("expiresAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? ExpiresAt);
 
 public sealed record ExternalPublicationStatusDto(
     [property: JsonPropertyName("memoryItemId")] string MemoryItemId,

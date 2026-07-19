@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Luthn.Sdk.Classification;
+using Luthn.Sdk.Provenance;
 
 namespace Luthn.Sdk.Agent;
 
@@ -10,14 +11,13 @@ public sealed record TurnSummaryIntakeRequestDto(
     [property: JsonPropertyName("coreTags")] IReadOnlyList<string> CoreTags,
     [property: JsonPropertyName("turnId")] string? TurnId = null,
     [property: JsonPropertyName("turnRange")] string? TurnRange = null,
-    [property: JsonPropertyName("projectPath")] string? ProjectPath = null,
     [property: JsonPropertyName("contentDigest")] string? ContentDigest = null,
     [property: JsonPropertyName("idempotencyKey")] string? IdempotencyKey = null,
-    [property: JsonPropertyName("sourceMetadata")] IReadOnlyDictionary<string, string>? SourceMetadata = null,
     [property: JsonPropertyName("title")] string? Title = null,
     [property: JsonPropertyName("projectKey")] string? ProjectKey = null,
     [property: JsonPropertyName("taskKey")] string? TaskKey = null,
-    [property: JsonPropertyName("topicTags")] IReadOnlyList<string>? TopicTags = null);
+    [property: JsonPropertyName("topicTags")] IReadOnlyList<string>? TopicTags = null,
+    [property: JsonPropertyName("provenance")] CollectionProvenanceClaimsDto? Provenance = null);
 
 public sealed record TurnSummaryIntakeResponseDto(
     [property: JsonPropertyName("summaryId")] string SummaryId,

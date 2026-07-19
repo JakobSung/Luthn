@@ -39,6 +39,10 @@ public sealed class McpToolBoundaryTests
         Assert.DoesNotContain("query_private_records", names);
         Assert.DoesNotContain(names, name => name.Contains("approve", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(names, name => name.Contains("deny", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(names, name => name.Contains("provenance", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            typeof(ILuthnAgentClient).GetMethods(),
+            method => method.Name.Contains("Provenance", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -300,7 +304,15 @@ public sealed class McpToolBoundaryTests
               "sourceSessionId": "session-1",
               "projectKey": "luthn",
               "taskKey": "release",
-              "topicTags": ["delivery"]
+              "topicTags": ["delivery"],
+              "provenance": {
+                "userId": "owner.one",
+                "agentId": "codex",
+                "applicationId": "codex.desktop",
+                "pluginId": "luthn.plugin",
+                "connectorId": "luthn.codex.connector",
+                "connectorVersion": "2"
+              }
             }
             """);
         using var queryArgs = JsonDocument.Parse(
@@ -318,6 +330,12 @@ public sealed class McpToolBoundaryTests
         Assert.Equal("luthn", client.LastCreateMemoryRequest?.ProjectKey);
         Assert.Equal("release", client.LastCreateMemoryRequest?.TaskKey);
         Assert.Equal(["delivery"], client.LastCreateMemoryRequest?.TopicTags);
+        Assert.Equal("owner.one", client.LastCreateMemoryRequest?.Provenance?.UserId);
+        Assert.Equal("codex", client.LastCreateMemoryRequest?.Provenance?.AgentId);
+        Assert.Equal("codex.desktop", client.LastCreateMemoryRequest?.Provenance?.ApplicationId);
+        Assert.Equal("luthn.plugin", client.LastCreateMemoryRequest?.Provenance?.PluginId);
+        Assert.Equal("luthn.codex.connector", client.LastCreateMemoryRequest?.Provenance?.ConnectorId);
+        Assert.Equal("2", client.LastCreateMemoryRequest?.Provenance?.ConnectorVersion);
         Assert.Equal("release", client.LastMemoryQueryRequest?.Query);
         Assert.Equal(["runbook"], client.LastMemoryQueryRequest?.CoreTags);
         Assert.Equal(5, client.LastMemoryQueryRequest?.MaxItems);
@@ -415,6 +433,21 @@ public sealed class McpToolBoundaryTests
         Assert.Equal("string", properties.GetProperty("projectKey").GetProperty("type").GetString());
         Assert.Equal("string", properties.GetProperty("taskKey").GetProperty("type").GetString());
         Assert.Equal("array", properties.GetProperty("topicTags").GetProperty("type").GetString());
+
+        var createMemoryTool = toolsJson.RootElement
+            .GetProperty("result")
+            .GetProperty("tools")
+            .EnumerateArray()
+            .First(item => item.GetProperty("name").GetString() == "create_shared_memory");
+        var provenanceSchema = createMemoryTool
+            .GetProperty("inputSchema")
+            .GetProperty("properties")
+            .GetProperty("provenance");
+        Assert.Equal("object", provenanceSchema.GetProperty("type").GetString());
+        Assert.False(provenanceSchema.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal(
+            128,
+            provenanceSchema.GetProperty("properties").GetProperty("connectorId").GetProperty("maxLength").GetInt32());
 
         var sensitiveAccessTool = toolsJson.RootElement
             .GetProperty("result")

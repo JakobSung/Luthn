@@ -30,7 +30,6 @@ Request:
   "sessionId": "session-1",
   "turnId": "turn-12",
   "sourceAgent": "codex",
-  "projectPath": "/path/to/project",
   "summary": "Published release note for external contributors.",
   "coreTags": ["release", "codex"],
   "contentDigest": "sha256:...",
@@ -38,6 +37,9 @@ Request:
   "title": "Codex release note"
 }
 ```
+
+Raw project paths and free-form `sourceMetadata` are rejected. Use the bounded
+`projectKey`, `taskKey`, `topicTags`, and structured `provenance` fields instead.
 
 Response:
 
@@ -526,6 +528,50 @@ indexes use `[protected-memory]` / `[protected-payload]` placeholders with empty
 tags and recall metadata. No public API returns the ciphertext or decrypts this
 payload. `/readyz` reports `sensitive-memory-protection`; protected API routes
 return `503` when the key ring or existing ciphertext cannot be verified.
+
+Writes to `/api/memory/items`, `/api/sources`, and
+`/api/agent/turn-summaries` accept the same optional structured `provenance`
+object:
+
+```json
+{
+  "provenance": {
+    "userId": "owner.one",
+    "agentId": "codex",
+    "applicationId": "codex.desktop",
+    "pluginId": "luthn.hook",
+    "connectorId": "luthn.codex.connector",
+    "connectorVersion": "2",
+    "collectedAt": "2026-07-19T00:00:00Z"
+  }
+}
+```
+
+These values are bounded caller claims. Identifiers are normalized to lower
+case, raw paths and free-form source metadata are not accepted, and a client
+collection time more than five minutes ahead of server receipt is rejected.
+The authenticated service-token actor and `receivedAt` are always derived by
+the server and cannot be overridden.
+
+## Collection provenance
+
+```http
+GET /api/provenance/source-events/{sourceEventId}
+GET /api/provenance/memory-items/{memoryItemId}
+```
+
+Both routes require `audit.read`; they are intentionally absent from the MCP
+agent tool set and agent-only connector interface. Each source event and memory
+item has exactly one versioned immutable provenance row. A turn summary uses
+one row linked to both its source event and memory item. `actorTrust` is
+`service-token`, `local-runtime`, or `legacy-unknown`; `claimsTrust` is
+`caller-supplied`, `no-claims`, or `legacy-unknown`. Existing rows receive a
+deterministic version-1 record with unknown claims during migration.
+
+Provenance records collection origin state, while audit events record actions
+and decisions over time. Provenance is not copied into audit payloads, agent
+recall, search indexes, metrics, encrypted user payloads, safe sync, or external
+publication.
 
 ## Wiki-safe proposal
 

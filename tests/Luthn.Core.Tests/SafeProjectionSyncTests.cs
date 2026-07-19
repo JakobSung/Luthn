@@ -41,7 +41,6 @@ public sealed class SafeProjectionSyncTests
         Assert.Equal(SafeProjectionSyncOperation.Revoke, envelope.Operation);
         Assert.Null(envelope.Title);
         Assert.Null(envelope.SafeSummary);
-        Assert.Null(envelope.ProvenanceDigest);
         Assert.Empty(envelope.CoreTags);
     }
 
@@ -71,6 +70,7 @@ public sealed class SafeProjectionSyncTests
         Assert.DoesNotContain(fieldNames, name => name.Contains("Vault", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(fieldNames, name => name.Contains("Credential", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(fieldNames, name => name.Contains("Token", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(fieldNames, name => name.Contains("Provenance", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(fieldNames, name => name.Equals("SourceContent", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -89,6 +89,5 @@ public sealed class SafeProjectionSyncTests
             Now.AddDays(-1),
             Now,
             Now,
-            expiresAt: null,
-            provenanceDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            expiresAt: null);
 }

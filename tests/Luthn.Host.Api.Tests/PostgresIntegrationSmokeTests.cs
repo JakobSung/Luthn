@@ -128,10 +128,30 @@ public sealed class PostgresIntegrationSmokeTests
                 migratedSensitivePayload.ProtectedPayload).SafeSummary);
         Assert.True(protectionState.IsReady);
         Assert.Equal(1, protectionState.MigratedRecords);
+        var legacyProvenance = await db.CollectionProvenance.AsNoTracking().ToArrayAsync();
+        Assert.Equal(4, legacyProvenance.Length);
+        Assert.All(legacyProvenance, record =>
+        {
+            Assert.Equal(1, record.ContractVersion);
+            Assert.Equal(CollectionProvenance.LegacyUnknownTrust, record.AuthenticatedActor);
+            Assert.Equal(CollectionProvenance.LegacyUnknownTrust, record.ActorTrust);
+            Assert.Equal(CollectionProvenance.LegacyUnknownTrust, record.ClaimsTrust);
+            Assert.Null(record.ClaimedUserId);
+            Assert.Null(record.AgentId);
+            Assert.Null(record.ApplicationId);
+            Assert.Null(record.PluginId);
+            Assert.Null(record.ConnectorId);
+            Assert.Null(record.ConnectorVersion);
+            Assert.Null(record.CollectedAt);
+        });
+        Assert.Equal(1, legacyProvenance.Count(record => record.SourceEventId == "source-legacy-recall"));
+        Assert.Equal(1, legacyProvenance.Count(record => record.MemoryItemId == "memory-legacy-recall"));
         await db.SharedMemoryItems
             .Where(record => record.Id == "memory-legacy-sensitive")
             .ExecuteDeleteAsync();
         Assert.False(await db.SensitiveMemoryPayloads
+            .AnyAsync(record => record.MemoryItemId == "memory-legacy-sensitive"));
+        Assert.False(await db.CollectionProvenance
             .AnyAsync(record => record.MemoryItemId == "memory-legacy-sensitive"));
         var migratedResult = await SensitiveAccessEndpoints.ReadRequestResult(
             "access-legacy-approved",
@@ -154,6 +174,15 @@ public sealed class PostgresIntegrationSmokeTests
             ReceivedAt = now.AddDays(-2),
             ContentDigest = "sha256:old-db-match"
         });
+        db.CollectionProvenance.Add(new CollectionProvenanceRecord
+        {
+            Id = "provenance-old-db-match",
+            SourceEventId = "source-old-db-match",
+            AuthenticatedActor = "postgres-smoke",
+            ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
+            ClaimsTrust = CollectionProvenance.NoClaimsTrust,
+            ReceivedAt = now.AddDays(-2)
+        });
         db.SourceEvents.AddRange(Enumerable.Range(0, 1001).Select(index => new SourceEventRecord
         {
             Id = $"source-newer-db-nonmatch-{index}",
@@ -162,6 +191,16 @@ public sealed class PostgresIntegrationSmokeTests
             ReceivedAt = now.AddMinutes(index),
             ContentDigest = $"sha256:newer-db-nonmatch-{index}"
         }));
+        db.CollectionProvenance.AddRange(Enumerable.Range(0, 1001).Select(index =>
+            new CollectionProvenanceRecord
+            {
+                Id = $"provenance-newer-{index}",
+                SourceEventId = $"source-newer-db-nonmatch-{index}",
+                AuthenticatedActor = "postgres-smoke",
+                ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
+                ClaimsTrust = CollectionProvenance.NoClaimsTrust,
+                ReceivedAt = now.AddMinutes(index)
+            }));
         db.WikiProposals.Add(new WikiProposalRecord
         {
             Id = "wiki-old-db-match",
@@ -192,6 +231,15 @@ public sealed class PostgresIntegrationSmokeTests
             ReceivedAt = now,
             ContentDigest = "sha256:sensitive-retry-smoke",
             ContainsSensitiveMaterial = true
+        });
+        db.CollectionProvenance.Add(new CollectionProvenanceRecord
+        {
+            Id = "provenance-sensitive-retry-smoke",
+            SourceEventId = "source-sensitive-retry-smoke",
+            AuthenticatedActor = "postgres-smoke",
+            ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
+            ClaimsTrust = CollectionProvenance.NoClaimsTrust,
+            ReceivedAt = now
         });
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {
@@ -252,6 +300,21 @@ public sealed class PostgresIntegrationSmokeTests
         Assert.Equal(1, await operationDb.AuditEvents.CountAsync(record =>
             record.SubjectId == "access-retry-expiry-smoke" &&
             record.Action == "sensitive_access.expired"));
+
+        await Assert.ThrowsAnyAsync<Exception>(() => operationDb.Database.ExecuteSqlRawAsync(
+            "UPDATE collection_provenance SET \"AgentId\" = 'tampered' WHERE \"Id\" = 'provenance-old-db-match'"));
+        await using (var missingProvenanceDb = new LuthnDbContext(options))
+        {
+            missingProvenanceDb.SourceEvents.Add(new SourceEventRecord
+            {
+                Id = "source-missing-provenance",
+                SourceSystem = "test",
+                SourceType = "postgres-smoke",
+                ReceivedAt = now,
+                ContentDigest = "sha256:missing-provenance"
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(() => missingProvenanceDb.SaveChangesAsync());
+        }
 
         var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
         var candidates = await selector.SelectAgentContextAsync(

@@ -25,7 +25,17 @@ public sealed class MemoryEndpointTests
             Visibility = MemoryVisibility.SharedAcrossAgents,
             ProjectKey = " LUTHN ",
             TaskKey = " RELEASE ",
-            TopicTags = [" Delivery ", "delivery"]
+            TopicTags = [" Delivery ", "delivery"],
+            Provenance = new CollectionProvenanceClaims
+            {
+                UserId = "User.One",
+                AgentId = "Codex",
+                ApplicationId = "Codex.Desktop",
+                PluginId = "Luthn.Plugin",
+                ConnectorId = "Luthn.Connector",
+                ConnectorVersion = "1.2.0+local",
+                CollectedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+            }
         };
 
         var createResult = await MemoryEndpoints.CreateMemoryItem(
@@ -79,6 +89,19 @@ public sealed class MemoryEndpointTests
         Assert.Equal(id, audit.SubjectId);
         Assert.Equal("metadata-only", audit.PayloadClass);
         Assert.Equal("safe-projection-only", audit.RedactionState);
+        var provenance = Assert.Single(await db.CollectionProvenance.ToArrayAsync());
+        Assert.Null(provenance.SourceEventId);
+        Assert.Equal(id, provenance.MemoryItemId);
+        Assert.Equal("local-anonymous", provenance.AuthenticatedActor);
+        Assert.Equal(CollectionProvenance.LocalRuntimeActorTrust, provenance.ActorTrust);
+        Assert.Equal(CollectionProvenance.CallerClaimsTrust, provenance.ClaimsTrust);
+        Assert.Equal("user.one", provenance.ClaimedUserId);
+        Assert.Equal("codex", provenance.AgentId);
+        Assert.Equal("codex.desktop", provenance.ApplicationId);
+        Assert.Equal("luthn.plugin", provenance.PluginId);
+        Assert.Equal("luthn.connector", provenance.ConnectorId);
+        Assert.Equal("1.2.0+local", provenance.ConnectorVersion);
+        Assert.Equal(created.Value.CreatedAt, provenance.ReceivedAt);
     }
 
     [Fact]

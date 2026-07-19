@@ -498,6 +498,12 @@ def upload_hook(
         capsule = build_turn_capsule(hook_input)
         if capsule is None:
             return 0
+        capsule["provenance"] = {
+            "agentId": "codex",
+            "applicationId": "codex",
+            "connectorId": "luthn-codex-connector",
+            "connectorVersion": connector_version,
+        }
     except Exception:
         return 0
 
