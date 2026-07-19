@@ -98,6 +98,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.Equal(["delivery"], memory.TopicTags);
         Assert.Equal(source.Id, provenance.SourceEventId);
         Assert.Equal(memory.Id, provenance.MemoryItemId);
+        Assert.Equal("local-owner", provenance.AuthenticatedUserId);
         Assert.Equal("owner.one", provenance.ClaimedUserId);
         Assert.Equal("codex", provenance.AgentId);
         Assert.Equal("codex.desktop", provenance.ApplicationId);

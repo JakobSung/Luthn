@@ -50,6 +50,7 @@ public sealed class CollectionProvenanceTests
 
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
         Assert.Equal("provenance-writer", readBody.RootElement.GetProperty("authenticatedActor").GetString());
+        Assert.Equal("local-owner", readBody.RootElement.GetProperty("authenticatedUserId").GetString());
         Assert.Equal("service-token", readBody.RootElement.GetProperty("actorTrust").GetString());
         Assert.Equal("caller-supplied", readBody.RootElement.GetProperty("claimsTrust").GetString());
         Assert.Equal("owner.one", readBody.RootElement.GetProperty("claimedUserId").GetString());

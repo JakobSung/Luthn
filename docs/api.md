@@ -12,6 +12,24 @@ aliases are not part of the public API. Source intake responses include
 `sourceEventId` as a backward-compatible alias, but `sourceId` is the canonical
 public source identifier for new API, SDK, connector, and MCP contracts.
 
+## Server-derived ownership
+
+`SingleOwner` is the default identity mode and resolves every protected record
+to the normalized configured owner, `local-owner` by default. `MultiUser`
+requires service-token authentication and a bounded `userId` on every
+non-operator token. The server derives authorization identity from the matched
+token; request bodies, SDKs, connectors, and MCP tools expose no owner override.
+
+Memory, source, wiki, sensitive-access, publication, safe-search, context-pack,
+and turn-summary idempotency operations are scoped to that owner. In this
+contract `SharedAcrossAgents` means agents authenticated for the same owner.
+An explicitly configured operator token may perform the documented bounded
+cross-owner administration routes, which retain metadata-only audit evidence.
+`/readyz` reports the `identity` boundary separately from service-token health.
+In `MultiUser` mode the audit-event listing is operator-only because legacy
+audit rows do not carry an owner partition; same-owner provenance reads remain
+available to scoped non-operator tokens.
+
 ## Agent turn-summary intake
 
 ```http
@@ -550,8 +568,8 @@ object:
 These values are bounded caller claims. Identifiers are normalized to lower
 case, raw paths and free-form source metadata are not accepted, and a client
 collection time more than five minutes ahead of server receipt is rejected.
-The authenticated service-token actor and `receivedAt` are always derived by
-the server and cannot be overridden.
+The authenticated service-token actor, authenticated owner user, and
+`receivedAt` are always derived by the server and cannot be overridden.
 
 ## Collection provenance
 
@@ -567,6 +585,9 @@ one row linked to both its source event and memory item. `actorTrust` is
 `service-token`, `local-runtime`, or `legacy-unknown`; `claimsTrust` is
 `caller-supplied`, `no-claims`, or `legacy-unknown`. Existing rows receive a
 deterministic version-1 record with unknown claims during migration.
+`authenticatedUserId` is the trusted server-derived owner identity;
+`claimedUserId` is only caller-reported collection context. Non-operator
+`audit.read` tokens can read provenance only for their own owner.
 
 Provenance records collection origin state, while audit events record actions
 and decisions over time. Provenance is not copied into audit payloads, agent
@@ -592,7 +613,7 @@ POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. Listing and decision operations require the separate trusted `access.decide` scope; create/read operations require only `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
+These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and decision operations require the separate trusted `access.decide` scope; an explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
 
 List response:
 

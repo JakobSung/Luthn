@@ -52,25 +52,29 @@ public static class TurnSummaryEndpoints
 
         var normalizedTags = NormalizeTags(request.CoreTags!);
         var contentDigest = NormalizeDigest(request.ContentDigest) ?? ComputeSha256Digest(request.Summary);
-        var summaryId = CreateStableSummaryId(request, contentDigest);
+        var actor = ServiceTokenAuthorization.GetActor(httpContext);
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        var summaryId = CreateStableSummaryId(request, contentDigest, principal.UserId);
         var sourceEventId = summaryId;
         var existingSource = await db.SourceEvents
             .AsNoTracking()
-            .SingleOrDefaultAsync(record => record.Id == sourceEventId, cancellationToken);
+            .SingleOrDefaultAsync(
+                record => record.Id == sourceEventId && record.OwnerUserId == principal.UserId,
+                cancellationToken);
         if (existingSource is not null)
         {
-            var existing = await BuildExistingResponseAsync(db, sourceEventId, cancellationToken);
+            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.UserId, cancellationToken);
             return TypedResults.Ok(existing);
         }
 
         var receivedAt = DateTimeOffset.UtcNow;
         var memoryItemId = $"memory-{sourceEventId}";
-        var actor = ServiceTokenAuthorization.GetActor(httpContext);
         var provenanceError = CollectionProvenance.TryCreate(
             sourceEventId,
             memoryItemId,
             request.Provenance,
             actor,
+            principal.UserId,
             ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
             receivedAt,
             out var provenance,
@@ -142,7 +146,8 @@ public static class TurnSummaryEndpoints
             SourceType = "turn-summary",
             ReceivedAt = receivedAt,
             ContentDigest = contentDigest,
-            ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial
+            ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial,
+            OwnerUserId = principal.UserId
         });
         db.CollectionProvenance.Add(provenance);
         db.ClassificationResults.Add(new ClassificationResultRecord
@@ -174,7 +179,8 @@ public static class TurnSummaryEndpoints
             AllowsAgentContext = allowsAgentContext,
             CreatedAt = receivedAt,
             UpdatedAt = receivedAt,
-            CreatedBy = actor
+            CreatedBy = actor,
+            OwnerUserId = principal.UserId
         };
         db.SharedMemoryItems.Add(memoryRecord);
         if (SensitiveMemoryPersistence.RequiresProtection(memoryRecord))
@@ -207,7 +213,7 @@ public static class TurnSummaryEndpoints
                 throw;
             }
 
-            var existing = await BuildExistingResponseAsync(db, sourceEventId, cancellationToken);
+            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.UserId, cancellationToken);
             return TypedResults.Ok(existing);
         }
 
@@ -228,6 +234,7 @@ public static class TurnSummaryEndpoints
     private static async Task<TurnSummaryIntakeResponse> BuildExistingResponseAsync(
         LuthnDbContext db,
         string sourceEventId,
+        string ownerUserId,
         CancellationToken cancellationToken)
     {
         var classification = await db.ClassificationResults
@@ -235,7 +242,9 @@ public static class TurnSummaryEndpoints
             .SingleAsync(record => record.SourceEventId == sourceEventId, cancellationToken);
         var memory = await db.SharedMemoryItems
             .AsNoTracking()
-            .SingleOrDefaultAsync(record => record.Id == $"memory-{sourceEventId}", cancellationToken);
+            .SingleOrDefaultAsync(
+                record => record.Id == $"memory-{sourceEventId}" && record.OwnerUserId == ownerUserId,
+                cancellationToken);
         var audit = await db.AuditEvents
             .AsNoTracking()
             .Where(record => record.SubjectId == sourceEventId &&
@@ -424,12 +433,15 @@ public static class TurnSummaryEndpoints
             ? $"{request.SourceAgent.Trim()} turn summary"
             : request.Title.Trim();
 
-    private static string CreateStableSummaryId(TurnSummaryIntakeRequest request, string contentDigest)
+    private static string CreateStableSummaryId(
+        TurnSummaryIntakeRequest request,
+        string contentDigest,
+        string ownerUserId)
     {
         var key = string.IsNullOrWhiteSpace(request.IdempotencyKey)
             ? $"{request.SourceAgent.Trim()}:{request.SessionId.Trim()}:{request.TurnId?.Trim()}:{request.TurnRange?.Trim()}:{contentDigest}"
             : request.IdempotencyKey.Trim();
-        return $"turn-summary-{HashFragment(key)}";
+        return $"turn-summary-{HashFragment($"{ownerUserId}:{key}")}";
     }
 
     private static string? NormalizeDigest(string? contentDigest) =>

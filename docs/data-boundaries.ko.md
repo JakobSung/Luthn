@@ -136,10 +136,27 @@ XML을 commit·출력하거나 암호화되지 않은 저장소와 일반 log에
 key ring을 잃으면 암호화 memory는 복구할 수 없고 새 key 생성으로 기존 payload를
 복호화할 수 없습니다.
 
+## 서버 신뢰 소유권 경계
+
+인가 owner는 server-side 속성이며 수집 metadata가 아닙니다. `SingleOwner`는 기존
+anonymous와 service-token 동작을 정규화된 하나의 local owner로 연결합니다.
+`MultiUser`는 모든 비운영자 product token에 제한된 user identity가 설정되지 않으면
+fail-closed합니다. 호출자가 보낸 `provenance.userId`, request JSON, header, agent·app 이름,
+connector metadata는 owner를 선택하거나 바꾸지 못합니다.
+
+source event, shared memory, wiki proposal, 민감 reference·request, provenance, safe-sync
+outbox의 owner는 같은 write transaction에서 기록합니다. 모든 agent-safe read와 ranking은
+후보 선택 전에 owner를 거릅니다. turn-summary idempotency에는 owner partition을 넣고 MCP
+context-pack cache key에는 역으로 token을 알아낼 수 없는 credential partition을 넣습니다.
+user identity, bearer digest, provenance claim은 안전 투영이나 cache 상태 출력에 들어가지
+않습니다. 민감 접근 상태 polling도 같은 partition을 사용하는 1초짜리 제한 cache라서
+상태 변경이 그보다 오래 stale하지 않습니다. 운영자 권한은 호출자 header가 아니라 명시적 token 설정이며, 교차-owner 작업은
+관리 route와 metadata-only audit record로 제한합니다.
+
 ## 수집 출처 경계
 
 모든 source event와 shared-memory item은 versioned 불변 `collection_provenance` 행을
-하나 가집니다. server가 정한 인증 ingest actor·수신 시각과, 호출자가 주장한 선택적
+하나 가집니다. server가 정한 인증 ingest actor·owner user·수신 시각과, 호출자가 주장한 선택적
 user·agent·application·plugin·connector·connector version·client 수집 시각을 분리해
 저장합니다. 호출자 주장은 인증이나 tenant 권한 증거가 아닙니다. 기존 행은 명시적인
 `legacy-unknown` trust와 비어 있는 origin claim을 사용합니다.

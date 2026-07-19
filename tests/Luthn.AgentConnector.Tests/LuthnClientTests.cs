@@ -451,6 +451,7 @@ public sealed class LuthnClientTests
               "sourceEventId": null,
               "memoryItemId": "memory-1",
               "authenticatedActor": "operator-service",
+              "authenticatedUserId": "local-owner",
               "actorTrust": "service-token",
               "claimsTrust": "caller-supplied",
               "claimedUserId": "owner.one",
@@ -471,6 +472,7 @@ public sealed class LuthnClientTests
         Assert.Equal(HttpMethod.Get, handler.Request!.Method);
         Assert.Equal("/api/provenance/memory-items/memory-1", handler.Request.RequestUri!.AbsolutePath);
         Assert.Equal("operator-service", response.AuthenticatedActor);
+        Assert.Equal("local-owner", response.AuthenticatedUserId);
         Assert.Equal("owner.one", response.ClaimedUserId);
     }
 

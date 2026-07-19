@@ -43,6 +43,7 @@ public sealed class RetrievalCandidateSelectorTests
         var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
         var candidates = await selector.SelectAgentContextAsync(
             new SafeSearchRequest("common", ["common"], 100),
+            "local-owner",
             CancellationToken.None);
 
         Assert.Equal(RetrievalCandidateLimits.MaxCombinedCandidates, candidates.Count);
@@ -73,6 +74,7 @@ public sealed class RetrievalCandidateSelectorTests
         var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
         var candidates = await selector.SelectAgentContextAsync(
             new SafeSearchRequest("needle", ["needle"], 20),
+            "local-owner",
             CancellationToken.None);
 
         Assert.Equal(["wiki-safe", "memory-safe"], candidates.Select(candidate => candidate.Id).ToArray());
@@ -88,6 +90,7 @@ public sealed class RetrievalCandidateSelectorTests
         var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
         var candidates = await selector.SelectAgentContextAsync(
             new SafeSearchRequest("need", [], 20),
+            "local-owner",
             CancellationToken.None);
 
         Assert.Equal(["wiki-needle"], candidates.Select(candidate => candidate.Id).ToArray());
@@ -106,6 +109,7 @@ public sealed class RetrievalCandidateSelectorTests
         var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
         var candidates = await selector.SelectAgentContextAsync(
             new SafeSearchRequest("needle", ["needle"], 20, "luthn"),
+            "local-owner",
             CancellationToken.None);
 
         Assert.Equal(
@@ -146,6 +150,7 @@ public sealed class RetrievalCandidateSelectorTests
         var selector = new DbBackedRetrievalCandidateSelector(db, new FixedTimeProvider(now));
         var candidates = await selector.SelectAgentContextAsync(
             new SafeSearchRequest("recall", ["recall"], 20),
+            "local-owner",
             CancellationToken.None);
 
         Assert.Equal(RetrievalCandidateLimits.MaxCandidatesPerCorpus, candidates.Count);

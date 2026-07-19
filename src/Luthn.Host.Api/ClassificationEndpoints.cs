@@ -109,6 +109,7 @@ public static class ClassificationEndpoints
         LuthnDbContext db,
         IHostEnvironment environment,
         IOptions<LuthnAuthOptions> authOptions,
+        IOptions<LuthnIdentityOptions> identityOptions,
         IOptions<LuthnHostOperationalOptions> hostOptions,
         IOptions<ClassificationProviderOptions> classificationOptions,
         IOperatorClassificationSettingsStore classificationSettings,
@@ -143,10 +144,27 @@ public static class ClassificationEndpoints
             return NotReady("database", checks);
         }
 
+        var now = DateTimeOffset.UtcNow;
+        var identityIssue = ServiceTokenAuthorization.GetIdentityReadinessIssue(
+            environment,
+            authOptions.Value,
+            identityOptions.Value,
+            now);
+        if (identityIssue is not null)
+        {
+            checks.Add(new ReadinessCheck("identity", "not_ready", identityIssue));
+            return NotReady("identity", checks);
+        }
+        checks.Add(new ReadinessCheck(
+            "identity",
+            "ready",
+            $"{identityOptions.Value.Mode} server-derived ownership is ready."));
+
         var tokenIssue = ServiceTokenAuthorization.GetProductionReadinessIssue(
             environment,
             authOptions.Value,
-            DateTimeOffset.UtcNow);
+            identityOptions.Value,
+            now);
         if (tokenIssue is not null)
         {
             checks.Add(new ReadinessCheck("service-token", "not_ready", tokenIssue));
@@ -256,6 +274,7 @@ public static class ClassificationEndpoints
         IRetrievalCandidateSelector candidateSelector,
         IOperationalMetrics metrics,
         TimeProvider timeProvider,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateSafeSearchRequest(
@@ -297,6 +316,7 @@ public static class ClassificationEndpoints
                     normalizedRequest.ProjectKey,
                     normalizedRequest.TaskKey,
                     normalizedRequest.TopicTags),
+                ServiceTokenAuthorization.GetPrincipal(httpContext).UserId,
                 cancellationToken);
             var pack = builder.Build(normalizedRequest, candidates) with
             {
@@ -328,6 +348,7 @@ public static class ClassificationEndpoints
         IRetrievalCandidateSelector candidateSelector,
         IOperationalMetrics metrics,
         TimeProvider timeProvider,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateSafeSearchRequest(
@@ -360,7 +381,10 @@ public static class ClassificationEndpoints
         var telemetry = new SearchTelemetryScope(metrics, timeProvider, "agent_search");
         try
         {
-            var candidates = await candidateSelector.SelectAgentContextAsync(normalizedRequest, cancellationToken);
+            var candidates = await candidateSelector.SelectAgentContextAsync(
+                normalizedRequest,
+                ServiceTokenAuthorization.GetPrincipal(httpContext).UserId,
+                cancellationToken);
             var search = retrievalBackend.Search(normalizedRequest, candidates) with
             {
                 RetrievalId = telemetry.RetrievalId
@@ -389,11 +413,14 @@ public static class ClassificationEndpoints
         string id,
         LuthnDbContext db,
         WikiMarkdownRenderer renderer,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        var ownerUserId = ServiceTokenAuthorization.GetPrincipal(httpContext).UserId;
         var proposal = await db.WikiProposals
             .AsNoTracking()
-            .Where(record => record.Id == id &&
+            .Where(record => record.OwnerUserId == ownerUserId &&
+                record.Id == id &&
                 record.AllowsAgentContext &&
                 record.Sensitivity == SensitivityLevel.Public)
             .Select(record => new WikiMarkdownProjection(

@@ -58,6 +58,20 @@ provenance mutation. Include `collection_provenance` in database backup and
 restore as ordinary metadata. Its retention follows the linked subject; do not
 export it to agent, sync, telemetry, or audit payloads.
 
+The ownership migration runs in the same PostgreSQL schema transaction. It
+backfills every legacy source, memory, wiki, sensitive reference/request,
+provenance, and safe-sync outbox row to `local-owner`, then adds non-empty
+constraints and owner-leading indexes. The temporary backfill defaults are
+removed in the same migration so later writes missing trusted owner stamping
+fail instead of silently becoming `local-owner`. Keep the pre-migration database backup
+until `/readyz` reports both `identity` and `database` ready and focused
+same-owner/cross-owner checks pass. Rollback requires stopping API, MCP, and
+adapter writes, restoring the pre-migration backup if the older image cannot
+read the expanded schema, restoring the matching operator key volume, and
+starting the matching previous image. Do not change `SingleOwnerUserId` after
+data exists without an explicit data migration; the setting does not relabel
+persisted owners.
+
 ## Self-Host Migration Model
 
 Luthn uses EF Core migrations against PostgreSQL. Operators should treat schema

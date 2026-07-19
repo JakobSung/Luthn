@@ -132,6 +132,34 @@ Luthn__Auth__Tokens__0__Scopes__0=agent.read
 Luthn__Auth__Tokens__0__ExpiresAt=2026-12-31T23:59:59Z
 ```
 
+Fresh installs use the backward-compatible single-owner identity boundary:
+
+```bash
+Luthn__Identity__Mode=SingleOwner
+Luthn__Identity__SingleOwnerUserId=local-owner
+Luthn__Auth__Tokens__0__UserId=local-owner
+Luthn__Auth__Tokens__0__IsOperator=false
+```
+
+For a local multi-user deployment, switch the mode and bind every non-operator
+product token to one bounded user ID. IDs are lower-cased and may contain ASCII
+letters, digits, `.`, `_`, `:`, `@`, and `-`; the first character must be a
+letter or digit and the maximum is 128 characters. Missing or invalid bindings
+return `503`, and caller JSON cannot override them.
+
+```bash
+Luthn__Identity__Mode=MultiUser
+Luthn__Auth__Tokens__0__UserId=alice
+Luthn__Auth__Tokens__0__IsOperator=false
+Luthn__Auth__Tokens__1__Name=local-operator
+Luthn__Auth__Tokens__1__IsOperator=true
+```
+
+Use a distinct least-privilege token per user or connector. `IsOperator=true`
+is an explicit cross-owner administrative role; the `X-Luthn-Operator` header
+remains audit metadata and never grants that role. Verify `/readyz` after any
+identity configuration change.
+
 Supported scopes include `agent.read`, `agent.write.summary`,
 `agent.connection.read`, `agent.connection.write`, `classification.preview`,
 `config.write`,

@@ -25,12 +25,16 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     {
         modelBuilder.Entity<SourceEventRecord>(entity =>
         {
-            entity.ToTable("source_events");
+            entity.ToTable("source_events", table => table.HasCheckConstraint(
+                "CK_source_events_owner_user_id",
+                "\"OwnerUserId\" <> ''"));
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SourceSystem).HasMaxLength(128).IsRequired();
             entity.Property(record => record.SourceType).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ContentDigest).HasMaxLength(256).IsRequired();
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => record.OwnerUserId);
         });
 
         modelBuilder.Entity<ClassificationResultRecord>(entity =>
@@ -50,7 +54,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<WikiProposalRecord>(entity =>
         {
-            entity.ToTable("wiki_proposals");
+            entity.ToTable("wiki_proposals", table => table.HasCheckConstraint(
+                "CK_wiki_proposals_owner_user_id",
+                "\"OwnerUserId\" <> ''"));
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
@@ -63,13 +69,14 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.TopicTags).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
             entity.Property(record => record.SearchTerms).HasColumnType("text").HasDefaultValue("||");
             entity.Property(record => record.SearchTagKeys).HasColumnType("text").HasDefaultValue("||");
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new
             {
                 record.AllowsAgentContext,
                 record.Sensitivity,
                 record.CreatedAt
             });
-            entity.HasIndex(record => new { record.ProjectKey, record.TaskKey, record.CreatedAt });
+            entity.HasIndex(record => new { record.OwnerUserId, record.ProjectKey, record.TaskKey, record.CreatedAt });
             entity.HasOne(record => record.SourceEvent)
                 .WithMany()
                 .HasForeignKey(record => record.SourceEventId)
@@ -78,7 +85,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<SensitiveRecordReferenceRecord>(entity =>
         {
-            entity.ToTable("sensitive_record_references");
+            entity.ToTable("sensitive_record_references", table => table.HasCheckConstraint(
+                "CK_sensitive_record_references_owner_user_id",
+                "\"OwnerUserId\" <> ''"));
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
@@ -86,6 +95,8 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.SourceType).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ReferenceLabel).HasMaxLength(256).IsRequired();
             entity.Property(record => record.RedactedSummary).HasMaxLength(4000).IsRequired();
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => record.OwnerUserId);
             entity.HasOne(record => record.SourceEvent)
                 .WithMany()
                 .HasForeignKey(record => record.SourceEventId)
@@ -94,7 +105,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<SensitiveAccessRequestRecord>(entity =>
         {
-            entity.ToTable("sensitive_access_requests");
+            entity.ToTable("sensitive_access_requests", table => table.HasCheckConstraint(
+                "CK_sensitive_access_requests_owner_user_id",
+                "\"OwnerUserId\" <> ''"));
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SensitiveRecordReferenceId).HasMaxLength(128).IsRequired();
@@ -104,7 +117,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.RedactedSummary).HasMaxLength(4000).IsRequired();
             entity.Property(record => record.Status).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.DecidedBy).HasMaxLength(128);
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new { record.Status, record.ExpiresAt, record.UpdatedAt });
+            entity.HasIndex(record => new { record.OwnerUserId, record.Status, record.UpdatedAt });
             entity.HasOne(record => record.SensitiveRecordReference)
                 .WithMany()
                 .HasForeignKey(record => record.SensitiveRecordReferenceId)
@@ -130,7 +145,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<SharedMemoryItemRecord>(entity =>
         {
-            entity.ToTable("shared_memory_items");
+            entity.ToTable("shared_memory_items", table => table.HasCheckConstraint(
+                "CK_shared_memory_items_owner_user_id",
+                "\"OwnerUserId\" <> ''"));
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.Title).HasMaxLength(200).IsRequired();
@@ -146,6 +163,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.RetentionKind).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.SourceSessionId).HasMaxLength(128);
             entity.Property(record => record.CreatedBy).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.Revision).HasDefaultValue(1L);
             entity.Property(record => record.Revision).IsConcurrencyToken();
             entity.Property(record => record.ExternalPublicationState)
@@ -160,7 +178,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.Visibility,
                 record.ExpiresAt
             });
-            entity.HasIndex(record => new { record.ProjectKey, record.TaskKey, record.UpdatedAt });
+            entity.HasIndex(record => new { record.OwnerUserId, record.ProjectKey, record.TaskKey, record.UpdatedAt });
         });
 
         modelBuilder.Entity<SensitiveMemoryPayloadRecord>(entity =>
@@ -179,9 +197,15 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<CollectionProvenanceRecord>(entity =>
         {
-            entity.ToTable("collection_provenance", table => table.HasCheckConstraint(
-                "CK_collection_provenance_subject",
-                "\"SourceEventId\" IS NOT NULL OR \"MemoryItemId\" IS NOT NULL"));
+            entity.ToTable("collection_provenance", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_collection_provenance_subject",
+                    "\"SourceEventId\" IS NOT NULL OR \"MemoryItemId\" IS NOT NULL");
+                table.HasCheckConstraint(
+                    "CK_collection_provenance_authenticated_user_id",
+                    "\"AuthenticatedUserId\" <> ''");
+            });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(64);
             entity.Property(record => record.ContractVersion).HasDefaultValue(1);
@@ -190,6 +214,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.AuthenticatedActor).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ActorTrust).HasMaxLength(32).IsRequired();
             entity.Property(record => record.ClaimsTrust).HasMaxLength(32).IsRequired();
+            entity.Property(record => record.AuthenticatedUserId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ClaimedUserId).HasMaxLength(128);
             entity.Property(record => record.AgentId).HasMaxLength(128);
             entity.Property(record => record.ApplicationId).HasMaxLength(128);
@@ -219,12 +244,15 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<SafeProjectionSyncOutboxRecord>(entity =>
         {
-            entity.ToTable("safe_projection_sync_outbox");
+            entity.ToTable("safe_projection_sync_outbox", table => table.HasCheckConstraint(
+                "CK_safe_projection_sync_outbox_owner_user_id",
+                "\"OwnerUserId\" <> ''"));
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.IdempotencyKey).HasMaxLength(512).IsRequired();
             entity.Property(record => record.OriginInstanceId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.LocalRecordId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.Operation).HasConversion<string>().HasMaxLength(32);
             entity.Property(record => record.SafeEnvelopeJson).HasColumnType("jsonb").IsRequired();
             entity.Property(record => record.State).HasConversion<string>().HasMaxLength(32);
@@ -239,6 +267,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.Operation
             }).IsUnique();
             entity.HasIndex(record => new { record.State, record.NextAttemptAt, record.CreatedAt });
+            entity.HasIndex(record => new { record.OwnerUserId, record.State, record.CreatedAt });
         });
 
         modelBuilder.Entity<SafeProjectionSyncCheckpointRecord>(entity =>

@@ -44,8 +44,12 @@ services:
       Luthn__OperatorConfig__Directory: /var/lib/luthn/operator
       Luthn__Host__RequestTimeoutSeconds: ${Luthn__Host__RequestTimeoutSeconds:-65}
       Luthn__Auth__RequireServiceToken: ${Luthn__Auth__RequireServiceToken:-true}
+      Luthn__Identity__Mode: ${Luthn__Identity__Mode:-SingleOwner}
+      Luthn__Identity__SingleOwnerUserId: ${Luthn__Identity__SingleOwnerUserId:-local-owner}
       Luthn__Auth__Tokens__0__Name: ${Luthn__Auth__Tokens__0__Name:-local-agent}
       Luthn__Auth__Tokens__0__Sha256Digest: ${Luthn__Auth__Tokens__0__Sha256Digest:?service token digest is required}
+      Luthn__Auth__Tokens__0__UserId: ${Luthn__Auth__Tokens__0__UserId:-local-owner}
+      Luthn__Auth__Tokens__0__IsOperator: ${Luthn__Auth__Tokens__0__IsOperator:-false}
       Luthn__Auth__Tokens__0__Scopes__0: ${Luthn__Auth__Tokens__0__Scopes__0:-agent.read}
       Luthn__Auth__Tokens__0__Scopes__1: ${Luthn__Auth__Tokens__0__Scopes__1:-agent.write.summary}
       Luthn__Auth__Tokens__0__Scopes__2: ${Luthn__Auth__Tokens__0__Scopes__2:-memory.write}
@@ -64,6 +68,7 @@ services:
       Luthn__Auth__Tokens__0__Scopes__15: ${Luthn__Auth__Tokens__0__Scopes__15:-}
       Luthn__Auth__Tokens__1__Name: ${Luthn__Auth__Tokens__1__Name:-local-operator}
       Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:?operator token digest is required}
+      Luthn__Auth__Tokens__1__IsOperator: ${Luthn__Auth__Tokens__1__IsOperator:-true}
       Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
     ports:
       - "127.0.0.1:${LUTHN_PORT:-8080}:8080"

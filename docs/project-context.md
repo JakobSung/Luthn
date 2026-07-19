@@ -84,8 +84,12 @@ Runtime projects:
   metric contracts.
 - Store one immutable, versioned collection-provenance record atomically with
   every new source event or shared-memory item. Keep caller claims distinct
-  from server-derived actor identity, and expose provenance only to authorized
-  operators.
+  from server-derived actor and owner identity, and expose provenance only to
+  an authorized same-owner reader or explicit operator.
+- Treat owner identity as server-derived authorization state. Filter every
+  agent-safe persistence query, ranking path, idempotency key, publication,
+  sensitive-access path, and retrieval cache by that owner before returning or
+  reusing data.
 - Keep `Luthn.McpServer` connector-side over HTTP; do not wire it directly to
   Core.
 - Do not add one-off console apps. Prefer API endpoints, hosted services, MCP

@@ -56,7 +56,7 @@ public sealed class MemoryEndpointTests
         Assert.Equal(["delivery"], created.Value.TopicTags);
         Assert.DoesNotContain("raw", created.Value.SafeSummary, StringComparison.OrdinalIgnoreCase);
 
-        var readResult = await MemoryEndpoints.ReadMemoryItem(id, db, CancellationToken.None);
+        var readResult = await MemoryEndpoints.ReadMemoryItem(id, db, new DefaultHttpContext(), CancellationToken.None);
         var ok = Assert.IsType<Ok<MemoryItemResponse>>(readResult.Result);
 
         Assert.Equal(id, ok.Value!.Id);
@@ -70,6 +70,7 @@ public sealed class MemoryEndpointTests
             db,
             metrics,
             TimeProvider.System,
+            new DefaultHttpContext(),
             CancellationToken.None);
         var queryOk = Assert.IsType<Ok<MemoryQueryResponse>>(queryResult.Result);
         var item = Assert.Single(queryOk.Value!.Items);
@@ -167,7 +168,7 @@ public sealed class MemoryEndpointTests
         Assert.Equal("metadata-only", audit.PayloadClass);
         Assert.Equal("encrypted-payload-only", audit.RedactionState);
 
-        var read = await MemoryEndpoints.ReadMemoryItem(created.Value.Id, db, CancellationToken.None);
+        var read = await MemoryEndpoints.ReadMemoryItem(created.Value.Id, db, new DefaultHttpContext(), CancellationToken.None);
         var query = await MemoryEndpoints.QueryMemoryItems(
             new MemoryQueryRequest("credential", ["security"], 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
@@ -175,6 +176,7 @@ public sealed class MemoryEndpointTests
             db,
             new OperationalMetrics(),
             TimeProvider.System,
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.IsType<NotFound>(read.Result);
@@ -208,7 +210,7 @@ public sealed class MemoryEndpointTests
         Assert.Equal(MemoryVisibility.PrivateToOwner, created.Value.Visibility);
         Assert.False(created.Value.AllowsAgentContext);
         Assert.IsType<NotFound>(
-            (await MemoryEndpoints.ReadMemoryItem(created.Value.Id, db, CancellationToken.None)).Result);
+            (await MemoryEndpoints.ReadMemoryItem(created.Value.Id, db, new DefaultHttpContext(), CancellationToken.None)).Result);
     }
 
     [Fact]
@@ -341,8 +343,8 @@ public sealed class MemoryEndpointTests
             ExpiresAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z")
         });
 
-        var privateRead = await MemoryEndpoints.ReadMemoryItem(privateId, db, CancellationToken.None);
-        var expiredRead = await MemoryEndpoints.ReadMemoryItem(expiredId, db, CancellationToken.None);
+        var privateRead = await MemoryEndpoints.ReadMemoryItem(privateId, db, new DefaultHttpContext(), CancellationToken.None);
+        var expiredRead = await MemoryEndpoints.ReadMemoryItem(expiredId, db, new DefaultHttpContext(), CancellationToken.None);
         var query = await MemoryEndpoints.QueryMemoryItems(
             new MemoryQueryRequest(CoreTags: ["release", "private"], MaxItems: 10),
             new DeterministicRetrievalBackend(new SafeSearchIndex()),
@@ -350,6 +352,7 @@ public sealed class MemoryEndpointTests
             db,
             new OperationalMetrics(),
             TimeProvider.System,
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.IsType<NotFound>(privateRead.Result);
@@ -396,6 +399,7 @@ public sealed class MemoryEndpointTests
             db,
             new OperationalMetrics(),
             TimeProvider.System,
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequest<Microsoft.AspNetCore.Mvc.ProblemDetails>>(result.Result);
@@ -442,6 +446,7 @@ public sealed class MemoryEndpointTests
             db,
             new OperationalMetrics(),
             TimeProvider.System,
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var ok = Assert.IsType<Ok<MemoryQueryResponse>>(result.Result);

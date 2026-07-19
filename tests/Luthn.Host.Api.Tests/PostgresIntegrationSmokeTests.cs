@@ -105,11 +105,17 @@ public sealed class PostgresIntegrationSmokeTests
         var migratedRequest = await db.SensitiveAccessRequests
             .SingleAsync(record => record.Id == "access-legacy-approved");
         Assert.Equal("Reviewed legacy output.", migratedRequest.RedactedSummary);
+        Assert.Equal("local-owner", migratedRequest.OwnerUserId);
+        Assert.Equal(
+            "local-owner",
+            (await db.SensitiveRecordReferences.SingleAsync(record => record.Id == "sensitive-ref-legacy-approved")).OwnerUserId);
         var migratedWiki = await db.WikiProposals.SingleAsync(record => record.Id == "wiki-legacy-recall");
+        Assert.Equal("local-owner", migratedWiki.OwnerUserId);
         Assert.Null(migratedWiki.ProjectKey);
         Assert.Null(migratedWiki.TaskKey);
         Assert.Empty(migratedWiki.TopicTags);
         var migratedMemory = await db.SharedMemoryItems.SingleAsync(record => record.Id == "memory-legacy-recall");
+        Assert.Equal("local-owner", migratedMemory.OwnerUserId);
         Assert.Null(migratedMemory.ProjectKey);
         Assert.Null(migratedMemory.TaskKey);
         Assert.Empty(migratedMemory.TopicTags);
@@ -134,6 +140,7 @@ public sealed class PostgresIntegrationSmokeTests
         {
             Assert.Equal(1, record.ContractVersion);
             Assert.Equal(CollectionProvenance.LegacyUnknownTrust, record.AuthenticatedActor);
+            Assert.Equal("local-owner", record.AuthenticatedUserId);
             Assert.Equal(CollectionProvenance.LegacyUnknownTrust, record.ActorTrust);
             Assert.Equal(CollectionProvenance.LegacyUnknownTrust, record.ClaimsTrust);
             Assert.Null(record.ClaimedUserId);
@@ -164,6 +171,25 @@ public sealed class PostgresIntegrationSmokeTests
 
         var pending = await db.Database.GetPendingMigrationsAsync();
         Assert.Empty(pending);
+        var retainedOwnerDefaults = await db.Database.SqlQueryRaw<int>(
+                """
+                SELECT COUNT(*)::int AS "Value"
+                FROM pg_attrdef defaults
+                JOIN pg_attribute attributes
+                  ON attributes.attrelid = defaults.adrelid
+                 AND attributes.attnum = defaults.adnum
+                JOIN pg_class tables ON tables.oid = defaults.adrelid
+                WHERE (tables.relname, attributes.attname) IN (
+                    ('source_events', 'OwnerUserId'),
+                    ('wiki_proposals', 'OwnerUserId'),
+                    ('shared_memory_items', 'OwnerUserId'),
+                    ('sensitive_record_references', 'OwnerUserId'),
+                    ('sensitive_access_requests', 'OwnerUserId'),
+                    ('safe_projection_sync_outbox', 'OwnerUserId'),
+                    ('collection_provenance', 'AuthenticatedUserId'))
+                """)
+            .SingleAsync();
+        Assert.Equal(0, retainedOwnerDefaults);
 
         var now = DateTimeOffset.UtcNow;
         db.SourceEvents.Add(new SourceEventRecord
@@ -223,6 +249,37 @@ public sealed class PostgresIntegrationSmokeTests
             AllowsAgentContext = true,
             CreatedAt = now.AddMinutes(index)
         }));
+        db.SourceEvents.Add(new SourceEventRecord
+        {
+            Id = "source-other-owner-match",
+            OwnerUserId = "other-owner",
+            SourceSystem = "test",
+            SourceType = "postgres-smoke",
+            ReceivedAt = now.AddDays(1),
+            ContentDigest = "sha256:other-owner-match"
+        });
+        db.CollectionProvenance.Add(new CollectionProvenanceRecord
+        {
+            Id = "provenance-other-owner-match",
+            SourceEventId = "source-other-owner-match",
+            AuthenticatedActor = "postgres-smoke",
+            AuthenticatedUserId = "other-owner",
+            ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
+            ClaimsTrust = CollectionProvenance.NoClaimsTrust,
+            ReceivedAt = now.AddDays(1)
+        });
+        db.WikiProposals.Add(new WikiProposalRecord
+        {
+            Id = "wiki-other-owner-match",
+            OwnerUserId = "other-owner",
+            SourceEventId = "source-other-owner-match",
+            Title = "Needle recovery runbook",
+            SafeSummary = "A newer cross-owner result must remain invisible.",
+            Sensitivity = SensitivityLevel.Public,
+            CoreTags = ["needle"],
+            AllowsAgentContext = true,
+            CreatedAt = now.AddDays(1)
+        });
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = "source-sensitive-retry-smoke",
@@ -294,6 +351,7 @@ public sealed class PostgresIntegrationSmokeTests
         var expiry = await SensitiveAccessEndpoints.ReadRequest(
             "access-retry-expiry-smoke",
             operationDb,
+            new DefaultHttpContext(),
             CancellationToken.None);
         var expired = Assert.IsType<Ok<SensitiveAccessRequestResponse>>(expiry.Result);
         Assert.Equal("Expired", expired.Value!.Status);
@@ -303,6 +361,8 @@ public sealed class PostgresIntegrationSmokeTests
 
         await Assert.ThrowsAnyAsync<Exception>(() => operationDb.Database.ExecuteSqlRawAsync(
             "UPDATE collection_provenance SET \"AgentId\" = 'tampered' WHERE \"Id\" = 'provenance-old-db-match'"));
+        await Assert.ThrowsAnyAsync<Exception>(() => operationDb.Database.ExecuteSqlRawAsync(
+            "UPDATE shared_memory_items SET \"OwnerUserId\" = '' WHERE \"Id\" = 'memory-legacy-recall'"));
         await using (var missingProvenanceDb = new LuthnDbContext(options))
         {
             missingProvenanceDb.SourceEvents.Add(new SourceEventRecord
@@ -319,6 +379,7 @@ public sealed class PostgresIntegrationSmokeTests
         var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
         var candidates = await selector.SelectAgentContextAsync(
             new SafeSearchRequest("needle", ["needle"], 10),
+            "local-owner",
             CancellationToken.None);
         var candidate = Assert.Single(candidates);
         Assert.Equal("wiki-old-db-match", candidate.Id);
@@ -327,6 +388,7 @@ public sealed class PostgresIntegrationSmokeTests
             db,
             new FakeHostEnvironment("Development"),
             Options.Create(new LuthnAuthOptions()),
+            Options.Create(new LuthnIdentityOptions()),
             Options.Create(new LuthnHostOperationalOptions()),
             Options.Create(new ClassificationProviderOptions
             {

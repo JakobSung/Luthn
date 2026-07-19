@@ -95,6 +95,7 @@ if (hostOptions.EnableForwardedHeaders)
     });
 }
 builder.Services.Configure<LuthnAuthOptions>(builder.Configuration.GetSection("Luthn:Auth"));
+builder.Services.Configure<LuthnIdentityOptions>(builder.Configuration.GetSection("Luthn:Identity"));
 if (builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddDbContext<LuthnDbContext>(options =>
