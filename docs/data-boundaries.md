@@ -61,6 +61,19 @@ The local mock recognizes bounded English and Korean marker phrases for this
 taxonomy. It remains a test and experiment classifier, not a production
 quality claim.
 
+Every configured operational provider is combined with local sensitive-data
+guard version `1`. The guard recognizes bounded high-confidence private-key,
+access-token, assigned-secret, email, Korean phone and resident-registration,
+and Luhn-valid payment-card shapes. It returns canonical category names only;
+matched values and excerpts are not added to classification results, logs,
+metrics, audits, or persistence metadata. Provider errors still fail before
+storage and never fall back to detector-only acceptance.
+
+`ExternalHttp` is the self-hosted-capable classifier boundary. Operators may
+point it at a local or private-network AI service; any non-local transfer is an
+explicit operator configuration decision. The local guard applies after every
+valid provider response and can only make routing more restrictive.
+
 Provider output is normalized before policy evaluation. A sensitive category
 raises sensitivity to at least its taxonomy minimum; `containsSensitiveMaterial`
 raises sensitivity to at least `Confidential`; and `Confidential` or
@@ -83,7 +96,8 @@ aggregate false-negative, false-positive, and mismatch counts. Raw corpus text
 is not copied into the report.
 
 Evaluation uses the local deterministic mock by default and performs no network
-request. Testing a configured API requires both `--provider configured-api` and
+request. `--provider guarded-mock` exercises the same local hybrid guard without
+creating an API client. Testing a configured API requires both `--provider configured-api` and
 the explicit `--allow-external-provider` acknowledgement because the API may
 relay corpus text to its configured classifier. An optional bearer token can be
 read only from the named environment variable supplied with `--token-env`; the

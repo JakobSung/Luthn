@@ -115,7 +115,14 @@ POST /api/operator/classification-provider/test
 }
 ```
 
-응답은 `provider`, `model`, `endpoint`, `authHeaderName`, `payloadClass`, `redactionState`, `hasApiKey`만 반환하고 API key는 절대 돌려주지 않습니다. 시험 endpoint는 선택적 `content`, `sourceType`을 받아 현재 provider와 정책 engine을 실행하고 안전한 설정 보기, 분류, 저장 결정을 반환합니다. 저장과 시험은 메타데이터 전용 감사 사건을 기록합니다.
+응답은 `provider`, `model`, `endpoint`, `authHeaderName`, `payloadClass`,
+`redactionState`, `hasApiKey`, `providerBoundary`,
+`localSensitiveDataGuardActive`, `localSensitiveDataGuardVersion`을 반환하고
+API key나 detector 일치값은 절대 돌려주지 않습니다. `ExternalHttp`는
+`self-hosted-capable-external-http` 경계로 표시됩니다. 시험 endpoint는 선택적
+`content`, `sourceType`을 받아 현재 provider와 정책 engine을 실행하고 안전한 설정
+보기, 분류, 저장 결정을 반환합니다. 저장과 시험은 메타데이터 전용 감사 사건을
+기록합니다.
 
 ## 운영 관측 지표 내보내기
 

@@ -58,7 +58,8 @@ public sealed class ClassificationEvaluationCommand
             var evaluator = new ClassificationGoldenEvaluator();
             var report = options.Provider switch
             {
-                EvaluationProvider.Mock => await EvaluateMockAsync(evaluator, dataset, cancellationToken),
+                EvaluationProvider.Mock => await EvaluateMockAsync(evaluator, dataset, guarded: false, cancellationToken),
+                EvaluationProvider.GuardedMock => await EvaluateMockAsync(evaluator, dataset, guarded: true, cancellationToken),
                 EvaluationProvider.ConfiguredApi => await EvaluateConfiguredApiAsync(
                     evaluator,
                     dataset,
@@ -110,13 +111,18 @@ public sealed class ClassificationEvaluationCommand
     private static Task<ClassificationEvaluationReport> EvaluateMockAsync(
         ClassificationGoldenEvaluator evaluator,
         ClassificationGoldenDataset dataset,
+        bool guarded,
         CancellationToken cancellationToken)
     {
-        var classifier = new MockContentClassifier();
+        IContentClassifier classifier = guarded
+            ? new HybridContentClassifier(
+                new MockContentClassifier(),
+                new DeterministicSensitiveDataDetector())
+            : new MockContentClassifier();
         var policyEngine = new PolicyEngine();
         return evaluator.EvaluateAsync(
             dataset,
-            "mock",
+            guarded ? "guarded-mock" : "mock",
             async (goldenCase, caseCancellationToken) =>
             {
                 var classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
@@ -295,8 +301,9 @@ public sealed class ClassificationEvaluationCommand
         value.ToLowerInvariant() switch
         {
             "mock" => EvaluationProvider.Mock,
+            "guarded-mock" => EvaluationProvider.GuardedMock,
             "configured-api" => EvaluationProvider.ConfiguredApi,
-            _ => throw new ArgumentException("--provider must be 'mock' or 'configured-api'.")
+            _ => throw new ArgumentException("--provider must be 'mock', 'guarded-mock', or 'configured-api'.")
         };
 
     private static string FindDefaultDatasetPath()
@@ -321,6 +328,7 @@ public sealed class ClassificationEvaluationCommand
     private enum EvaluationProvider
     {
         Mock,
+        GuardedMock,
         ConfiguredApi
     }
 

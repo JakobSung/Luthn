@@ -159,6 +159,45 @@
       "expectedStorageDecision": "SensitiveDbOnly"
     },
     {
+      "id": "ko-phone-shape",
+      "language": "Korean",
+      "sourceType": "note",
+      "content": "연락처는 010-1234-5678입니다.",
+      "title": null,
+      "safeSummary": null,
+      "coreTags": [],
+      "expectedSensitivity": "Confidential",
+      "expectedCategories": ["personal identifier"],
+      "expectedContainsSensitiveMaterial": true,
+      "expectedStorageDecision": "SensitiveDbOnly"
+    },
+    {
+      "id": "ko-resident-registration-shape",
+      "language": "Korean",
+      "sourceType": "note",
+      "content": "식별값은 900101-1234568입니다.",
+      "title": null,
+      "safeSummary": null,
+      "coreTags": [],
+      "expectedSensitivity": "Confidential",
+      "expectedCategories": ["personal identifier"],
+      "expectedContainsSensitiveMaterial": true,
+      "expectedStorageDecision": "SensitiveDbOnly"
+    },
+    {
+      "id": "ko-payment-card-shape",
+      "language": "Korean",
+      "sourceType": "note",
+      "content": "시험용 결제수단은 4111 1111 1111 1111입니다.",
+      "title": null,
+      "safeSummary": null,
+      "coreTags": [],
+      "expectedSensitivity": "Confidential",
+      "expectedCategories": ["payment"],
+      "expectedContainsSensitiveMaterial": true,
+      "expectedStorageDecision": "SensitiveDbOnly"
+    },
+    {
       "id": "mixed-internal-runbook",
       "language": "Mixed",
       "sourceType": "note",
@@ -224,6 +263,19 @@
       "expectedStorageDecision": "WikiCandidate"
     },
     {
+      "id": "mixed-email-shape",
+      "language": "Mixed",
+      "sourceType": "note",
+      "content": "담당 contact는 person@example.com 입니다.",
+      "title": null,
+      "safeSummary": null,
+      "coreTags": [],
+      "expectedSensitivity": "Confidential",
+      "expectedCategories": ["email"],
+      "expectedContainsSensitiveMaterial": true,
+      "expectedStorageDecision": "SensitiveDbOnly"
+    },
+    {
       "id": "en-public-onboarding",
       "language": "English",
       "sourceType": "note",
@@ -261,6 +313,19 @@
       "expectedCategories": [],
       "expectedContainsSensitiveMaterial": false,
       "expectedStorageDecision": "WikiCandidate"
+    },
+    {
+      "id": "en-access-token-shape",
+      "language": "English",
+      "sourceType": "note",
+      "content": "Synthetic token ghp_1234567890abcdefghijklmnopqrstuvwxyz",
+      "title": null,
+      "safeSummary": null,
+      "coreTags": [],
+      "expectedSensitivity": "Restricted",
+      "expectedCategories": ["access key"],
+      "expectedContainsSensitiveMaterial": true,
+      "expectedStorageDecision": "SensitiveDbOnly"
     }
   ]
 }

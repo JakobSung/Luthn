@@ -267,7 +267,10 @@ Save request:
 ```
 
 Responses include `provider`, `model`, `endpoint`, `authHeaderName`,
-`payloadClass`, `redactionState`, and `hasApiKey`. They never return the API key.
+`payloadClass`, `redactionState`, `hasApiKey`, `providerBoundary`,
+`localSensitiveDataGuardActive`, and `localSensitiveDataGuardVersion`. They
+never return the API key or detector matches. `ExternalHttp` reports the
+`self-hosted-capable-external-http` boundary.
 The test endpoint accepts optional `content` and `sourceType`, runs the current
 provider and policy engine, and returns the safe configuration view,
 classification, and storage decision. Save and test operations write

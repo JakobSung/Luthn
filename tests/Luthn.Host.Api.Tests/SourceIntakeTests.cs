@@ -145,6 +145,55 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
     }
 
     [Fact]
+    public async Task DetectorOnlySignalCreatesSensitiveReferenceWithoutPersistingMatchedValue()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        const string matchedValue = "010-1234-5678";
+        var content = $"담당 연락처는 {matchedValue}입니다.";
+
+        using var response = await client.PostAsJsonAsync("/api/sources", new
+        {
+            sourceSystem = "local",
+            sourceType = "note",
+            content,
+            title = "담당자 연락",
+            safeSummary = "연락 절차",
+            coreTags = new[] { "contact" }
+        });
+        var responseJson = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(responseJson);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(
+            "Confidential",
+            body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("wikiProposalId").ValueKind);
+        Assert.NotEqual(JsonValueKind.Null, body.RootElement.GetProperty("sensitiveReferenceId").ValueKind);
+        Assert.DoesNotContain(matchedValue, responseJson, StringComparison.Ordinal);
+
+        using var scope = CreateScope(factory);
+        var db = GetDb(scope);
+        var source = await db.SourceEvents.SingleAsync();
+        var classification = await db.ClassificationResults.SingleAsync();
+        var reference = await db.SensitiveRecordReferences.SingleAsync();
+        var audits = await db.AuditEvents.ToArrayAsync();
+
+        Assert.DoesNotContain(matchedValue, source.ContentDigest, StringComparison.Ordinal);
+        Assert.Contains("personal identifier", classification.Categories);
+        Assert.DoesNotContain(classification.Categories, category => category.Contains(matchedValue, StringComparison.Ordinal));
+        Assert.DoesNotContain(matchedValue, reference.ReferenceLabel, StringComparison.Ordinal);
+        Assert.DoesNotContain(matchedValue, reference.RedactedSummary, StringComparison.Ordinal);
+        Assert.All(audits, audit =>
+        {
+            Assert.DoesNotContain(matchedValue, audit.SubjectId, StringComparison.Ordinal);
+            Assert.DoesNotContain(matchedValue, audit.PayloadClass, StringComparison.Ordinal);
+            Assert.DoesNotContain(matchedValue, audit.RedactionState, StringComparison.Ordinal);
+        });
+        Assert.Empty(await db.WikiProposals.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task SensitiveSourceDoesNotTrustUnsafeCallerSummaryAsRedactedOutput()
     {
         using var factory = CreateFactory();

@@ -57,6 +57,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("Classification provider", index, StringComparison.Ordinal);
         Assert.Contains("Unconfigured — choose a provider", index, StringComparison.Ordinal);
         Assert.Contains("Mock — development/test only", index, StringComparison.Ordinal);
+        Assert.Contains("Self-hosted / external HTTP", index, StringComparison.Ordinal);
         Assert.Contains("Access requests", index, StringComparison.Ordinal);
         Assert.Contains("Agent connections", index, StringComparison.Ordinal);
         Assert.Contains("Read-only agent connection status", index, StringComparison.Ordinal);
@@ -84,11 +85,64 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.False(body.RootElement.GetProperty("hasApiKey").GetBoolean());
         Assert.True(body.RootElement.GetProperty("mockAllowed").GetBoolean());
         Assert.Equal("mock-non-production", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal("local-non-production", body.RootElement.GetProperty("providerBoundary").GetString());
+        Assert.True(body.RootElement.GetProperty("localSensitiveDataGuardActive").GetBoolean());
+        Assert.Equal(
+            DeterministicSensitiveDataDetector.Version,
+            body.RootElement.GetProperty("localSensitiveDataGuardVersion").GetString());
         Assert.Contains(
             "development or test",
             body.RootElement.GetProperty("statusDetail").GetString(),
             StringComparison.Ordinal);
         Assert.False(body.RootElement.TryGetProperty("apiKey", out _));
+
+        using var scope = _factory.Services.CreateScope();
+        Assert.IsType<HybridContentClassifier>(scope.ServiceProvider.GetRequiredService<IContentClassifier>());
+    }
+
+    [Fact]
+    public async Task ReadinessReportsLocalGuardWithoutSensitiveEvidence()
+    {
+        using var response = await _client.GetAsync("/readyz");
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var guard = body.RootElement.GetProperty("checks")
+            .EnumerateArray()
+            .Single(check => check.GetProperty("name").GetString() == "classification-guard");
+        Assert.Equal("ready", guard.GetProperty("status").GetString());
+        Assert.Equal(
+            $"Local secret/PII guard version {DeterministicSensitiveDataDetector.Version} is active.",
+            guard.GetProperty("detail").GetString());
+        Assert.False(body.RootElement.ToString().Contains("matched", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task RuntimeGuardOverridesMockPublicFalseNegativeBeforePolicyRouting()
+    {
+        const string submittedValue = "010-1234-5678";
+        using var response = await _client.PostAsJsonAsync("/api/classification/preview", new
+        {
+            sourceId = "guarded-preview-source",
+            content = $"연락처 {submittedValue}",
+            sourceType = "note"
+        });
+        var responseJson = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(responseJson);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(
+            "Confidential",
+            body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.Contains(
+            body.RootElement.GetProperty("classification").GetProperty("categories").EnumerateArray(),
+            category => category.GetString() == "personal identifier");
+        Assert.True(body.RootElement.GetProperty("classification").GetProperty("containsSensitiveMaterial").GetBoolean());
+        Assert.Equal(
+            "SensitiveDbOnly",
+            body.RootElement.GetProperty("storageDecision").GetProperty("kind").GetString());
+        Assert.False(body.RootElement.GetProperty("storageDecision").GetProperty("allowsAgentContext").GetBoolean());
+        Assert.DoesNotContain(submittedValue, responseJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -338,6 +392,28 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.False(response.Value.MockAllowed);
         Assert.Equal("mock-disabled", response.Value.Status);
         Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, response.Value.StatusDetail);
+        Assert.True(response.Value.LocalSensitiveDataGuardActive);
+        Assert.Equal(DeterministicSensitiveDataDetector.Version, response.Value.LocalSensitiveDataGuardVersion);
+    }
+
+    [Fact]
+    public async Task ExternalHttpConfigurationReportsSelfHostedCapableGuardedBoundary()
+    {
+        var response = await OperatorConfigurationEndpoints.ReadClassificationProvider(
+            new StaticSettingsStore(new OperatorClassificationProviderSettings
+            {
+                Provider = OperatorClassificationProviderKind.ExternalHttp,
+                Endpoint = "http://127.0.0.1:5099/classify",
+                PayloadClass = "classification-input",
+                RedactionState = "operator-configured-provider"
+            }),
+            Options.Create(new ClassificationProviderOptions()),
+            CancellationToken.None);
+
+        Assert.NotNull(response.Value);
+        Assert.Equal("self-hosted-capable-external-http", response.Value.ProviderBoundary);
+        Assert.True(response.Value.LocalSensitiveDataGuardActive);
+        Assert.Contains("self-hosted", response.Value.StatusDetail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
