@@ -28,6 +28,8 @@ public sealed record SharedMemoryQueryResponseDto(
     [property: JsonPropertyName("coreTags")] IReadOnlyList<string> CoreTags,
     [property: JsonPropertyName("items")] IReadOnlyList<SharedMemoryItemDto> Items)
 {
+    [JsonPropertyName("retrievalId")]
+    public string? RetrievalId { get; init; }
     [JsonPropertyName("projectKey")]
     public string? ProjectKey { get; init; }
     [JsonPropertyName("taskKey")]

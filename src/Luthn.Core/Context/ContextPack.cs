@@ -39,6 +39,7 @@ public sealed record ContextPackRequest
 
 public sealed record ContextPack(IReadOnlyList<string> CoreTags, IReadOnlyList<ContextPackItem> Items)
 {
+    public string? RetrievalId { get; init; }
     public string? ProjectKey { get; init; }
     public string? TaskKey { get; init; }
     public IReadOnlyList<string> TopicTags { get; init; } = [];

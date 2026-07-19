@@ -141,6 +141,7 @@ get_wiki_proposal
 classify_preview
 create_shared_memory
 query_shared_memory
+submit_search_feedback
 get_shared_memory_item
 create_sensitive_access_request
 get_sensitive_access_request
@@ -149,9 +150,15 @@ get_sensitive_access_result
 
 Raw Vault dumps, unrestricted source reads, and private-record export tools are
 not part of the default agent surface. The connector provisions the
-`access.request` scope for the three metadata-only request tools above, but MCP
+`access.request` scope for the three metadata-only request tools above and the
+`metrics.write` scope for bounded cache observations and explicit feedback, but MCP
 does not expose approval or denial. Private details require the separate trusted
 operator decision path.
+
+`submit_search_feedback` accepts only a `retrievalId` returned by Luthn and a
+`helpful` or `unhelpful` judgment. It does not accept a query, result body, or
+free-form comment. Search telemetry is best-effort and never changes recall
+results or timeout/cache behavior.
 
 ## Verify And Disconnect
 

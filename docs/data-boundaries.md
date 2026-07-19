@@ -124,6 +124,10 @@ automatic recall and explicit MCP reads. Optional `projectKey`, `taskKey`, and
 `topicTags` values are normalized, bounded, classified with the complete safe
 projection, and may contain only non-sensitive identifiers. Raw workspace and
 transcript paths are neither recall metadata nor persisted capture fields.
+Search-quality telemetry is aggregate and in-memory. It uses allowlisted
+surface, outcome, cache-status, result-count, duration, and feedback-judgment
+values only. Queries, tags, project/task/topic keys, cache keys, titles,
+summaries, result identifiers, raw errors, and free-form feedback are excluded.
 
 ## Public-Safe Knowledge May Contain
 

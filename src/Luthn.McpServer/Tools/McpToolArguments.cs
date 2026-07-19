@@ -4,6 +4,26 @@ namespace Luthn.McpServer.Tools;
 
 internal static class McpToolArguments
 {
+    public static void RejectUnknownProperties(
+        JsonElement arguments,
+        params string[] allowedPropertyNames)
+    {
+        if (arguments.ValueKind is not JsonValueKind.Object)
+        {
+            throw new ArgumentException("Tool arguments must be an object.", nameof(arguments));
+        }
+
+        var allowed = allowedPropertyNames.ToHashSet(StringComparer.Ordinal);
+        var unknown = arguments
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .FirstOrDefault(propertyName => !allowed.Contains(propertyName));
+        if (unknown is not null)
+        {
+            throw new ArgumentException($"Unknown argument: {unknown}.", nameof(arguments));
+        }
+    }
+
     public static string ReadRequiredString(JsonElement arguments, string propertyName)
     {
         if (!arguments.TryGetProperty(propertyName, out var element) ||

@@ -138,6 +138,7 @@ if (app.Environment.IsEnvironment("Testing"))
 app.MapLuthnApi();
 app.MapOperatorConfiguration();
 app.MapOperationalMetrics();
+app.MapSearchTelemetry();
 
 app.Run();
 

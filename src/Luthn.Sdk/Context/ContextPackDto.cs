@@ -14,6 +14,8 @@ public sealed record ContextPackDto(
     [property: JsonPropertyName("coreTags")] IReadOnlyList<string> CoreTags,
     [property: JsonPropertyName("items")] IReadOnlyList<ContextPackItemDto> Items)
 {
+    [JsonPropertyName("retrievalId")]
+    public string? RetrievalId { get; init; }
     [JsonPropertyName("projectKey")]
     public string? ProjectKey { get; init; }
     [JsonPropertyName("taskKey")]
@@ -52,6 +54,8 @@ public sealed record SafeSearchResponseDto(
     [property: JsonPropertyName("coreTags")] IReadOnlyList<string> CoreTags,
     [property: JsonPropertyName("results")] IReadOnlyList<SafeSearchResultDto> Results)
 {
+    [JsonPropertyName("retrievalId")]
+    public string? RetrievalId { get; init; }
     [JsonPropertyName("projectKey")]
     public string? ProjectKey { get; init; }
     [JsonPropertyName("taskKey")]

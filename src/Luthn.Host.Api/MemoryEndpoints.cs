@@ -176,6 +176,8 @@ public static class MemoryEndpoints
         IRetrievalBackend retrievalBackend,
         IRetrievalCandidateSelector candidateSelector,
         LuthnDbContext db,
+        IOperationalMetrics metrics,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateQuery(request);
@@ -201,31 +203,53 @@ public static class MemoryEndpoints
                 "Invalid memory query request.",
                 error.Message));
         }
-        var candidates = await candidateSelector.SelectSharedMemoryAsync(
-            searchRequest,
-            cancellationToken);
-        var search = retrievalBackend.Search(
-            searchRequest,
-            candidates);
-        var resultIds = search.Results.Select(result => result.Id).ToArray();
-        var now = DateTimeOffset.UtcNow;
-        var records = resultIds.Length == 0
-            ? []
-            : await ReadAgentSafeMemoryItems(db, now)
-                .Where(record => resultIds.Contains(record.Id))
-                .ToArrayAsync(cancellationToken);
-        var recordsById = records.ToDictionary(record => record.Id, StringComparer.Ordinal);
-        var items = search.Results
-            .Where(result => recordsById.ContainsKey(result.Id))
-            .Select(result => ToResponse(recordsById[result.Id]))
-            .ToArray();
-
-        return TypedResults.Ok(new MemoryQueryResponse(search.Query, search.CoreTags, items)
+        var telemetry = new SearchTelemetryScope(metrics, timeProvider, "memory_query");
+        try
         {
-            ProjectKey = search.ProjectKey,
-            TaskKey = search.TaskKey,
-            TopicTags = search.TopicTags
-        });
+            var candidates = await candidateSelector.SelectSharedMemoryAsync(
+                searchRequest,
+                cancellationToken);
+            var search = retrievalBackend.Search(
+                searchRequest,
+                candidates);
+            var resultIds = search.Results.Select(result => result.Id).ToArray();
+            var now = timeProvider.GetUtcNow();
+            var records = resultIds.Length == 0
+                ? []
+                : await ReadAgentSafeMemoryItems(db, now)
+                    .Where(record => resultIds.Contains(record.Id))
+                    .ToArrayAsync(cancellationToken);
+            var recordsById = records.ToDictionary(record => record.Id, StringComparer.Ordinal);
+            var items = search.Results
+                .Where(result => recordsById.ContainsKey(result.Id))
+                .Select(result => ToResponse(recordsById[result.Id]))
+                .ToArray();
+
+            var response = new MemoryQueryResponse(search.Query, search.CoreTags, items)
+            {
+                RetrievalId = telemetry.RetrievalId,
+                ProjectKey = search.ProjectKey,
+                TaskKey = search.TaskKey,
+                TopicTags = search.TopicTags
+            };
+            telemetry.Complete(items.Length);
+            return TypedResults.Ok(response);
+        }
+        catch (TimeoutException)
+        {
+            telemetry.Timeout();
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            telemetry.Canceled();
+            throw;
+        }
+        catch
+        {
+            telemetry.Error();
+            throw;
+        }
     }
 
     private static IQueryable<SharedMemoryItemRecord> ReadAgentSafeMemoryItems(
@@ -447,6 +471,7 @@ public sealed record MemoryQueryResponse(
     IReadOnlyList<string> CoreTags,
     IReadOnlyList<MemoryItemResponse> Items)
 {
+    public string? RetrievalId { get; init; }
     public string? ProjectKey { get; init; }
     public string? TaskKey { get; init; }
     public IReadOnlyList<string> TopicTags { get; init; } = [];

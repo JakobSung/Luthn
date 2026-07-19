@@ -7,6 +7,7 @@ using Luthn.Sdk.Memory;
 using Luthn.Sdk.Plugins;
 using Luthn.Sdk.Source;
 using Luthn.Sdk.Sync;
+using Luthn.Sdk.Telemetry;
 using Luthn.Sdk.Wiki;
 
 namespace Luthn.Sdk.Tests;
@@ -167,6 +168,25 @@ public sealed class SdkContractTests
         Assert.Null(item.TaskKey);
         Assert.Empty(item.TopicTags);
         Assert.Equal(default, item.ProjectionTimestamp);
+        Assert.Null(response.RetrievalId);
+    }
+
+    [Fact]
+    public void SearchTelemetryDtosSerializeOnlyBoundedMetadataFields()
+    {
+        var observation = JsonSerializer.Serialize(
+            new SearchObservationRequestDto("mcp_context_pack", "succeeded", "hit", 8, 2));
+        var feedback = JsonSerializer.Serialize(
+            new SearchFeedbackRequestDto("retrieval-0123456789abcdef0123456789abcdef", "helpful"));
+
+        Assert.Equal(
+            """{"surface":"mcp_context_pack","outcome":"succeeded","cacheStatus":"hit","durationMilliseconds":8,"resultCount":2}""",
+            observation);
+        Assert.Equal(
+            """{"retrievalId":"retrieval-0123456789abcdef0123456789abcdef","judgment":"helpful"}""",
+            feedback);
+        Assert.DoesNotContain("query", observation, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("resultId", feedback, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

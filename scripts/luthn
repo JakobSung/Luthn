@@ -19,7 +19,7 @@ codex_pending_state_file="${LUTHN_CODEX_PENDING_STATE_FILE:-$connector_state_dir
 codex_disconnect_pending_state_file="${LUTHN_CODEX_DISCONNECT_PENDING_STATE_FILE:-$connector_state_dir/codex.disconnect.pending.env}"
 cli_template_version="3"
 codex_connector_version="2"
-mcp_schema_version="2"
+mcp_schema_version="3"
 distribution_ref="${LUTHN_DISTRIBUTION_REF:-main}"
 source_base_url="${LUTHN_SOURCE_BASE_URL:-https://raw.githubusercontent.com/JakobSung/Luthn/${distribution_ref}}"
 default_image="ghcr.io/jakobsung/luthn:main"
@@ -448,6 +448,7 @@ Luthn__Auth__Tokens__0__Scopes__4=classification.preview
 Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read
 Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write
 Luthn__Auth__Tokens__0__Scopes__7=access.request
+Luthn__Auth__Tokens__0__Scopes__8=metrics.write
 Luthn__Auth__Tokens__1__Name=local-operator
 Luthn__Auth__Tokens__1__Sha256Digest=$operator_digest
 Luthn__Auth__Tokens__1__Scopes__0=access.decide
@@ -627,6 +628,7 @@ ensure_connector_scopes() {
   local read_present=false
   local write_present=false
   local access_request_present=false
+  local metrics_write_present=false
   local wildcard_present=false
   local scope_value
   local scope_index
@@ -640,12 +642,13 @@ ensure_connector_scopes() {
       agent.connection.read) read_present=true ;;
       agent.connection.write) write_present=true ;;
       access.request) access_request_present=true ;;
+      metrics.write) metrics_write_present=true ;;
       '') empty_indices+=("$scope_index") ;;
     esac
   done
 
   if [[ "$wildcard_present" == "true" \
-    || ( "$read_present" == "true" && "$write_present" == "true" && "$access_request_present" == "true" ) ]]; then
+    || ( "$read_present" == "true" && "$write_present" == "true" && "$access_request_present" == "true" && "$metrics_write_present" == "true" ) ]]; then
     return 0
   fi
 
@@ -653,6 +656,7 @@ ensure_connector_scopes() {
   [[ "$read_present" == "true" ]] || required_slots=$((required_slots + 1))
   [[ "$write_present" == "true" ]] || required_slots=$((required_slots + 1))
   [[ "$access_request_present" == "true" ]] || required_slots=$((required_slots + 1))
+  [[ "$metrics_write_present" == "true" ]] || required_slots=$((required_slots + 1))
   if (( ${#empty_indices[@]} < required_slots )); then
     echo "No free service-token scope slots are available for the connector." >&2
     return 1
@@ -667,6 +671,8 @@ ensure_connector_scopes() {
   local value2=""
   local key3=""
   local value3=""
+  local key4=""
+  local value4=""
   local next_slot=0
   if [[ "$read_present" != "true" ]]; then
     key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
@@ -694,6 +700,22 @@ ensure_connector_scopes() {
       key3="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
       value3="access.request"
     fi
+    next_slot=$((next_slot + 1))
+  fi
+  if [[ "$metrics_write_present" != "true" ]]; then
+    if [[ -z "$key1" ]]; then
+      key1="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value1="metrics.write"
+    elif [[ -z "$key2" ]]; then
+      key2="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value2="metrics.write"
+    elif [[ -z "$key3" ]]; then
+      key3="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value3="metrics.write"
+    else
+      key4="Luthn__Auth__Tokens__0__Scopes__${empty_indices[$next_slot]}"
+      value4="metrics.write"
+    fi
   fi
 
   local input_file="$config_file"
@@ -702,16 +724,18 @@ ensure_connector_scopes() {
   if ! config_tmp="$(mktemp "${config_file}.connector-scopes.XXXXXX")"; then
     return 1
   fi
-  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" -v key3="$key3" -v value3="$value3" '
-    BEGIN { updated1 = 0; updated2 = 0; updated3 = 0 }
+  if ! awk -F= -v key1="$key1" -v value1="$value1" -v key2="$key2" -v value2="$value2" -v key3="$key3" -v value3="$value3" -v key4="$key4" -v value4="$value4" '
+    BEGIN { updated1 = 0; updated2 = 0; updated3 = 0; updated4 = 0 }
     key1 != "" && $1 == key1 { print key1 "=" value1; updated1 = 1; next }
     key2 != "" && $1 == key2 { print key2 "=" value2; updated2 = 1; next }
     key3 != "" && $1 == key3 { print key3 "=" value3; updated3 = 1; next }
+    key4 != "" && $1 == key4 { print key4 "=" value4; updated4 = 1; next }
     { print }
     END {
       if (key1 != "" && !updated1) print key1 "=" value1
       if (key2 != "" && !updated2) print key2 "=" value2
       if (key3 != "" && !updated3) print key3 "=" value3
+      if (key4 != "" && !updated4) print key4 "=" value4
     }
   ' "$input_file" >"$config_tmp"; then
     rm -f "$config_tmp"

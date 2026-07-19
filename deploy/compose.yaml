@@ -57,7 +57,7 @@ services:
       Luthn__Auth__Tokens__0__Scopes__8: ${Luthn__Auth__Tokens__0__Scopes__8:-}
       Luthn__Auth__Tokens__0__Scopes__9: ${Luthn__Auth__Tokens__0__Scopes__9:-metrics.read}
       Luthn__Auth__Tokens__0__Scopes__10: ${Luthn__Auth__Tokens__0__Scopes__10:-access.request}
-      Luthn__Auth__Tokens__0__Scopes__11: ${Luthn__Auth__Tokens__0__Scopes__11:-}
+      Luthn__Auth__Tokens__0__Scopes__11: ${Luthn__Auth__Tokens__0__Scopes__11:-metrics.write}
       Luthn__Auth__Tokens__0__Scopes__12: ${Luthn__Auth__Tokens__0__Scopes__12:-}
       Luthn__Auth__Tokens__0__Scopes__13: ${Luthn__Auth__Tokens__0__Scopes__13:-}
       Luthn__Auth__Tokens__0__Scopes__14: ${Luthn__Auth__Tokens__0__Scopes__14:-}

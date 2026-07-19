@@ -1294,6 +1294,8 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         public void RecordSensitiveAccessRequest() { }
         public void RecordSensitiveAccessDecision(string outcome) { }
         public void RecordSafeSearchCandidates(string source, int count) { }
+        public void RecordSearchRequest(string surface, string outcome, string cacheStatus, TimeSpan duration, int resultCount) { }
+        public void RecordSearchFeedback(string judgment) { }
         public OperationalMetricsSnapshot Snapshot() => OperationalMetricsSnapshot.Empty;
     }
 

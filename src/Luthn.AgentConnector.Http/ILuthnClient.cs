@@ -5,6 +5,7 @@ using Luthn.Sdk.Classification;
 using Luthn.Sdk.Context;
 using Luthn.Sdk.Memory;
 using Luthn.Sdk.Source;
+using Luthn.Sdk.Telemetry;
 using Luthn.Sdk.Wiki;
 
 namespace Luthn.AgentConnector.Http;
@@ -98,6 +99,16 @@ public interface ILuthnAgentClient
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access result reads.");
+
+    Task<SearchTelemetryAcceptedDto> ReportSearchObservationAsync(
+        SearchObservationRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement search telemetry observations.");
+
+    Task<SearchTelemetryAcceptedDto> SubmitSearchFeedbackAsync(
+        SearchFeedbackRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement search feedback.");
 
 }
 
@@ -216,6 +227,26 @@ public interface ILuthnClient : ILuthnAgentClient
         SharedMemoryQueryRequestDto request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement shared memory queries.");
+
+    Task<SearchTelemetryAcceptedDto> ILuthnAgentClient.ReportSearchObservationAsync(
+        SearchObservationRequestDto request,
+        CancellationToken cancellationToken) =>
+        ReportSearchObservationAsync(request, cancellationToken);
+
+    new Task<SearchTelemetryAcceptedDto> ReportSearchObservationAsync(
+        SearchObservationRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement search telemetry observations.");
+
+    Task<SearchTelemetryAcceptedDto> ILuthnAgentClient.SubmitSearchFeedbackAsync(
+        SearchFeedbackRequestDto request,
+        CancellationToken cancellationToken) =>
+        SubmitSearchFeedbackAsync(request, cancellationToken);
+
+    new Task<SearchTelemetryAcceptedDto> SubmitSearchFeedbackAsync(
+        SearchFeedbackRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement search feedback.");
 
     Task<SensitiveAccessRequestDto> ILuthnAgentClient.CreateSensitiveAccessRequestAsync(
         SensitiveAccessCreateRequestDto request,
