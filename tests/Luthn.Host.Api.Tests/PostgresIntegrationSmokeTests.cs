@@ -88,6 +88,11 @@ public sealed class PostgresIntegrationSmokeTests
                 ("Id", "Title", "SafeSummary", "Sensitivity", "CoreTags", "Visibility", "RetentionKind", "AllowsAgentContext", "CreatedAt", "UpdatedAt", "CreatedBy")
             VALUES
                 ('memory-legacy-sensitive', 'Legacy database secret', 'Legacy plaintext sensitive summary.', 'Restricted', '["database-secret"]'::jsonb, 'PrivateToOwner', 'Durable', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'postgres-smoke');
+
+            INSERT INTO agent_connection_channels
+                ("Id", "AgentId", "AgentName", "IntegrationKind", "ConnectorVersion", "Channel", "ConfigurationOwner", "IsConfigured", "VerificationState", "ActivityState", "FirstObservedAt", "UpdatedAt")
+            VALUES
+                ('codex:mcp', 'codex', 'Codex', 'host-hook-mcp', 'legacy', 'mcp', 'luthn', TRUE, 'Verified', 'Unknown', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
             """);
         await migrator.MigrateAsync();
 
@@ -119,6 +124,9 @@ public sealed class PostgresIntegrationSmokeTests
         Assert.Null(migratedMemory.ProjectKey);
         Assert.Null(migratedMemory.TaskKey);
         Assert.Empty(migratedMemory.TopicTags);
+        var migratedAgentConnection = await db.AgentConnectionChannels
+            .SingleAsync(record => record.Id == "codex:mcp");
+        Assert.Equal("local-owner", migratedAgentConnection.OwnerUserId);
         var migratedSensitiveMemory = await db.SharedMemoryItems
             .AsNoTracking()
             .SingleAsync(record => record.Id == "memory-legacy-sensitive");
@@ -186,10 +194,47 @@ public sealed class PostgresIntegrationSmokeTests
                     ('sensitive_record_references', 'OwnerUserId'),
                     ('sensitive_access_requests', 'OwnerUserId'),
                     ('safe_projection_sync_outbox', 'OwnerUserId'),
-                    ('collection_provenance', 'AuthenticatedUserId'))
+                    ('collection_provenance', 'AuthenticatedUserId'),
+                    ('agent_connection_channels', 'OwnerUserId'))
                 """)
             .SingleAsync();
         Assert.Equal(0, retainedOwnerDefaults);
+
+        db.AgentConnectionChannels.AddRange(
+            new AgentConnectionChannelRecord
+            {
+                Id = "agent-connection-owner-alice",
+                OwnerUserId = "alice",
+                AgentId = "shared-agent",
+                AgentName = "Shared agent",
+                IntegrationKind = "postgres-smoke",
+                ConnectorVersion = "1",
+                Channel = "mcp",
+                ConfigurationOwner = "luthn",
+                IsConfigured = true,
+                VerificationState = AgentConnectionVerificationState.Verified,
+                FirstObservedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            },
+            new AgentConnectionChannelRecord
+            {
+                Id = "agent-connection-owner-bob",
+                OwnerUserId = "bob",
+                AgentId = "shared-agent",
+                AgentName = "Shared agent",
+                IntegrationKind = "postgres-smoke",
+                ConnectorVersion = "1",
+                Channel = "mcp",
+                ConfigurationOwner = "luthn",
+                IsConfigured = true,
+                VerificationState = AgentConnectionVerificationState.Verified,
+                FirstObservedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+        await db.SaveChangesAsync();
+        Assert.Equal(
+            2,
+            await db.AgentConnectionChannels.CountAsync(record => record.AgentId == "shared-agent"));
 
         var now = DateTimeOffset.UtcNow;
         db.SourceEvents.Add(new SourceEventRecord

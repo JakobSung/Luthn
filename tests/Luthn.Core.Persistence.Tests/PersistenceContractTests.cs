@@ -89,6 +89,7 @@ public sealed class PersistenceContractTests
         db.AgentConnectionChannels.Add(new AgentConnectionChannelRecord
         {
             Id = "codex:mcp",
+            OwnerUserId = "local-owner",
             AgentId = "codex",
             AgentName = "Codex",
             IntegrationKind = "host-hook-mcp",
@@ -132,7 +133,9 @@ public sealed class PersistenceContractTests
             SafeSearchText.ToIndexMarker(SafeSearchText.BuildTagKey("runbook")),
             memory.SearchTagKeys,
             StringComparison.Ordinal);
-        Assert.Equal("mcp", (await db.AgentConnectionChannels.SingleAsync()).Channel);
+        var connection = await db.AgentConnectionChannels.SingleAsync();
+        Assert.Equal("mcp", connection.Channel);
+        Assert.Equal("local-owner", connection.OwnerUserId);
         Assert.Equal(AuditEventPayloadVersions.Current, (await db.AuditEvents.SingleAsync()).PayloadVersion);
         Assert.DoesNotContain(
             db.Model.GetEntityTypes().SelectMany(entity => entity.GetProperties()).Select(property => property.Name),
@@ -213,6 +216,15 @@ public sealed class PersistenceContractTests
         Assert.Contains("request.\"Status\" = 'Approved'", script, StringComparison.Ordinal);
         Assert.Contains("IX_audit_events_SubjectId_OccurredAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_agent_connection_channels_AgentId_Channel", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "IX_agent_connection_channels_OwnerUserId_AgentId_Channel",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains("CK_agent_connection_channels_owner_user_id", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "ALTER TABLE agent_connection_channels ALTER COLUMN \"OwnerUserId\" DROP DEFAULT",
+            script,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("raw_content", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("raw_source", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DEFAULT 'LocalOnly'", script, StringComparison.Ordinal);

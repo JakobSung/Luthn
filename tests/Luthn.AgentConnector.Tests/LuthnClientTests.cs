@@ -281,6 +281,7 @@ public sealed class LuthnClientTests
     {
         using var handler = new CapturingHandler("""
             {
+              "ownerUserId": "local-owner",
               "agentId": "codex",
               "agentName": "Codex",
               "integrationKind": "host-hook-mcp",
@@ -324,7 +325,9 @@ public sealed class LuthnClientTests
         Assert.Contains("\"channel\"", body, StringComparison.Ordinal);
         Assert.DoesNotContain("token", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("transcript", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ownerUserId", body, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("Verified", response.State);
+        Assert.Equal("local-owner", response.OwnerUserId);
     }
 
     [Fact]
@@ -334,6 +337,7 @@ public sealed class LuthnClientTests
             {
               "connections": [
                 {
+                  "ownerUserId": "local-owner",
                   "agentId": "codex",
                   "agentName": "Codex",
                   "integrationKind": "host-hook-mcp",
@@ -353,7 +357,9 @@ public sealed class LuthnClientTests
 
         Assert.Equal(HttpMethod.Get, handler.Request!.Method);
         Assert.Equal("/api/agent-connections", handler.Request.RequestUri!.AbsolutePath);
-        Assert.Equal("Active", Assert.Single(response.Connections).State);
+        var connection = Assert.Single(response.Connections);
+        Assert.Equal("Active", connection.State);
+        Assert.Equal("local-owner", connection.OwnerUserId);
     }
 
     [Fact]

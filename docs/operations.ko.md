@@ -40,7 +40,10 @@ payload로 export하지 않습니다.
 
 ownership migration도 같은 PostgreSQL schema transaction에서 실행합니다. 기존 source,
 memory, wiki, 민감 reference·request, provenance, safe-sync outbox를 모두
-`local-owner`로 backfill한 뒤 빈 owner를 막는 constraint와 owner 선두 index를 추가합니다.
+`local-owner`로 backfill합니다. agent-connection row도 `local-owner`로 backfill한 뒤
+기존 전역 agent/channel unique index를 owner/agent/channel unique index로 바꿉니다.
+따라서 서로 다른 owner는 같은 agent와 channel 이름을 안전하게 함께 사용할 수 있습니다.
+빈 owner를 막는 constraint와 owner 선두 index를 추가하며,
 같은 migration에서 임시 backfill default를 제거하므로 이후 trusted owner 기록을 빠뜨린
 write는 조용히 `local-owner`가 되지 않고 실패합니다.
 `/readyz`에서 `identity`와 `database`가 모두 ready이고 same-owner/cross-owner 확인이
@@ -49,6 +52,7 @@ write는 조용히 `local-owner`가 되지 않고 실패합니다.
 맞는 operator key volume을 복원한 뒤 같은 이전 image를 시작합니다. data가 생긴 뒤
 명시적 data migration 없이 `SingleOwnerUserId`를 바꾸면 안 됩니다. 설정 변경만으로 기존
 owner row가 다시 표시되지는 않습니다.
+SDK와 connector request에는 owner 선택 필드가 추가되지 않으며 identity는 service token에서만 정합니다.
 
 ## 직접 호스팅 Migration 모형
 

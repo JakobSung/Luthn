@@ -16,6 +16,9 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
 {
     private const string ReadBearer = "agent-connection-read-local";
     private const string WriteBearer = "agent-connection-write-local";
+    private const string AliceBearer = "agent-connection-alice";
+    private const string BobBearer = "agent-connection-bob";
+    private const string OperatorBearer = "agent-connection-operator";
 
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -64,7 +67,11 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
         Assert.Equal(2, await db.AgentConnectionChannels.CountAsync());
         Assert.All(
             await db.AgentConnectionChannels.ToArrayAsync(),
-            record => Assert.Equal("luthn", record.ConfigurationOwner));
+            record =>
+            {
+                Assert.Equal("luthn", record.ConfigurationOwner);
+                Assert.Equal(LuthnIdentityOptions.DefaultSingleOwnerUserId, record.OwnerUserId);
+            });
     }
 
     [Fact]
@@ -225,12 +232,23 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
                 serviceToken = "must-not-be-accepted",
                 channels = new[] { Channel("mcp", configured: true) }
             });
+        using var spoofedOwner = await client.PostAsJsonAsync(
+            "/api/agent-connections/codex/observations",
+            new
+            {
+                ownerUserId = "another-user",
+                agentName = "Codex",
+                integrationKind = "host-hook-mcp",
+                connectorVersion = "1",
+                channels = new[] { Channel("mcp", configured: true) }
+            });
         using var inconsistentDisconnected = await client.PostAsJsonAsync(
             "/api/agent-connections/codex/observations",
             Observation(Channel("mcp", configured: false, verification: "Verified")));
 
         Assert.Equal(HttpStatusCode.BadRequest, invalidFailure.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, unknownField.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, spoofedOwner.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, inconsistentDisconnected.StatusCode);
         Assert.DoesNotContain(
             "must-not-be-accepted",
@@ -354,6 +372,77 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
         Assert.Equal(HttpStatusCode.OK, acceptedRead.StatusCode);
     }
 
+    [Fact]
+    public async Task MultiUserConnectionsAreOwnerScopedAndOperatorsCanDistinguishOwners()
+    {
+        using var factory = CreateMultiUserFactory();
+        using var alice = CreateAuthorizedClient(factory, AliceBearer);
+        using var bob = CreateAuthorizedClient(factory, BobBearer);
+        using var operatorClient = CreateAuthorizedClient(factory, OperatorBearer);
+
+        using var aliceObservation = await alice.PostAsJsonAsync(
+            "/api/agent-connections/codex/observations",
+            Observation(Channel(
+                "mcp",
+                configured: true,
+                verification: "Verified",
+                activity: "Succeeded")));
+        using var bobObservation = await bob.PostAsJsonAsync(
+            "/api/agent-connections/codex/observations",
+            Observation(Channel("mcp", configured: true, verification: "Verified")));
+
+        Assert.Equal(HttpStatusCode.OK, aliceObservation.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, bobObservation.StatusCode);
+
+        using var aliceList = await alice.GetAsync("/api/agent-connections");
+        using var bobList = await bob.GetAsync("/api/agent-connections");
+        using var operatorList = await operatorClient.GetAsync("/api/agent-connections");
+        using var aliceBody = await JsonDocument.ParseAsync(await aliceList.Content.ReadAsStreamAsync());
+        using var bobBody = await JsonDocument.ParseAsync(await bobList.Content.ReadAsStreamAsync());
+        using var operatorBody = await JsonDocument.ParseAsync(await operatorList.Content.ReadAsStreamAsync());
+
+        var aliceConnection = Assert.Single(
+            aliceBody.RootElement.GetProperty("connections").EnumerateArray());
+        var bobConnection = Assert.Single(
+            bobBody.RootElement.GetProperty("connections").EnumerateArray());
+        var operatorConnections = operatorBody.RootElement
+            .GetProperty("connections")
+            .EnumerateArray()
+            .ToArray();
+
+        Assert.Equal("alice", aliceConnection.GetProperty("ownerUserId").GetString());
+        Assert.Equal("Active", aliceConnection.GetProperty("state").GetString());
+        Assert.Equal("bob", bobConnection.GetProperty("ownerUserId").GetString());
+        Assert.Equal("Verified", bobConnection.GetProperty("state").GetString());
+        Assert.Equal(2, operatorConnections.Length);
+        Assert.Equal(
+            ["alice", "bob"],
+            operatorConnections
+                .Select(connection => connection.GetProperty("ownerUserId").GetString()!)
+                .ToArray());
+
+        using var aliceDisconnected = await alice.PostAsJsonAsync(
+            "/api/agent-connections/codex/observations",
+            Observation(Channel("mcp", configured: false)));
+        using var bobAfterAliceDisconnect = await bob.GetAsync("/api/agent-connections");
+        using var bobAfterBody = await JsonDocument.ParseAsync(
+            await bobAfterAliceDisconnect.Content.ReadAsStreamAsync());
+        var bobAfterConnection = Assert.Single(
+            bobAfterBody.RootElement.GetProperty("connections").EnumerateArray());
+
+        Assert.Equal(HttpStatusCode.OK, aliceDisconnected.StatusCode);
+        Assert.Equal("Verified", bobAfterConnection.GetProperty("state").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var records = await db.AgentConnectionChannels
+            .OrderBy(record => record.OwnerUserId)
+            .ToArrayAsync();
+        Assert.Equal(2, records.Length);
+        Assert.Equal(["alice", "bob"], records.Select(record => record.OwnerUserId).ToArray());
+        Assert.Equal(2, records.Select(record => record.Id).Distinct(StringComparer.Ordinal).Count());
+    }
+
     private static object Observation(params object[] channels) => new
     {
         agentName = "Codex",
@@ -389,20 +478,69 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
             builder.UseEnvironment("Testing");
             builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
             builder.UseSetting("Luthn:Auth:RequireServiceToken", "true");
-            ConfigureToken(builder, 0, "connection-reader", ReadBearer, "agent.connection.read");
-            ConfigureToken(builder, 1, "connection-writer", WriteBearer, "agent.connection.write");
+            ConfigureToken(builder, 0, "connection-reader", ReadBearer, ["agent.connection.read"]);
+            ConfigureToken(builder, 1, "connection-writer", WriteBearer, ["agent.connection.write"]);
         });
+
+    private WebApplicationFactory<Program> CreateMultiUserFactory() =>
+        _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
+            builder.UseSetting("Luthn:Auth:RequireServiceToken", "true");
+            builder.UseSetting("Luthn:Identity:Mode", "MultiUser");
+            ConfigureToken(
+                builder,
+                0,
+                "alice-connection",
+                AliceBearer,
+                ["agent.connection.read", "agent.connection.write"],
+                userId: "Alice");
+            ConfigureToken(
+                builder,
+                1,
+                "bob-connection",
+                BobBearer,
+                ["agent.connection.read", "agent.connection.write"],
+                userId: "Bob");
+            ConfigureToken(
+                builder,
+                2,
+                "operator-connection",
+                OperatorBearer,
+                ["agent.connection.read"],
+                isOperator: true);
+        });
+
+    private static HttpClient CreateAuthorizedClient(
+        WebApplicationFactory<Program> factory,
+        string bearer)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        return client;
+    }
 
     private static void ConfigureToken(
         IWebHostBuilder builder,
         int index,
         string name,
         string bearer,
-        string scope)
+        IReadOnlyList<string> scopes,
+        string? userId = null,
+        bool isOperator = false)
     {
         builder.UseSetting($"Luthn:Auth:Tokens:{index}:Name", name);
         builder.UseSetting($"Luthn:Auth:Tokens:{index}:Sha256Digest", Sha256Digest(bearer));
-        builder.UseSetting($"Luthn:Auth:Tokens:{index}:Scopes:0", scope);
+        for (var scopeIndex = 0; scopeIndex < scopes.Count; scopeIndex++)
+        {
+            builder.UseSetting($"Luthn:Auth:Tokens:{index}:Scopes:{scopeIndex}", scopes[scopeIndex]);
+        }
+        if (userId is not null)
+        {
+            builder.UseSetting($"Luthn:Auth:Tokens:{index}:UserId", userId);
+        }
+        builder.UseSetting($"Luthn:Auth:Tokens:{index}:IsOperator", isOperator.ToString());
     }
 
     private static string Sha256Digest(string value)
