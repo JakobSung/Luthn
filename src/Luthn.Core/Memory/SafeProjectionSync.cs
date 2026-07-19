@@ -42,8 +42,7 @@ public sealed record SafeProjectionSyncEnvelope(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     DateTimeOffset DecidedAt,
-    DateTimeOffset? ExpiresAt,
-    string? ProvenanceDigest);
+    DateTimeOffset? ExpiresAt);
 
 public sealed record SafeProjectionSyncTransportResult(
     bool Accepted,
@@ -104,8 +103,7 @@ public static class SafeProjectionSyncPolicy
         DateTimeOffset createdAt,
         DateTimeOffset updatedAt,
         DateTimeOffset decidedAt,
-        DateTimeOffset? expiresAt,
-        string? provenanceDigest = null)
+        DateTimeOffset? expiresAt)
     {
         if (!AllowsPublication(publicationState, sensitivity, visibility, expiresAt, updatedAt))
         {
@@ -130,8 +128,7 @@ public static class SafeProjectionSyncPolicy
             createdAt,
             updatedAt,
             decidedAt,
-            expiresAt,
-            NormalizeOptionalToken(provenanceDigest, nameof(provenanceDigest)));
+            expiresAt);
     }
 
     public static SafeProjectionSyncEnvelope CreateRevoke(
@@ -158,8 +155,7 @@ public static class SafeProjectionSyncPolicy
             createdAt,
             updatedAt,
             decidedAt,
-            ExpiresAt: null,
-            ProvenanceDigest: null);
+            ExpiresAt: null);
     }
 
     public static string CreateIdempotencyKey(SafeProjectionSyncEnvelope envelope)
@@ -196,7 +192,4 @@ public static class SafeProjectionSyncPolicy
 
         return token;
     }
-
-    private static string? NormalizeOptionalToken(string? value, string parameterName) =>
-        string.IsNullOrWhiteSpace(value) ? null : RequiredToken(value, parameterName);
 }

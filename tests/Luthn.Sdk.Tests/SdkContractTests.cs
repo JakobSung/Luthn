@@ -59,8 +59,7 @@ public sealed class SdkContractTests
             DateTimeOffset.Parse("2026-07-12T00:00:00Z"),
             DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
             DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
-            DateTimeOffset.Parse("2027-07-13T00:00:00Z"),
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            DateTimeOffset.Parse("2027-07-13T00:00:00Z"));
 
         var json = JsonSerializer.Serialize(envelope);
         using var document = JsonDocument.Parse(json);
@@ -73,8 +72,7 @@ public sealed class SdkContractTests
         {
             "contractVersion", "originInstanceId", "localRecordId", "revision", "operation",
             "title", "safeSummary", "coreTags", "projectionKind", "payloadClass",
-            "redactionState", "createdAt", "updatedAt", "decidedAt", "expiresAt",
-            "provenanceDigest"
+            "redactionState", "createdAt", "updatedAt", "decidedAt", "expiresAt"
         }.OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
         Assert.Equal(expectedProperties, actualProperties);
@@ -106,7 +104,6 @@ public sealed class SdkContractTests
             DateTimeOffset.Parse("2026-07-12T00:00:00Z"),
             DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
             DateTimeOffset.Parse("2026-07-13T00:00:00Z"),
-            null,
             null);
 
         var json = JsonSerializer.Serialize(envelope);
