@@ -114,8 +114,11 @@ cause the entire capsule to be dropped locally.
 
 The service token remains in Luthn's protected configuration. It is not copied
 into Codex hook configuration, MCP registration, connector state, or
-auto-recall instructions. Hook delivery is asynchronous and fail-open, so an
-unavailable Luthn service does not block completion of a Codex turn.
+auto-recall instructions. Hook delivery is asynchronous on macOS and Linux. On
+Windows it is synchronous within a 10-second hook timeout so the host cannot
+terminate a detached uploader. Delivery remains fail-open on every platform,
+although an unavailable service can delay a Windows turn until the bounded
+request fails.
 
 Default auto-recall does not expose the private store. It asks the scoped MCP
 surface for one small agent-safe context pack at a new task or material topic

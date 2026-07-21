@@ -91,7 +91,7 @@ token 값을 출력하지 않습니다.
 
 macOS, Linux, Windows에서 신뢰된 Codex Stop hook은 제한된 host 사건을 받아 최종 assistant 응답만으로 capsule을 만듭니다. 전체 대화 기록, 사용자 prompt, 작업 폴더 경로, 대화 기록 경로는 읽거나 올리지 않습니다. session·turn 식별자는 전송 전에 hash 처리되고, 요약은 API 제한보다 짧게 제한되며, 알려진 자격 증명 모양이 발견되면 capsule 전체를 로컬에서 버립니다.
 
-서비스 token은 Luthn의 보호된 설정에 남으며 Codex hook 설정, MCP 등록, connector 상태, 자동 회상 지침으로 복사되지 않습니다. hook 전송은 비동기·실패 허용 방식이므로 Luthn을 사용할 수 없어도 Codex turn 완료를 막지 않습니다.
+서비스 token은 Luthn의 보호된 설정에 남으며 Codex hook 설정, MCP 등록, connector 상태, 자동 회상 지침으로 복사되지 않습니다. macOS와 Linux의 hook 전송은 비동기입니다. Windows에서는 host가 분리된 업로더를 종료하지 못하도록 10초 훅 제한 안에서 동기 전송합니다. 모든 플랫폼에서 실패 허용 동작을 유지하지만, Luthn을 사용할 수 없으면 Windows turn은 제한된 요청이 실패할 때까지 지연될 수 있습니다.
 
 기본 자동 회상은 새 작업이나 중요한 주제 변경 때 범위가 제한된 MCP를 통해 작은 에이전트 안전 context pack 하나만 요청합니다. 자동 회상과 명시적 MCP 조회에는 같은 분류·정책·안전 투영 규칙이 적용됩니다. 선택적 `projectKey`, `taskKey`, `topicTags`는 정규화·길이 제한 후 전체 안전 투영과 함께 분류하며 비민감 식별자만 허용합니다. 원본 작업 폴더와 대화 기록 경로는 회상 메타데이터도, 저장되는 capture 필드도 아닙니다. 검색 품질 지표는 메모리 내 집계이며 allowlist surface, 결과, cache 상태, 결과 수, 시간, feedback 판단만 사용합니다. query, tag, 프로젝트·작업·주제 키, cache key, 제목, 요약, 결과 식별자, 원시 오류, 자유형 feedback은 제외합니다.
 

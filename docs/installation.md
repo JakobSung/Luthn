@@ -238,10 +238,20 @@ Do not copy executables out of `WindowsApps` or change WindowsApps ACLs.
 | `Index was outside the bounds of the array` | Rerun the current bootstrap to replace the older CLI; the current CLI reports a specific missing-command error. |
 | `SeSecurityPrivilege` during a repeated install | Rerun the current bootstrap; the current CLI updates access rules without resetting file ownership. |
 | `No runnable Codex CLI was found` | Repair Codex CLI discovery or set `LUTHN_CODEX_COMMAND` to a tested executable. |
+| `automatic ingestion: waiting for Codex hook trust` | Restart Codex, open `/hooks`, and Trust `Stop > luthn.agent-connector.v1`; Luthn never bypasses this decision. |
+| Hook definition is missing, still uses the old 5-second timeout, or auto-recall instructions changed | Run `luthn connect codex` again, restart Codex, and renew hook Trust if prompted. |
 
 After registration, restart Codex, use `/mcp` to verify the `luthn` server, and
 open `/hooks` to Trust `Stop > luthn.agent-connector.v1`. Complete one turn and
 run `luthn connection status codex` to verify automatic ingestion.
+
+The Windows implementation is production-active, not a preview path. The
+PowerShell Stop hook sends the bounded capsule in the hook process and has a
+10-second timeout covering its two bounded 4-second API requests plus process
+overhead. Delivery fails open. Re-running `luthn connect codex` upgrades older
+managed 5-second hook definitions while preserving unrelated hooks and Codex
+instructions. The same command enables lightweight auto-recall by default by
+installing the marked Luthn block in the global Codex `AGENTS.md`.
 
 Windows state uses these stable locations by default:
 
@@ -418,6 +428,11 @@ command verifies the registration and probes `get_context_pack`; the bearer
 token remains in Luthn's private configuration and is not copied into Codex
 arguments, hook configuration, or instructions. Repeated setup is idempotent,
 and unrelated hooks, instructions, and MCP registrations are preserved.
+
+On Windows, delivery is synchronous inside the Stop hook process and bounded by
+a 10-second hook timeout; this prevents Codex from terminating a detached child
+before its upload completes. The hook still fails open. On macOS and Linux,
+delivery remains asynchronous through the existing Python helper.
 
 Lightweight automatic recall is enabled by default:
 

@@ -125,9 +125,12 @@ It does not read or upload:
 - the transcript path;
 - credential files or the Luthn service token.
 
-Delivery is asynchronous and non-blocking. Luthn redacts common credential
-patterns locally and classifies every capsule before it can become shared
-context. Sensitive or disallowed content stays behind the memory boundary.
+Delivery is asynchronous and non-blocking on macOS and Linux. On Windows, the
+hook waits for the bounded upload so Codex cannot terminate a detached uploader;
+the hook timeout is 10 seconds and failures remain fail-open. Luthn redacts
+common credential patterns locally and classifies every capsule before it can
+become shared context. Sensitive or disallowed content stays behind the memory
+boundary.
 
 ## What MCP Provides
 

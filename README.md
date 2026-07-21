@@ -25,10 +25,10 @@ raw private data part of the model's default context.
 
 ## How The Memory Loop Works
 
-On macOS, Linux, and Windows, a trusted Codex hook can submit a bounded capsule
-of the final assistant response after a turn. Luthn redacts and classifies that
-capsule before anything becomes agent-visible. MCP provides safe reads and
-explicit shared-memory writes.
+On macOS, Linux, and Windows, the trusted Codex Stop hook submits a bounded
+capsule of the final assistant response after a turn. Luthn redacts and
+classifies that capsule before anything becomes agent-visible. MCP provides safe
+reads and explicit shared-memory writes.
 
 Lightweight auto-recall fetches one small context pack when a new task or
 material topic begins. It is enabled by default when Codex is connected and
@@ -43,6 +43,24 @@ new task       -> auto-recall or MCP -> reuse relevant context
 
 See [Codex connection and memory](docs/agent-quickstart.md) for setup, the
 one-time hook Trust step, privacy guarantees, and recall limits.
+
+The Codex integration is implemented. The first command configures it and the
+second verifies its state:
+
+```bash
+luthn connect codex
+luthn connection status codex
+```
+
+That command installs the Luthn-owned Stop hook, registers the Docker-backed
+`luthn` MCP server, and adds the marked auto-recall instructions to the global
+Codex `AGENTS.md`. On Windows, the PowerShell Stop hook completes its bounded
+upload inside the hook process with a 10-second timeout so Codex cannot terminate
+a detached uploader; failures remain fail-open. macOS and Linux keep the
+asynchronous helper. Auto-recall is enabled by default and requests at most 3
+items, about 600 tokens, with a 200 ms fail-open deadline and a 10-minute cache.
+After the first connection or a managed hook update, restart Codex and Trust
+`Stop > luthn.agent-connector.v1` from `/hooks` once.
 
 ## Recommended Installation
 

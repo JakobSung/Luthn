@@ -113,7 +113,7 @@ try {
 } finally { `$memory.Dispose() }
 "@
     [IO.File]::WriteAllText($forwarder, $forwarderContent, [Text.UTF8Encoding]::new($false))
-    $hookCommand = "`"$pwsh`" -NoProfile -NonInteractive -File `"$forwarder`""
+    $hookCommand = "& `"$pwsh`" -NoProfile -NonInteractive -File `"$forwarder`""
     $hooks = [ordered]@{
         hooks = [ordered]@{
             Stop = @([ordered]@{
