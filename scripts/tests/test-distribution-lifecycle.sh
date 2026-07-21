@@ -79,6 +79,7 @@ fi
 grep -q '^Luthn__Auth__Tokens__1__Name=local-operator$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__1__IsOperator=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__1__Scopes__0=access.decide$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__1__Scopes__1=config.write$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Identity__Mode=SingleOwner$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Identity__SingleOwnerUserId=local-owner$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__0__UserId=local-owner$' "$LUTHN_CONFIG_DIR/luthn.env"
@@ -97,6 +98,16 @@ evaluation_output="$(docker run --rm "$image" classification-eval)"
 grep -q '"datasetVersion": 1' <<<"$evaluation_output"
 grep -q '"provider": "mock"' <<<"$evaluation_output"
 curl -fsS "$base_url/healthz" >/dev/null
+operator_config_body="$test_root/operator-config.json"
+operator_config_status="$(curl -sS -o "$operator_config_body" -w '%{http_code}' "$base_url/api/operator/classification-provider" \
+  -H "Authorization: Bearer $operator_token_before")"
+test "$operator_config_status" = "200"
+grep -q '"provider"' "$operator_config_body"
+agent_config_body="$test_root/agent-config.json"
+agent_config_status="$(curl -sS -o "$agent_config_body" -w '%{http_code}' "$base_url/api/operator/classification-provider" \
+  -H "Authorization: Bearer $token_before")"
+test "$agent_config_status" = "403"
+grep -q '"status":403' "$agent_config_body"
 fresh_ready_body="$test_root/fresh-ready.json"
 fresh_ready_status="$(curl -sS -o "$fresh_ready_body" -w '%{http_code}' "$base_url/readyz")"
 test "$fresh_ready_status" = "503"
@@ -285,7 +296,7 @@ grep -q '^Luthn__Auth__Tokens__0__Scopes__8=metrics.write$' "$LUTHN_CONFIG_DIR/l
 grep -q '^Luthn__Auth__Tokens__1__Name=local-operator$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__1__IsOperator=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Auth__Tokens__1__Scopes__0=access.decide$' "$LUTHN_CONFIG_DIR/luthn.env"
-! grep -q '^Luthn__Auth__Tokens__1__Scopes__1=' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Auth__Tokens__1__Scopes__1=config.write$' "$LUTHN_CONFIG_DIR/luthn.env"
 ! grep -q '^Luthn__Auth__Tokens__1__ExpiresAt=' "$LUTHN_CONFIG_DIR/luthn.env"
 context_output="$(curl -fsS -X POST "$base_url/api/agent/context-packs" \
   -H 'content-type: application/json' \

@@ -367,7 +367,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__8=metrics\.write$") "new installs should provision the MCP search telemetry write scope"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$") "new installs should provision a distinct local operator credential"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__IsOperator=true$") "the local operator credential should have the explicit operator role"
-    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "the local operator credential should be decision-only"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$" -and [IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__1=config\.write$") "the local operator credential should allow operator configuration"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_ENVIRONMENT=Production$") "new installs should use the Production environment"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=unconfigured$") "new installs should not select the mock classifier"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__AllowMock=false$") "new installs should disable mock classification"
@@ -593,8 +593,8 @@ esac
     Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
     $updatedConfig = [IO.File]::ReadAllText($configFile)
     Assert-True ($updatedConfig -cmatch "(?m)^LUTHN_OPERATOR_VOLUME=luthn-operator$") "update should preserve the separate Data Protection key volume selection"
-    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__IsOperator=true$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$") "update should reuse the Compose-exposed operator slot with the explicit operator role"
-    Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__1__(?:Scopes__1|ExpiresAt)=") "update should normalize the managed operator slot to decision-only"
+    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__IsOperator=true$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__1=config\.write$") "update should reuse the Compose-exposed operator slot with configuration access"
+    Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__1__ExpiresAt=") "update should normalize the managed operator slot without expiry metadata"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
     Assert-True ($backupFiles.Count -eq 1 -and $backupFiles[0].Length -gt 0) "update should create a non-empty PostgreSQL backup"
     $updateStateFile = Join-Path $windowsRoot "state/update-windows.json"
