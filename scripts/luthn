@@ -457,6 +457,7 @@ Luthn__Auth__Tokens__1__Name=local-operator
 Luthn__Auth__Tokens__1__Sha256Digest=$operator_digest
 Luthn__Auth__Tokens__1__IsOperator=true
 Luthn__Auth__Tokens__1__Scopes__0=access.decide
+Luthn__Auth__Tokens__1__Scopes__1=config.write
 EOF
   chmod 0600 "$config_file"
 }
@@ -531,6 +532,7 @@ ensure_operator_credential() {
   set_config "${operator_prefix}Sha256Digest" "$operator_digest"
   set_config "${operator_prefix}IsOperator" true
   set_config "${operator_prefix}Scopes__0" access.decide
+  set_config "${operator_prefix}Scopes__1" config.write
 }
 
 ensure_config_value() {

@@ -35,6 +35,7 @@ services:
       Luthn__Auth__Tokens__1__Name: ${Luthn__Auth__Tokens__1__Name:-local-operator}
       Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:-}
       Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
+      Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-}
     ports:
       - "8080:8080"
     depends_on:

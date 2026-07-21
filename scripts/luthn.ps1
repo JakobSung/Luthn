@@ -849,7 +849,8 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__1__Name=local-operator",
         "Luthn__Auth__Tokens__1__Sha256Digest=$OperatorDigest",
         "Luthn__Auth__Tokens__1__IsOperator=true",
-        "Luthn__Auth__Tokens__1__Scopes__0=access.decide"
+        "Luthn__Auth__Tokens__1__Scopes__0=access.decide",
+        "Luthn__Auth__Tokens__1__Scopes__1=config.write"
     ) -join "`n"
     Write-Utf8File -Path $script:ConfigFile -Content ($content + "`n")
     Protect-SecretFile $script:ConfigFile
@@ -903,6 +904,7 @@ function Ensure-OperatorCredential {
     Set-ConfigValue "${operatorPrefix}Sha256Digest" $operatorDigest
     Set-ConfigValue "${operatorPrefix}IsOperator" "true"
     Set-ConfigValue "${operatorPrefix}Scopes__0" "access.decide"
+    Set-ConfigValue "${operatorPrefix}Scopes__1" "config.write"
 }
 
 function Wait-ForPostgres {
