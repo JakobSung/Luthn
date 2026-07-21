@@ -51,6 +51,7 @@ $script:MaxCodexHookInputBytes = 256 * 1024
 $script:MaxCodexInstructionsBytes = 1024 * 1024
 $script:MaxTurnCapsuleCharacters = 3900
 $script:CodexHttpTimeoutSeconds = 4
+$script:CodexHookTimeoutSeconds = ($script:CodexHttpTimeoutSeconds * 2) + 2
 $script:AutoRecallInstruction = @"
 <!-- luthn:auto-recall:start -->
 # Luthn lightweight recall
@@ -471,7 +472,7 @@ function Get-WindowsManagedTemplateDigest {
     $template = [ordered]@{
         hookMarker = $script:CodexHookMarker
         hookStatusMessage = $script:CodexHookStatusMessage
-        hookTimeoutSeconds = $script:CodexHttpTimeoutSeconds + 1
+        hookTimeoutSeconds = $script:CodexHookTimeoutSeconds
         autoRecallInstruction = $script:AutoRecallInstruction
     } | ConvertTo-Json -Compress
     return Get-Sha256Hex -Bytes ([Text.Encoding]::UTF8.GetBytes($template))
@@ -1688,6 +1689,8 @@ function Test-CodexHookInstalled {
         (-not $handlers[0].Contains("commandWindows") -or $handlers[0]["commandWindows"] -ceq $Command) -and
         (-not $handlers[0].Contains("command_windows") -or $handlers[0]["command_windows"] -ceq $Command) -and
         $handlers[0]["statusMessage"] -ceq $script:CodexHookStatusMessage -and
+        $handlers[0].Contains("timeout") -and
+        [int]$handlers[0]["timeout"] -eq $script:CodexHookTimeoutSeconds -and
         -not $handlers[0].Contains("async")
 }
 
@@ -1703,7 +1706,7 @@ function Install-CodexHook {
             type = "command"
             command = $Command
             commandWindows = $Command
-            timeout = $script:CodexHttpTimeoutSeconds + 1
+            timeout = $script:CodexHookTimeoutSeconds
             statusMessage = $script:CodexHookStatusMessage
         })
     }
@@ -1950,29 +1953,11 @@ function Invoke-CodexHookUploadPayload {
 
 function Start-CodexHookUpload {
     param([Parameter(Mandatory = $true)][string]$PayloadJson)
-    if ($env:LUTHN_CODEX_HOOK_SYNCHRONOUS -ceq "true") {
-        Invoke-CodexHookUploadPayload $PayloadJson
-        return
-    }
-    $cli = Join-Path $script:BinDir "luthn.ps1"
-    if (-not [IO.File]::Exists($cli)) { $cli = $PSCommandPath }
-    $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = Get-PwshPath
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardInput = $true
-    foreach ($argument in @("-NoProfile", "-NonInteractive", "-File", $cli, "codex-hook-upload")) {
-        [void]$startInfo.ArgumentList.Add($argument)
-    }
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
-    try {
-        if (-not $process.Start()) { return }
-        $process.StandardInput.Write($PayloadJson)
-        $process.StandardInput.Close()
-    } finally {
-        $process.Dispose()
-    }
+    # Keep the upload in the Stop hook process. Codex may tear down detached
+    # descendants after the hook command exits, which made the previous
+    # fire-and-forget PowerShell uploader lose otherwise valid capsules on
+    # Windows. Delivery remains bounded by the Windows hook's timeout.
+    Invoke-CodexHookUploadPayload $PayloadJson
 }
 
 function Run-CodexHook {

@@ -103,6 +103,13 @@ $env:LUTHN_CODEX_COMMAND = 'C:\path\to\codex.exe'
 
 `WindowsApps`에서 실행 파일을 복사하거나 ACL을 바꾸지 않습니다. 설치 후 Codex를 다시 시작하고 `/mcp`에서 `luthn`, `/hooks`에서 `Stop > luthn.agent-connector.v1`을 Trust한 다음 turn 하나를 완료해 `luthn connection status codex`를 확인합니다.
 
+Windows connector는 현재 운영 경로로 구현되어 있습니다. PowerShell Stop hook은
+제한된 capsule을 훅 프로세스 안에서 전송하며, 4초 API 요청 두 번과 프로세스
+여유 시간을 포함하도록 훅 제한 시간을 10초로 설정합니다. 전송 실패는 Codex
+turn을 실패시키지 않습니다. `luthn connect codex`를 다시 실행하면 이전 5초 관리
+hook을 10초 정의로 교정하고 관계없는 hook과 Codex 지침은 보존합니다. 같은 명령은
+전역 Codex `AGENTS.md`에 표시된 Luthn 블록을 설치해 자동 회상도 기본 활성화합니다.
+
 | 증상 | 조치 |
 |---|---|
 | `PowerShell 7.4 or later is required` | PowerShell을 갱신하고 `pwsh`로 설치 실행 |
@@ -110,6 +117,8 @@ $env:LUTHN_CODEX_COMMAND = 'C:\path\to\codex.exe'
 | Docker가 `windows` 보고 | Linux container로 전환 |
 | `luthn` 인식 안 됨 | 현재 `PATH` 갱신 또는 직접 CLI 경로 사용 |
 | Codex CLI를 찾지 못함 | CLI 복구 또는 검증된 `LUTHN_CODEX_COMMAND` 지정 |
+| `automatic ingestion: waiting for Codex hook trust` | Codex 재시작 후 `/hooks`에서 `Stop > luthn.agent-connector.v1` Trust |
+| hook이 없거나 이전 5초 제한을 사용하거나 자동 회상 지침이 변경됨 | `luthn connect codex` 재실행 후 Codex 재시작, 필요하면 Trust 갱신 |
 
 ## 상태와 운영자 화면
 
@@ -191,7 +200,24 @@ luthn disconnect codex
 luthn mcp --list-tools
 ```
 
-연결은 Luthn 소유 Stop hook과 Docker Compose stdio MCP를 등록합니다. 기본 자동 회상은 새 작업 때 최대 3개 항목·약 600 token·200ms 제한·10분 cache로 `get_context_pack`을 한 번 호출합니다. 반복 실행과 연결 해제는 관계없는 Codex 설정을 보존합니다.
+연결은 Luthn 소유 Stop hook과 Docker Compose stdio MCP를 등록하고 전역 Codex
+`AGENTS.md`에 표시된 자동 회상 블록을 설치합니다. Windows는 분리 프로세스 종료로
+인한 누락을 막기 위해 Stop hook 프로세스 안에서 최대 10초 동안 동기 전송하며
+실패 허용 동작을 유지합니다. macOS와 Linux는 기존 Python helper의 비동기 전송을
+사용합니다. 기본 자동 회상은 새 작업이나 중요한 주제 변경 때 최대 3개 항목·약
+600 token·200ms 실패 허용 제한·10분 cache로 `get_context_pack`을 한 번 호출하고,
+같은 작업에서는 이미 반환된 맥락을 재사용합니다. 메모리가 실제 반환된 경우에만
+commentary에 `Luthn 메모리 N개 참고`를 한 번 표시합니다. 반복 실행과 연결 해제는
+관계없는 Codex 설정을 보존합니다.
+
+최초 연결 또는 관리 hook 변경 뒤 Codex를 다시 시작하고 `/hooks`에서
+`Stop > luthn.agent-connector.v1`을 Trust합니다. Luthn은 Codex의 hook 신뢰 결정을
+우회하지 않습니다. 다음 명령으로 자동 수집, MCP, 자동 회상 상태를 함께 확인합니다.
+
+```bash
+luthn connection status codex
+luthn doctor --json
+```
 
 예상 MCP tool은 `get_context_pack`, `search_safe_context`, `get_wiki_proposal`, `classify_preview`, `create_shared_memory`, `query_shared_memory`, `get_shared_memory_item`, `create_sensitive_access_request`, `get_sensitive_access_request`, `get_sensitive_access_result`입니다. 기본 connector token에는 `access.request`가 포함되어 새 설치와 update 뒤 요청·상태·결과 도구가 바로 동작합니다. 승인·거절은 MCP 밖의 신뢰된 운영자 경로에 남습니다.
 

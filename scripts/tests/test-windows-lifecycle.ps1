@@ -380,6 +380,7 @@ esac
     Assert-True ($luthnHook.Count -eq 1) "one-step setup should install one Luthn Stop hook"
     Assert-True ($luthnHook[0].hooks[0].commandWindows -ceq $luthnHook[0].hooks[0].command) "Windows hook should include a matching commandWindows entry"
     Assert-True ($luthnHook[0].hooks[0].statusMessage -ceq "Luthn 메모리 저장 예약 중…") "one-step setup should describe the upload as scheduled"
+    Assert-True ([int]$luthnHook[0].hooks[0].timeout -eq 10) "Windows Stop hook should cover two sequential four-second API calls plus process overhead"
     Assert-True (@($installedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "one-step setup should preserve unrelated hooks"
     Assert-True (-not ([IO.File]::ReadAllText($codexHooksFile).Contains($token))) "Codex hooks should not contain the token"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start")) "one-step setup should enable auto-recall by default"
@@ -768,6 +769,7 @@ esac
     $legacyHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
     $legacyLuthnHook = @($legacyHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
     $legacyLuthnHook[0].hooks[0].statusMessage = "Syncing Luthn memory"
+    $legacyLuthnHook[0].hooks[0].timeout = 5
     [IO.File]::WriteAllText($codexHooksFile, (($legacyHooks | ConvertTo-Json -Depth 20) + "`n"), [Text.UTF8Encoding]::new($false))
     $legacyInstructions = [IO.File]::ReadAllText($codexInstructionsFile)
     $recallStartMarker = "<!-- luthn:auto-recall:start -->"
@@ -784,6 +786,7 @@ esac
     $upgradedLuthnHook = @($upgradedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
     Assert-True ($upgradedLuthnHook.Count -eq 1) "upgrade should retain exactly one managed Stop hook"
     Assert-True ($upgradedLuthnHook[0].hooks[0].statusMessage -ceq "Luthn 메모리 저장 예약 중…") "upgrade should replace the legacy Stop status message"
+    Assert-True ([int]$upgradedLuthnHook[0].hooks[0].timeout -eq 10) "upgrade should replace the legacy five-second Stop timeout"
     Assert-True (@($upgradedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "upgrade should preserve unrelated hooks"
     $upgradedInstructions = [IO.File]::ReadAllText($codexInstructionsFile)
     Assert-True (-not $upgradedInstructions.Contains("Legacy managed instructions.")) "upgrade should replace the previous managed recall block"
@@ -803,6 +806,7 @@ esac
     $staleConnectorHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
     $staleManagedHook = @($staleConnectorHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
     $staleManagedHook[0].hooks[0].statusMessage = "Stale managed connector template"
+    $staleManagedHook[0].hooks[0].timeout = 5
     [IO.File]::WriteAllText($codexHooksFile, (($staleConnectorHooks | ConvertTo-Json -Depth 20) + "`n"), [Text.UTF8Encoding]::new($false))
     $connectorUpdateContent = [IO.File]::ReadAllText((Join-Path $RepoRoot "scripts/luthn.ps1")) + "`n# connector-update-rollback-fixture`n"
     [IO.File]::WriteAllText($connectorUpdateCli, $connectorUpdateContent, [Text.UTF8Encoding]::new($false))
@@ -835,6 +839,7 @@ esac
     $reconciledHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
     $reconciledManagedHook = @($reconciledHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" })
     Assert-True ($reconciledManagedHook[0].hooks[0].statusMessage -ceq "Luthn 메모리 저장 예약 중…") "successful update should replace the stale managed hook template"
+    Assert-True ([int]$reconciledManagedHook[0].hooks[0].timeout -eq 10) "successful update should replace a stale five-second Stop timeout"
     Assert-True (@($reconciledHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "connector reconciliation should preserve unrelated hooks"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("Preserve this text.")) "connector reconciliation should preserve unrelated instructions"
 
@@ -915,11 +920,11 @@ esac
     Assert-True ($oversizedResult.ExitCode -eq 0) "oversized hook input should fail open"
     Assert-True ((Get-FileHash -LiteralPath $codexHookCapture -Algorithm SHA256).Hash -eq $captureHash) "oversized hook input should not be captured"
 
-    Remove-Item Env:LUTHN_CODEX_HOOK_SYNCHRONOUS
     [IO.File]::Delete($codexHookCapture)
-    $asyncHook = Invoke-CodexHookProcess $installedCli $validHookEvent
-    for ($attempt = 0; $attempt -lt 50 -and -not [IO.File]::Exists($codexHookCapture); $attempt++) { Start-Sleep -Milliseconds 100 }
-    Assert-True ($asyncHook.ExitCode -eq 0 -and [IO.File]::Exists($codexHookCapture)) "the detached Windows hook uploader should complete after the hook returns"
+    $defaultHook = Invoke-CodexHookProcess $installedCli $validHookEvent
+    Assert-True ($defaultHook.ExitCode -eq 0 -and [IO.File]::Exists($codexHookCapture)) "the default Windows hook uploader should complete before the hook returns"
+    Assert-True (([IO.File]::ReadAllText($codexHookCapture) | ConvertFrom-Json).summary -ceq "Implemented the Windows connector safely.") "the default Windows hook uploader should preserve the bounded capsule"
+    Remove-Item Env:LUTHN_CODEX_HOOK_SYNCHRONOUS
     Remove-Item Env:LUTHN_CODEX_HOOK_CAPTURE_FILE
 
     [IO.File]::Delete($codexOwnershipState)
