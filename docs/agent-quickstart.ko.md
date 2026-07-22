@@ -1,4 +1,4 @@
-# Codex 연결과 기억
+# 에이전트 연결과 기억
 
 [English](agent-quickstart.md)
 

@@ -1,4 +1,4 @@
-# Codex Connection And Memory
+# Agent Connection And Memory
 
 [한국어](agent-quickstart.ko.md)
 

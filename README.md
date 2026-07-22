@@ -9,7 +9,7 @@
 <p align="center">
   <a href="README.ko.md">한국어</a> ·
   <a href="docs/installation.md">Installation</a> ·
-  <a href="docs/agent-quickstart.md">Codex connection and memory</a> ·
+  <a href="docs/agent-quickstart.md">Agent connection and memory</a> ·
   <a href="docs/data-boundaries.md">Data boundaries</a> ·
   <a href="docs/local-development.md">Development</a>
 </p>
@@ -25,13 +25,13 @@ raw private data part of the model's default context.
 
 ## How The Memory Loop Works
 
-On macOS, Linux, and Windows, the trusted Codex Stop hook submits a bounded
+On macOS, Linux, and Windows, a Codex or Claude Code Stop hook submits a bounded
 capsule of the final assistant response after a turn. Luthn redacts and
 classifies that capsule before anything becomes agent-visible. MCP provides safe
 reads and explicit shared-memory writes.
 
 Lightweight auto-recall fetches one small context pack when a new task or
-material topic begins. It is enabled by default when Codex is connected and
+material topic begins. It is enabled by default when an agent is connected and
 reuses that context during the task instead of querying on every turn. Optional
 non-sensitive project, task, and topic keys scope and rank recall; recent safe
 projections receive a bounded ranking bonus.
@@ -41,7 +41,7 @@ completed turn -> bounded capsule -> classify and store safe context
 new task       -> auto-recall or MCP -> reuse relevant context
 ```
 
-See [Codex connection and memory](docs/agent-quickstart.md) for setup, the
+See [Agent connection and memory](docs/agent-quickstart.md) for setup, the
 one-time hook Trust step, privacy guarantees, and recall limits.
 
 Codex and Claude Code use the same connection lifecycle. The first command
@@ -55,9 +55,16 @@ luthn connect claude
 luthn connection status claude
 ```
 
-That command installs the Luthn-owned Stop hook, registers the Docker-backed
-`luthn` MCP server, and adds the marked auto-recall instructions to the global
-Codex `AGENTS.md`. On Windows, the PowerShell Stop hook completes its bounded
+Codex and Claude Code can be connected to the same Luthn installation at the
+same time. They share agent-safe memory while their hooks, MCP registrations,
+recall instructions, and connection state remain independently managed. See
+[Multiple agent connections](docs/agent-connections.md) for coexistence,
+name-conflict, disconnect, and uninstall behavior.
+
+Each connection command installs an agent-specific Luthn-owned Stop hook,
+registers the Docker-backed `luthn` MCP server, and adds marked auto-recall
+instructions to Codex `AGENTS.md` or Claude Code `CLAUDE.md`. On Windows, the
+PowerShell Stop hook completes its bounded
 upload inside the hook process with a 10-second timeout so Codex cannot terminate
 a detached uploader; failures remain fail-open. macOS and Linux keep the
 asynchronous helper. Auto-recall is enabled by default and requests at most 3
@@ -90,7 +97,8 @@ provider-transfer implications, agent visibility, and publication rules.
 ## Documentation
 
 - [Installation, recovery, and lifecycle](docs/installation.md)
-- [Codex connection, hook, MCP, and recall](docs/agent-quickstart.md)
+- [Agent connection, hook, MCP, and recall](docs/agent-quickstart.md)
+- [Simultaneous Codex and Claude Code connections](docs/agent-connections.md)
 - [Data boundaries](docs/data-boundaries.md)
 - [Operations and recovery](docs/operations.md)
 - [API](docs/api.md)
