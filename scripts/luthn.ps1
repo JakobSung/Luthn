@@ -12,7 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:LuthnWindowsCliVersion = "3"
+$script:LuthnWindowsCliVersion = "4"
 $script:CodexConnectorTemplateVersion = "3"
 $script:McpSchemaVersion = "3"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
@@ -866,6 +866,7 @@ function Install-ComposeRuntime {
 LUTHN_IMAGE=$script:DefaultImage
 LUTHN_SERVICE_TOKEN_FILE=$temporaryToken
 Luthn__Auth__Tokens__0__Sha256Digest=validation
+Luthn__Auth__Tokens__1__Sha256Digest=validation
 "@
         $validationArguments = @(
             "compose", "--project-name", $script:ProjectName,

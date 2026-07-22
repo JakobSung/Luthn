@@ -997,13 +997,13 @@ EOF
   }
   read_remote_image_metadata() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-      sha256:current aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa main 3 3 2
+      sha256:current aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa main 4 3 2
   }
   version_json="$(show_version --json)"
   update_json="$(check_for_update --json)"
   read_remote_image_metadata() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-      sha256:candidate bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb main 3 3 2
+      sha256:candidate bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb main 4 3 2
   }
   available_json="$(check_for_update --json)"
   python3 - "$version_json" "$update_json" "$available_json" <<'PY'
@@ -1018,7 +1018,7 @@ assert set(version) == {
     "stableReleaseVersion",
 }
 assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
-assert version["cliTemplateVersion"] == "3"
+assert version["cliTemplateVersion"] == "4"
 assert version["connectorTemplateVersion"] == "3"
 assert version["mcpSchemaVersion"] == "3"
 assert update["status"] == "current"

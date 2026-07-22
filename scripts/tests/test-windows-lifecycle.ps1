@@ -126,7 +126,7 @@ if ($args.Count -ge 1 -and $args[0] -ceq "info") {
 if ($args.Count -ge 3 -and $args[0] -ceq "buildx" -and $args[1] -ceq "imagetools" -and $args[2] -ceq "inspect") {
     if ($env:FAKE_DOCKER_REMOTE_FAIL -ceq "true") { exit 20 }
     if ($joined -match '\.Manifest') { '{"digest":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}'; exit 0 }
-if ($joined -match '\.Image') { '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 }
+if ($joined -match '\.Image') { '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"4","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 }
 }
 if ($args.Count -ge 1 -and $args[0] -ceq "pull") { if ($env:FAKE_DOCKER_PULL_FAIL -ceq "true") { exit 16 }; "pulled"; exit 0 }
 if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
@@ -145,6 +145,16 @@ if ($args.Count -ge 1 -and $args[0] -ceq "run") {
 if ($args.Count -ge 1 -and $args[0] -ceq "ps") { exit 0 }
 if ($args.Count -ge 1 -and $args[0] -in @("stop", "kill")) { exit 0 }
 if ($args.Count -ge 1 -and $args[0] -ceq "compose") {
+    if ($args -ccontains "config" -and $args -ccontains "--quiet") {
+        $environmentIndex = [Array]::IndexOf($args, "--env-file")
+        if ($environmentIndex -lt 0 -or $environmentIndex + 1 -ge $args.Count) { exit 21 }
+        $validationEnvironment = [IO.File]::ReadAllText($args[$environmentIndex + 1])
+        if ($validationEnvironment -notmatch '(?m)^Luthn__Auth__Tokens__0__Sha256Digest=.+$' -or
+            $validationEnvironment -notmatch '(?m)^Luthn__Auth__Tokens__1__Sha256Digest=.+$') {
+            [Console]::Error.WriteLine("required service and operator token digests are missing")
+            exit 22
+        }
+    }
     if ($args -ccontains "--list-tools") { if ($env:FAKE_MCP_PROBE_FAIL -ceq "true") { exit 14 }; "get_context_pack"; "search_safe_context"; exit 0 }
     if ($args[-1] -ceq "mcp") { [void][Console]::In.ReadToEnd(); '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0"}}}'; exit 0 }
     if ($args -ccontains "pg_isready") { exit 0 }
@@ -170,7 +180,7 @@ if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
   [ "${FAKE_DOCKER_REMOTE_FAIL:-false}" = "true" ] && exit 20
   case "$joined" in
     *'.Manifest'*) printf '%s\n' '{"digest":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}'; exit 0 ;;
-    *'.Image'*) printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 ;;
+    *'.Image'*) printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"4","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 ;;
   esac
 fi
 if [ "$1" = "pull" ]; then [ "${FAKE_DOCKER_PULL_FAIL:-false}" = "true" ] && exit 16; echo "pulled"; exit 0; fi
@@ -194,6 +204,19 @@ fi
 if [ "$1" = "ps" ]; then exit 0; fi
 if [ "$1" = "stop" ] || [ "$1" = "kill" ]; then exit 0; fi
 if [ "$1" = "compose" ]; then
+  case "$joined" in
+    *' config --quiet')
+      environment_file=""
+      previous=""
+      for value in "$@"; do
+        if [ "$previous" = "--env-file" ]; then environment_file="$value"; break; fi
+        previous="$value"
+      done
+      [ -n "$environment_file" ] || exit 21
+      grep -q '^Luthn__Auth__Tokens__0__Sha256Digest=.' "$environment_file" || exit 22
+      grep -q '^Luthn__Auth__Tokens__1__Sha256Digest=.' "$environment_file" || exit 22
+      ;;
+  esac
   case "$joined" in
     *--list-tools*) [ "${FAKE_MCP_PROBE_FAIL:-false}" = "true" ] && exit 14; printf 'get_context_pack\nsearch_safe_context\n'; exit 0 ;;
     *' mcp') cat >/dev/null; printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"version":"0.1.0"}}}'; exit 0 ;;
@@ -303,6 +326,10 @@ esac
     $env:FAKE_CODEX_STATE = $fakeCodexState
     $env:FAKE_CODEX_TEMPLATE = $fakeCodexTemplate
     $env:FAKE_DOCKER_READY_MARKER = $fakeDockerReadyMarker
+    Assert-True -Condition (
+        [IO.File]::ReadAllText($env:LUTHN_COMPOSE_SOURCE_FILE).Contains(
+            '${Luthn__Auth__Tokens__1__Sha256Digest:-luthn-compose-validation-only}')) `
+        -Message "Compose should keep legacy Windows CLI validation able to bootstrap the refreshed CLI"
     [void][IO.Directory]::CreateDirectory($sharedBinDir)
     [void][IO.Directory]::CreateDirectory($codexHome)
     [IO.File]::WriteAllText($sharedBinSentinel, "preserve me", [Text.UTF8Encoding]::new($false))
@@ -539,7 +566,7 @@ esac
     $version = $versionResult.Output | ConvertFrom-Json
     Assert-True ($version.installedImageReference -ceq $resolvedOfficialImage) "version should report the immutable installed image reference"
     Assert-True ($version.updateChannel -ceq "ghcr.io/jakobsung/luthn:stable") "version should report the selected update channel"
-    Assert-True ($version.cliTemplateVersion -ceq "3" -and $version.connectorTemplateVersion -ceq "3") "version should report CLI and connector template versions"
+    Assert-True ($version.cliTemplateVersion -ceq "4" -and $version.connectorTemplateVersion -ceq "3") "version should report CLI and connector template versions"
     Assert-True ($version.mcpSchemaVersion -ceq "0.1.0") "version should fall back to the legacy MCP server version when the image label and schemaVersion field are absent"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($tokenFile))) "version JSON must not expose the service token"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($operatorTokenFile))) "version JSON must not expose the operator token"

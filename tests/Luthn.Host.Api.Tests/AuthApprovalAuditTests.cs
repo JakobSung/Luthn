@@ -192,6 +192,33 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public void ProductionReadinessRejectsMalformedServiceTokenDigest()
+    {
+        var options = new LuthnAuthOptions
+        {
+            RequireServiceToken = true,
+            Tokens =
+            [
+                new LuthnServiceTokenOptions
+                {
+                    Name = "local-operator",
+                    Sha256Digest = "luthn-compose-validation-only",
+                    Scopes = [ServiceScopes.AccessDecide],
+                    IsOperator = true
+                }
+            ]
+        };
+
+        var issue = ServiceTokenAuthorization.GetProductionReadinessIssue(
+            new FakeHostEnvironment("Production"),
+            options,
+            new LuthnIdentityOptions(),
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal("Every active service token must have a valid SHA-256 digest.", issue);
+    }
+
+    [Fact]
     public async Task OperatorIdentityIsAuditMetadataAfterScopeAuthorization()
     {
         using var factory = CreateAuthFactory();
