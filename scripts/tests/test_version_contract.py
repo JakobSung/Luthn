@@ -122,7 +122,7 @@ if [[ "$joined" == *"buildx imagetools inspect"* && "$joined" == *".Manifest"* ]
   exit 0
 fi
 if [[ "$joined" == *"buildx imagetools inspect"* && "$joined" == *".Image"* ]]; then
-  printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"v0.1.0","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'
+  printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"v0.1.0","io.luthn.cli-template.version":"4","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'
   exit 0
 fi
 exit 1

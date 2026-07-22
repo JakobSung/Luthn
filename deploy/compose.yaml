@@ -67,7 +67,11 @@ services:
       Luthn__Auth__Tokens__0__Scopes__14: ${Luthn__Auth__Tokens__0__Scopes__14:-}
       Luthn__Auth__Tokens__0__Scopes__15: ${Luthn__Auth__Tokens__0__Scopes__15:-}
       Luthn__Auth__Tokens__1__Name: ${Luthn__Auth__Tokens__1__Name:-local-operator}
-      Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:?operator token digest is required}
+      # Legacy Windows CLIs validate a downloaded Compose file with a minimal
+      # temporary env before installing the refreshed CLI. This invalid,
+      # non-secret fallback keeps that bootstrap path working; API readiness
+      # rejects it, and installers write the real digest before startup.
+      Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:-luthn-compose-validation-only}
       Luthn__Auth__Tokens__1__IsOperator: ${Luthn__Auth__Tokens__1__IsOperator:-true}
       Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
       Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-}

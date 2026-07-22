@@ -271,6 +271,11 @@ public static class ServiceTokenAuthorization
             return "Every active service token must have a SHA-256 digest.";
         }
 
+        if (activeTokens.Any(token => !IsValidSha256Digest(token.Sha256Digest)))
+        {
+            return "Every active service token must have a valid SHA-256 digest.";
+        }
+
         if (activeTokens.Any(token => token.Scopes.Count == 0))
         {
             return "Every active service token must declare at least one scope.";
@@ -447,6 +452,13 @@ public static class ServiceTokenAuthorization
         digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)
             ? digest["sha256:".Length..].Trim().ToLowerInvariant()
             : digest.Trim().ToLowerInvariant();
+
+    private static bool IsValidSha256Digest(string digest)
+    {
+        var normalized = NormalizeDigest(digest);
+        return normalized.Length == 64 && normalized.All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
+    }
 
     private static bool FixedEquals(string left, string right)
     {
