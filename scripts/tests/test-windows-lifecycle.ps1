@@ -123,7 +123,7 @@ if ($args.Count -ge 1 -and $args[0] -ceq "info") {
 if ($args.Count -ge 3 -and $args[0] -ceq "buildx" -and $args[1] -ceq "imagetools" -and $args[2] -ceq "inspect") {
     if ($env:FAKE_DOCKER_REMOTE_FAIL -ceq "true") { exit 20 }
     if ($joined -match '\.Manifest') { '{"digest":"sha256:fake"}'; exit 0 }
-    if ($joined -match '\.Image') { '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"2","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 }
+if ($joined -match '\.Image') { '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 }
 }
 if ($args.Count -ge 1 -and $args[0] -ceq "pull") { if ($env:FAKE_DOCKER_PULL_FAIL -ceq "true") { exit 16 }; "pulled"; exit 0 }
 if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
@@ -167,7 +167,7 @@ if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
   [ "${FAKE_DOCKER_REMOTE_FAIL:-false}" = "true" ] && exit 20
   case "$joined" in
     *'.Manifest'*) printf '%s\n' '{"digest":"sha256:fake"}'; exit 0 ;;
-    *'.Image'*) printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"2","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 ;;
+    *'.Image'*) printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 ;;
   esac
 fi
 if [ "$1" = "pull" ]; then [ "${FAKE_DOCKER_PULL_FAIL:-false}" = "true" ] && exit 16; echo "pulled"; exit 0; fi
@@ -386,7 +386,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start")) "one-step setup should enable auto-recall by default"
     $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
-    Assert-True ($connectorState.connectorVersion -ceq "2") "Windows connector state should record the managed template version"
+    Assert-True ($connectorState.connectorVersion -ceq "3") "Windows connector state should record the managed template version"
     Assert-True ($connectorState.helperDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the selected CLI digest"
     Assert-True ($connectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the managed template digest"
     Assert-True ($connectorState.hookInstalled -and $connectorState.autoRecall) "connector state should record default auto-recall"
@@ -412,6 +412,46 @@ esac
     Assert-True (@($disconnectedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.agent-connector.v1" }).Count -eq 0) "disconnect should remove the Luthn Stop hook"
     Assert-True (@($disconnectedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "disconnect should preserve unrelated hooks"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $originalInstructions) "disconnect should preserve unrelated instructions"
+
+    $claudeHome = Join-Path $testRoot "claude home"
+    $claudeSettingsFile = Join-Path $claudeHome "settings.json"
+    $claudeInstructionsFile = Join-Path $claudeHome "CLAUDE.md"
+    $claudeOwnershipState = Join-Path $windowsRoot "state/connectors/claude-code-windows.json"
+    [void][IO.Directory]::CreateDirectory($claudeHome)
+    [IO.File]::WriteAllText($claudeSettingsFile, ($unrelatedHooks + "`n"), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($claudeInstructionsFile, $originalInstructions, [Text.UTF8Encoding]::new($false))
+    $env:LUTHN_CLAUDE_COMMAND = $fakeCodex
+    $env:LUTHN_CLAUDE_SETTINGS_FILE = $claudeSettingsFile
+    $env:LUTHN_CLAUDE_INSTRUCTIONS_FILE = $claudeInstructionsFile
+
+    $claudeConnect = Invoke-LuthnProcess $installedCli @("connect", "claude")
+    Assert-True ($claudeConnect.ExitCode -eq 0) "Claude Code connection should succeed: $($claudeConnect.Output)"
+    Assert-True ([IO.File]::Exists($claudeOwnershipState)) "Claude connection should record ownership state"
+    $claudeSettings = [IO.File]::ReadAllText($claudeSettingsFile) | ConvertFrom-Json
+    Assert-True (@($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.claude-agent-connector.v1" }).Count -eq 1) "Claude connection should install one managed Stop hook"
+    Assert-True (@($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "Claude connection should preserve unrelated hooks"
+    Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("luthn:auto-recall:start")) "Claude connection should enable lightweight recall by default"
+    Assert-True (-not ([IO.File]::ReadAllText($claudeSettingsFile).Contains($token)) -and -not ([IO.File]::ReadAllText($claudeOwnershipState).Contains($token))) "Claude configuration should not contain the service token"
+    $claudeStatus = Invoke-LuthnProcess $installedCli @("connection", "status", "claude")
+    Assert-True ($claudeStatus.ExitCode -eq 0 -and $claudeStatus.Output -match "automatic-ingestion: configured" -and $claudeStatus.Output -match "mcp: configured") "Claude status should expose hook and MCP state: $($claudeStatus.Output)"
+
+    $env:FAKE_CODEX_REMOVE_FAIL = "true"
+    $failedClaudeDisconnect = Invoke-LuthnProcess $installedCli @("disconnect", "claude")
+    Assert-True ($failedClaudeDisconnect.ExitCode -ne 0) "Claude MCP cleanup failure should fail disconnect"
+    Assert-True ([IO.File]::Exists($claudeOwnershipState)) "failed Claude cleanup should preserve ownership state"
+    Assert-True (([IO.File]::ReadAllText($claudeSettingsFile) | ConvertFrom-Json).hooks.Stop.matcher -contains "luthn.claude-agent-connector.v1") "failed Claude cleanup should restore the managed hook"
+    $env:FAKE_CODEX_REMOVE_FAIL = "false"
+    $claudeDisconnect = Invoke-LuthnProcess $installedCli @("disconnect", "claude")
+    Assert-True ($claudeDisconnect.ExitCode -eq 0) "Claude Code disconnect should succeed: $($claudeDisconnect.Output)"
+    Assert-True (-not [IO.File]::Exists($claudeOwnershipState)) "Claude disconnect should remove ownership state"
+    Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile) -ceq $originalInstructions) "Claude disconnect should preserve unrelated instructions"
+
+    $unrelatedClaudeRegistration = '{"name":"luthn","transport":{"command":"unrelated-tool"}}'
+    [IO.File]::WriteAllText($fakeCodexState, $unrelatedClaudeRegistration, [Text.UTF8Encoding]::new($false))
+    $conflictingClaudeConnect = Invoke-LuthnProcess $installedCli @("connect", "claude")
+    Assert-True ($conflictingClaudeConnect.ExitCode -ne 0) "Claude connection should reject an unrelated luthn registration"
+    Assert-True ([IO.File]::ReadAllText($fakeCodexState) -ceq $unrelatedClaudeRegistration) "Claude connection should preserve an unrelated registration"
+    [IO.File]::Delete($fakeCodexState)
 
     $firstHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
     $configBeforeFullScopeInstall = [IO.File]::ReadAllText($configFile)
@@ -495,7 +535,7 @@ esac
     Assert-True ($versionResult.ExitCode -eq 0) "version --json should succeed: $($versionResult.Output)"
     $version = $versionResult.Output | ConvertFrom-Json
     Assert-True ($version.installedImageReference -ceq "ghcr.io/jakobsung/luthn:main") "version should report the installed image reference"
-    Assert-True ($version.cliTemplateVersion -ceq "3" -and $version.connectorTemplateVersion -ceq "2") "version should report CLI and connector template versions"
+    Assert-True ($version.cliTemplateVersion -ceq "3" -and $version.connectorTemplateVersion -ceq "3") "version should report CLI and connector template versions"
     Assert-True ($version.mcpSchemaVersion -ceq "0.1.0") "version should fall back to the legacy MCP server version when the image label and schemaVersion field are absent"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($tokenFile))) "version JSON must not expose the service token"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($operatorTokenFile))) "version JSON must not expose the operator token"
@@ -833,7 +873,7 @@ esac
     Assert-True ($connectorUpdate.Output -match "Restart required: Luthn MCP compatibility changed") "connector template changes should require a Codex host restart"
     Assert-True ($connectorUpdate.Output -match "Agent notice: restart the current Codex host before invoking Luthn tools again\.") "connector template changes should emit the bounded agent notice"
     $reconciledConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
-    Assert-True ($reconciledConnectorState.connectorVersion -ceq "2") "successful update should record the current connector template version"
+    Assert-True ($reconciledConnectorState.connectorVersion -ceq "3") "successful update should record the current connector template version"
     Assert-True ($reconciledConnectorState.helperDigest -cmatch "^[0-9a-f]{64}$" -and $reconciledConnectorState.helperDigest -cne ("0" * 64)) "successful update should replace a same-version stale helper digest"
     Assert-True ($reconciledConnectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "successful update should record the current managed template digest"
     $reconciledHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
@@ -941,7 +981,7 @@ esac
     $legacyRollback = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:legacy")
     Assert-True ($legacyRollback.ExitCode -eq 0) "update should roll back to a pre-manifest Windows runtime: $($legacyRollback.Output)"
     $legacyConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
-    Assert-True ($legacyConnectorState.connectorVersion -ceq "2") "legacy rollback should retain version-only connector state"
+    Assert-True ($legacyConnectorState.connectorVersion -ceq "3") "legacy rollback should retain version-only connector state"
     Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "helperDigest")) "legacy rollback state should not require a helper digest"
     Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "templateDigest")) "legacy rollback state should not require a template digest"
 

@@ -13,7 +13,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:LuthnWindowsCliVersion = "3"
-$script:CodexConnectorTemplateVersion = "2"
+$script:CodexConnectorTemplateVersion = "3"
 $script:McpSchemaVersion = "3"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
 $script:RootDir = if ($env:LUTHN_WINDOWS_ROOT) {
@@ -37,6 +37,11 @@ $script:CodexPendingStateFile = if ($env:LUTHN_CODEX_PENDING_STATE_FILE) { $env:
 $script:CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } elseif ($env:USERPROFILE) { Join-Path $env:USERPROFILE ".codex" } else { throw "USERPROFILE or CODEX_HOME is required." }
 $script:CodexHooksFile = if ($env:LUTHN_CODEX_HOOKS_FILE) { $env:LUTHN_CODEX_HOOKS_FILE } else { Join-Path $script:CodexHome "hooks.json" }
 $script:CodexInstructionsFile = if ($env:LUTHN_CODEX_INSTRUCTIONS_FILE) { $env:LUTHN_CODEX_INSTRUCTIONS_FILE } else { Join-Path $script:CodexHome "AGENTS.md" }
+$script:ClaudeStateFile = if ($env:LUTHN_CLAUDE_STATE_FILE) { $env:LUTHN_CLAUDE_STATE_FILE } else { Join-Path $script:ConnectorStateDir "claude-code-windows.json" }
+$script:ClaudePendingStateFile = if ($env:LUTHN_CLAUDE_PENDING_STATE_FILE) { $env:LUTHN_CLAUDE_PENDING_STATE_FILE } else { Join-Path $script:ConnectorStateDir "claude-code-windows.pending.json" }
+$script:ClaudeHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } elseif ($env:USERPROFILE) { Join-Path $env:USERPROFILE ".claude" } else { throw "USERPROFILE or CLAUDE_CONFIG_DIR is required." }
+$script:ClaudeSettingsFile = if ($env:LUTHN_CLAUDE_SETTINGS_FILE) { $env:LUTHN_CLAUDE_SETTINGS_FILE } else { Join-Path $script:ClaudeHome "settings.json" }
+$script:ClaudeInstructionsFile = if ($env:LUTHN_CLAUDE_INSTRUCTIONS_FILE) { $env:LUTHN_CLAUDE_INSTRUCTIONS_FILE } else { Join-Path $script:ClaudeHome "CLAUDE.md" }
 $script:UpdateStateFile = if ($env:LUTHN_UPDATE_STATE_FILE) { $env:LUTHN_UPDATE_STATE_FILE } else { Join-Path $script:StateDir "update-windows.json" }
 $script:DistributionRef = if ($env:LUTHN_DISTRIBUTION_REF) { $env:LUTHN_DISTRIBUTION_REF } else { "main" }
 $script:SourceBaseUrl = if ($env:LUTHN_SOURCE_BASE_URL) { $env:LUTHN_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/JakobSung/Luthn/$($script:DistributionRef)" }
@@ -44,7 +49,9 @@ $script:DefaultImage = "ghcr.io/jakobsung/luthn:main"
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:StrictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
 $script:CodexHookMarker = "luthn.agent-connector.v1"
+$script:ClaudeHookMarker = "luthn.claude-agent-connector.v1"
 $script:CodexHookStatusMessage = "Luthn 메모리 저장 예약 중…"
+$script:ClaudeHookStatusMessage = "Saving Luthn memory…"
 $script:AutoRecallStartMarker = "<!-- luthn:auto-recall:start -->"
 $script:AutoRecallEndMarker = "<!-- luthn:auto-recall:end -->"
 $script:MaxCodexHookInputBytes = 256 * 1024
@@ -93,6 +100,18 @@ under these rules:
 - Do not put the recall status in a normal assistant response or final response.
 <!-- luthn:auto-recall:end -->
 "@
+$script:ClaudeAutoRecallInstruction = @"
+<!-- luthn:auto-recall:start -->
+# Luthn lightweight recall
+
+For a new task or material topic change, call the Luthn MCP `get_context_pack`
+tool once before substantial work. Send only short, non-sensitive normalized
+metadata; never send a workspace path, transcript path, transcript content, or
+credential. Use maxItems 3, maxTokens 600, timeoutMs 200, a stable non-sensitive
+cacheKey, cacheTtlSeconds 600, and failOpen true. Reuse the result during the
+same task and continue without memory when the call is empty, times out, or fails.
+<!-- luthn:auto-recall:end -->
+"@
 
 function Show-Usage {
     @"
@@ -101,15 +120,17 @@ usage: luthn <command> [options]
 commands:
   version [--json]           Show installed runtime and compatibility versions.
   manifest                   Show versioned connector template digests as JSON.
-  install [--connect-codex]  Install Luthn and optionally connect Codex.
+  install [--connect-codex|--connect-claude]
+                             Install Luthn and optionally connect one agent.
   status                     Show services, readiness, console, and image.
   update check [--json]      Check the configured update channel without pulling.
   update [image]             Back up, pull, migrate, restart, and verify.
   doctor [--json]            Diagnose runtime, update, and Codex integration state.
-  connect codex [--no-auto-recall]
-                             Configure Codex; recall is enabled by default.
-  connection status codex    Show local and server Codex connection state.
-  disconnect codex           Remove only Luthn-owned Codex configuration.
+  connect codex|claude [--no-auto-recall]
+                             Configure Codex or Claude Code; recall is enabled by default.
+  connection status codex|claude
+                             Show local and server connector state.
+  disconnect codex|claude    Remove only Luthn-owned connector configuration.
   mcp [--list-tools]         Run the Docker-backed MCP stdio server.
   uninstall                  Remove services and runtime; preserve data/config.
   help                       Show this help.
@@ -989,8 +1010,11 @@ function Require-Installation {
 function Install-Luthn {
     param([string[]]$Arguments)
     $connectCodex = $false
+    $connectClaude = $false
     foreach ($argument in $Arguments) {
-        if ($argument -ceq "--connect-codex") { $connectCodex = $true } else { throw "usage: luthn install [--connect-codex]" }
+        if ($argument -ceq "--connect-codex") { $connectCodex = $true }
+        elseif ($argument -ceq "--connect-claude") { $connectClaude = $true }
+        else { throw "usage: luthn install [--connect-codex|--connect-claude]" }
     }
 
     Test-DockerPreflight
@@ -1049,9 +1073,11 @@ function Install-Luthn {
         for ($index = 0; $index -lt $scopes.Count; $index++) {
             Ensure-ConfigValue "Luthn__Auth__Tokens__0__Scopes__$index" $scopes[$index]
         }
-        $accessScopeRequired = $connectCodex -or
+        $accessScopeRequired = $connectCodex -or $connectClaude -or
             [IO.File]::Exists($script:CodexStateFile) -or
-            [IO.File]::Exists($script:CodexPendingStateFile)
+            [IO.File]::Exists($script:CodexPendingStateFile) -or
+            [IO.File]::Exists($script:ClaudeStateFile) -or
+            [IO.File]::Exists($script:ClaudePendingStateFile)
         Ensure-ServiceTokenScope "access.request" -Required:$accessScopeRequired
         Ensure-ServiceTokenScope "metrics.write" -Required:$accessScopeRequired
     }
@@ -1081,6 +1107,7 @@ function Install-Luthn {
     Write-Host "Agent:   luthn connect codex"
 
     if ($connectCodex) { Connect-Codex }
+    if ($connectClaude) { Connect-Claude }
 }
 
 function Show-Status {
@@ -2243,6 +2270,231 @@ function Disconnect-Codex {
     Write-Host "Luthn-owned Codex connector configuration was removed."
 }
 
+function Get-ClaudeTool {
+    return Get-ToolSpec -Name "claude" -OverrideVariable "LUTHN_CLAUDE_COMMAND"
+}
+
+function Get-ClaudeSettingsDocument {
+    if (-not [IO.File]::Exists($script:ClaudeSettingsFile)) { return [ordered]@{} }
+    $content = Read-CodexManagedText -Path $script:ClaudeSettingsFile
+    try { $document = $content | ConvertFrom-Json -AsHashtable } catch { throw "Claude settings are not valid JSON: $($script:ClaudeSettingsFile)" }
+    if ($null -eq $document -or $document -isnot [Collections.IDictionary]) { throw "Claude settings must be a JSON object." }
+    if ($document.Contains("hooks") -and $document["hooks"] -isnot [Collections.IDictionary]) { throw "Claude settings hooks must be an object." }
+    return $document
+}
+
+function Get-ClaudeStopGroups {
+    param([Collections.IDictionary]$Document, [switch]$Create)
+    if (-not $Document.Contains("hooks")) { if (-not $Create) { return $null }; $Document["hooks"] = [ordered]@{} }
+    $hooks = $Document["hooks"]
+    if (-not $hooks.Contains("Stop")) { if (-not $Create) { return $null }; $hooks["Stop"] = @() }
+    if ($hooks["Stop"] -isnot [System.Collections.IEnumerable]) { throw "Claude settings hooks.Stop must be an array." }
+    return @($hooks["Stop"])
+}
+
+function Get-ClaudeHookArguments { return @("-NoProfile", "-File", $script:BinDir + "\\luthn.ps1", "claude-hook") }
+
+function Test-ClaudeHookInstalled {
+    param([string]$Path = $script:ClaudeSettingsFile, [string]$Command = (Get-PwshPath), [string[]]$Arguments = (Get-ClaudeHookArguments))
+    if (-not [IO.File]::Exists((Get-CodexManagedTarget $Path))) { return $false }
+    $originalPath = $script:ClaudeSettingsFile
+    $script:ClaudeSettingsFile = $Path
+    try { $groups = @(Get-ClaudeStopGroups (Get-ClaudeSettingsDocument)) } finally { $script:ClaudeSettingsFile = $originalPath }
+    $matches = @($groups | Where-Object { $_ -is [Collections.IDictionary] -and $_["matcher"] -ceq $script:ClaudeHookMarker })
+    if ($matches.Count -ne 1) { return $false }
+    $handlers = @($matches[0]["hooks"])
+    return $handlers.Count -eq 1 -and $handlers[0]["type"] -ceq "command" -and $handlers[0]["command"] -ceq $Command -and (Test-StringArrayEqual @($handlers[0]["args"]) $Arguments)
+}
+
+function Install-ClaudeHook {
+    param([string]$Path = $script:ClaudeSettingsFile)
+    $originalPath = $script:ClaudeSettingsFile
+    $script:ClaudeSettingsFile = $Path
+    try { $document = Get-ClaudeSettingsDocument } finally { $script:ClaudeSettingsFile = $originalPath }
+    $groups = @(Get-ClaudeStopGroups $document -Create)
+    $remaining = @($groups | Where-Object { $_ -isnot [Collections.IDictionary] -or $_["matcher"] -cne $script:ClaudeHookMarker })
+    $remaining += [ordered]@{ matcher = $script:ClaudeHookMarker; hooks = @([ordered]@{ type = "command"; command = Get-PwshPath; args = Get-ClaudeHookArguments; timeout = 10; statusMessage = $script:ClaudeHookStatusMessage }) }
+    $document["hooks"]["Stop"] = $remaining
+    Write-CodexManagedText -Path $Path -Content (($document | ConvertTo-Json -Depth 20) + "`n")
+}
+
+function Remove-ClaudeHook {
+    param([string]$Path = $script:ClaudeSettingsFile)
+    if (-not [IO.File]::Exists((Get-CodexManagedTarget $Path))) { return }
+    $originalPath = $script:ClaudeSettingsFile
+    $script:ClaudeSettingsFile = $Path
+    try { $document = Get-ClaudeSettingsDocument } finally { $script:ClaudeSettingsFile = $originalPath }
+    $groups = Get-ClaudeStopGroups $document
+    if ($null -eq $groups) { return }
+    $document["hooks"]["Stop"] = @($groups | Where-Object { $_ -isnot [Collections.IDictionary] -or $_["matcher"] -cne $script:ClaudeHookMarker })
+    Write-CodexManagedText -Path $Path -Content (($document | ConvertTo-Json -Depth 20) + "`n")
+}
+
+function Test-ClaudeAutoRecallInstalled {
+    param([string]$Path = $script:ClaudeInstructionsFile)
+    if (-not [IO.File]::Exists((Get-CodexManagedTarget $Path))) { return $false }
+    return (Read-CodexManagedText $Path).Contains($script:ClaudeAutoRecallInstruction)
+}
+
+function Set-ClaudeAutoRecall([bool]$Enabled, [string]$Path = $script:ClaudeInstructionsFile) {
+    $target = Get-CodexManagedTarget $Path
+    if (-not $Enabled -and -not [IO.File]::Exists($target)) { return }
+    $content = Read-CodexManagedText $Path
+    $clean = Get-ContentWithoutAutoRecall $content
+    if ($Enabled) { $clean = (($clean.TrimEnd()) + $(if ($clean.Trim()) { "`n`n" } else { "" }) + $script:ClaudeAutoRecallInstruction + "`n") }
+    if (-not $Enabled -and -not $clean) { [IO.File]::Delete($target) } else { Write-CodexManagedText -Path $Path -Content $clean }
+}
+
+function New-ClaudeTurnCapsule([string]$HookJson) {
+    $input = $HookJson | ConvertFrom-Json -AsHashtable
+    if ($input["hook_event_name"] -cne "Stop") { throw "expected Claude Stop hook input" }
+    $session = [string]$input["session_id"]; $message = $input["last_assistant_message"]
+    if (-not $session.Trim() -or $message -isnot [string] -or -not $message.Trim() -or (Test-CodexMessageContainsCredentials $message)) { return $null }
+    $summary = $message.Trim(); if ($summary.Length -gt $script:MaxTurnCapsuleCharacters) { $summary = $summary.Substring(0, $script:MaxTurnCapsuleCharacters).TrimEnd() }
+    foreach ($managedTokenFile in @((Read-ConfigValue "LUTHN_SERVICE_TOKEN_FILE" $script:TokenFile), (Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile))) {
+        if ([IO.File]::Exists($managedTokenFile)) {
+            $managedToken = [IO.File]::ReadAllText($managedTokenFile).Trim()
+            if ($managedToken -and $summary.Contains($managedToken, [StringComparison]::Ordinal)) { return $null }
+        }
+    }
+    $turn = [string]$input["prompt_id"]; if (-not $turn.Trim()) { $turn = Get-StableCodexId "claude-message" $summary }
+    $summaryHash = [Security.Cryptography.SHA256]::HashData($script:Utf8NoBom.GetBytes($summary))
+    return [ordered]@{ sessionId = Get-StableCodexId "claude-session" $session; turnId = Get-StableCodexId "claude-turn" $turn; sourceAgent = "claude-code"; summary = $summary; coreTags = @("claude-code", "conversation"); contentDigest = "sha256:$([Convert]::ToHexString($summaryHash).ToLowerInvariant())"; idempotencyKey = Get-StableCodexId "claude-capsule" "$session`:$turn"; title = "Claude Code turn capsule"; provenance = [ordered]@{ agentId = "claude-code"; applicationId = "claude-code"; connectorId = "luthn-claude-code-connector"; connectorVersion = $script:CodexConnectorTemplateVersion } }
+}
+
+function Send-ClaudeObservation {
+    param([Parameter(Mandatory = $true)][object[]]$Channels)
+    try {
+        $credentials = Get-CodexApiCredentials
+        [void](Invoke-LuthnApiRequest "POST" "$($credentials.BaseUrl)/api/agent-connections/claude-code/observations" $credentials.Token ([ordered]@{ agentName = "Claude Code"; integrationKind = "host-hook-mcp"; connectorVersion = $script:CodexConnectorTemplateVersion; channels = $Channels }))
+    } catch {}
+}
+
+function Run-ClaudeHook {
+    try { $capsule = New-ClaudeTurnCapsule (Read-BoundedStandardInput $script:MaxCodexHookInputBytes); if ($null -ne $capsule) { $credentials = Get-CodexApiCredentials; [void](Invoke-LuthnApiRequest "POST" "$($credentials.BaseUrl)/api/agent/turn-summaries" $credentials.Token $capsule); Send-ClaudeObservation @([ordered]@{ channel = "automatic-ingestion"; configured = $true; verificationState = "Verified"; activityState = "Succeeded"; failureCode = $null }) } } catch { Send-ClaudeObservation @([ordered]@{ channel = "automatic-ingestion"; configured = $true; verificationState = "Verified"; activityState = "Failed"; failureCode = "delivery.failed" }) }
+}
+
+function Get-ClaudeRegistrationSnapshot($Claude) {
+    $result = Invoke-ToolCapture -Tool $Claude -Arguments @("mcp", "get", "luthn")
+    if ($result.ExitCode -ne 0) { return $null }
+    $normalized = ($result.StdOut + $result.StdErr).Trim()
+    return [ordered]@{ output = $normalized; digest = Get-Sha256Hex ($script:Utf8NoBom.GetBytes($normalized)) }
+}
+
+function Write-ClaudeConnectorState {
+    param([string]$Path, [string]$SetupState, [string]$SettingsFile, [string]$InstructionsFile, [bool]$AutoRecall, [bool]$McpOwned, [string]$McpDigest, [bool]$SettingsExisted, [bool]$InstructionsExisted)
+    Ensure-Directories
+    $state = [ordered]@{ version = 2; agentId = "claude-code"; setupState = $SetupState; settingsFile = $SettingsFile; instructionsFile = $InstructionsFile; hookInstalled = $true; autoRecall = $AutoRecall; mcpOwned = $McpOwned; mcpDigest = $McpDigest; settingsExistedBeforeConnect = $SettingsExisted; instructionsExistedBeforeConnect = $InstructionsExisted; updatedAt = [DateTimeOffset]::UtcNow.ToString("O") }
+    Write-Utf8File -Path $Path -Content (($state | ConvertTo-Json -Depth 5 -Compress) + "`n")
+    Protect-SecretFile $Path
+}
+
+function Ensure-ClaudeConnectorScopes {
+    $before = [IO.File]::ReadAllText($script:ConfigFile)
+    try {
+        foreach ($scope in @("agent.connection.read", "agent.connection.write", "access.request", "metrics.write")) { Ensure-ServiceTokenScope $scope -Required }
+        $after = [IO.File]::ReadAllText($script:ConfigFile)
+        if ($after -ceq $before) { return [pscustomobject]@{ Changed = $false; Content = $before } }
+        Invoke-ComposeVisible @("up", "-d", "--force-recreate", "api")
+        Wait-ForApi
+    } catch {
+        if ([IO.File]::ReadAllText($script:ConfigFile) -cne $before) {
+            Write-Utf8File -Path $script:ConfigFile -Content $before
+            try { Invoke-ComposeVisible @("up", "-d", "--force-recreate", "api"); Wait-ForApi } catch {}
+        }
+        throw
+    }
+    return [pscustomobject]@{ Changed = $true; Content = $before }
+}
+
+function Restore-ClaudeConnectorScopes($Snapshot) {
+    if (-not $Snapshot -or -not $Snapshot.Changed) { return }
+    Write-Utf8File -Path $script:ConfigFile -Content $Snapshot.Content
+    Invoke-ComposeVisible @("up", "-d", "--force-recreate", "api")
+    Wait-ForApi
+}
+
+function Connect-Claude {
+    param([string[]]$Arguments = @())
+    $autoRecall = $true
+    if ($Arguments.Count -gt 1 -or ($Arguments.Count -eq 1 -and $Arguments[0] -notin @("--auto-recall", "--no-auto-recall"))) { throw "usage: luthn connect claude [--no-auto-recall]" }
+    if ($Arguments -contains "--no-auto-recall") { $autoRecall = $false }
+    Require-Installation; Test-DockerPreflight
+    $claude = Get-ClaudeTool; $docker = Get-DockerTool; $mcpArgs = @($docker.PrefixArguments) + @(Get-McpDockerArguments)
+    $previousState = $null
+    $previousStatePath = if ([IO.File]::Exists($script:ClaudeStateFile)) { $script:ClaudeStateFile } elseif ([IO.File]::Exists($script:ClaudePendingStateFile)) { $script:ClaudePendingStateFile } else { $null }
+    if ($previousStatePath) { try { $previousState = [IO.File]::ReadAllText($previousStatePath) | ConvertFrom-Json -AsHashtable } catch {} }
+    $existing = Get-ClaudeRegistrationSnapshot $claude
+    if ($existing -and -not $previousState) { throw "Claude Code already has an unrelated MCP registration named 'luthn'; no configuration was changed." }
+    if ($existing -and $previousState -and $previousState["mcpDigest"] -and $existing.digest -cne $previousState["mcpDigest"]) { throw "Claude Code's 'luthn' MCP registration changed after setup and was preserved." }
+    $settingsFile = if ($previousState -and $previousState["settingsFile"]) { [string]$previousState["settingsFile"] } else { $script:ClaudeSettingsFile }
+    $instructionsFile = if ($previousState -and $previousState["instructionsFile"]) { [string]$previousState["instructionsFile"] } else { $script:ClaudeInstructionsFile }
+    $settingsSnapshot = Get-CodexFileSnapshot $settingsFile
+    $instructionsSnapshot = Get-CodexFileSnapshot $instructionsFile
+    $scopeSnapshot = $null
+    $added = $false; $rollbackErrors = [Collections.Generic.List[string]]::new()
+    try {
+        Write-ClaudeConnectorState $script:ClaudePendingStateFile "pending" $settingsFile $instructionsFile $autoRecall $true $(if ($existing) { $existing.digest } else { "" }) $settingsSnapshot.Existed $instructionsSnapshot.Existed
+        $scopeSnapshot = Ensure-ClaudeConnectorScopes
+        if (-not $existing) {
+            Assert-ToolSuccess (Invoke-ToolCapture -Tool $claude -Arguments (@("mcp", "add", "--scope", "user", "luthn", "--", $docker.FilePath) + $mcpArgs)) "Claude MCP registration"
+            $added = $true; $existing = Get-ClaudeRegistrationSnapshot $claude
+            if (-not $existing) { throw "Claude MCP registration could not be verified." }
+        }
+        if (-not (Test-McpProbe)) { throw "Claude MCP probe failed." }
+        Install-ClaudeHook -Path $settingsFile
+        Set-ClaudeAutoRecall $autoRecall $instructionsFile
+        Write-ClaudeConnectorState $script:ClaudeStateFile "configured" $settingsFile $instructionsFile $autoRecall $true $existing.digest $settingsSnapshot.Existed $instructionsSnapshot.Existed
+        [IO.File]::Delete($script:ClaudePendingStateFile)
+    } catch {
+        $originalError = $_.Exception.Message
+        try { Restore-CodexFileSnapshot $settingsSnapshot; Restore-CodexFileSnapshot $instructionsSnapshot } catch { $rollbackErrors.Add("Claude file rollback failed: $($_.Exception.Message)") }
+        if ($added) { try { Assert-ToolSuccess (Invoke-ToolCapture -Tool $claude -Arguments @("mcp", "remove", "luthn")) "Claude MCP rollback" } catch { $rollbackErrors.Add($_.Exception.Message) } }
+        try { Restore-ClaudeConnectorScopes $scopeSnapshot } catch { $rollbackErrors.Add("scope rollback failed: $($_.Exception.Message)") }
+        if ($rollbackErrors.Count -eq 0) { [IO.File]::Delete($script:ClaudePendingStateFile) }
+        throw "$originalError$($(if ($rollbackErrors.Count) { ' ' + ($rollbackErrors -join '; ') + '; ownership state was preserved.' } else { '' }))"
+    }
+    Send-ClaudeObservation @([ordered]@{ channel = "automatic-ingestion"; configured = $true; verificationState = "Unknown"; activityState = "Unknown"; failureCode = $null }, [ordered]@{ channel = "mcp"; configured = $true; verificationState = "Verified"; activityState = "Succeeded"; failureCode = $null })
+    Write-Host "Claude Code connector is configured. Restart Claude Code, complete a turn, then run: luthn connection status claude"
+}
+
+function Show-ClaudeConnectionStatus {
+    $statePath = if ([IO.File]::Exists($script:ClaudeStateFile)) { $script:ClaudeStateFile } elseif ([IO.File]::Exists($script:ClaudePendingStateFile)) { $script:ClaudePendingStateFile } else { $null }
+    $state = if ($statePath) { try { [IO.File]::ReadAllText($statePath) | ConvertFrom-Json -AsHashtable } catch { $null } } else { $null }
+    $settingsFile = if ($state -and $state["settingsFile"]) { [string]$state["settingsFile"] } else { $script:ClaudeSettingsFile }
+    $instructionsFile = if ($state -and $state["instructionsFile"]) { [string]$state["instructionsFile"] } else { $script:ClaudeInstructionsFile }
+    Write-Host "Local connector: $(if ($state) { [string]$state['setupState'] } else { 'not configured' })"
+    Write-Host "  automatic-ingestion: $(if (Test-ClaudeHookInstalled -Path $settingsFile) { 'configured' } else { 'missing' })"
+    $mcpState = "missing"
+    try { $registration = Get-ClaudeRegistrationSnapshot (Get-ClaudeTool); if ($registration -and $state -and (-not $state["mcpDigest"] -or $registration.digest -ceq $state["mcpDigest"])) { $mcpState = "configured" } elseif ($registration) { $mcpState = "changed" } } catch {}
+    Write-Host "  mcp: $mcpState"
+    Write-Host "  lightweight-recall: $(if (Test-ClaudeAutoRecallInstalled -Path $instructionsFile) { 'enabled' } else { 'disabled' })"
+    try { $credentials = Get-CodexApiCredentials; $response = Invoke-LuthnApiRequest "GET" "$($credentials.BaseUrl)/api/agent-connections" $credentials.Token; $connection = @($response["connections"] | Where-Object { $_["agentId"] -ceq "claude-code" }) | Select-Object -First 1; if (-not $connection) { Write-Host "Server observation: unknown"; return }; Write-Host "Server observation: $($connection['state'])"; foreach ($channel in @($connection["channels"])) { Write-Host "  $($channel['channel']): $($channel['state'])" } } catch { Write-Host "Server observation: unavailable" }
+}
+
+function Disconnect-Claude {
+    $statePath = if ([IO.File]::Exists($script:ClaudeStateFile)) { $script:ClaudeStateFile } elseif ([IO.File]::Exists($script:ClaudePendingStateFile)) { $script:ClaudePendingStateFile } else { $null }
+    if (-not $statePath) { Write-Host "No Luthn-owned Claude Code configuration was recorded."; return }
+    $state = [IO.File]::ReadAllText($statePath) | ConvertFrom-Json -AsHashtable
+    $settingsFile = if ($state["settingsFile"]) { [string]$state["settingsFile"] } else { $script:ClaudeSettingsFile }
+    $instructionsFile = if ($state["instructionsFile"]) { [string]$state["instructionsFile"] } else { $script:ClaudeInstructionsFile }
+    $settingsSnapshot = Get-CodexFileSnapshot $settingsFile; $instructionsSnapshot = Get-CodexFileSnapshot $instructionsFile
+    $claude = Get-ClaudeTool; $registration = Get-ClaudeRegistrationSnapshot $claude
+    if ($registration -and $state["mcpDigest"] -and $registration.digest -cne $state["mcpDigest"]) { throw "Claude Code's 'luthn' MCP registration changed after setup and was preserved." }
+    try {
+        Remove-ClaudeHook -Path $settingsFile
+        Set-ClaudeAutoRecall $false $instructionsFile
+        if ($registration -and $state["mcpOwned"] -ne $false) { Assert-ToolSuccess (Invoke-ToolCapture -Tool $claude -Arguments @("mcp", "remove", "luthn")) "Claude MCP cleanup" }
+    } catch {
+        $originalError = $_.Exception.Message
+        try { Restore-CodexFileSnapshot $settingsSnapshot; Restore-CodexFileSnapshot $instructionsSnapshot } catch { throw "$originalError Claude configuration rollback also failed: $($_.Exception.Message)" }
+        throw $originalError
+    }
+    foreach ($path in @($script:ClaudeStateFile, $script:ClaudePendingStateFile)) { if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) } }
+    Send-ClaudeObservation @([ordered]@{ channel = "automatic-ingestion"; configured = $false; verificationState = "Unknown"; activityState = "Unknown"; failureCode = $null }, [ordered]@{ channel = "mcp"; configured = $false; verificationState = "Unknown"; activityState = "Unknown"; failureCode = $null })
+    Write-Host "Luthn-owned Claude Code connector configuration was removed."
+}
+
 function Run-Mcp {
     param([string[]]$Arguments)
     Require-Installation
@@ -2263,6 +2515,13 @@ function Uninstall-Luthn {
             Disconnect-Codex
         } catch {
             throw "Uninstall stopped because Codex connector cleanup did not complete. $($_.Exception.Message)"
+        }
+    }
+    if ([IO.File]::Exists($script:ClaudeStateFile) -or [IO.File]::Exists($script:ClaudePendingStateFile)) {
+        try {
+            Disconnect-Claude
+        } catch {
+            throw "Uninstall stopped because Claude Code connector cleanup did not complete. $($_.Exception.Message)"
         }
     }
     if ([IO.File]::Exists($script:ComposeFile) -and [IO.File]::Exists($script:ConfigFile)) {
@@ -2295,16 +2554,22 @@ try {
         }
         "doctor" { Invoke-Doctor $CommandArguments }
         "connect" {
-            if ($CommandArguments.Count -lt 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn connect codex [--no-auto-recall]" }
-            Connect-Codex @($CommandArguments | Select-Object -Skip 1)
+            if ($CommandArguments.Count -lt 1) { throw "usage: luthn connect codex|claude [--no-auto-recall]" }
+            if ($CommandArguments[0] -ceq "codex") { Connect-Codex @($CommandArguments | Select-Object -Skip 1) }
+            elseif ($CommandArguments[0] -ceq "claude") { Connect-Claude @($CommandArguments | Select-Object -Skip 1) }
+            else { throw "usage: luthn connect codex|claude [--no-auto-recall]" }
         }
         "connection" {
-            if ($CommandArguments.Count -ne 2 -or $CommandArguments[0] -cne "status" -or $CommandArguments[1] -cne "codex") { throw "usage: luthn connection status codex" }
-            Show-CodexConnectionStatus
+            if ($CommandArguments.Count -ne 2 -or $CommandArguments[0] -cne "status") { throw "usage: luthn connection status codex|claude" }
+            if ($CommandArguments[1] -ceq "codex") { Show-CodexConnectionStatus }
+            elseif ($CommandArguments[1] -ceq "claude") { Show-ClaudeConnectionStatus }
+            else { throw "usage: luthn connection status codex|claude" }
         }
         "disconnect" {
-            if ($CommandArguments.Count -ne 1 -or $CommandArguments[0] -cne "codex") { throw "usage: luthn disconnect codex" }
-            Disconnect-Codex
+            if ($CommandArguments.Count -ne 1) { throw "usage: luthn disconnect codex|claude" }
+            if ($CommandArguments[0] -ceq "codex") { Disconnect-Codex }
+            elseif ($CommandArguments[0] -ceq "claude") { Disconnect-Claude }
+            else { throw "usage: luthn disconnect codex|claude" }
         }
         "mcp" { Run-Mcp $CommandArguments }
         "codex-hook" {
@@ -2314,6 +2579,10 @@ try {
         "codex-hook-upload" {
             if ($CommandArguments.Count -ne 0) { throw "usage: luthn codex-hook-upload" }
             Run-CodexHookUpload
+        }
+        "claude-hook" {
+            if ($CommandArguments.Count -ne 0) { throw "usage: luthn claude-hook" }
+            Run-ClaudeHook
         }
         "uninstall" { Uninstall-Luthn $CommandArguments }
         "help" { Show-Usage }

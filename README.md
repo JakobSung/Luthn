@@ -44,12 +44,15 @@ new task       -> auto-recall or MCP -> reuse relevant context
 See [Codex connection and memory](docs/agent-quickstart.md) for setup, the
 one-time hook Trust step, privacy guarantees, and recall limits.
 
-The Codex integration is implemented. The first command configures it and the
-second verifies its state:
+Codex and Claude Code use the same connection lifecycle. The first command
+configures a host and the second verifies its state:
 
 ```bash
 luthn connect codex
 luthn connection status codex
+
+luthn connect claude
+luthn connection status claude
 ```
 
 That command installs the Luthn-owned Stop hook, registers the Docker-backed

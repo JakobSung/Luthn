@@ -2,6 +2,6 @@
   "contractVersion": 1,
   "stableReleaseVersion": null,
   "cliTemplateVersion": "3",
-  "connectorTemplateVersion": "2",
+  "connectorTemplateVersion": "3",
   "mcpSchemaVersion": "3"
 }

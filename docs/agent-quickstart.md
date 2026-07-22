@@ -52,6 +52,21 @@ The command preserves unrelated Codex hooks, instructions, and MCP
 registrations. The bearer token remains in Luthn's private configuration and is
 not copied into Codex configuration.
 
+## Connect Claude Code
+
+Claude Code has the same MCP, automatic Stop capture, lightweight recall,
+status, and disconnect lifecycle:
+
+```bash
+luthn connect claude
+luthn connection status claude
+```
+
+Luthn owns only its `Stop` hook in `~/.claude/settings.json`, its managed
+recall block in `~/.claude/CLAUDE.md`, and its user-scoped MCP registration.
+It does not read Claude transcripts; the Stop hook uses Claude Code's bounded
+`last_assistant_message` field. Remove it with `luthn disconnect claude`.
+
 ### Complete Hook Trust On Any Host
 
 The connection command installs the Luthn-owned Stop hook and registers MCP.

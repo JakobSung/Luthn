@@ -17,8 +17,10 @@ connector_state_dir="${LUTHN_CONNECTOR_STATE_DIR:-$state_dir/connectors}"
 codex_state_file="${LUTHN_CODEX_STATE_FILE:-$connector_state_dir/codex.env}"
 codex_pending_state_file="${LUTHN_CODEX_PENDING_STATE_FILE:-$connector_state_dir/codex.pending.env}"
 codex_disconnect_pending_state_file="${LUTHN_CODEX_DISCONNECT_PENDING_STATE_FILE:-$connector_state_dir/codex.disconnect.pending.env}"
+claude_state_file="${LUTHN_CLAUDE_STATE_FILE:-$connector_state_dir/claude-code.env}"
+claude_pending_state_file="${LUTHN_CLAUDE_PENDING_STATE_FILE:-$connector_state_dir/claude-code.pending.env}"
 cli_template_version="3"
-codex_connector_version="2"
+codex_connector_version="3"
 mcp_schema_version="3"
 distribution_ref="${LUTHN_DISTRIBUTION_REF:-main}"
 source_base_url="${LUTHN_SOURCE_BASE_URL:-https://raw.githubusercontent.com/JakobSung/Luthn/${distribution_ref}}"
@@ -29,7 +31,8 @@ print_usage() {
 usage: luthn <command> [options]
 
 commands:
-  install [--connect-codex]       Install Luthn and optionally configure Codex.
+  install [--connect-codex|--connect-claude]
+                                   Install Luthn and optionally configure an agent.
   version [--json]                Show installed runtime and compatibility versions.
   status                          Show services, readiness, console, and image.
   update check [--json]           Check the configured update channel without pulling.
@@ -38,10 +41,10 @@ commands:
   reset --yes                     Delete data volumes and recreate the stack.
   uninstall                      Remove services and runtime; preserve data/config.
   uninstall --purge-data --yes   Remove services, data, config, backups, and CLI.
-  connect codex [--no-auto-recall]
-                                   Configure Codex; recall is enabled by default.
-  connection status codex        Show local and server Codex connection state.
-  disconnect codex                Remove only Luthn-owned Codex configuration.
+  connect codex|claude [--no-auto-recall]
+                                   Configure Codex or Claude Code; recall is enabled by default.
+  connection status codex|claude Show connector state.
+  disconnect codex|claude        Remove only Luthn-owned connector configuration.
   adapter                         Upload a turn-summary JSON payload from stdin.
   mcp [--list-tools]              Run the MCP stdio server from the image.
   help                            Show this help.
@@ -917,10 +920,12 @@ start_stack() {
 
 install_luthn() {
   connect_after_install=false
+  connect_claude_after_install=false
   while (( $# > 0 )); do
     case "$1" in
       --connect-codex) connect_after_install=true ;;
-      *) echo "usage: luthn install [--connect-codex]" >&2; return 2 ;;
+      --connect-claude) connect_claude_after_install=true ;;
+      *) echo "usage: luthn install [--connect-codex|--connect-claude]" >&2; return 2 ;;
     esac
     shift
   done
@@ -928,9 +933,9 @@ install_luthn() {
   require_docker
   require_command curl
 
-  if [[ -f "$config_file" ]] && has_codex_connector_state \
+  if [[ -f "$config_file" ]] && { has_codex_connector_state || [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]]; } \
     && ! ensure_connector_scopes --check-only; then
-    echo "Install stopped because the active Codex connector scopes could not be configured." >&2
+    echo "Install stopped because the active agent connector scopes could not be configured." >&2
     return 1
   fi
 
@@ -999,9 +1004,9 @@ install_luthn() {
     echo "Install stopped because the local operator credential could not be configured." >&2
     return 1
   fi
-  if has_codex_connector_state; then
+  if has_codex_connector_state || [[ -f "$claude_state_file" || -f "$claude_pending_state_file" || "$connect_claude_after_install" == "true" ]]; then
     if ! ensure_connector_scopes; then
-      echo "Install stopped because the active Codex connector scopes could not be configured." >&2
+      echo "Install stopped because the active agent connector scopes could not be configured." >&2
       return 1
     fi
   elif ! ensure_access_request_scope; then
@@ -1034,6 +1039,10 @@ EOF
   if [[ "$connect_after_install" == "true" ]]; then
     echo
     connect_codex
+  fi
+  if [[ "$connect_claude_after_install" == "true" ]]; then
+    echo
+    connect_claude
   fi
 }
 
@@ -2320,6 +2329,13 @@ uninstall_luthn() {
       return 1
     fi
   fi
+  if [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]]; then
+    if ! disconnect_claude; then
+      echo "Uninstall stopped because Claude Code connector cleanup did not complete." >&2
+      echo "Restore Claude Code prerequisites, run 'luthn disconnect claude', and retry." >&2
+      return 1
+    fi
+  fi
   if [[ -f "$compose_file" && -f "$config_file" ]]; then
     if [[ "$purge_data" == "true" ]]; then
       compose_cmd down --volumes --remove-orphans
@@ -2339,6 +2355,165 @@ uninstall_luthn() {
     echo "Luthn services and runtime were removed. Data volumes, configuration, and backups were preserved."
   fi
   rm -f "$cli_path"
+}
+
+claude_settings_path() { printf '%s' "${LUTHN_CLAUDE_SETTINGS_FILE:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json}"; }
+claude_instructions_path() { printf '%s' "${LUTHN_CLAUDE_INSTRUCTIONS_FILE:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md}"; }
+
+claude_hook_args() {
+  helper="$(codex_helper_path)"; base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"; service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"; managed_operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
+  printf '%s\n' --arg "$helper" --arg claude-hook-run --arg --base-url --arg "$base_url" --arg --token-file --arg "$service_token_file" --arg --excluded-token-file --arg "$managed_operator_token_file" --arg --connector-version --arg "$codex_connector_version"
+}
+
+sha256_text() {
+  if command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+  else printf '%s' "$1" | openssl dgst -sha256 | awk '{print $NF}'
+  fi
+}
+
+claude_state_value() {
+  key="$1"; connector_state="$claude_state_file"
+  [[ -f "$connector_state" ]] || connector_state="$claude_pending_state_file"
+  [[ -f "$connector_state" ]] || return 0
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$connector_state"
+}
+
+claude_registration_snapshot() {
+  if ! claude_registration_output="$(claude mcp get luthn 2>&1)"; then return 1; fi
+  claude_registration_digest="$(sha256_text "$claude_registration_output")"
+  [[ "$claude_registration_digest" =~ ^[0-9a-f]{64}$ ]]
+}
+
+record_claude_connector_state() {
+  destination="$1"; setup_state="$2"; settings="$3"; instructions="$4"; auto_recall="$5"; mcp_digest="$6"; settings_existed="$7"; instructions_existed="$8"
+  ensure_directories || return 1
+  state_tmp="$(mktemp "${destination}.XXXXXX")" || return 1
+  if ! cat >"$state_tmp" <<EOF
+AGENT_ID=claude-code
+AGENT_NAME=Claude Code
+INTEGRATION_KIND=host-hook-mcp
+CONNECTOR_VERSION=$codex_connector_version
+CONFIGURATION_OWNER=luthn
+CHANNELS=automatic-ingestion,mcp
+SETTINGS_FILE=$settings
+INSTRUCTIONS_FILE=$instructions
+AUTO_RECALL=$auto_recall
+MCP_NAME=luthn
+MCP_OWNED=true
+MCP_DIGEST=$mcp_digest
+SETTINGS_EXISTED_BEFORE_CONNECT=$settings_existed
+INSTRUCTIONS_EXISTED_BEFORE_CONNECT=$instructions_existed
+SETUP_STATE=$setup_state
+UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  then rm -f "$state_tmp"; return 1; fi
+  chmod 0600 "$state_tmp" && mv "$state_tmp" "$destination" || { rm -f "$state_tmp"; return 1; }
+}
+
+report_claude_observation() {
+  helper="$(codex_helper_path)"; [[ -f "$helper" && -f "$config_file" ]] || return 1
+  service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"; base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  report_args=("$helper" report --base-url "$base_url" --token-file "$service_token_file" --agent-id claude-code --agent-name "Claude Code" --connector-version "$codex_connector_version")
+  while (( $# > 0 )); do report_args+=(--channel "$1"); shift; done
+  python3 "${report_args[@]}"
+}
+
+rollback_claude_connect() {
+  settings="$1"; settings_backup="$2"; settings_existed="$3"; instructions="$4"; instructions_backup="$5"; instructions_existed="$6"; mcp_added="$7"; config_backup="$8"
+  rollback_failed=false
+  restore_hooks_backup "$settings" "$settings_backup" "$settings_existed" || rollback_failed=true
+  restore_hooks_backup "$instructions" "$instructions_backup" "$instructions_existed" || rollback_failed=true
+  if [[ "$mcp_added" == true ]] && ! claude mcp remove luthn >/dev/null 2>&1; then rollback_failed=true; fi
+  if ! cmp -s "$config_backup" "$config_file"; then
+    if ! restore_connector_config_backup "$config_backup" || ! compose_cmd up -d --force-recreate api >/dev/null || ! wait_for_api; then rollback_failed=true; fi
+  fi
+  rm -f "$settings_backup" "$instructions_backup"
+  if [[ "$rollback_failed" == false ]]; then rm -f "$claude_pending_state_file" "$config_backup"; return 0; fi
+  echo "Claude connector rollback was incomplete; ownership state was preserved at $claude_pending_state_file" >&2
+  return 1
+}
+
+connect_claude() {
+  auto_recall=true
+  case "${1:-}" in --auto-recall) shift;; --no-auto-recall) auto_recall=false; shift;; esac
+  (( $# == 0 )) || { echo "usage: luthn connect claude [--no-auto-recall]" >&2; return 2; }
+  require_installation; require_docker; require_command curl; require_command python3; require_command claude
+  ensure_codex_connector_helper || { echo "Claude Code connector helper is unavailable." >&2; return 1; }
+  helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"
+  [[ -n "$settings" ]] || settings="$(claude_settings_path)"; [[ -n "$instructions" ]] || instructions="$(claude_instructions_path)"
+  hook_args=(); while IFS= read -r value; do hook_args+=("$value"); done < <(claude_hook_args)
+  state_exists=false; [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] && state_exists=true
+  registration_exists=false
+  if claude_registration_snapshot; then registration_exists=true; fi
+  if [[ "$registration_exists" == true && "$state_exists" == false ]]; then
+    echo "Claude Code already has an unrelated MCP registration named 'luthn'; no configuration was changed." >&2; return 1
+  fi
+  ensure_directories
+  recorded_digest="$(claude_state_value MCP_DIGEST)"
+  if [[ "$registration_exists" == true && -n "$recorded_digest" && "$recorded_digest" != "$claude_registration_digest" ]]; then
+    echo "Claude Code's 'luthn' MCP registration changed after setup and was preserved." >&2; return 1
+  fi
+  settings_backup="$(mktemp "$connector_state_dir/claude-settings.XXXXXX")"; instructions_backup="$(mktemp "$connector_state_dir/claude-instructions.XXXXXX")"; config_backup="$(mktemp "${config_file}.claude-connect.XXXXXX")"
+  settings_existed=false; instructions_existed=false
+  if [[ -f "$settings" ]]; then cp -p "$settings" "$settings_backup"; settings_existed=true; fi
+  if [[ -f "$instructions" ]]; then cp -p "$instructions" "$instructions_backup"; instructions_existed=true; fi
+  cp -p "$config_file" "$config_backup" || { rm -f "$settings_backup" "$instructions_backup" "$config_backup"; return 1; }
+  record_claude_connector_state "$claude_pending_state_file" partial "$settings" "$instructions" "$auto_recall" "${claude_registration_digest:-}" "$settings_existed" "$instructions_existed" || { rm -f "$settings_backup" "$instructions_backup" "$config_backup"; return 1; }
+  mcp_added=false
+  if ! ensure_connector_scopes; then rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1; fi
+  if [[ "$connector_scopes_changed" == true ]] && { ! compose_cmd up -d --force-recreate api >/dev/null || ! wait_for_api; }; then
+    rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1
+  fi
+  if [[ "$registration_exists" == false ]]; then
+    if ! claude mcp add --scope user luthn -- "$cli_path" mcp >/dev/null; then
+      rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1
+    fi
+    mcp_added=true
+    if ! claude_registration_snapshot; then
+      rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1
+    fi
+  fi
+  if ! mcp_probe="$(compose_cmd --profile tools run --rm --no-deps -T mcp mcp --list-tools 2>&1)" || ! printf '%s\n' "$mcp_probe" | grep -q '^get_context_pack$'; then
+    rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1
+  fi
+  if ! python3 "$helper" claude-hooks install --path "$settings" --command python3 "${hook_args[@]}"; then rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1; fi
+  if [[ "$auto_recall" == true ]]; then recall_action=install; else recall_action=remove; fi
+  if ! python3 "$helper" claude-instructions "$recall_action" --path "$instructions"; then rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1; fi
+  if ! record_claude_connector_state "$claude_state_file" configured "$settings" "$instructions" "$auto_recall" "$claude_registration_digest" "$settings_existed" "$instructions_existed"; then rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1; fi
+  rm -f "$claude_pending_state_file" "$settings_backup" "$instructions_backup" "$config_backup"
+  report_claude_observation "automatic-ingestion:true:Unknown:Unknown:" "mcp:true:Verified:Succeeded:" >/dev/null 2>&1 || true
+  echo "Claude Code connector is configured. Restart Claude Code, complete a turn, then run: $cli_path connection status claude"
+}
+
+show_claude_connection_status() {
+  require_installation; require_command python3
+  helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"; [[ -n "$settings" ]] || settings="$(claude_settings_path)"; [[ -n "$instructions" ]] || instructions="$(claude_instructions_path)"; hook_args=(); while IFS= read -r value; do hook_args+=("$value"); done < <(claude_hook_args)
+  [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] && echo "Local connector: $(claude_state_value SETUP_STATE)" || echo "Local connector: not configured"
+  if [[ -f "$helper" ]] && python3 "$helper" claude-hooks check --path "$settings" --command python3 "${hook_args[@]}"; then echo "  automatic-ingestion: configured"; else echo "  automatic-ingestion: missing"; fi
+  recorded_digest="$(claude_state_value MCP_DIGEST)"; if command -v claude >/dev/null 2>&1 && claude_registration_snapshot && { [[ -z "$recorded_digest" ]] || [[ "$recorded_digest" == "$claude_registration_digest" ]]; }; then echo "  mcp: configured"; else echo "  mcp: missing or changed"; fi
+  if [[ -f "$helper" ]] && python3 "$helper" claude-instructions check --path "$instructions"; then echo "  lightweight-recall: enabled"; else echo "  lightweight-recall: disabled"; fi
+  service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"; base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"; [[ -f "$helper" && -f "$service_token_file" ]] && python3 "$helper" status --base-url "$base_url" --token-file "$service_token_file" --agent-id claude-code || true
+}
+
+disconnect_claude() {
+  require_installation; require_command python3
+  [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] || { echo "No Luthn-owned Claude Code configuration was recorded."; return 0; }
+  helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"; [[ -n "$settings" ]] || settings="$(claude_settings_path)"; [[ -n "$instructions" ]] || instructions="$(claude_instructions_path)"
+  [[ -f "$helper" ]] || ensure_codex_connector_helper || return 1
+  require_command claude
+  recorded_digest="$(claude_state_value MCP_DIGEST)"; registration_exists=false; if claude_registration_snapshot; then registration_exists=true; fi
+  if [[ "$registration_exists" == true && -n "$recorded_digest" && "$recorded_digest" != "$claude_registration_digest" ]]; then echo "Claude Code's 'luthn' MCP registration changed after setup and was preserved." >&2; return 1; fi
+  settings_backup="$(mktemp "$connector_state_dir/claude-disconnect-settings.XXXXXX")"; instructions_backup="$(mktemp "$connector_state_dir/claude-disconnect-instructions.XXXXXX")"; settings_existed=false; instructions_existed=false
+  if [[ -f "$settings" ]]; then cp -p "$settings" "$settings_backup"; settings_existed=true; fi; if [[ -f "$instructions" ]]; then cp -p "$instructions" "$instructions_backup"; instructions_existed=true; fi
+  cleanup_failed=false
+  python3 "$helper" claude-hooks remove --path "$settings" || cleanup_failed=true
+  if [[ "$cleanup_failed" == false ]]; then python3 "$helper" claude-instructions remove --path "$instructions" || cleanup_failed=true; fi
+  if [[ "$cleanup_failed" == false && "$registration_exists" == true ]] && ! claude mcp remove luthn >/dev/null 2>&1; then cleanup_failed=true; fi
+  if [[ "$cleanup_failed" == true ]]; then restore_hooks_backup "$settings" "$settings_backup" "$settings_existed" || true; restore_hooks_backup "$instructions" "$instructions_backup" "$instructions_existed" || true; rm -f "$settings_backup" "$instructions_backup"; echo "Claude connector cleanup failed; ownership state was preserved." >&2; return 1; fi
+  rm -f "$claude_state_file" "$claude_pending_state_file" "$settings_backup" "$instructions_backup"
+  report_claude_observation "automatic-ingestion:false:Unknown:Unknown:" "mcp:false:Unknown:Unknown:" >/dev/null 2>&1 || true
+  echo "Luthn-owned Claude Code connector configuration was removed."
 }
 
 run_adapter() {
@@ -2394,22 +2569,20 @@ case "$command" in
   uninstall) shift; uninstall_luthn "$@" ;;
   connect)
     shift
-    [[ "${1:-}" == "codex" ]] || { echo "usage: luthn connect codex [--no-auto-recall]" >&2; exit 2; }
-    shift
-    connect_codex "$@"
+    case "${1:-}" in
+      codex) shift; connect_codex "$@" ;;
+      claude) shift; connect_claude "$@" ;;
+      *) echo "usage: luthn connect codex|claude [--no-auto-recall]" >&2; exit 2 ;;
+    esac
     ;;
   connection)
     shift
-    [[ "${1:-}" == "status" && "${2:-}" == "codex" ]] || {
-      echo "usage: luthn connection status codex" >&2
-      exit 2
-    }
-    show_codex_connection_status
+    [[ "${1:-}" == "status" ]] || { echo "usage: luthn connection status codex|claude" >&2; exit 2; }
+    case "${2:-}" in codex) show_codex_connection_status;; claude) show_claude_connection_status;; *) echo "usage: luthn connection status codex|claude" >&2; exit 2;; esac
     ;;
   disconnect)
     shift
-    [[ "${1:-}" == "codex" ]] || { echo "usage: luthn disconnect codex" >&2; exit 2; }
-    disconnect_codex
+    case "${1:-}" in codex) disconnect_codex;; claude) disconnect_claude;; *) echo "usage: luthn disconnect codex|claude" >&2; exit 2;; esac
     ;;
   codex-hook) run_codex_hook ;;
   adapter) run_adapter ;;

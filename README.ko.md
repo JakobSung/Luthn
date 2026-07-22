@@ -49,6 +49,9 @@ Codex 통합은 이미 구현되어 있습니다. 첫 번째 명령으로 구성
 ```bash
 luthn connect codex
 luthn connection status codex
+
+luthn connect claude
+luthn connection status claude
 ```
 
 연결 명령은 Luthn 소유 Stop hook을 설치하고 Docker 기반 `luthn` MCP를 등록하며,

@@ -47,6 +47,21 @@ luthn connection status codex
 
 운영자 화면은 연결 관측 상태만 보여 주며 에이전트 설정을 설치·변경·신뢰·삭제하지 않습니다. Windows에서 Codex CLI를 찾지 못하면 [설치 안내의 복구 절차](installation.ko.md)를 따르고 `WindowsApps` 실행 파일을 복사하거나 ACL을 바꾸지 마세요.
 
+## Claude Code 연결
+
+Claude Code도 MCP, Stop hook 자동 저장, 가벼운 회상, 상태 확인과 연결 해제에 같은
+수명주기 명령을 사용합니다.
+
+```bash
+luthn connect claude
+luthn connection status claude
+```
+
+Luthn은 `~/.claude/settings.json`의 자체 Stop hook, `~/.claude/CLAUDE.md`의
+관리 회상 블록, 사용자 범위 MCP 등록만 소유합니다. transcript를 읽지 않고 Stop
+event의 제한된 `last_assistant_message`만 사용합니다. 해제는
+`luthn disconnect claude`입니다.
+
 ## 가벼운 자동 회상
 
 `luthn connect codex`와 `--connect-codex` 설치 흐름은 자동 회상을 기본으로 켭니다. 이전 호환 형식도 사용할 수 있습니다.
