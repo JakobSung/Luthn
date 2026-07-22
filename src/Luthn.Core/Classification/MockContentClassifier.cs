@@ -6,7 +6,7 @@ namespace Luthn.Core.Classification;
 public sealed class MockContentClassifier : IContentClassifier
 {
     public const string UsageNotice =
-        "MockContentClassifier is test and experiment only; production classification requires an external provider.";
+        "MockContentClassifier is a deterministic local classifier. Replace it with an external provider when provider-backed classification is required.";
 
     public ClassificationProviderBoundary Boundary { get; } =
         new("mock", "local-classification-input", "local-only");

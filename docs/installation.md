@@ -299,19 +299,15 @@ same fields for agents and automation without secret values.
 Open the operator console at <http://127.0.0.1:8080/>. PostgreSQL is kept on the
 internal Compose network and the console/API port is loopback-bound by default.
 
-### Required classification setup
+### Classification defaults
 
-Open the operator console after installation and configure a classification
-provider. Until then, classification-dependent writes return a bounded 503,
-the submitted raw content is not projected or stored, and `/readyz` identifies
-`classification-provider` as the pending dependency.
-
-Packaged installs do not enable the mock classifier. `Mock` is visible only as
-a development/test option and is rejected unless
-`Luthn__Classification__AllowMock=true` is set explicitly. Do not enable this
-flag for an operational deployment. Existing stored `Mock` selections are also
-blocked after upgrade until that explicit opt-in is present; replace them in
-the operator console without deleting the database or stored provider settings.
+New installations use the local `mock` classifier, so classification-dependent
+writes and `/readyz` work immediately without a separate provider setup. The
+mock is deterministic and local; replace it in the operator console with an
+operator-configured provider when you need provider-backed classification.
+`luthn install` and `luthn update` also replace the exact legacy default pair
+`unconfigured`/`false` with `mock`/`true`; any other configured value remains
+unchanged.
 
 ## Lifecycle Commands
 

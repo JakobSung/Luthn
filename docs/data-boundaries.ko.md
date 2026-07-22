@@ -173,8 +173,8 @@ provenance는 불변 수집 기원 기록입니다.
 
 ## Provider 경계
 
-- 새 배포 설치는 명시적인 `unconfigured` 상태를 사용합니다. 분류는 원문을 저장하거나 투영하기 전에 제한된 provider-unavailable 응답으로 안전하게 실패합니다.
-- mock 분류기는 로컬에서 자격 증명 없이 동작하며 시험·로컬 실험에만 사용합니다. `Provider=mock`과 `AllowMock=true`가 모두 필요하며, 업그레이드 전에 저장된 mock 선택도 이 명시적 opt-in 없이는 차단됩니다.
+- 새 배포 설치는 로컬 `mock` 분류기를 사용하므로 별도 provider 설정 없이 분류가 동작합니다.
+- mock 분류기는 로컬에서 자격 증명 없이 동작합니다. 설치 기본값이 `Provider=mock`과 `AllowMock=true`를 함께 설정하며, provider 기반 분류가 필요하면 운영자 설정으로 교체합니다.
 - 운영자가 설정한 provider 비밀 값은 server에만 두고, 화면/API에는 key 보유 여부만 표시합니다.
 - 외부 분류는 명시적으로 선택해야 합니다.
 - `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`는 Luthn이 민감도를 정하기 전에 분류 prompt로 원문을 받습니다. 운영자가 이 외부 전송을 허용할 때만 사용하고, 원본을 직접 호스팅 경계 안에 두어야 하면 통제 가능한 `External HTTP` provider를 사용합니다.

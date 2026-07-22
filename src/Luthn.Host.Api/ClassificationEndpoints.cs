@@ -189,7 +189,6 @@ public static class ClassificationEndpoints
         try
         {
             providerIssue = GetClassificationProviderReadinessIssue(
-                environment,
                 classificationSettings.Current,
                 classificationOptions.Value);
         }
@@ -231,7 +230,6 @@ public static class ClassificationEndpoints
         statusCode: StatusCodes.Status503ServiceUnavailable);
 
     private static string? GetClassificationProviderReadinessIssue(
-        IHostEnvironment environment,
         OperatorClassificationProviderSettings settings,
         ClassificationProviderOptions options)
     {
@@ -247,12 +245,7 @@ public static class ClassificationEndpoints
                 return ClassificationProviderOptions.MockDisabledMessage;
             }
 
-            if (!environment.IsProduction())
-            {
-                return null;
-            }
-
-            return "Production classification requires an operator-configured non-mock provider.";
+            return null;
         }
 
         if (settings.Provider != OperatorClassificationProviderKind.ExternalHttp && !settings.HasApiKey)
