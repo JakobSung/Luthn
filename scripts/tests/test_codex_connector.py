@@ -90,6 +90,39 @@ class CodexHookConfigurationTests(unittest.TestCase):
 
             self.assertEqual(original, hooks_path.read_text(encoding="utf-8"))
 
+    def test_claude_hook_preserves_unrelated_settings_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            settings_path.write_text(
+                json.dumps({"permissions": {"allow": ["Read"]}, "hooks": {
+                    "Stop": [{"matcher": "other.owner", "hooks": []}]
+                }}),
+                encoding="utf-8",
+            )
+            command = "pwsh"
+            args = ["-NoProfile", "-File", "/tmp/luthn.ps1", "claude-hook"]
+            CONNECTOR.install_claude_hook(settings_path, command, args)
+            CONNECTOR.install_claude_hook(settings_path, command, args)
+            document = json.loads(settings_path.read_text(encoding="utf-8"))
+            self.assertEqual({"allow": ["Read"]}, document["permissions"])
+            self.assertEqual(2, len(document["hooks"]["Stop"]))
+            self.assertTrue(CONNECTOR.claude_hook_is_installed(settings_path, command, args))
+            CONNECTOR.remove_claude_hook(settings_path)
+            self.assertEqual(
+                "other.owner", json.loads(settings_path.read_text(encoding="utf-8"))["hooks"]["Stop"][0]["matcher"]
+            )
+
+    def test_claude_capsule_uses_stop_message_without_reading_transcript(self):
+        capsule = CONNECTOR.build_claude_turn_capsule({
+            "hook_event_name": "Stop", "session_id": "session-a",
+            "prompt_id": "prompt-a", "transcript_path": "/private/transcript.jsonl",
+            "last_assistant_message": "Published a safe decision.",
+        })
+        self.assertIsNotNone(capsule)
+        self.assertEqual("claude-code", capsule["sourceAgent"])
+        self.assertEqual("Claude Code turn capsule", capsule["title"])
+        self.assertNotIn("transcript", json.dumps(capsule))
+
     def test_install_preserves_hooks_symlink(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -402,6 +435,37 @@ class TurnCapsuleTests(unittest.TestCase):
 
             request_json.assert_not_called()
 
+    def test_claude_hook_does_not_upload_the_managed_operator_token(self):
+        operator_token = "abcdef0123456789" * 3
+        payload = json.dumps(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "claude-session",
+                "prompt_id": "claude-prompt",
+                "last_assistant_message": f"Operator token: {operator_token}",
+            }
+        ).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as directory:
+            service_token_file = Path(directory) / "service-token"
+            service_token_file.write_text("service-token-value", encoding="utf-8")
+            operator_token_file = Path(directory) / "operator-token"
+            operator_token_file.write_text(operator_token, encoding="utf-8")
+            with mock.patch.object(
+                CONNECTOR, "_read_bounded_hook_input", return_value=payload
+            ), mock.patch.object(CONNECTOR, "_request_json") as request_json:
+                self.assertEqual(
+                    0,
+                    CONNECTOR.run_claude_hook(
+                        "http://127.0.0.1:1",
+                        service_token_file,
+                        "3",
+                        [operator_token_file],
+                    ),
+                )
+
+            request_json.assert_not_called()
+
     def test_truncated_service_token_is_not_sent_to_turn_summary_intake(self):
         token = "0123456789abcdef" * 3
         prefix = "x" * (CONNECTOR.MAX_TURN_CAPSULE_CHARS - len(token) + 1)
@@ -453,7 +517,7 @@ class TurnCapsuleTests(unittest.TestCase):
         self.assertTrue(popen.call_args.kwargs["close_fds"])
         self.assertEqual(CONNECTOR.subprocess.DEVNULL, popen.call_args.kwargs["stdout"])
         self.assertEqual(CONNECTOR.subprocess.DEVNULL, popen.call_args.kwargs["stderr"])
-        self.assertIn("/tmp/operator-token", popen.call_args.args[0])
+        self.assertIn(str(Path("/tmp/operator-token")), popen.call_args.args[0])
 
     def test_success_observation_failure_does_not_report_intake_as_failed(self):
         payload = json.dumps(

@@ -22,8 +22,10 @@ from urllib import error, request
 
 
 HOOK_MARKER = "luthn.agent-connector.v1"
+CLAUDE_HOOK_MARKER = "luthn.claude-agent-connector.v1"
 HOOK_STATUS_MESSAGE = "Luthn 메모리 저장 예약 중…"
-CONNECTOR_TEMPLATE_VERSION = "2"
+CLAUDE_HOOK_STATUS_MESSAGE = "Saving Luthn memory…"
+CONNECTOR_TEMPLATE_VERSION = "3"
 INSTRUCTION_START_MARKER = "<!-- luthn:auto-recall:start -->"
 INSTRUCTION_END_MARKER = "<!-- luthn:auto-recall:end -->"
 MAX_HOOK_INPUT_BYTES = 256 * 1024
@@ -69,6 +71,30 @@ under these rules:
 - Never include memory titles, content, IDs, queries, scores, sources, or any
   sensitive information in the commentary.
 - Do not put the recall status in a normal assistant response or final response.
+{INSTRUCTION_END_MARKER}"""
+
+# Claude Code loads CLAUDE.md rather than AGENTS.md.  Keep its managed block
+# provider-neutral: Claude has no commentary channel contract equivalent to Codex.
+CLAUDE_AUTO_RECALL_INSTRUCTION = f"""{INSTRUCTION_START_MARKER}
+# Luthn lightweight recall
+
+For a new task or a material topic change, call the Luthn MCP
+`get_context_pack` tool once before substantial work. Use a short task query
+and only non-sensitive, normalized `projectKey`, `taskKey`, and `topicTags`.
+Never send a workspace path, transcript path, transcript content, credential,
+or customer identifier as recall metadata.
+
+- `maxItems`: 3
+- `maxTokens`: 600
+- `timeoutMs`: 200
+- `cacheKey`: a stable non-sensitive project/task key
+- `cacheTtlSeconds`: 600
+- `failOpen`: true
+
+Reuse the returned context for the current task. Refresh only after a material
+topic change or cache expiry. If recall is empty, times out, or fails, continue
+without memory. Use deeper Luthn MCP search only when the bounded context pack
+is insufficient.
 {INSTRUCTION_END_MARKER}"""
 
 
@@ -209,15 +235,15 @@ def _without_auto_recall_instruction(content: str) -> str:
     return f"{remaining}\n" if remaining else ""
 
 
-def install_auto_recall_instruction(path: Path) -> None:
-    if auto_recall_instruction_is_installed(path):
+def install_auto_recall_instruction(path: Path, instruction: str = AUTO_RECALL_INSTRUCTION) -> None:
+    if auto_recall_instruction_is_installed(path, instruction):
         return
     content = _without_auto_recall_instruction(_read_instructions(path))
     prefix = content.rstrip("\n")
     updated = (
-        f"{prefix}\n\n{AUTO_RECALL_INSTRUCTION}\n"
+        f"{prefix}\n\n{instruction}\n"
         if prefix
-        else f"{AUTO_RECALL_INSTRUCTION}\n"
+        else f"{instruction}\n"
     )
     _write_instructions(path, updated)
 
@@ -231,14 +257,16 @@ def remove_auto_recall_instruction(path: Path) -> None:
         _write_instructions(path, updated)
 
 
-def auto_recall_instruction_is_installed(path: Path) -> bool:
+def auto_recall_instruction_is_installed(
+    path: Path, instruction: str = AUTO_RECALL_INSTRUCTION
+) -> bool:
     if not path.exists():
         return False
     content = _read_instructions(path)
     return (
         content.count(INSTRUCTION_START_MARKER) == 1
         and content.count(INSTRUCTION_END_MARKER) == 1
-        and AUTO_RECALL_INSTRUCTION in content
+        and instruction in content
     )
 
 
@@ -330,6 +358,108 @@ def hook_is_installed(path: Path, command: str | None) -> bool:
         and handlers[0].get("statusMessage") == HOOK_STATUS_MESSAGE
         and "async" not in handlers[0]
     )
+
+
+def _load_claude_settings(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as stream:
+        document = json.load(stream)
+    if not isinstance(document, dict):
+        raise ValueError("Claude settings must be a JSON object")
+    if "hooks" in document and not isinstance(document["hooks"], dict):
+        raise ValueError("Claude settings 'hooks' must be an object")
+    return document
+
+
+def _write_json_document(path: Path, document: dict[str, Any]) -> None:
+    destination = path.resolve(strict=True) if path.is_symlink() else path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(destination.stat().st_mode) if destination.exists() else 0o600
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", dir=destination.parent, text=True
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(document, stream, indent=2, ensure_ascii=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary_name, mode)
+        os.replace(temporary_name, destination)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _claude_stop_groups(document: dict[str, Any], create: bool) -> list[Any] | None:
+    hooks = document.get("hooks")
+    if hooks is None:
+        if not create:
+            return None
+        hooks = {}
+        document["hooks"] = hooks
+    if not isinstance(hooks, dict):
+        raise ValueError("Claude settings 'hooks' must be an object")
+    groups = hooks.get("Stop")
+    if groups is None:
+        if not create:
+            return None
+        groups = []
+        hooks["Stop"] = groups
+    if not isinstance(groups, list):
+        raise ValueError("Claude settings 'hooks.Stop' must be an array")
+    return groups
+
+
+def install_claude_hook(path: Path, command: str, args: list[str]) -> None:
+    if claude_hook_is_installed(path, command, args):
+        return
+    document = _load_claude_settings(path)
+    groups = _claude_stop_groups(document, create=True)
+    assert groups is not None
+    groups[:] = [
+        group for group in groups
+        if not isinstance(group, dict) or group.get("matcher") != CLAUDE_HOOK_MARKER
+    ]
+    groups.append({"matcher": CLAUDE_HOOK_MARKER, "hooks": [{
+        "type": "command", "command": command, "args": args,
+        "timeout": HTTP_TIMEOUT_SECONDS + 6,
+        "statusMessage": CLAUDE_HOOK_STATUS_MESSAGE,
+    }]})
+    _write_json_document(path, document)
+
+
+def remove_claude_hook(path: Path) -> None:
+    if not path.exists():
+        return
+    document = _load_claude_settings(path)
+    groups = _claude_stop_groups(document, create=False)
+    if groups is None:
+        return
+    remaining = [group for group in groups if not isinstance(group, dict) or group.get("matcher") != CLAUDE_HOOK_MARKER]
+    if len(remaining) != len(groups):
+        groups[:] = remaining
+        _write_json_document(path, document)
+
+
+def claude_hook_is_installed(path: Path, command: str | None, args: list[str] | None) -> bool:
+    if not path.exists():
+        return False
+    groups = _claude_stop_groups(_load_claude_settings(path), create=False) or []
+    matches = [group for group in groups if isinstance(group, dict) and group.get("matcher") == CLAUDE_HOOK_MARKER]
+    if len(matches) != 1:
+        return False
+    if command is None:
+        return True
+    handlers = matches[0].get("hooks")
+    return (isinstance(handlers, list) and len(handlers) == 1 and
+            isinstance(handlers[0], dict) and handlers[0].get("type") == "command" and
+            handlers[0].get("command") == command and handlers[0].get("args") == args and
+            handlers[0].get("statusMessage") == CLAUDE_HOOK_STATUS_MESSAGE)
 
 
 def _read_token(path: Path) -> str:
@@ -452,6 +582,43 @@ def build_turn_capsule(hook_input: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def build_claude_turn_capsule(hook_input: dict[str, Any]) -> dict[str, Any] | None:
+    if hook_input.get("hook_event_name") != "Stop":
+        raise ValueError("expected Claude Stop hook input")
+    session_id = hook_input.get("session_id")
+    assistant_message = hook_input.get("last_assistant_message")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ValueError("Claude Stop hook input is missing session_id")
+    if assistant_message is None:
+        return None
+    if not isinstance(assistant_message, str):
+        raise ValueError("Claude Stop hook last_assistant_message must be text")
+    if _contains_credentials(assistant_message):
+        return None
+    summary = assistant_message.strip()
+    if not summary:
+        return None
+    if len(summary) > MAX_TURN_CAPSULE_CHARS:
+        summary = summary[:MAX_TURN_CAPSULE_CHARS].rstrip()
+    # prompt_id is available in current Claude Code releases.  Fall back to a
+    # deterministic message digest for older clients without reading transcripts.
+    turn_source = hook_input.get("prompt_id")
+    if not isinstance(turn_source, str) or not turn_source.strip():
+        turn_source = hashlib.sha256(summary.encode("utf-8")).hexdigest()
+    stable_session = _stable_id("claude-session", session_id.strip())
+    stable_turn = _stable_id("claude-turn", turn_source.strip())
+    return {
+        "sessionId": stable_session,
+        "turnId": stable_turn,
+        "sourceAgent": "claude-code",
+        "summary": summary,
+        "coreTags": ["claude-code", "conversation"],
+        "contentDigest": f"sha256:{hashlib.sha256(summary.encode('utf-8')).hexdigest()}",
+        "idempotencyKey": _stable_id("claude-capsule", f"{session_id.strip()}:{turn_source.strip()}"),
+        "title": "Claude Code turn capsule",
+    }
+
+
 def _failure_code(exception: BaseException) -> str:
     if isinstance(exception, error.HTTPError):
         if exception.code in {401, 403}:
@@ -480,12 +647,16 @@ def upload_hook(
     token_file: Path,
     connector_version: str,
     excluded_token_files: list[Path] | None = None,
+    agent_id: str = "codex",
+    agent_name: str = "Codex",
+    connector_id: str = "luthn-codex-connector",
+    capsule_builder: Any = build_turn_capsule,
 ) -> int:
     try:
         raw = _read_bounded_hook_input()
         hook_input = json.loads(raw.decode("utf-8"))
         if not isinstance(hook_input, dict):
-            raise ValueError("Codex hook input must be a JSON object")
+            raise ValueError("hook input must be a JSON object")
         token = _read_token(token_file)
         assistant_message = hook_input.get("last_assistant_message")
         if isinstance(assistant_message, str):
@@ -495,13 +666,13 @@ def upload_hook(
             )
             if any(value in assistant_message for value in excluded_tokens):
                 return 0
-        capsule = build_turn_capsule(hook_input)
+        capsule = capsule_builder(hook_input)
         if capsule is None:
             return 0
         capsule["provenance"] = {
-            "agentId": "codex",
-            "applicationId": "codex",
-            "connectorId": "luthn-codex-connector",
+            "agentId": agent_id,
+            "applicationId": agent_id,
+            "connectorId": connector_id,
             "connectorVersion": connector_version,
         }
     except Exception:
@@ -519,8 +690,8 @@ def upload_hook(
             report_observation(
                 base_url,
                 token,
-                "codex",
-                "Codex",
+                agent_id,
+                agent_name,
                 "host-hook-mcp",
                 connector_version,
                 [
@@ -541,8 +712,8 @@ def upload_hook(
         report_observation(
             base_url,
             token,
-            "codex",
-            "Codex",
+                agent_id,
+                agent_name,
             "host-hook-mcp",
             connector_version,
             [
@@ -598,6 +769,20 @@ def run_hook(
     return 0
 
 
+def run_claude_hook(
+    base_url: str, token_file: Path, connector_version: str,
+    excluded_token_files: list[Path] | None = None,
+) -> int:
+    # Claude Code permits a bounded synchronous Stop hook.  Waiting here avoids
+    # losing a detached child process while remaining fail-open for the user turn.
+    return upload_hook(
+        base_url, token_file, connector_version, excluded_token_files,
+        agent_id="claude-code", agent_name="Claude Code",
+        connector_id="luthn-claude-code-connector",
+        capsule_builder=build_claude_turn_capsule,
+    )
+
+
 def print_status(base_url: str, token: str, agent_id: str) -> int:
     _, response = _request_json(
         "GET", f"{base_url.rstrip('/')}/api/agent-connections", token
@@ -637,9 +822,19 @@ def build_parser() -> argparse.ArgumentParser:
     hooks.add_argument("--path", type=Path, required=True)
     hooks.add_argument("--command", dest="hook_command")
 
+    claude_hooks = subparsers.add_parser("claude-hooks")
+    claude_hooks.add_argument("action", choices=["install", "remove", "check"])
+    claude_hooks.add_argument("--path", type=Path, required=True)
+    claude_hooks.add_argument("--command", dest="hook_command")
+    claude_hooks.add_argument("--arg", dest="hook_args", action="append", default=[])
+
     instructions = subparsers.add_parser("instructions")
     instructions.add_argument("action", choices=["install", "remove", "check"])
     instructions.add_argument("--path", type=Path, required=True)
+
+    claude_instructions = subparsers.add_parser("claude-instructions")
+    claude_instructions.add_argument("action", choices=["install", "remove", "check"])
+    claude_instructions.add_argument("--path", type=Path, required=True)
 
     report = subparsers.add_parser("report")
     report.add_argument("--base-url", required=True)
@@ -661,6 +856,12 @@ def build_parser() -> argparse.ArgumentParser:
     hook_upload.add_argument("--token-file", type=Path, required=True)
     hook_upload.add_argument("--excluded-token-file", type=Path, action="append")
     hook_upload.add_argument("--connector-version", required=True)
+
+    claude_hook_run = subparsers.add_parser("claude-hook-run")
+    claude_hook_run.add_argument("--base-url", required=True)
+    claude_hook_run.add_argument("--token-file", type=Path, required=True)
+    claude_hook_run.add_argument("--excluded-token-file", type=Path, action="append")
+    claude_hook_run.add_argument("--connector-version", required=True)
 
     status = subparsers.add_parser("status")
     status.add_argument("--base-url", required=True)
@@ -685,6 +886,19 @@ def main() -> int:
             return 0
         return 0 if hook_is_installed(arguments.path, arguments.hook_command) else 1
 
+    if arguments.operation == "claude-hooks":
+        if arguments.action == "install":
+            if not arguments.hook_command:
+                raise ValueError("--command is required for Claude hook installation")
+            install_claude_hook(arguments.path, arguments.hook_command, arguments.hook_args)
+            return 0
+        if arguments.action == "remove":
+            remove_claude_hook(arguments.path)
+            return 0
+        return 0 if claude_hook_is_installed(
+            arguments.path, arguments.hook_command, arguments.hook_args
+        ) else 1
+
     if arguments.operation == "instructions":
         if arguments.action == "install":
             install_auto_recall_instruction(arguments.path)
@@ -693,6 +907,17 @@ def main() -> int:
             remove_auto_recall_instruction(arguments.path)
             return 0
         return 0 if auto_recall_instruction_is_installed(arguments.path) else 1
+
+    if arguments.operation == "claude-instructions":
+        if arguments.action == "install":
+            install_auto_recall_instruction(arguments.path, CLAUDE_AUTO_RECALL_INSTRUCTION)
+            return 0
+        if arguments.action == "remove":
+            remove_auto_recall_instruction(arguments.path)
+            return 0
+        return 0 if auto_recall_instruction_is_installed(
+            arguments.path, CLAUDE_AUTO_RECALL_INSTRUCTION
+        ) else 1
 
     if arguments.operation == "report":
         token = _read_token(arguments.token_file)
@@ -719,6 +944,14 @@ def main() -> int:
 
     if arguments.operation == "hook-upload":
         return upload_hook(
+            arguments.base_url,
+            arguments.token_file,
+            arguments.connector_version,
+            arguments.excluded_token_file,
+        )
+
+    if arguments.operation == "claude-hook-run":
+        return run_claude_hook(
             arguments.base_url,
             arguments.token_file,
             arguments.connector_version,
