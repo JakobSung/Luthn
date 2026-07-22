@@ -75,6 +75,7 @@ git diff --check
 - [API](api.ko.md)
 - [로컬 개발](local-development.ko.md)
 - [운영](operations.ko.md)
+- [컨테이너 릴리즈](releases.ko.md)
 - [Codex 연결](agent-quickstart.ko.md)
 - [라이선스](licensing.ko.md)
 - [구조](architecture.ko.md)

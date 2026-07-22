@@ -122,14 +122,14 @@ if ($args.Count -ge 1 -and $args[0] -ceq "info") {
 }
 if ($args.Count -ge 3 -and $args[0] -ceq "buildx" -and $args[1] -ceq "imagetools" -and $args[2] -ceq "inspect") {
     if ($env:FAKE_DOCKER_REMOTE_FAIL -ceq "true") { exit 20 }
-    if ($joined -match '\.Manifest') { '{"digest":"sha256:fake"}'; exit 0 }
+    if ($joined -match '\.Manifest') { '{"digest":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}'; exit 0 }
 if ($joined -match '\.Image') { '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 }
 }
 if ($args.Count -ge 1 -and $args[0] -ceq "pull") { if ($env:FAKE_DOCKER_PULL_FAIL -ceq "true") { exit 16 }; "pulled"; exit 0 }
 if ($args.Count -ge 2 -and $args[0] -ceq "image" -and $args[1] -ceq "inspect") {
     if ($joined -match "io.luthn.mcp-schema.version") { }
     elseif ($joined -match "org.opencontainers.image.revision") { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
-    elseif ($joined -match "RepoDigests") { "ghcr.io/jakobsung/luthn@sha256:fake" }
+    elseif ($joined -match "RepoDigests") { "ghcr.io/jakobsung/luthn@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }
     else { "sha256:fake" }
     exit 0
 }
@@ -166,7 +166,7 @@ fi
 if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
   [ "${FAKE_DOCKER_REMOTE_FAIL:-false}" = "true" ] && exit 20
   case "$joined" in
-    *'.Manifest'*) printf '%s\n' '{"digest":"sha256:fake"}'; exit 0 ;;
+    *'.Manifest'*) printf '%s\n' '{"digest":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}'; exit 0 ;;
     *'.Image'*) printf '%s\n' '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","org.opencontainers.image.version":"main","io.luthn.cli-template.version":"3","io.luthn.connector-template.version":"3","io.luthn.mcp-schema.version":"3"}}}}'; exit 0 ;;
   esac
 fi
@@ -175,7 +175,7 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
   case "$joined" in
     *io.luthn.mcp-schema.version*) : ;;
     *org.opencontainers.image.revision*) echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
-    *RepoDigests*) echo "ghcr.io/jakobsung/luthn@sha256:fake" ;;
+    *RepoDigests*) echo "ghcr.io/jakobsung/luthn@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" ;;
     *) echo "sha256:fake" ;;
   esac
   exit 0
@@ -523,6 +523,7 @@ esac
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $firstHash) "preflight failure should preserve the installed CLI"
     $env:FAKE_INSTALLER_DOCKER_OS = "linux"
 
+    $resolvedOfficialImage = "ghcr.io/jakobsung/luthn@sha256:$('d' * 64)"
     $status = Invoke-LuthnProcess $installedCli @("status")
     Assert-True ($status.ExitCode -eq 0) "status should succeed: $($status.Output)"
     Assert-True ($status.Output -match "Health: ready") "status should report health"
@@ -534,7 +535,8 @@ esac
     $versionResult = Invoke-LuthnProcess $installedCli @("version", "--json")
     Assert-True ($versionResult.ExitCode -eq 0) "version --json should succeed: $($versionResult.Output)"
     $version = $versionResult.Output | ConvertFrom-Json
-    Assert-True ($version.installedImageReference -ceq "ghcr.io/jakobsung/luthn:main") "version should report the installed image reference"
+    Assert-True ($version.installedImageReference -ceq $resolvedOfficialImage) "version should report the immutable installed image reference"
+    Assert-True ($version.updateChannel -ceq "ghcr.io/jakobsung/luthn:stable") "version should report the selected update channel"
     Assert-True ($version.cliTemplateVersion -ceq "3" -and $version.connectorTemplateVersion -ceq "3") "version should report CLI and connector template versions"
     Assert-True ($version.mcpSchemaVersion -ceq "0.1.0") "version should fall back to the legacy MCP server version when the image label and schemaVersion field are absent"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($tokenFile))) "version JSON must not expose the service token"
@@ -550,13 +552,15 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexHooksFile) -ceq $hooksBeforeUpdateCheck) "update check should not modify Codex configuration"
 
     $pinnedImage = "ghcr.io/jakobsung/luthn@sha256:$('0' * 64)"
-    [IO.File]::WriteAllText($configFile, $configBeforeUpdateCheck.Replace("LUTHN_IMAGE=ghcr.io/jakobsung/luthn:main", "LUTHN_IMAGE=$pinnedImage"), [Text.UTF8Encoding]::new($false))
+    $pinnedConfig = $configBeforeUpdateCheck -replace '(?m)^LUTHN_IMAGE=.*$', "LUTHN_IMAGE=$pinnedImage"
+    $pinnedConfig = $pinnedConfig -replace '(?m)^LUTHN_UPDATE_CHANNEL=.*\r?\n?', ''
+    [IO.File]::WriteAllText($configFile, $pinnedConfig, [Text.UTF8Encoding]::new($false))
     $pinnedConfig = [IO.File]::ReadAllText($configFile)
     $dockerLogCountBeforePinnedUpdate = [IO.File]::ReadAllLines($fakeDockerLog).Count
     $pinnedCheck = Invoke-LuthnProcess $installedCli @("update", "check", "--json")
     Assert-True ($pinnedCheck.ExitCode -eq 0 -and ($pinnedCheck.Output | ConvertFrom-Json).status -ceq "pinned") "immutable image references should report pinned"
     $pinnedUpdate = Invoke-LuthnProcess $installedCli @("update")
-    Assert-True ($pinnedUpdate.ExitCode -ne 0 -and $pinnedUpdate.Output -match "configured image is immutable") "implicit update should stop for an immutable pin"
+    Assert-True ($pinnedUpdate.ExitCode -ne 0 -and $pinnedUpdate.Output -match "configured release is pinned") "implicit update should stop for an immutable pin"
     Assert-True ([IO.File]::ReadAllText($configFile) -ceq $pinnedConfig) "pin checks should not modify configuration"
     $pinnedDockerLog = @([IO.File]::ReadAllLines($fakeDockerLog) | Select-Object -Skip $dockerLogCountBeforePinnedUpdate)
     Assert-True (-not ($pinnedDockerLog -match '^pull ')) "implicit pinned update must not pull"
@@ -626,7 +630,8 @@ esac
     Assert-True ($update.Output -match "Revision: a{40} -> a{40}") "successful update should report the revision transition"
     Assert-True ($update.Output -notmatch "Restart required:" -and $update.Output -notmatch "Agent notice:") "runtime-only update should not emit a compatibility restart notice"
     Assert-True ([IO.File]::ReadAllText($installedCli) -match "windows-update-test-fixture") "update should refresh the installed Windows CLI"
-    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "update should select the target image"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($resolvedOfficialImage))$") "update should select the immutable target image"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_UPDATE_CHANNEL=$([regex]::Escape($targetImage))$") "update should preserve the requested channel"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__7=access\.request$") "update should provision the MCP sensitive-access request scope for legacy installs"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__0__Scopes__8=metrics\.write$") "update should provision the MCP search telemetry write scope for legacy installs"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Identity__Mode=SingleOwner$" -and [IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Identity__SingleOwnerUserId=local-owner$") "update should provision the single-owner compatibility boundary for legacy installs"
@@ -641,7 +646,7 @@ esac
     $updateStateFile = Join-Path $windowsRoot "state/update-windows.json"
     $updateState = [IO.File]::ReadAllText($updateStateFile) | ConvertFrom-Json
     Assert-True ($updateState.status -ceq "ready") "successful update should record ready state"
-    Assert-True ($updateState.targetImage -ceq $targetImage) "update state should record the target image"
+    Assert-True ($updateState.targetImage -ceq $resolvedOfficialImage) "update state should record the immutable target image"
     Assert-True ([IO.File]::Exists($updateState.backupPath)) "update state should record the backup path"
 
     $updateLog = @([IO.File]::ReadAllLines($fakeDockerLog) | Select-Object -Skip $updateLogStart)
@@ -678,7 +683,7 @@ esac
     Assert-True ($pullFailure.ExitCode -ne 0) "pull failure should stop update"
     Assert-True ($pullFailure.Output -match "running API and previous image were preserved") "pull failure should report preservation: $($pullFailure.Output)"
     Assert-True ((Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash -eq $updatedHash) "pull failure should preserve the installed CLI"
-    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "pull failure should preserve the selected image"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($resolvedOfficialImage))$") "pull failure should preserve the selected image"
     $env:FAKE_DOCKER_PULL_FAIL = "false"
 
     $backupCountBeforeFailure = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump").Count
@@ -687,7 +692,7 @@ esac
     Assert-True ($backupFailure.ExitCode -ne 0) "backup failure should stop update"
     Assert-True ($backupFailure.Output -match "previous API was restarted") "backup failure should restart the previous API"
     Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump").Count -eq $backupCountBeforeFailure) "failed backup should remove its partial file"
-    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "backup failure should preserve the previous image reference"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($resolvedOfficialImage))$") "backup failure should preserve the previous image reference"
     $env:FAKE_DOCKER_BACKUP_FAIL = "false"
 
     $env:FAKE_DOCKER_MIGRATE_FAIL = "true"
@@ -707,7 +712,7 @@ esac
 
     $recoveryUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($recoveryUpdate.ExitCode -eq 0) "a corrected update should recover after migration failure: $($recoveryUpdate.Output)"
-    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($targetImage))$") "recovery update should restore the requested image"
+    Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^LUTHN_IMAGE=$([regex]::Escape($resolvedOfficialImage))$") "recovery update should restore the immutable requested image"
 
     Remove-Item Env:LUTHN_CODEX_COMMAND
     Remove-Item Env:CODEX_CLI_PATH -ErrorAction SilentlyContinue

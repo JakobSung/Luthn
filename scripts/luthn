@@ -24,14 +24,17 @@ codex_connector_version="3"
 mcp_schema_version="3"
 distribution_ref="${LUTHN_DISTRIBUTION_REF:-main}"
 source_base_url="${LUTHN_SOURCE_BASE_URL:-https://raw.githubusercontent.com/JakobSung/Luthn/${distribution_ref}}"
-default_image="ghcr.io/jakobsung/luthn:main"
+image_repository="ghcr.io/jakobsung/luthn"
+default_update_channel="${image_repository}:stable"
+default_image="$default_update_channel"
 
 print_usage() {
   cat <<'USAGE'
 usage: luthn <command> [options]
 
 commands:
-  install [--connect-codex|--connect-claude]
+  install [--channel stable|main|--version vMAJOR.MINOR.PATCH]
+          [--connect-codex|--connect-claude]
                                    Install Luthn and optionally configure an agent.
   version [--json]                Show installed runtime and compatibility versions.
   status                          Show services, readiness, console, and image.
@@ -83,7 +86,26 @@ is_immutable_image_ref() {
 }
 
 is_official_image_ref() {
-  [[ "$1" == ghcr.io/jakobsung/luthn:* || "$1" == ghcr.io/jakobsung/luthn@* ]]
+  [[ "$1" == "$image_repository":* || "$1" == "$image_repository"@* ]]
+}
+
+is_mutable_update_channel() {
+  [[ "$1" == "${image_repository}:stable" || "$1" == "${image_repository}:main" ]]
+}
+
+normalize_image_selector() {
+  selector="$1"
+  case "$selector" in
+    stable|main) printf '%s:%s' "$image_repository" "$selector" ;;
+    v[0-9]*.[0-9]*.[0-9]*)
+      if [[ "$selector" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+        printf '%s:%s' "$image_repository" "$selector"
+      else
+        return 1
+      fi
+      ;;
+    *) printf '%s' "$selector" ;;
+  esac
 }
 
 image_label() {
@@ -96,6 +118,41 @@ image_digest() {
   image="$1"
   repo_digests="$(docker image inspect --format '{{join .RepoDigests ","}}' "$image" 2>/dev/null || true)"
   printf '%s' "$repo_digests" | awk -F, '{ value=$NF; sub(/^.*@/, "", value); print value }'
+}
+
+official_image_digest() {
+  image="$1"
+  repo_digests="$(docker image inspect --format '{{join .RepoDigests ","}}' "$image" 2>/dev/null || true)"
+  printf '%s' "$repo_digests" | awk -F, -v prefix="$image_repository@" '
+    {
+      for (field = 1; field <= NF; field++) {
+        if (substr($field, 1, length(prefix)) == prefix) {
+          value = $field
+          sub(/^.*@/, "", value)
+          print value
+          exit
+        }
+      }
+    }'
+}
+
+immutable_image_ref() {
+  image="$1"
+  digest="$(official_image_digest "$image")"
+  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  printf '%s@%s' "$image_repository" "$digest"
+}
+
+configured_update_channel() {
+  channel="$(read_config LUTHN_UPDATE_CHANNEL)"
+  if [[ -n "$channel" ]]; then
+    printf '%s' "$channel"
+    return
+  fi
+  legacy_image="$(read_config LUTHN_IMAGE "$default_image")"
+  if is_official_image_ref "$legacy_image" && ! is_immutable_image_ref "$legacy_image"; then
+    printf '%s' "$legacy_image"
+  fi
 }
 
 stable_release_version() {
@@ -153,6 +210,7 @@ show_version() {
   fi
 
   image_ref="$(read_config LUTHN_IMAGE "$default_image")"
+  update_channel="$(configured_update_channel)"
   running_id=""
   installed_digest=""
   source_revision=""
@@ -180,13 +238,14 @@ show_version() {
 
   if [[ "$json" == "true" ]]; then
     require_command python3
-    python3 - "$image_ref" "$installed_digest" "$source_revision" \
+    python3 - "$update_channel" "$image_ref" "$installed_digest" "$source_revision" \
       "$cli_template_version" "$connector_version" "$installed_mcp_schema" \
       "$release_version" <<'PY'
 import json
 import sys
 
 keys = (
+    "updateChannel",
     "installedImageReference",
     "imageDigest",
     "sourceRevision",
@@ -202,6 +261,7 @@ PY
   fi
 
   cat <<EOF
+Update channel: ${update_channel:-pinned}
 Installed image: $image_ref
 Image digest: ${installed_digest:-unavailable}
 Source revision: ${source_revision:-unavailable}
@@ -290,7 +350,8 @@ check_for_update() {
   require_docker
   require_command python3
 
-  channel="$(read_config LUTHN_IMAGE "$default_image")"
+  channel="$(configured_update_channel)"
+  installed_ref="$(read_config LUTHN_IMAGE "$default_image")"
   running_id="$(image_id_for_container)"
   current_digest=""
   current_revision=""
@@ -299,16 +360,22 @@ check_for_update() {
     current_revision="$(image_label "$running_id" org.opencontainers.image.revision)"
   fi
 
-  if is_immutable_image_ref "$channel"; then
-    print_update_check_result "$json" pinned "$channel" "$current_digest" "" \
+  if [[ -z "$channel" ]]; then
+    print_update_check_result "$json" pinned "${channel:-$installed_ref}" "$current_digest" "" \
       "$current_revision" "" \
-      "The configured image is immutable. Select an explicit mutable channel or target to update."
+      "The configured release is pinned. Select stable or main explicitly to change update channels."
     return 0
   fi
   if ! is_official_image_ref "$channel"; then
     print_update_check_result "$json" unavailable "$channel" "$current_digest" "" \
       "$current_revision" "" \
       "Automatic checks are available only for the official Luthn image channel."
+    return 0
+  fi
+  if ! is_mutable_update_channel "$channel"; then
+    print_update_check_result "$json" pinned "$channel" "$current_digest" "" \
+      "$current_revision" "" \
+      "The configured release is pinned. Select stable or main explicitly to change update channels."
     return 0
   fi
 
@@ -418,8 +485,9 @@ write_operator_token_file() {
 
 write_initial_config() {
   image="$1"
-  digest="$2"
-  operator_digest="$3"
+  update_channel="$2"
+  digest="$3"
+  operator_digest="$4"
   port="${LUTHN_PORT:-8080}"
   postgres_volume="${LUTHN_POSTGRES_VOLUME:-luthn-postgres}"
   operator_volume="${LUTHN_OPERATOR_VOLUME:-luthn-operator}"
@@ -427,6 +495,7 @@ write_initial_config() {
   umask 077
   cat >"$config_file" <<EOF
 LUTHN_IMAGE=$image
+LUTHN_UPDATE_CHANNEL=$update_channel
 LUTHN_PORT=$port
 LUTHN_ENVIRONMENT=Production
 LUTHN_BASE_URL=http://127.0.0.1:$port
@@ -558,7 +627,7 @@ pull_image() {
 runtime_source_for_image() {
   image="$1"
   revision="${2:-}"
-  if [[ "$image" == ghcr.io/jakobsung/luthn:* && "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+  if is_official_image_ref "$image" && [[ "$revision" =~ ^[0-9a-f]{40}$ ]]; then
     printf 'https://raw.githubusercontent.com/JakobSung/Luthn/%s' "$revision"
   elif [[ "$image" =~ ^ghcr\.io/jakobsung/luthn:sha-([0-9a-f]{40})$ ]]; then
     printf 'https://raw.githubusercontent.com/JakobSung/Luthn/%s' "${BASH_REMATCH[1]}"
@@ -921,11 +990,42 @@ start_stack() {
 install_luthn() {
   connect_after_install=false
   connect_claude_after_install=false
+  requested_selector=""
+  selector_kind=""
   while (( $# > 0 )); do
     case "$1" in
       --connect-codex) connect_after_install=true ;;
       --connect-claude) connect_claude_after_install=true ;;
-      *) echo "usage: luthn install [--connect-codex|--connect-claude]" >&2; return 2 ;;
+      --channel)
+        [[ -z "$selector_kind" ]] || {
+          echo "choose exactly one of --channel or --version" >&2
+          return 2
+        }
+        [[ "${2:-}" == "stable" || "${2:-}" == "main" ]] || {
+          echo "usage: luthn install [--channel stable|main|--version vMAJOR.MINOR.PATCH] [--connect-codex|--connect-claude]" >&2
+          return 2
+        }
+        requested_selector="$2"
+        selector_kind=channel
+        shift
+        ;;
+      --version)
+        [[ -z "$selector_kind" ]] || {
+          echo "choose exactly one of --channel or --version" >&2
+          return 2
+        }
+        [[ "${2:-}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+          echo "usage: luthn install [--channel stable|main|--version vMAJOR.MINOR.PATCH] [--connect-codex|--connect-claude]" >&2
+          return 2
+        }
+        requested_selector="$2"
+        selector_kind=version
+        shift
+        ;;
+      *)
+        echo "usage: luthn install [--channel stable|main|--version vMAJOR.MINOR.PATCH] [--connect-codex|--connect-claude]" >&2
+        return 2
+        ;;
     esac
     shift
   done
@@ -939,9 +1039,31 @@ install_luthn() {
     return 1
   fi
 
-  image="$(read_config LUTHN_IMAGE "${LUTHN_IMAGE:-$default_image}")"
+  update_channel="$(configured_update_channel)"
+  if [[ -n "$requested_selector" ]]; then
+    update_channel="$(normalize_image_selector "$requested_selector")"
+    image="$update_channel"
+  elif [[ -f "$config_file" ]]; then
+    image="$(read_config LUTHN_IMAGE "$default_image")"
+  else
+    update_channel="${LUTHN_UPDATE_CHANNEL:-$default_update_channel}"
+    image="${LUTHN_IMAGE:-$update_channel}"
+  fi
+  if ! is_official_image_ref "$image" && [[ -z "${LUTHN_UPDATE_CHANNEL:-}" && -z "$requested_selector" ]]; then
+    update_channel="$image"
+  fi
+  if [[ -z "$update_channel" ]]; then
+    update_channel="$image"
+  fi
   echo "Pulling $image..."
   pull_image "$image"
+  resolved_image="$image"
+  if is_official_image_ref "$image"; then
+    if ! resolved_image="$(immutable_image_ref "$image")"; then
+      echo "Install stopped because the selected image digest could not be resolved." >&2
+      return 1
+    fi
+  fi
   if ! operator_credential_slot_available "$image"; then
     echo "Install stopped because the local operator credential could not be configured." >&2
     return 1
@@ -959,9 +1081,10 @@ install_luthn() {
     fi
     write_token_file "$token"
     write_operator_token_file "$operator_token"
-    write_initial_config "$image" "$digest" "$operator_digest"
+    write_initial_config "$resolved_image" "$update_channel" "$digest" "$operator_digest"
   else
-    ensure_config_value LUTHN_IMAGE "$image"
+    set_config LUTHN_IMAGE "$resolved_image"
+    set_config LUTHN_UPDATE_CHANNEL "$update_channel"
     ensure_config_value LUTHN_PORT "${LUTHN_PORT:-8080}"
     ensure_config_value LUTHN_ENVIRONMENT Production
     ensure_config_value LUTHN_BASE_URL "http://127.0.0.1:$(read_config LUTHN_PORT 8080)"
@@ -1017,7 +1140,7 @@ install_luthn() {
   compose_cmd pull postgres
   start_stack true
   current_id="$(image_id_for_container)"
-  record_state ready "$(read_config LUTHN_IMAGE "$image")" "$current_id"
+  record_state ready "$(read_config LUTHN_IMAGE "$resolved_image")" "$current_id"
   refresh_codex_connection_observation || \
     echo "warning: installed Codex connector status could not be reported" >&2
 
@@ -1052,6 +1175,7 @@ show_status() {
   require_command curl
   base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
   image_ref="$(read_config LUTHN_IMAGE "$default_image")"
+  update_channel="$(configured_update_channel)"
   image_id="$(image_id_for_container)"
   image_digest=""
   running_revision=""
@@ -1081,6 +1205,7 @@ show_status() {
     echo "Classification: setup required in the operator console"
   fi
   echo "Console: $base_url/"
+  echo "Update channel: ${update_channel:-pinned}"
   echo "Image: $image_ref"
   echo "Image ID: ${image_id:-unavailable}"
   echo "Digest: ${image_digest:-unavailable}"
@@ -2012,20 +2137,32 @@ update_luthn() {
   require_installation
   require_docker
   require_command curl
-  configured_image="$(read_config LUTHN_IMAGE "$default_image")"
+  previous_ref="$(read_config LUTHN_IMAGE "$default_image")"
+  previous_channel="$(configured_update_channel)"
   explicit_target=false
   if [[ -n "${1:-}" ]]; then
-    target_image="$1"
+    if ! target_channel="$(normalize_image_selector "$1")"; then
+      echo "Update stopped because the requested version is invalid: $1" >&2
+      return 2
+    fi
     explicit_target=true
   else
-    target_image="$configured_image"
+    target_channel="$previous_channel"
   fi
-  if [[ "$explicit_target" != "true" ]] && is_immutable_image_ref "$target_image"; then
-    echo "Update stopped because the configured image is immutable: $target_image" >&2
-    echo "Choose an explicit mutable channel or target: luthn update <image>" >&2
+  if [[ -z "$target_channel" ]]; then
+    echo "Update stopped because the installed image is pinned without an update channel." >&2
+    echo "Choose an explicit channel or release: luthn update stable|main|vMAJOR.MINOR.PATCH" >&2
     return 2
   fi
-  previous_ref="$(read_config LUTHN_IMAGE "$default_image")"
+  if ! is_official_image_ref "$target_channel" && [[ "$explicit_target" != "true" ]]; then
+    echo "Update stopped because the update channel is not an official Luthn image: $target_channel" >&2
+    return 2
+  fi
+  if [[ "$explicit_target" != "true" ]] && ! is_mutable_update_channel "$target_channel"; then
+    echo "Update stopped because the configured release is pinned: $target_channel" >&2
+    echo "Choose stable or main explicitly to change update channels." >&2
+    return 2
+  fi
   previous_id="$(image_id_for_container)"
   previous_revision=""
   previous_mcp_schema=""
@@ -2040,15 +2177,23 @@ update_luthn() {
   ensure_directories
   backup_path="$state_dir/backups/luthn-$(date -u +%Y%m%dT%H%M%SZ).dump"
 
-  echo "Pulling $target_image..."
-  if ! pull_image "$target_image"; then
-    record_state failed "$target_image" "" "$previous_id"
+  echo "Pulling $target_channel..."
+  if ! pull_image "$target_channel"; then
+    record_state failed "$target_channel" "" "$previous_id"
     echo "Update failed while pulling the target image. The running API and previous image were preserved." >&2
     return 1
   fi
 
-  target_id="$(docker image inspect --format '{{.Id}}' "$target_image")"
-  target_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target_image" 2>/dev/null || true)"
+  target_id="$(docker image inspect --format '{{.Id}}' "$target_channel")"
+  target_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target_channel" 2>/dev/null || true)"
+  target_image="$target_channel"
+  if is_official_image_ref "$target_channel"; then
+    if ! target_image="$(immutable_image_ref "$target_channel")"; then
+      record_state failed "$target_channel" "$target_id" "$previous_id"
+      echo "Update stopped because the target image digest could not be resolved." >&2
+      return 1
+    fi
+  fi
   target_mcp_schema="$(image_label "$target_id" io.luthn.mcp-schema.version)"
   if [[ -z "$target_mcp_schema" ]] && command -v python3 >/dev/null 2>&1; then
     target_mcp_schema="$(probe_image_mcp_schema_version "$target_id" 2>/dev/null || true)"
@@ -2272,10 +2417,11 @@ update_luthn() {
   fi
 
   current_id="$(image_id_for_container)"
+  set_config LUTHN_UPDATE_CHANNEL "$target_channel"
   record_state ready "$target_image" "$current_id" "$previous_id" "$backup_path"
   refresh_codex_connection_observation || \
     echo "warning: updated Codex connector status could not be reported" >&2
-  echo "Luthn update completed: $target_image"
+  echo "Luthn update completed: $target_channel -> $target_image"
   echo "Revision: ${previous_revision:-unavailable} -> ${target_revision:-unavailable}"
   if [[ "$compatibility_changed" == "true" ]]; then
     echo "Restart required: Luthn MCP compatibility changed (${previous_mcp_schema:-unknown} -> ${target_mcp_schema:-$mcp_schema_version})."

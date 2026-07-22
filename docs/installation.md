@@ -35,7 +35,7 @@ An agent following this document should execute the work, not only repeat the
 commands to the user.
 
 1. Detect the host OS and use only the matching procedure below.
-2. On macOS and Linux, keep using the existing `install.sh --connect-codex`
+2. On macOS and Linux, keep using the existing `install.sh --channel stable --connect-codex`
    flow below. The Windows recovery steps and PowerShell changes do not apply
    to those hosts.
 3. Inspect the existing host prerequisites, Docker, Luthn, and Codex state
@@ -100,11 +100,12 @@ The first command must print `linux`. Windows containers are not supported.
 ## Install on macOS or Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --connect-codex
+curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.sh | bash -s -- --channel stable --connect-codex
 ```
 
 The bootstrap installs the CLI at `~/.local/bin/luthn`. It downloads the
-source-free Compose bundle, pulls `ghcr.io/jakobsung/luthn:main`, creates a
+source-free Compose bundle, resolves `ghcr.io/jakobsung/luthn:stable` to an
+immutable digest, creates a
 local service token, starts PostgreSQL, applies migrations before API startup,
 seeds public-safe demo data, and waits until the API is healthy. A fresh install
 starts with classification explicitly `unconfigured`; `/readyz` remains
@@ -181,7 +182,7 @@ for Docker, verifies the service, and connects Codex before returning:
 $installer = Join-Path ([IO.Path]::GetTempPath()) "luthn-install.ps1"
 try {
     irm https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/install.ps1 -OutFile $installer
-    pwsh -NoProfile -File $installer -ConnectCodex
+    pwsh -NoProfile -File $installer -Channel stable -ConnectCodex
     if ($LASTEXITCODE -ne 0) { throw "Luthn installation failed with exit code $LASTEXITCODE" }
 } finally {
     Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue
@@ -283,7 +284,8 @@ luthn doctor --json
 Status reports Compose service state, health, readiness, console URL, image
 reference, image ID, and registry digest when available.
 
-`version` reports the installed image reference and digest, source revision,
+`version` reports the update channel separately from the immutable installed
+image reference and running digest, source revision,
 CLI and connector template versions, MCP schema version, and a stable release
 version when the image carries one. `update check` inspects only the configured
 official registry channel and never pulls an image, stops a service, changes
@@ -378,7 +380,7 @@ of unrelated Codex configuration, the two named Docker volumes, and
 
 `luthn update` performs this sequence:
 
-1. resolves the configured mutable channel, or requires an explicit target when the installation is pinned;
+1. resolves the configured mutable channel or explicit release to an immutable digest, or requires an explicit target when the installation is pinned;
 2. pulls the target image and verifies that legacy operator credentials and connector scopes can be reconciled;
 3. snapshots configuration and managed Codex files, installs the matching CLI and Compose runtime, and validates the target MCP schema;
 4. starts/checks PostgreSQL;
@@ -392,12 +394,13 @@ of unrelated Codex configuration, the two named Docker volumes, and
 Pin an immutable published image when needed:
 
 ```bash
-luthn update ghcr.io/jakobsung/luthn:sha-<full-commit-sha>
+luthn update stable
+luthn update v0.1.0
 ```
 
-An installed immutable digest or `sha-<full-commit-sha>` reference reports
-`pinned`. A bare `luthn update` stops instead of re-pulling the same immutable
-reference; pass an explicit target to move the installation.
+An explicit SemVer, immutable digest, or `sha-<full-commit-sha>` selection
+reports `pinned`. A bare `luthn update` stops instead of moving a pinned
+installation; select `stable`, `main`, or another release explicitly.
 
 After a successful update, Luthn prints a restart-required operator message and
 an agent-safe notice only when the MCP schema, connector template, or managed

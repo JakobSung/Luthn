@@ -1,6 +1,6 @@
 name: luthn
 
-x-luthn-image: &luthn-image ${LUTHN_IMAGE:-ghcr.io/jakobsung/luthn:main}
+x-luthn-image: &luthn-image ${LUTHN_IMAGE:-ghcr.io/jakobsung/luthn:stable}
 x-luthn-database: &luthn-database ${LUTHN_DOCKER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=luthn;Username=luthn}
 
 services:

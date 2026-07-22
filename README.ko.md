@@ -97,6 +97,7 @@ https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installat
 - [Codex와 Claude Code 동시 연결](docs/agent-connections.ko.md)
 - [데이터 경계](docs/data-boundaries.ko.md)
 - [운영과 복구](docs/operations.ko.md)
+- [컨테이너 릴리즈](docs/releases.ko.md)
 - [API](docs/api.ko.md)
 - [구조](docs/architecture.ko.md)
 - [로컬 개발](docs/local-development.ko.md)

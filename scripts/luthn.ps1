@@ -45,7 +45,9 @@ $script:ClaudeInstructionsFile = if ($env:LUTHN_CLAUDE_INSTRUCTIONS_FILE) { $env
 $script:UpdateStateFile = if ($env:LUTHN_UPDATE_STATE_FILE) { $env:LUTHN_UPDATE_STATE_FILE } else { Join-Path $script:StateDir "update-windows.json" }
 $script:DistributionRef = if ($env:LUTHN_DISTRIBUTION_REF) { $env:LUTHN_DISTRIBUTION_REF } else { "main" }
 $script:SourceBaseUrl = if ($env:LUTHN_SOURCE_BASE_URL) { $env:LUTHN_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/JakobSung/Luthn/$($script:DistributionRef)" }
-$script:DefaultImage = "ghcr.io/jakobsung/luthn:main"
+$script:ImageRepository = "ghcr.io/jakobsung/luthn"
+$script:DefaultUpdateChannel = "$($script:ImageRepository):stable"
+$script:DefaultImage = $script:DefaultUpdateChannel
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:StrictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
 $script:CodexHookMarker = "luthn.agent-connector.v1"
@@ -120,7 +122,8 @@ usage: luthn <command> [options]
 commands:
   version [--json]           Show installed runtime and compatibility versions.
   manifest                   Show versioned connector template digests as JSON.
-  install [--connect-codex|--connect-claude]
+  install [--channel stable|main|--version vMAJOR.MINOR.PATCH]
+          [--connect-codex|--connect-claude]
                              Install Luthn and optionally connect one agent.
   status                     Show services, readiness, console, and image.
   update check [--json]      Check the configured update channel without pulling.
@@ -451,7 +454,7 @@ function New-ServiceToken {
 
 function Get-RuntimeSource {
     param([string]$Image, [string]$Revision)
-    if ($Image -like "ghcr.io/jakobsung/luthn:*" -and $Revision -cmatch "^[0-9a-f]{40}$") {
+    if ((Test-OfficialImageReference $Image) -and $Revision -cmatch "^[0-9a-f]{40}$") {
         return "https://raw.githubusercontent.com/JakobSung/Luthn/$Revision"
     }
     if ($Image -cmatch "^ghcr\.io/jakobsung/luthn:sha-([0-9a-f]{40})$") {
@@ -519,6 +522,31 @@ function Test-OfficialImageReference {
     return $Image -clike 'ghcr.io/jakobsung/luthn:*' -or $Image -clike 'ghcr.io/jakobsung/luthn@*'
 }
 
+function Test-MutableUpdateChannel {
+    param([Parameter(Mandatory = $true)][string]$Image)
+    return $Image -ceq "$($script:ImageRepository):stable" -or
+        $Image -ceq "$($script:ImageRepository):main"
+}
+
+function Resolve-ImageSelector {
+    param([Parameter(Mandatory = $true)][string]$Selector)
+    if ($Selector -in @("stable", "main")) { return "$($script:ImageRepository):$Selector" }
+    if ($Selector -cmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+        return "$($script:ImageRepository):$Selector"
+    }
+    return $Selector
+}
+
+function Get-ConfiguredUpdateChannel {
+    $channel = Read-ConfigValue "LUTHN_UPDATE_CHANNEL" ""
+    if ($channel) { return $channel }
+    $legacyImage = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+    if ((Test-OfficialImageReference $legacyImage) -and -not (Test-ImmutableImageReference $legacyImage)) {
+        return $legacyImage
+    }
+    return ""
+}
+
 function Get-ImageLabel {
     param(
         [Parameter(Mandatory = $true)][string]$Image,
@@ -537,6 +565,29 @@ function Get-ImageDigest {
     if ($result.ExitCode -ne 0 -or -not $result.StdOut.Trim()) { return "" }
     $last = @($result.StdOut.Trim() -split ',')[-1]
     return @($last -split '@')[-1]
+}
+
+function Get-OfficialImageDigest {
+    param([Parameter(Mandatory = $true)][string]$Image)
+    $result = Invoke-ToolCapture -Tool (Get-DockerTool) -Arguments @(
+        "image", "inspect", "--format", "{{join .RepoDigests `",`"}}", $Image)
+    if ($result.ExitCode -ne 0 -or -not $result.StdOut.Trim()) { return "" }
+    $prefix = "$($script:ImageRepository)@"
+    foreach ($candidate in @($result.StdOut.Trim() -split ',')) {
+        if ($candidate.StartsWith($prefix, [StringComparison]::Ordinal)) {
+            return @($candidate -split '@')[-1]
+        }
+    }
+    return ""
+}
+
+function Get-ImmutableImageReference {
+    param([Parameter(Mandatory = $true)][string]$Image)
+    $digest = Get-OfficialImageDigest -Image $Image
+    if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+        throw "selected image digest could not be resolved"
+    }
+    return "$($script:ImageRepository)@$digest"
 }
 
 function Get-StableReleaseVersion {
@@ -586,6 +637,7 @@ function Get-McpSchemaVersionFromImage {
 
 function Get-VersionInformation {
     $imageReference = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+    $updateChannel = Get-ConfiguredUpdateChannel
     $imageId = ""
     $digest = ""
     $revision = ""
@@ -603,6 +655,7 @@ function Get-VersionInformation {
         }
     }
     return [ordered]@{
+        updateChannel = $(if ($updateChannel) { $updateChannel } else { $null })
         installedImageReference = $imageReference
         imageDigest = $(if ($digest) { $digest } else { $null })
         sourceRevision = $(if ($revision) { $revision } else { $null })
@@ -623,6 +676,7 @@ function Show-VersionInformation {
         $information | ConvertTo-Json -Compress
         return
     }
+    Write-Host "Update channel: $(if ($information.updateChannel) { $information.updateChannel } else { 'pinned' })"
     Write-Host "Installed image: $($information.installedImageReference)"
     Write-Host "Image digest: $(if ($information.imageDigest) { $information.imageDigest } else { 'unavailable' })"
     Write-Host "Source revision: $(if ($information.sourceRevision) { $information.sourceRevision } else { 'unavailable' })"
@@ -663,19 +717,24 @@ function Invoke-UpdateCheck {
     Require-Installation
     Test-DockerPreflight
     $asJson = $Arguments.Count -eq 1
-    $channel = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+    $channel = Get-ConfiguredUpdateChannel
+    $installedReference = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
     $currentId = Get-ApiImageId
     $currentDigest = if ($currentId) { Get-ImageDigest -Image $currentId } else { "" }
     $currentRevision = if ($currentId) { Get-ImageLabel -Image $currentId -Label "org.opencontainers.image.revision" } else { "" }
     $candidateDigest = ""
     $candidateRevision = ""
     $exitCode = 0
-    if (Test-ImmutableImageReference $channel) {
+    if (-not $channel) {
         $status = "pinned"
-        $message = "The configured image is immutable. Select an explicit mutable channel or target to update."
+        $channel = $installedReference
+        $message = "The configured release is pinned. Select stable or main explicitly to change update channels."
     } elseif (-not (Test-OfficialImageReference $channel)) {
         $status = "unavailable"
         $message = "Automatic checks are available only for the official Luthn image channel."
+    } elseif (-not (Test-MutableUpdateChannel $channel)) {
+        $status = "pinned"
+        $message = "The configured release is pinned. Select stable or main explicitly to change update channels."
     } else {
         try {
             $candidate = Get-RemoteImageMetadata -Image $channel
@@ -833,12 +892,13 @@ Luthn__Auth__Tokens__0__Sha256Digest=validation
 }
 
 function Write-InitialConfig {
-    param([string]$Image, [string]$Digest, [string]$OperatorDigest)
+    param([string]$Image, [string]$UpdateChannel, [string]$Digest, [string]$OperatorDigest)
     $port = if ($env:LUTHN_PORT) { $env:LUTHN_PORT } else { "8080" }
     $postgresVolume = if ($env:LUTHN_POSTGRES_VOLUME) { $env:LUTHN_POSTGRES_VOLUME } else { "luthn-postgres" }
     $operatorVolume = if ($env:LUTHN_OPERATOR_VOLUME) { $env:LUTHN_OPERATOR_VOLUME } else { "luthn-operator" }
     $content = @(
         "LUTHN_IMAGE=$Image",
+        "LUTHN_UPDATE_CHANNEL=$UpdateChannel",
         "LUTHN_PORT=$port",
         "LUTHN_ENVIRONMENT=Production",
         "LUTHN_BASE_URL=http://127.0.0.1:$port",
@@ -1011,17 +1071,51 @@ function Install-Luthn {
     param([string[]]$Arguments)
     $connectCodex = $false
     $connectClaude = $false
-    foreach ($argument in $Arguments) {
+    $requestedSelector = ""
+    $selectorKind = ""
+    for ($index = 0; $index -lt $Arguments.Count; $index++) {
+        $argument = $Arguments[$index]
         if ($argument -ceq "--connect-codex") { $connectCodex = $true }
         elseif ($argument -ceq "--connect-claude") { $connectClaude = $true }
-        else { throw "usage: luthn install [--connect-codex|--connect-claude]" }
+        elseif ($argument -in @("--channel", "--version")) {
+            if ($selectorKind) { throw "choose exactly one of --channel or --version" }
+            if ($index + 1 -ge $Arguments.Count) {
+                throw "usage: luthn install [--channel stable|main|--version vMAJOR.MINOR.PATCH] [--connect-codex|--connect-claude]"
+            }
+            $index++
+            $value = $Arguments[$index]
+            if ($argument -ceq "--channel" -and $value -notin @("stable", "main")) {
+                throw "install channel must be stable or main"
+            }
+            if ($argument -ceq "--version" -and $value -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+                throw "install version must use strict vMAJOR.MINOR.PATCH SemVer"
+            }
+            $requestedSelector = $value
+            $selectorKind = $argument
+        } else {
+            throw "usage: luthn install [--channel stable|main|--version vMAJOR.MINOR.PATCH] [--connect-codex|--connect-claude]"
+        }
     }
 
     Test-DockerPreflight
     $docker = Get-DockerTool
-    $image = Read-ConfigValue "LUTHN_IMAGE" $(if ($env:LUTHN_IMAGE) { $env:LUTHN_IMAGE } else { $script:DefaultImage })
+    $updateChannel = Get-ConfiguredUpdateChannel
+    if ($requestedSelector) {
+        $updateChannel = Resolve-ImageSelector $requestedSelector
+        $image = $updateChannel
+    } elseif ([IO.File]::Exists($script:ConfigFile)) {
+        $image = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+    } else {
+        $updateChannel = if ($env:LUTHN_UPDATE_CHANNEL) { $env:LUTHN_UPDATE_CHANNEL } else { $script:DefaultUpdateChannel }
+        $image = if ($env:LUTHN_IMAGE) { $env:LUTHN_IMAGE } else { $updateChannel }
+    }
+    if (-not (Test-OfficialImageReference $image) -and -not $env:LUTHN_UPDATE_CHANNEL -and -not $requestedSelector) {
+        $updateChannel = $image
+    }
+    if (-not $updateChannel) { $updateChannel = $image }
     Write-Host "Pulling $image..."
     Invoke-ToolVisible -Tool $docker -Arguments @("pull", $image)
+    $resolvedImage = if (Test-OfficialImageReference $image) { Get-ImmutableImageReference -Image $image } else { $image }
     Assert-OperatorCredentialSlotAvailable -Image $image
 
     $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $image)
@@ -1038,9 +1132,10 @@ function Install-Luthn {
         Protect-SecretFile $script:TokenFile
         Write-Utf8File -Path $script:OperatorTokenFile -Content $operatorToken
         Protect-SecretFile $script:OperatorTokenFile
-        Write-InitialConfig -Image $image -Digest $digest -OperatorDigest $operatorDigest
+        Write-InitialConfig -Image $resolvedImage -UpdateChannel $updateChannel -Digest $digest -OperatorDigest $operatorDigest
     } else {
-        Ensure-ConfigValue "LUTHN_IMAGE" $image
+        Set-ConfigValue "LUTHN_IMAGE" $resolvedImage
+        Set-ConfigValue "LUTHN_UPDATE_CHANNEL" $updateChannel
         Ensure-ConfigValue "LUTHN_PORT" $(if ($env:LUTHN_PORT) { $env:LUTHN_PORT } else { "8080" })
         Ensure-ConfigValue "LUTHN_ENVIRONMENT" "Production"
         Ensure-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:$(Read-ConfigValue 'LUTHN_PORT' '8080')"
@@ -1147,6 +1242,8 @@ function Show-Status {
         Write-Host "Classification: setup required in the operator console"
     }
     Write-Host "Console: $baseUrl/"
+    $updateChannel = Get-ConfiguredUpdateChannel
+    Write-Host "Update channel: $(if ($updateChannel) { $updateChannel } else { 'pinned' })"
     Write-Host "Image: $imageRef"
     Write-Host "Image ID: $(if ($imageId) { $imageId } else { 'unavailable' })"
     Write-Host "Digest: $(if ($digest) { $digest } else { 'unavailable' })"
@@ -1395,12 +1492,18 @@ function Update-Luthn {
     Require-Installation
     Test-DockerPreflight
     $docker = Get-DockerTool
-    $targetImage = if ($Arguments.Count -eq 1) { $Arguments[0] } else { Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage }
-    if (-not $targetImage) { throw "usage: luthn update [image]" }
-    if ($Arguments.Count -eq 0 -and (Test-ImmutableImageReference $targetImage)) {
-        throw "Update stopped because the configured image is immutable: $targetImage. Choose an explicit mutable channel or target: luthn update <image>"
-    }
     $previousImageRef = Read-ConfigValue "LUTHN_IMAGE" $script:DefaultImage
+    $previousUpdateChannel = Get-ConfiguredUpdateChannel
+    $targetChannel = if ($Arguments.Count -eq 1) { Resolve-ImageSelector $Arguments[0] } else { $previousUpdateChannel }
+    if (-not $targetChannel) {
+        throw "Update stopped because the installed image is pinned without an update channel. Choose stable, main, or vMAJOR.MINOR.PATCH explicitly."
+    }
+    if (-not (Test-OfficialImageReference $targetChannel) -and $Arguments.Count -eq 0) {
+        throw "Update stopped because the update channel is not an official Luthn image: $targetChannel"
+    }
+    if ($Arguments.Count -eq 0 -and -not (Test-MutableUpdateChannel $targetChannel)) {
+        throw "Update stopped because the configured release is pinned: $targetChannel. Choose stable or main explicitly to change update channels."
+    }
     $previousImageId = Get-ApiImageId
     $previousRevision = ""
     $previousMcpSchema = ""
@@ -1412,22 +1515,27 @@ function Update-Luthn {
     }
 
     Ensure-Directories
-    Write-Host "Pulling $targetImage..."
+    Write-Host "Pulling $targetChannel..."
     $pull = if ($env:LUTHN_SKIP_PULL -ceq "true") {
-        Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", $targetImage)
+        Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", $targetChannel)
     } else {
-        Invoke-ToolCapture -Tool $docker -Arguments @("pull", $targetImage)
+        Invoke-ToolCapture -Tool $docker -Arguments @("pull", $targetChannel)
     }
     if ($pull.ExitCode -ne 0) {
-        Write-UpdateState -Status "failed" -TargetImage $targetImage -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId
+        Write-UpdateState -Status "failed" -TargetImage $targetChannel -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId
         throw "Update failed while pulling the target image. The running API and previous image were preserved."
     }
 
-    $targetIdResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{.Id}}", $targetImage)
+    $targetIdResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{.Id}}", $targetChannel)
     Assert-ToolSuccess $targetIdResult "target image inspection"
     $targetImageId = $targetIdResult.StdOut.Trim()
-    $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $targetImage)
+    $revisionResult = Invoke-ToolCapture -Tool $docker -Arguments @("image", "inspect", "--format", "{{ index .Config.Labels `"org.opencontainers.image.revision`" }}", $targetChannel)
     $targetRevision = if ($revisionResult.ExitCode -eq 0) { $revisionResult.StdOut.Trim() } else { "" }
+    $targetImage = if (Test-OfficialImageReference $targetChannel) {
+        Get-ImmutableImageReference -Image $targetChannel
+    } else {
+        $targetChannel
+    }
     $targetMcpSchema = Get-ImageLabel -Image $targetImageId -Label "io.luthn.mcp-schema.version"
     if (-not $targetMcpSchema) { $targetMcpSchema = Get-McpSchemaVersionFromImage -Image $targetImageId }
     Assert-OperatorCredentialSlotAvailable -Image $targetImage
@@ -1587,8 +1695,9 @@ function Update-Luthn {
     }
 
     $currentImageId = Get-ApiImageId
+    Set-ConfigValue -Key "LUTHN_UPDATE_CHANNEL" -Value $targetChannel
     Write-UpdateState -Status "ready" -TargetImage $targetImage -TargetImageId $currentImageId -PreviousImageRef $previousImageRef -PreviousImageId $previousImageId -BackupPath $backupPath
-    Write-Host "Luthn update completed: $targetImage"
+    Write-Host "Luthn update completed: $targetChannel -> $targetImage"
     Write-Host "Revision: $(if ($previousRevision) { $previousRevision } else { 'unavailable' }) -> $(if ($targetRevision) { $targetRevision } else { 'unavailable' })"
     if ($compatibilityChanged) {
         Write-Host "Restart required: Luthn MCP compatibility changed ($(if ($previousMcpSchema) { $previousMcpSchema } else { 'unknown' }) -> $(if ($targetMcpSchema) { $targetMcpSchema } else { $script:McpSchemaVersion }))."

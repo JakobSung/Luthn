@@ -2,13 +2,19 @@
 
 [CmdletBinding()]
 param(
-    [switch]$ConnectCodex
+    [switch]$ConnectCodex,
+    [ValidateSet("stable", "main")][string]$Channel = "stable",
+    [ValidatePattern('^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')][string]$Version
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$distributionRef = if ($env:LUTHN_DISTRIBUTION_REF) { $env:LUTHN_DISTRIBUTION_REF } else { "main" }
+if ($Version -and $PSBoundParameters.ContainsKey("Channel")) {
+    throw "Choose exactly one of -Channel or -Version."
+}
+
+$distributionRef = if ($env:LUTHN_DISTRIBUTION_REF) { $env:LUTHN_DISTRIBUTION_REF } elseif ($Version) { $Version } else { "main" }
 $sourceBaseUrl = if ($env:LUTHN_SOURCE_BASE_URL) { $env:LUTHN_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/JakobSung/Luthn/$distributionRef" }
 $rootDir = if ($env:LUTHN_WINDOWS_ROOT) {
     $env:LUTHN_WINDOWS_ROOT
@@ -158,6 +164,8 @@ try {
     }
 
     $installArguments = @("install")
+    if ($Version) { $installArguments += @("--version", $Version) }
+    else { $installArguments += @("--channel", $Channel) }
     if ($ConnectCodex) { $installArguments += "--connect-codex" }
     $pwshPath = Get-PwshPath
     & $pwshPath -NoProfile -File $cliPath @installArguments
