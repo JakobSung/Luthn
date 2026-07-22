@@ -97,9 +97,8 @@ curl http://localhost:8080/readyz
 `/healthz` is liveness only and does not touch PostgreSQL. `/readyz` checks the configured database dependency.
 It also reports first-run configuration checks for service tokens,
 classification provider readiness, and transport hardening. In production,
-readiness is not considered complete when no active service token is configured
-or when no production classification provider is configured. The repository
-Compose defaults to the explicit `unconfigured` provider state.
+readiness is not considered complete when no active service token is configured.
+The repository Compose defaults to the local `mock` provider.
 
 The Docker stack also serves the operator console at `http://localhost:8080/`.
 
@@ -187,12 +186,11 @@ or otherwise controlled classifier boundary. Direct third-party provider
 endpoints must be HTTPS URLs on the expected provider host before Luthn sends an
 API key header.
 
-The packaged and Compose runtime defaults to `unconfigured`; classification
-writes fail safely until the operator configures a provider. Source
-`Development` and `Testing` environments opt in to the local mock explicitly.
-`mock` is a deterministic keyword classifier for tests and local experiments,
-not a production safety or multilingual classification system. A manual local
-override must set both values:
+The packaged and Compose runtime defaults to the local `mock` provider so a new
+installation works immediately. `mock` is a deterministic keyword classifier,
+not a provider-backed safety or multilingual classification system. Replace it
+with an operator-configured provider when that capability is required. A manual
+local override can set both values:
 
 ```bash
 Luthn__Classification__Provider=mock

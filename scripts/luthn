@@ -438,8 +438,8 @@ LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=l
 POSTGRES_DB=luthn
 POSTGRES_USER=luthn
 POSTGRES_HOST_AUTH_METHOD=trust
-Luthn__Classification__Provider=unconfigured
-Luthn__Classification__AllowMock=false
+Luthn__Classification__Provider=mock
+Luthn__Classification__AllowMock=true
 Luthn__Auth__RequireServiceToken=true
 Luthn__Identity__Mode=SingleOwner
 Luthn__Identity__SingleOwnerUserId=local-owner
@@ -543,6 +543,15 @@ ensure_config_value() {
   value="$2"
   if [[ -z "$(read_config "$key")" ]]; then
     set_config "$key" "$value"
+  fi
+}
+
+upgrade_legacy_classification_default() {
+  provider="$(read_config Luthn__Classification__Provider)"
+  allow_mock="$(read_config Luthn__Classification__AllowMock)"
+  if [[ "$provider" == "unconfigured" && "$allow_mock" == "false" ]]; then
+    set_config Luthn__Classification__Provider mock
+    set_config Luthn__Classification__AllowMock true
   fi
 }
 
@@ -839,8 +848,8 @@ classification_setup_pending() {
 
 classification_setup_required_by_config() {
   local provider allow_mock
-  provider="$(read_config Luthn__Classification__Provider unconfigured)"
-  allow_mock="$(read_config Luthn__Classification__AllowMock false)"
+  provider="$(read_config Luthn__Classification__Provider mock)"
+  allow_mock="$(read_config Luthn__Classification__AllowMock true)"
   if [[ "$provider" == "unconfigured" ]]; then
     return 0
   fi
@@ -986,8 +995,9 @@ install_luthn() {
     ensure_config_value POSTGRES_DB luthn
     ensure_config_value POSTGRES_USER luthn
     ensure_config_value POSTGRES_HOST_AUTH_METHOD trust
-    ensure_config_value Luthn__Classification__Provider unconfigured
-    ensure_config_value Luthn__Classification__AllowMock false
+    ensure_config_value Luthn__Classification__Provider mock
+    ensure_config_value Luthn__Classification__AllowMock true
+    upgrade_legacy_classification_default
     ensure_config_value Luthn__Auth__RequireServiceToken true
     ensure_config_value Luthn__Identity__Mode SingleOwner
     ensure_config_value Luthn__Identity__SingleOwnerUserId local-owner

@@ -104,6 +104,9 @@ $codexHome = Join-Path $testRoot "codex home"
 $codexHooksFile = Join-Path $codexHome "hooks.json"
 $codexInstructionsFile = Join-Path $codexHome "AGENTS.md"
 $codexHookCapture = Join-Path $testRoot "hook-capsule.json"
+$claudeHome = Join-Path $testRoot "claude home"
+$claudeSettingsFile = Join-Path $claudeHome "settings.json"
+$claudeInstructionsFile = Join-Path $claudeHome "CLAUDE.md"
 $originalPath = $env:Path
 
 try {
@@ -288,6 +291,9 @@ esac
     $env:LUTHN_CODEX_HOOKS_FILE = $codexHooksFile
     $env:LUTHN_CODEX_INSTRUCTIONS_FILE = $codexInstructionsFile
     $env:LUTHN_CODEX_SKIP_OBSERVATION = "true"
+    $env:CLAUDE_CONFIG_DIR = $claudeHome
+    $env:LUTHN_CLAUDE_SETTINGS_FILE = $claudeSettingsFile
+    $env:LUTHN_CLAUDE_INSTRUCTIONS_FILE = $claudeInstructionsFile
     $env:LUTHN_HTTP_CHECK_COMMAND = $fakeHealth
     $env:LUTHN_COMPOSE_SOURCE_FILE = Join-Path $RepoRoot "deploy/compose.yaml"
     $env:LUTHN_WINDOWS_CLI_SOURCE_FILE = Join-Path $RepoRoot "scripts/luthn.ps1"
@@ -345,8 +351,7 @@ esac
         $shimHelp = & $installedShim help *>&1 | Out-String
         Assert-True ($LASTEXITCODE -eq 0 -and $shimHelp -match "usage: luthn") "installed command shim should execute from a non-ASCII path"
     }
-    Assert-True ($install.Output -match "Luthn is running") "install should report that the safely unconfigured runtime is running"
-    Assert-True ($install.Output -match "Classification: setup required in the operator console") "install should explain the required classification setup"
+    Assert-True ($install.Output -match "Luthn is ready") "install should report that the default classifier is ready"
 
     $configFile = Join-Path $windowsRoot "config/luthn.env"
     $tokenFile = Join-Path $windowsRoot "config/service-token"
@@ -369,8 +374,8 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__IsOperator=true$") "the local operator credential should have the explicit operator role"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$" -and [IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__1=config\.write$") "the local operator credential should allow operator configuration"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_ENVIRONMENT=Production$") "new installs should use the Production environment"
-    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=unconfigured$") "new installs should not select the mock classifier"
-    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__AllowMock=false$") "new installs should disable mock classification"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=mock$") "new installs should select the mock classifier"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__AllowMock=true$") "new installs should enable mock classification"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_OPERATOR_VOLUME=luthn-operator$") "new installs should use the separate persistent Data Protection key volume"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($operatorToken))) "Docker arguments and logs should not contain the operator token"
@@ -413,9 +418,6 @@ esac
     Assert-True (@($disconnectedHooks.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "disconnect should preserve unrelated hooks"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile) -ceq $originalInstructions) "disconnect should preserve unrelated instructions"
 
-    $claudeHome = Join-Path $testRoot "claude home"
-    $claudeSettingsFile = Join-Path $claudeHome "settings.json"
-    $claudeInstructionsFile = Join-Path $claudeHome "CLAUDE.md"
     $claudeOwnershipState = Join-Path $windowsRoot "state/connectors/claude-code-windows.json"
     [void][IO.Directory]::CreateDirectory($claudeHome)
     [IO.File]::WriteAllText($claudeSettingsFile, ($unrelatedHooks + "`n"), [Text.UTF8Encoding]::new($false))
@@ -1034,6 +1036,9 @@ esac
     Remove-Item Env:LUTHN_CODEX_HOOKS_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_CODEX_INSTRUCTIONS_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_CODEX_SKIP_OBSERVATION -ErrorAction SilentlyContinue
+    Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CLAUDE_SETTINGS_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:LUTHN_CLAUDE_INSTRUCTIONS_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_DOCKER_DESKTOP_COMMAND -ErrorAction SilentlyContinue
     Remove-Item Env:LUTHN_INSTALLER_DOCKER_COMMAND -ErrorAction SilentlyContinue
     if ($originalPath) { $env:Path = $originalPath }
