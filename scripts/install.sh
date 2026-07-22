@@ -69,7 +69,7 @@ trap - EXIT HUP INT TERM
 install_args=(install)
 if [[ -n "$version" ]]; then
   install_args+=(--version "$version")
-else
+elif [[ "$selector_kind" == "channel" || -z "${LUTHN_IMAGE:-}" ]]; then
   install_args+=(--channel "$channel")
 fi
 [[ "$connect_codex" == "true" ]] && install_args+=(--connect-codex)
