@@ -562,7 +562,7 @@ esac
     $pinnedCheck = Invoke-LuthnProcess $installedCli @("update", "check", "--json")
     Assert-True ($pinnedCheck.ExitCode -eq 0 -and ($pinnedCheck.Output | ConvertFrom-Json).status -ceq "pinned") "immutable image references should report pinned"
     $pinnedUpdate = Invoke-LuthnProcess $installedCli @("update")
-    Assert-True ($pinnedUpdate.ExitCode -ne 0 -and $pinnedUpdate.Output -match "configured release is pinned") "implicit update should stop for an immutable pin"
+    Assert-True ($pinnedUpdate.ExitCode -ne 0 -and $pinnedUpdate.Output -match "pinned without an update channel") "implicit update should stop for an immutable pin"
     Assert-True ([IO.File]::ReadAllText($configFile) -ceq $pinnedConfig) "pin checks should not modify configuration"
     $pinnedDockerLog = @([IO.File]::ReadAllLines($fakeDockerLog) | Select-Object -Skip $dockerLogCountBeforePinnedUpdate)
     Assert-True (-not ($pinnedDockerLog -match '^pull ')) "implicit pinned update must not pull"
