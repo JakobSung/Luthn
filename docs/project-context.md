@@ -125,6 +125,8 @@ git diff --check
   smoke commands.
 - `docs/operations.md`: self-host migration, backup/restore, and search
   adoption model.
+- `docs/releases.md`: agent-neutral container release, installation channel,
+  and immutable digest contract.
 - `docs/agent-quickstart.md`: agent and MCP connection path.
 - `docs/licensing.md`: package license boundary.
 - `docs/architecture.md`: Core model reference.

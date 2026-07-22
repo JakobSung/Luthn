@@ -101,6 +101,7 @@ provider-transfer implications, agent visibility, and publication rules.
 - [Simultaneous Codex and Claude Code connections](docs/agent-connections.md)
 - [Data boundaries](docs/data-boundaries.md)
 - [Operations and recovery](docs/operations.md)
+- [Container releases](docs/releases.md)
 - [API](docs/api.md)
 - [Architecture](docs/architecture.md)
 - [Local development](docs/local-development.md)

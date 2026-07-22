@@ -28,6 +28,10 @@ Invited collaborators should:
 4. Keep generated planning, analysis, review, report, handoff, evidence, and
    local agent state out of commits.
 
+Container releases are separate from pull-request merges. Maintainers and
+automation must follow [the canonical container release process](docs/releases.md);
+agent-specific instructions must not duplicate or override it.
+
 Changes to auth, authorization, service-token scopes, sensitive access, audit,
 persistence, MCP, agent boundaries, raw-source or Vault boundaries, licensing,
 or hosted-service boundaries require explicit maintainer review.

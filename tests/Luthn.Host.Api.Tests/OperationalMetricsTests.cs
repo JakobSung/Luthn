@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -85,7 +86,7 @@ public sealed class OperationalMetricsTests : IClassFixture<WebApplicationFactor
     [Fact]
     public void SearchMetersExposeOnlyBoundedLowCardinalityLabels()
     {
-        var measurements = new List<(string Name, IReadOnlyDictionary<string, object?> Tags)>();
+        var measurements = new ConcurrentQueue<(string Name, IReadOnlyDictionary<string, object?> Tags)>();
         using var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, current) =>
         {
@@ -95,18 +96,19 @@ public sealed class OperationalMetricsTests : IClassFixture<WebApplicationFactor
             }
         };
         listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) =>
-            measurements.Add((instrument.Name, tags.ToArray().ToDictionary(tag => tag.Key, tag => tag.Value))));
+            measurements.Enqueue((instrument.Name, tags.ToArray().ToDictionary(tag => tag.Key, tag => tag.Value))));
         listener.Start();
 
         var metrics = new OperationalMetrics();
         metrics.RecordSearchRequest("unsafe-project-name", "unsafe-query-outcome", "unsafe-cache-key", TimeSpan.FromMilliseconds(4), 1);
         metrics.RecordSearchFeedback("unsafe-free-form-comment");
 
-        Assert.Contains(measurements, item => item.Name == "luthn.search.requests");
-        Assert.Contains(measurements, item => item.Name == "luthn.search.duration");
-        Assert.Contains(measurements, item => item.Name == "luthn.search.results");
-        Assert.Contains(measurements, item => item.Name == "luthn.search.feedback");
-        Assert.All(measurements, item =>
+        var snapshot = measurements.ToArray();
+        Assert.Contains(snapshot, item => item.Name == "luthn.search.requests");
+        Assert.Contains(snapshot, item => item.Name == "luthn.search.duration");
+        Assert.Contains(snapshot, item => item.Name == "luthn.search.results");
+        Assert.Contains(snapshot, item => item.Name == "luthn.search.feedback");
+        Assert.All(snapshot, item =>
         {
             Assert.DoesNotContain(item.Tags.Keys, key => key.Contains("query", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(item.Tags.Keys, key => key.Contains("project", StringComparison.OrdinalIgnoreCase));

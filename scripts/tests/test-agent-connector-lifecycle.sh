@@ -970,6 +970,7 @@ cp "$repo_root/scripts/luthn" "$version_root/bin/luthn"
 chmod 0755 "$version_root/bin/luthn"
 cat >"$version_root/config/luthn.env" <<EOF
 LUTHN_IMAGE=ghcr.io/jakobsung/luthn:main
+LUTHN_UPDATE_CHANNEL=ghcr.io/jakobsung/luthn:main
 LUTHN_BASE_URL=http://127.0.0.1:8080
 EOF
 (
@@ -1012,10 +1013,11 @@ version = json.loads(sys.argv[1])
 update = json.loads(sys.argv[2])
 available = json.loads(sys.argv[3])
 assert set(version) == {
-    "installedImageReference", "imageDigest", "sourceRevision",
+    "installedImageReference", "updateChannel", "imageDigest", "sourceRevision",
     "cliTemplateVersion", "connectorTemplateVersion", "mcpSchemaVersion",
     "stableReleaseVersion",
 }
+assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
 assert version["cliTemplateVersion"] == "3"
 assert version["connectorTemplateVersion"] == "3"
 assert version["mcpSchemaVersion"] == "3"
@@ -1042,7 +1044,7 @@ PY
   fi
   [[ ! -e "$version_root/unexpected-pull" ]]
 
-  printf 'LUTHN_IMAGE=ghcr.io/jakobsung/luthn:main\nLUTHN_BASE_URL=http://127.0.0.1:8080\n' >"$config_file"
+  printf 'LUTHN_IMAGE=ghcr.io/jakobsung/luthn:main\nLUTHN_UPDATE_CHANNEL=ghcr.io/jakobsung/luthn:main\nLUTHN_BASE_URL=http://127.0.0.1:8080\n' >"$config_file"
   docker() {
     if [[ " $* " == *" image inspect "* && " $* " == *"{{.Id}}"* ]]; then
       printf '%s\n' sha256:current

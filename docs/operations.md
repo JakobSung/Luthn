@@ -24,7 +24,14 @@ under `~/.config/luthn`, runtime under `~/.local/share/luthn`, and update state
 plus backups under `~/.local/state/luthn`. Changing the caller directory must
 not select another project or empty volume set.
 
-`luthn update` records the running image ID, pulls the target image, refreshes
+The configuration records the selected update channel separately from the
+immutable image digest used by Compose. `luthn status` and `luthn version`
+report both identities. `stable` and `main` remain movable channels; an
+explicit `vMAJOR.MINOR.PATCH` selection is pinned until the operator chooses a
+new release or channel.
+
+`luthn update` records the running image ID, pulls the selected channel, resolves
+it to an immutable registry digest, refreshes
 the lifecycle runtime, stops API and active MCP/adapter write paths, creates a
 compressed PostgreSQL backup, runs migrations from the target image, starts the
 API, and requires health and readiness before recording success. It never

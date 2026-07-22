@@ -15,7 +15,9 @@ luthn uninstall
 
 원본 없는 배포는 고정 Compose project `luthn`, volume `luthn-postgres`·`luthn-operator`, `~/.config/luthn` 설정, `~/.local/share/luthn` runtime, `~/.local/state/luthn` 갱신·backup을 사용합니다. 실행 폴더가 바뀌어도 다른 project나 빈 volume을 선택하면 안 됩니다.
 
-`update`는 현재 image id를 기록하고 대상 image를 받아 runtime을 갱신한 뒤 API와 쓰기 경로를 멈추고 PostgreSQL backup, migration, API 시작, health/readiness 확인을 수행합니다. install·status·update 중 `docker compose down -v`를 사용하지 않습니다. volume 삭제는 `reset --yes` 또는 `uninstall --purge-data --yes`에서만 합니다.
+설정에는 사용자가 선택한 갱신 채널과 Compose가 실행하는 불변 image digest를 따로 기록합니다. `luthn status`와 `luthn version`은 두 값을 모두 표시합니다. `stable`과 `main`은 이동하는 채널이고, 명시적으로 선택한 `vMAJOR.MINOR.PATCH`는 운영자가 새 release나 채널을 선택할 때까지 고정됩니다.
+
+`update`는 현재 image id를 기록하고 선택한 채널을 받은 뒤 registry digest로 고정합니다. 이어서 runtime을 갱신하고 API와 쓰기 경로를 멈춘 뒤 PostgreSQL backup, migration, API 시작, health/readiness 확인을 수행합니다. install·status·update 중 `docker compose down -v`를 사용하지 않습니다. volume 삭제는 `reset --yes` 또는 `uninstall --purge-data --yes`에서만 합니다.
 
 `luthn-operator` volume에는 민감 shared-memory payload 복호화에 필요한 Data
 Protection key ring이 있습니다. PostgreSQL backup만으로는 완전한 복구 자료가

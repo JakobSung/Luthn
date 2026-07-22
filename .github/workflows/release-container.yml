@@ -1,0 +1,157 @@
+name: Release container
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Strict SemVer container version such as v0.1.0
+        required: true
+        type: string
+      source_sha:
+        description: Exact 40-character commit at the current tip of main
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-container
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/jakobsung/luthn
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Validate release request
+        id: release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          request="$(python3 scripts/release-container.py \
+            "$RELEASE_VERSION" \
+            --source-sha "$RELEASE_SOURCE_SHA" \
+            --validate-only)"
+          echo "version=$(jq -r '.version' <<<"$request")" >> "$GITHUB_OUTPUT"
+          echo "minor_tag=$(jq -r '.minor_tag' <<<"$request")" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(jq -r '.source_sha' <<<"$request")" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read compatibility contract
+        id: compatibility
+        run: |
+          echo "cli-template-version=$(jq -r '.cliTemplateVersion' release/version.json)" >> "$GITHUB_OUTPUT"
+          echo "connector-template-version=$(jq -r '.connectorTemplateVersion' release/version.json)" >> "$GITHUB_OUTPUT"
+          echo "mcp-schema-version=$(jq -r '.mcpSchemaVersion' release/version.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Extract release image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.release.outputs.version }}
+            type=raw,value=${{ steps.release.outputs.minor_tag }}
+            type=raw,value=stable
+            type=raw,value=sha-${{ steps.release.outputs.source_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.revision=${{ steps.release.outputs.source_sha }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            io.luthn.cli-template.version=${{ steps.compatibility.outputs.cli-template-version }}
+            io.luthn.connector-template.version=${{ steps.compatibility.outputs.connector-template-version }}
+            io.luthn.mcp-schema.version=${{ steps.compatibility.outputs.mcp-schema-version }}
+
+      - name: Build and publish multi-architecture release image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/Luthn.Host.Api/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify versioned manifest and labels
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_MINOR_TAG: ${{ steps.release.outputs.minor_tag }}
+          RELEASE_SOURCE_SHA: ${{ steps.release.outputs.source_sha }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE_NAME}:${RELEASE_VERSION}"
+          docker buildx imagetools inspect "${IMAGE_NAME}:${RELEASE_MINOR_TAG}"
+          docker buildx imagetools inspect "${IMAGE_NAME}:stable"
+          docker buildx imagetools inspect "${IMAGE_NAME}:sha-${RELEASE_SOURCE_SHA}"
+          image_json="$(docker buildx imagetools inspect \
+            "${IMAGE_NAME}:${RELEASE_VERSION}" --format '{{json .Image}}')"
+          python3 - "$image_json" "$RELEASE_VERSION" "$RELEASE_SOURCE_SHA" <<'PY'
+          import json
+          import sys
+
+          images = json.loads(sys.argv[1])
+          expected_version = sys.argv[2]
+          expected_revision = sys.argv[3]
+          if not images:
+              raise SystemExit("release image did not expose platform metadata")
+          required_platforms = {"linux/amd64", "linux/arm64"}
+          if not required_platforms.issubset(images):
+              missing = ", ".join(sorted(required_platforms.difference(images)))
+              raise SystemExit(f"release image is missing required platforms: {missing}")
+          for platform, image in images.items():
+              labels = image.get("config", {}).get("Labels", {}) or {}
+              if labels.get("org.opencontainers.image.version") != expected_version:
+                  raise SystemExit(f"release version label mismatch for {platform}")
+              if labels.get("org.opencontainers.image.revision") != expected_revision:
+                  raise SystemExit(f"source revision label mismatch for {platform}")
+          PY
+
+      - name: Verify anonymous versioned pull
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          docker logout ghcr.io
+          token="$(curl -fsSL \
+            'https://ghcr.io/token?scope=repository:jakobsung/luthn:pull' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          curl -fsSI \
+            -H "Authorization: Bearer ${token}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json" \
+            "https://ghcr.io/v2/jakobsung/luthn/manifests/${RELEASE_VERSION}"
+
+      - name: Create immutable Git release tag
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SOURCE_SHA: ${{ steps.release.outputs.source_sha }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "$RELEASE_VERSION" "$RELEASE_SOURCE_SHA" \
+            -m "Luthn container ${RELEASE_VERSION}"
+          git push origin "refs/tags/${RELEASE_VERSION}"
