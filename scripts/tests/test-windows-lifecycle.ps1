@@ -869,7 +869,7 @@ esac
 
     $connectorUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($connectorUpdate.ExitCode -eq 0) "update should reconcile a stale connector template: $($connectorUpdate.Output)"
-    Assert-True ($connectorUpdate.Output -match "Reconciling Codex connector template version 2") "update should report connector template reconciliation"
+    Assert-True ($connectorUpdate.Output -match "Reconciling Codex connector template version 3") "update should report connector template reconciliation"
     Assert-True ($connectorUpdate.Output -match "Restart required: Luthn MCP compatibility changed") "connector template changes should require a Codex host restart"
     Assert-True ($connectorUpdate.Output -match "Agent notice: restart the current Codex host before invoking Luthn tools again\.") "connector template changes should emit the bounded agent notice"
     $reconciledConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
