@@ -92,8 +92,8 @@ grep -q '^Luthn__Auth__Tokens__0__IsOperator=false$' "$LUTHN_CONFIG_DIR/luthn.en
 operator_key_manifest_before="$(operator_key_manifest)"
 test -n "$operator_key_manifest_before"
 grep -q '^LUTHN_ENVIRONMENT=Production$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Classification__Provider=unconfigured$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Classification__AllowMock=false$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Classification__Provider=mock$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Classification__AllowMock=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 evaluation_output="$(docker run --rm "$image" classification-eval)"
 grep -q '"datasetVersion": 1' <<<"$evaluation_output"
 grep -q '"provider": "mock"' <<<"$evaluation_output"
@@ -108,11 +108,7 @@ agent_config_status="$(curl -sS -o "$agent_config_body" -w '%{http_code}' "$base
   -H "Authorization: Bearer $token_before")"
 test "$agent_config_status" = "403"
 grep -q '"status":403' "$agent_config_body"
-fresh_ready_body="$test_root/fresh-ready.json"
-fresh_ready_status="$(curl -sS -o "$fresh_ready_body" -w '%{http_code}' "$base_url/readyz")"
-test "$fresh_ready_status" = "503"
-grep -q 'classification-provider' "$fresh_ready_body"
-grep -q 'No classification provider is configured' "$fresh_ready_body"
+curl -fsS "$base_url/readyz" >/dev/null
 console_html="$(curl -fsS "$base_url/")"
 grep -q '<title>Luthn Operator Console</title>' <<<"$console_html"
 fresh_preview_body="$test_root/fresh-preview.json"
@@ -120,28 +116,8 @@ fresh_preview_status="$(curl -sS -o "$fresh_preview_body" -w '%{http_code}' -X P
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_before" \
   --data '{"sourceId":"lifecycle-preview","content":"Private lifecycle sentinel must not be echoed.","sourceType":"note"}')"
-test "$fresh_preview_status" = "503"
-grep -q 'No classification provider is configured' "$fresh_preview_body"
-! grep -q 'Private lifecycle sentinel' "$fresh_preview_body"
-
-sed -i.bak \
-  -e 's/^LUTHN_ENVIRONMENT=Production$/LUTHN_ENVIRONMENT=Development/' \
-  -e 's/^Luthn__Classification__Provider=unconfigured$/Luthn__Classification__Provider=mock/' \
-  -e 's/^Luthn__Classification__AllowMock=false$/Luthn__Classification__AllowMock=true/' \
-  "$LUTHN_CONFIG_DIR/luthn.env"
-rm -f "$LUTHN_CONFIG_DIR/luthn.env.bak"
-docker compose \
-  --project-name "$LUTHN_PROJECT_NAME" \
-  --env-file "$LUTHN_CONFIG_DIR/luthn.env" \
-  -f "$LUTHN_DATA_DIR/compose.yaml" \
-  up -d --force-recreate api >/dev/null
-for _ in $(seq 1 60); do
-  if curl -fsS "$base_url/readyz" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-curl -fsS "$base_url/readyz" >/dev/null
+test "$fresh_preview_status" = "200"
+grep -q '"sourceId":"lifecycle-preview"' "$fresh_preview_body"
 preview_output="$(curl -fsS -X POST "$base_url/api/classification/preview" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_before" \
@@ -162,14 +138,20 @@ docker compose \
   --env-file "$LUTHN_CONFIG_DIR/luthn.env" \
   -f "$LUTHN_DATA_DIR/compose.yaml" \
   exec -T postgres psql -v ON_ERROR_STOP=1 -U luthn -d luthn >/dev/null <<'SQL'
+BEGIN;
 INSERT INTO source_events
-  ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial")
+  ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial", "OwnerUserId")
 VALUES
-  ('lifecycle-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-fixture', true);
+  ('lifecycle-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-fixture', true, 'local-owner');
+INSERT INTO collection_provenance
+  ("Id", "ContractVersion", "SourceEventId", "AuthenticatedActor", "ActorTrust", "ClaimsTrust", "AuthenticatedUserId", "ReceivedAt")
+VALUES
+  ('provenance-lifecycle-sensitive-source', 1, 'lifecycle-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now());
 INSERT INTO sensitive_record_references
-  ("Id", "SourceEventId", "SourceSystem", "SourceType", "ReceivedAt", "ContainsSensitiveMaterial", "ReferenceLabel", "RedactedSummary")
+  ("Id", "SourceEventId", "SourceSystem", "SourceType", "ReceivedAt", "ContainsSensitiveMaterial", "ReferenceLabel", "RedactedSummary", "OwnerUserId")
 VALUES
-  ('lifecycle-sensitive-reference', 'lifecycle-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-sensitive-source', 'Public-safe lifecycle summary.');
+  ('lifecycle-sensitive-reference', 'lifecycle-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-sensitive-source', 'Public-safe lifecycle summary.', 'local-owner');
+COMMIT;
 SQL
 access_request="$(curl -fsS -X POST "$base_url/api/access-requests" \
   -H 'content-type: application/json' \

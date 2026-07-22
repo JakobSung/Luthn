@@ -91,7 +91,7 @@ user 또는 connector마다 별도 최소권한 token을 사용합니다. `IsOpe
 
 운영자 화면의 `/api/operator/classification-provider`에서 `Mock`, `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, `External HTTP`를 선택하고 model·API key·연결 시험을 설정할 수 있습니다. API key는 server에 저장하며 응답이나 화면에 되돌려 보내지 않습니다.
 
-직접 제3자 LLM provider는 민감도 판정 전에 원문을 받습니다. 이 전송이 허용될 때만 사용하고, 원문을 통제된 경계에 남겨야 하면 `External HTTP`를 사용합니다. API key를 보내는 endpoint는 HTTPS여야 합니다. 배포·Compose 기본값은 `unconfigured`이고, source `Development`와 `Testing` 환경만 mock을 명시적으로 켭니다. `mock`은 결정적 keyword 분류기이므로 시험·로컬 실험 전용이며 수동 실행 시 두 값을 모두 지정해야 합니다.
+직접 제3자 LLM provider는 민감도 판정 전에 원문을 받습니다. 이 전송이 허용될 때만 사용하고, 원문을 통제된 경계에 남겨야 하면 `External HTTP`를 사용합니다. API key를 보내는 endpoint는 HTTPS여야 합니다. 기본 설정은 새 설치가 바로 동작하도록 로컬 `mock`을 선택합니다. `mock`은 결정적 keyword 분류기이므로 provider 기반의 안전성 또는 다국어 분류가 필요하면 외부 provider로 교체하세요. 수동으로 로컬 설정을 지정할 때는 두 값을 함께 설정할 수 있습니다.
 
 ```bash
 Luthn__Classification__Provider=mock

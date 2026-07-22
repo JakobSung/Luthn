@@ -425,6 +425,15 @@ function Ensure-ConfigValue {
     if (-not (Read-ConfigValue -Key $Key)) { Set-ConfigValue -Key $Key -Value $Value }
 }
 
+function Upgrade-LegacyClassificationDefault {
+    $provider = Read-ConfigValue "Luthn__Classification__Provider" ""
+    $allowMock = Read-ConfigValue "Luthn__Classification__AllowMock" ""
+    if ($provider -ceq "unconfigured" -and $allowMock -ceq "false") {
+        Set-ConfigValue "Luthn__Classification__Provider" "mock"
+        Set-ConfigValue "Luthn__Classification__AllowMock" "true"
+    }
+}
+
 function Ensure-ServiceTokenScope {
     param(
         [Parameter(Mandatory = $true)][string]$Scope,
@@ -910,8 +919,8 @@ function Write-InitialConfig {
         "POSTGRES_DB=luthn",
         "POSTGRES_USER=luthn",
         "POSTGRES_HOST_AUTH_METHOD=trust",
-        "Luthn__Classification__Provider=unconfigured",
-        "Luthn__Classification__AllowMock=false",
+        "Luthn__Classification__Provider=mock",
+        "Luthn__Classification__AllowMock=true",
         "Luthn__Auth__RequireServiceToken=true",
         "Luthn__Identity__Mode=SingleOwner",
         "Luthn__Identity__SingleOwnerUserId=local-owner",
@@ -1041,8 +1050,8 @@ function Test-ClassificationSetupPending {
 }
 
 function Test-ClassificationSetupRequiredByConfig {
-    $provider = Read-ConfigValue "Luthn__Classification__Provider" "unconfigured"
-    $allowMock = Read-ConfigValue "Luthn__Classification__AllowMock" "false"
+    $provider = Read-ConfigValue "Luthn__Classification__Provider" "mock"
+    $allowMock = Read-ConfigValue "Luthn__Classification__AllowMock" "true"
     return $provider -ceq "unconfigured" -or
         ($provider -ceq "mock" -and $allowMock -ine "true")
 }
@@ -1156,8 +1165,9 @@ function Install-Luthn {
         Ensure-ConfigValue "POSTGRES_DB" "luthn"
         Ensure-ConfigValue "POSTGRES_USER" "luthn"
         Ensure-ConfigValue "POSTGRES_HOST_AUTH_METHOD" "trust"
-        Ensure-ConfigValue "Luthn__Classification__Provider" "unconfigured"
-        Ensure-ConfigValue "Luthn__Classification__AllowMock" "false"
+        Ensure-ConfigValue "Luthn__Classification__Provider" "mock"
+        Ensure-ConfigValue "Luthn__Classification__AllowMock" "true"
+        Upgrade-LegacyClassificationDefault
         Ensure-ConfigValue "Luthn__Auth__RequireServiceToken" "true"
         Ensure-ConfigValue "Luthn__Identity__Mode" "SingleOwner"
         Ensure-ConfigValue "Luthn__Identity__SingleOwnerUserId" "local-owner"

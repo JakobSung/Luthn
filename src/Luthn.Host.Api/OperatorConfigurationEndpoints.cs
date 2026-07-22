@@ -137,7 +137,7 @@ public static class OperatorConfigurationEndpoints
         {
             OperatorClassificationProviderKind.Unconfigured => "unconfigured",
             OperatorClassificationProviderKind.Mock when !options.AllowMock => "mock-disabled",
-            OperatorClassificationProviderKind.Mock => "mock-non-production",
+            OperatorClassificationProviderKind.Mock => "mock-ready",
             _ => "configured"
         };
 
@@ -149,7 +149,7 @@ public static class OperatorConfigurationEndpoints
             OperatorClassificationProviderKind.Unconfigured => ClassificationProviderOptions.ProviderRequiredMessage,
             OperatorClassificationProviderKind.Mock when !options.AllowMock => ClassificationProviderOptions.MockDisabledMessage,
             OperatorClassificationProviderKind.Mock =>
-                "Mock classification is enabled for explicit development or test use only.",
+                "Local mock classification is ready. Replace it with a provider when provider-backed classification is required.",
             OperatorClassificationProviderKind.ExternalHttp =>
                 "ExternalHttp classification is configured for a self-hosted or operator-approved endpoint. The local secret/PII guard is active.",
             _ => $"{settings.Provider} classification is configured."
@@ -159,7 +159,7 @@ public static class OperatorConfigurationEndpoints
         settings.Provider switch
         {
             OperatorClassificationProviderKind.Unconfigured => "unconfigured",
-            OperatorClassificationProviderKind.Mock => "local-non-production",
+            OperatorClassificationProviderKind.Mock => "local-default",
             OperatorClassificationProviderKind.ExternalHttp => "self-hosted-capable-external-http",
             _ => "operator-configured-remote"
         };

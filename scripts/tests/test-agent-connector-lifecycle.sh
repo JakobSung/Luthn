@@ -155,7 +155,7 @@ import subprocess
 import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "version":
-    print("2")
+    print("3")
     raise SystemExit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == "helper-digest":
@@ -529,11 +529,11 @@ echo "[12/18] missing helper self-heals from the installed runtime revision"
 rm -f "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
 [[ -x "$tmp_root/connector-helper.py" ]]
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "2" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "3" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
 expected_helper_digest="$(awk -F= '$1 == "HELPER_DIGEST" { print $2 }' "$state_dir/connectors/codex.env")"
 printf '\n# same-version stale helper\n' >>"$tmp_root/connector-helper.py"
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "2" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "3" ]]
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" != "$expected_helper_digest" ]]
 run_luthn connect codex >/dev/null
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" == "$expected_helper_digest" ]]
@@ -550,7 +550,7 @@ raise SystemExit(1)
 EOF
 chmod 0700 "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "2" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "3" ]]
 cp "$tmp_root/connector-helper-fixture.py" "$tmp_root/connector-helper.py"
 run_luthn disconnect codex >/dev/null
 run_luthn connection status codex >/dev/null
@@ -745,8 +745,7 @@ chmod 0755 "$reconcile_bin/luthn"
 cp "$repo_root/scripts/luthn-codex-connector.py" \
   "$reconcile_data/runtime/luthn-codex-connector.py"
 chmod 0700 "$reconcile_data/runtime/luthn-codex-connector.py"
-sed 's/print("2")/print("3")/' "$tmp_root/connector-helper-fixture.py" \
-  >"$reconcile_root/target-helper.py"
+cp "$tmp_root/connector-helper-fixture.py" "$reconcile_root/target-helper.py"
 chmod 0700 "$reconcile_root/target-helper.py"
 printf 'services: {}\n' >"$reconcile_data/compose.yaml"
 cp "$config_dir/luthn.env" "$reconcile_config/luthn.env"

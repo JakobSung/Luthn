@@ -56,7 +56,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("Luthn Operator Console", index, StringComparison.Ordinal);
         Assert.Contains("Classification provider", index, StringComparison.Ordinal);
         Assert.Contains("Unconfigured — choose a provider", index, StringComparison.Ordinal);
-        Assert.Contains("Mock — development/test only", index, StringComparison.Ordinal);
+        Assert.Contains("Mock — local default", index, StringComparison.Ordinal);
         Assert.Contains("Self-hosted / external HTTP", index, StringComparison.Ordinal);
         Assert.Contains("Access requests", index, StringComparison.Ordinal);
         Assert.Contains("Agent connections", index, StringComparison.Ordinal);
@@ -77,7 +77,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
-    public async Task TestingProviderConfigurationExplicitlyAllowsMockWithoutExposingApiKey()
+    public async Task DefaultMockProviderIsReadyWithoutExposingApiKey()
     {
         using var response = await _client.GetAsync("/api/operator/classification-provider");
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
@@ -86,14 +86,14 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal("Mock", body.RootElement.GetProperty("provider").GetString());
         Assert.False(body.RootElement.GetProperty("hasApiKey").GetBoolean());
         Assert.True(body.RootElement.GetProperty("mockAllowed").GetBoolean());
-        Assert.Equal("mock-non-production", body.RootElement.GetProperty("status").GetString());
-        Assert.Equal("local-non-production", body.RootElement.GetProperty("providerBoundary").GetString());
+        Assert.Equal("mock-ready", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal("local-default", body.RootElement.GetProperty("providerBoundary").GetString());
         Assert.True(body.RootElement.GetProperty("localSensitiveDataGuardActive").GetBoolean());
         Assert.Equal(
             DeterministicSensitiveDataDetector.Version,
             body.RootElement.GetProperty("localSensitiveDataGuardVersion").GetString());
         Assert.Contains(
-            "development or test",
+            "Local mock classification is ready",
             body.RootElement.GetProperty("statusDetail").GetString(),
             StringComparison.Ordinal);
         Assert.False(body.RootElement.TryGetProperty("apiKey", out _));
@@ -823,7 +823,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal("mock", options.ResolveProvider());
         options.EnsureMockAllowed();
         Assert.Equal(
-            "MockContentClassifier is test and experiment only; production classification requires an external provider.",
+            "MockContentClassifier is a deterministic local classifier. Replace it with an external provider when provider-backed classification is required.",
             MockContentClassifier.UsageNotice);
     }
 

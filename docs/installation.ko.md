@@ -136,11 +136,9 @@ luthn doctor --json
 
 Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를 보고합니다. 운영자 화면은 <http://127.0.0.1:8080/>이며 API port는 기본적으로 loopback에만 연결됩니다.
 
-### 필수 분류 설정
+### 분류 기본값
 
-설치 후 운영자 화면에서 분류 provider를 설정합니다. 설정 전에는 분류가 필요한 쓰기가 제한된 503으로 실패하고, 제출한 원문은 투영되거나 저장되지 않으며, `/readyz`는 `classification-provider`가 남은 의존성임을 표시합니다.
-
-배포 설치는 mock 분류기를 켜지 않습니다. `Mock`은 개발·시험 선택지이며 `Luthn__Classification__AllowMock=true`를 명시하지 않으면 저장과 실행이 거절됩니다. 운영 배포에서는 이 값을 켜지 마세요. 업그레이드 전에 저장된 `Mock` 설정도 명시적 opt-in 없이는 실행되지 않으며, database나 저장된 provider 설정을 삭제하지 않고 운영자 화면에서 실제 provider로 교체할 수 있습니다.
+새 설치는 로컬 `mock` 분류기를 사용하므로 별도 provider 설정 없이 분류가 필요한 쓰기와 `/readyz`가 바로 동작합니다. mock은 결정론적 로컬 분류기이므로 provider 기반 분류가 필요하면 운영자 화면에서 원하는 provider로 교체하세요. `luthn install`과 `luthn update`는 이전 기본값 조합인 `unconfigured`/`false`만 `mock`/`true`로 바꾸며, 그 밖의 설정 값은 유지합니다.
 
 `version`은 update channel과 변경 불가 설치 image 참조·실행 digest, source revision, CLI/connector template
 version, MCP schema version과 image에 존재하는 stable release version을
