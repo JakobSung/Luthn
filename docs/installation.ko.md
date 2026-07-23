@@ -147,6 +147,14 @@ Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를
 추가하고 운영자가 설정한 기존 값은 보존합니다. 이 설정은 새로 수집되는 자동 turn
 요약에만 적용하며, 명시적으로 선별한 memory와 기존 database 행은 바꾸지 않습니다.
 
+물리 정리 기본값도 `Luthn__Memory__AutomaticTurnCleanupEnabled=true`,
+`Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60`,
+`Luthn__Memory__AutomaticTurnCleanupBatchSize=100`으로 추가합니다. interval은
+1~1440분, batch는 1~1000개를 지원합니다. install과 update는 유효한 운영자
+override를 보존하고 key가 없을 때만 기본값을 추가합니다. 정리 대상은 만료된
+local-only 자동 turn capsule로 제한하며, 직접 만든 memory와 외부 공개·outbox
+record는 제외합니다.
+
 `version`은 update channel과 변경 불가 설치 image 참조·실행 digest, source revision, CLI/connector template
 version, MCP schema version과 image에 존재하는 stable release version을
 보고합니다. `update check`는 설정된 공식 registry channel의 원격

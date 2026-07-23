@@ -923,6 +923,9 @@ function Write-InitialConfig {
         "Luthn__Classification__Provider=mock",
         "Luthn__Classification__AllowMock=true",
         "Luthn__Memory__AutomaticTurnRetentionDays=30",
+        "Luthn__Memory__AutomaticTurnCleanupEnabled=true",
+        "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60",
+        "Luthn__Memory__AutomaticTurnCleanupBatchSize=100",
         "Luthn__Auth__RequireServiceToken=true",
         "Luthn__Identity__Mode=SingleOwner",
         "Luthn__Identity__SingleOwnerUserId=local-owner",
@@ -1171,6 +1174,9 @@ function Install-Luthn {
         Ensure-ConfigValue "Luthn__Classification__AllowMock" "true"
         Upgrade-LegacyClassificationDefault
         Ensure-ConfigValue "Luthn__Memory__AutomaticTurnRetentionDays" "30"
+        Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupEnabled" "true"
+        Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes" "60"
+        Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupBatchSize" "100"
         Ensure-ConfigValue "Luthn__Auth__RequireServiceToken" "true"
         Ensure-ConfigValue "Luthn__Identity__Mode" "SingleOwner"
         Ensure-ConfigValue "Luthn__Identity__SingleOwnerUserId" "local-owner"
@@ -1592,6 +1598,9 @@ function Update-Luthn {
     Write-Host "Refreshing Windows CLI and Compose runtime..."
     try {
         Ensure-ConfigValue "Luthn__Memory__AutomaticTurnRetentionDays" "30"
+        Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupEnabled" "true"
+        Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes" "60"
+        Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupBatchSize" "100"
         Ensure-ServiceTokenScope "access.request" -Required:$connectorWasConfigured
         Ensure-ServiceTokenScope "metrics.write" -Required:$connectorWasConfigured
         Ensure-OperatorCredential -Image $targetImage

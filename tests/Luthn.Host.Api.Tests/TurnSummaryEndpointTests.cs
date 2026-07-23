@@ -360,7 +360,27 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             StringComparison.Ordinal);
     }
 
-    private WebApplicationFactory<Program> CreateFactory(int? retentionDays = null)
+    [Theory]
+    [InlineData("AutomaticTurnCleanupIntervalMinutes", 0, LuthnMemoryOptions.AutomaticTurnCleanupIntervalValidationMessage)]
+    [InlineData("AutomaticTurnCleanupIntervalMinutes", 1441, LuthnMemoryOptions.AutomaticTurnCleanupIntervalValidationMessage)]
+    [InlineData("AutomaticTurnCleanupBatchSize", 0, LuthnMemoryOptions.AutomaticTurnCleanupBatchValidationMessage)]
+    [InlineData("AutomaticTurnCleanupBatchSize", 1001, LuthnMemoryOptions.AutomaticTurnCleanupBatchValidationMessage)]
+    public void InvalidAutomaticTurnCleanupConfigurationFailsStartup(
+        string setting,
+        int value,
+        string expectedMessage)
+    {
+        using var factory = CreateFactory(memorySetting: setting, memorySettingValue: value);
+
+        var error = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+
+        Assert.Contains(expectedMessage, error.Message, StringComparison.Ordinal);
+    }
+
+    private WebApplicationFactory<Program> CreateFactory(
+        int? retentionDays = null,
+        string? memorySetting = null,
+        int? memorySettingValue = null)
     {
         return _factory.WithWebHostBuilder(builder =>
         {
@@ -371,6 +391,12 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
                 builder.UseSetting(
                     "Luthn:Memory:AutomaticTurnRetentionDays",
                     retentionDays.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            if (memorySetting is not null && memorySettingValue is not null)
+            {
+                builder.UseSetting(
+                    $"Luthn:Memory:{memorySetting}",
+                    memorySettingValue.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
         });
     }

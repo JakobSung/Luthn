@@ -123,10 +123,15 @@ request fails.
 Each newly accepted automatic turn capsule becomes an `Ephemeral` memory with
 a bounded expiry based on the server receipt time. The default is 30 days and
 operators may configure 1 through 365 days. At expiry the memory is no longer a
-recall, search, sync, or publication candidate. The first bounded-retention
-slice does not delete expired rows or alter historical rows. Explicit curated
-memory retains its independently requested `Durable`, `Session`, or
-`Ephemeral` lifecycle.
+recall, search, sync, or publication candidate. The default API cleanup loop
+then physically removes only local-only expired capsules that remain linked to
+their `turn-summary` source through provenance and have no outbox history. The
+memory, encrypted payload, provenance, classification, and source event are
+deleted transactionally. Existing audit history remains and one metadata-only
+cleanup event is added. Historical Durable rows, explicit memory, other source
+types, externally approved or revoked records, and outbox-linked records are
+not cleaned automatically. Explicit curated memory retains its independently
+requested `Durable`, `Session`, or `Ephemeral` lifecycle.
 
 Default auto-recall does not expose the private store. It asks the scoped MCP
 surface for one small agent-safe context pack at a new task or material topic

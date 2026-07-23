@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Luthn.Core.Classification;
+using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
 using Luthn.Core.Search;
 using Microsoft.AspNetCore.Http;
@@ -15,6 +16,96 @@ namespace Luthn.Host.Api.Tests;
 
 public sealed class PostgresIntegrationSmokeTests
 {
+    [Fact]
+    public async Task DisposablePostgresDatabasePrunesExpiredAutomaticTurnCapsulesWhenEnabled()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("LUTHN_POSTGRES_TEST_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString) ||
+            !string.Equals(
+                Environment.GetEnvironmentVariable("LUTHN_POSTGRES_TEST_ALLOW_RESET"),
+                "true",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!IsDisposableTestDatabase(connectionString))
+        {
+            throw new InvalidOperationException(
+                "LUTHN_POSTGRES_TEST_CONNECTION must target a disposable database whose name starts with luthn_test.");
+        }
+
+        var optionsBuilder = new DbContextOptionsBuilder<LuthnDbContext>();
+        optionsBuilder.UseLuthnPostgres(new LuthnDatabaseOptions(connectionString, EnableRetries: true));
+        var options = optionsBuilder.Options;
+        var now = DateTimeOffset.Parse("2026-07-23T12:00:00Z");
+
+        await using (var seed = new LuthnDbContext(options))
+        {
+            await seed.Database.EnsureDeletedAsync();
+            await seed.Database.MigrateAsync();
+            AddCleanupCapsule(seed, "cleanup-oldest", now.AddDays(-2), sensitive: true);
+            AddCleanupCapsule(seed, "cleanup-next", now.AddDays(-1));
+            AddCleanupCapsule(
+                seed,
+                "cleanup-durable",
+                expiresAt: null,
+                retentionKind: MemoryRetentionKind.Durable);
+            await seed.SaveChangesAsync();
+        }
+
+        await using var firstDb = new LuthnDbContext(options);
+        await using var secondDb = new LuthnDbContext(options);
+        var results = await Task.WhenAll(
+            new AutomaticTurnRetentionCleanupProcessor(firstDb).ProcessBatchAsync(now, 1),
+            new AutomaticTurnRetentionCleanupProcessor(secondDb).ProcessBatchAsync(now, 1));
+        Assert.Equal(1, results.Sum(result => result.DeletedCount));
+
+        await using (var remainingDb = new LuthnDbContext(options))
+        {
+            var remaining = await new AutomaticTurnRetentionCleanupProcessor(remainingDb)
+                .ProcessBatchAsync(now, 100);
+            Assert.Equal(1, remaining.DeletedCount);
+        }
+
+        await using var verify = new LuthnDbContext(options);
+        Assert.False(await verify.SharedMemoryItems.AnyAsync(record => record.Id == "memory-cleanup-oldest"));
+        Assert.False(await verify.SharedMemoryItems.AnyAsync(record => record.Id == "memory-cleanup-next"));
+        Assert.False(await verify.SensitiveMemoryPayloads.AnyAsync(record =>
+            record.MemoryItemId == "memory-cleanup-oldest"));
+        Assert.False(await verify.CollectionProvenance.AnyAsync(record =>
+            record.SourceEventId == "cleanup-oldest" ||
+            record.SourceEventId == "cleanup-next"));
+        Assert.False(await verify.ClassificationResults.AnyAsync(record =>
+            record.SourceEventId == "cleanup-oldest" ||
+            record.SourceEventId == "cleanup-next"));
+        Assert.False(await verify.SourceEvents.AnyAsync(record =>
+            record.Id == "cleanup-oldest" ||
+            record.Id == "cleanup-next"));
+        Assert.True(await verify.SharedMemoryItems.AnyAsync(record =>
+            record.Id == "memory-cleanup-durable"));
+        Assert.Equal(
+            2,
+            await verify.AuditEvents.CountAsync(record =>
+                record.Action == "turn_summary.retention.pruned"));
+        Assert.Equal(
+            2,
+            await verify.AuditEvents.CountAsync(record =>
+                record.Action == "turn_summary.intake.classified" &&
+                (record.SubjectId == "cleanup-oldest" || record.SubjectId == "cleanup-next")));
+
+        var cleanupIndexCount = await verify.Database.SqlQueryRaw<int>(
+                """
+                SELECT COUNT(*)::int AS "Value"
+                FROM pg_indexes
+                WHERE tablename = 'shared_memory_items'
+                  AND indexname = 'IX_shared_memory_items_cleanup_candidates'
+                  AND indexdef LIKE '%("RetentionKind", "ExternalPublicationState", "ExpiresAt", "CreatedAt", "Id")%'
+                """)
+            .SingleAsync();
+        Assert.Equal(1, cleanupIndexCount);
+    }
+
     [Fact]
     public async Task DisposablePostgresDatabaseRunsMigrationsRetryingTransactionsAndApiReadinessWhenEnabled()
     {
@@ -451,6 +542,84 @@ public sealed class PostgresIntegrationSmokeTests
 
         Assert.Equal("ready", response.Status);
         Assert.Equal("database", response.Dependency);
+    }
+
+    private static void AddCleanupCapsule(
+        LuthnDbContext db,
+        string id,
+        DateTimeOffset? expiresAt,
+        MemoryRetentionKind retentionKind = MemoryRetentionKind.Ephemeral,
+        bool sensitive = false)
+    {
+        var memoryItemId = $"memory-{id}";
+        var createdAt = DateTimeOffset.Parse("2026-07-20T12:00:00Z");
+        db.SourceEvents.Add(new SourceEventRecord
+        {
+            Id = id,
+            SourceSystem = "codex",
+            SourceType = "turn-summary",
+            ReceivedAt = createdAt,
+            ContentDigest = $"sha256:{id}"
+        });
+        db.ClassificationResults.Add(new ClassificationResultRecord
+        {
+            Id = $"classification-{id}",
+            SourceEventId = id,
+            Sensitivity = sensitive ? SensitivityLevel.Restricted : SensitivityLevel.Public,
+            Confidence = 1,
+            ContainsSensitiveMaterial = sensitive,
+            StorageDecision = sensitive
+                ? StorageDecisionKind.SensitiveDbOnly
+                : StorageDecisionKind.WikiCandidate
+        });
+        db.SharedMemoryItems.Add(new SharedMemoryItemRecord
+        {
+            Id = memoryItemId,
+            Title = sensitive ? "[protected]" : $"Memory {id}",
+            SafeSummary = sensitive ? "[protected]" : $"Summary {id}",
+            Sensitivity = sensitive ? SensitivityLevel.Restricted : SensitivityLevel.Public,
+            CoreTags = ["retention"],
+            Visibility = sensitive
+                ? MemoryVisibility.PrivateToOwner
+                : MemoryVisibility.SharedAcrossAgents,
+            RetentionKind = retentionKind,
+            ExpiresAt = expiresAt,
+            AllowsAgentContext = !sensitive,
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt,
+            CreatedBy = "postgres-smoke"
+        });
+        db.CollectionProvenance.Add(new CollectionProvenanceRecord
+        {
+            Id = $"provenance-{id}",
+            SourceEventId = id,
+            MemoryItemId = memoryItemId,
+            AuthenticatedActor = "postgres-smoke",
+            ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
+            ClaimsTrust = CollectionProvenance.NoClaimsTrust,
+            ReceivedAt = createdAt
+        });
+        db.AuditEvents.Add(new AuditEventRecord
+        {
+            Id = $"audit-{id}",
+            OccurredAt = createdAt,
+            Actor = "postgres-smoke",
+            Action = "turn_summary.intake.classified",
+            SubjectId = id,
+            PayloadClass = "metadata-only",
+            RedactionState = sensitive ? "encrypted-payload-only" : "safe-projection-only"
+        });
+        if (sensitive)
+        {
+            db.SensitiveMemoryPayloads.Add(new SensitiveMemoryPayloadRecord
+            {
+                MemoryItemId = memoryItemId,
+                ProtectionScheme = "postgres-smoke",
+                ProtectedPayload = "ciphertext",
+                CreatedAt = createdAt,
+                UpdatedAt = createdAt
+            });
+        }
     }
 
     private static bool IsDisposableTestDatabase(string connectionString) =>

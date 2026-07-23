@@ -206,6 +206,10 @@ public sealed class PersistenceContractTests
         Assert.Contains("DEFAULT ('[]'::jsonb)", script, StringComparison.Ordinal);
         Assert.Contains("IX_wiki_proposals_ProjectKey_TaskKey_CreatedAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_shared_memory_items_ProjectKey_TaskKey_UpdatedAt", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "IX_shared_memory_items_cleanup_candidates",
+            script,
+            StringComparison.Ordinal);
         Assert.Contains("regexp_split_to_table", script, StringComparison.Ordinal);
         Assert.Contains("jsonb_array_elements_text", script, StringComparison.Ordinal);
         Assert.Contains("IX_wiki_proposals_AllowsAgentContext_Sensitivity_CreatedAt", script, StringComparison.Ordinal);

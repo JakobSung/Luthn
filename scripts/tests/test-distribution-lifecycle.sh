@@ -95,6 +95,9 @@ grep -q '^LUTHN_ENVIRONMENT=Production$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Classification__Provider=mock$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Classification__AllowMock=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnRetentionDays=30$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupEnabled=true$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupBatchSize=100$' "$LUTHN_CONFIG_DIR/luthn.env"
 evaluation_output="$(docker run --rm "$image" classification-eval)"
 grep -q '"datasetVersion": 1' <<<"$evaluation_output"
 grep -q '"provider": "mock"' <<<"$evaluation_output"
@@ -225,6 +228,18 @@ awk '
     print "Luthn__Memory__AutomaticTurnRetentionDays=45"
     next
   }
+  $0 == "Luthn__Memory__AutomaticTurnCleanupEnabled=true" {
+    print "Luthn__Memory__AutomaticTurnCleanupEnabled=false"
+    next
+  }
+  $0 == "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60" {
+    print "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=120"
+    next
+  }
+  $0 == "Luthn__Memory__AutomaticTurnCleanupBatchSize=100" {
+    print "Luthn__Memory__AutomaticTurnCleanupBatchSize=25"
+    next
+  }
   { print }
 ' "$LUTHN_CONFIG_DIR/luthn.env" >"$LUTHN_CONFIG_DIR/luthn.env.retention-override"
 mv "$LUTHN_CONFIG_DIR/luthn.env.retention-override" "$LUTHN_CONFIG_DIR/luthn.env"
@@ -290,6 +305,9 @@ grep -q '^Luthn__Auth__Tokens__1__Scopes__0=access.decide$' "$LUTHN_CONFIG_DIR/l
 grep -q '^Luthn__Auth__Tokens__1__Scopes__1=config.write$' "$LUTHN_CONFIG_DIR/luthn.env"
 ! grep -q '^Luthn__Auth__Tokens__1__ExpiresAt=' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnRetentionDays=45$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupEnabled=false$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=120$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupBatchSize=25$' "$LUTHN_CONFIG_DIR/luthn.env"
 context_output="$(curl -fsS -X POST "$base_url/api/agent/context-packs" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_after" \
@@ -312,11 +330,18 @@ upgraded_operator_decision="$(curl -fsS -X POST "$base_url/api/access-requests/$
   --data '{"reason":"Approved after the lifecycle upgrade."}')"
 grep -q '"status":"Approved"' <<<"$upgraded_operator_decision"
 
-grep -v '^Luthn__Memory__AutomaticTurnRetentionDays=' "$LUTHN_CONFIG_DIR/luthn.env" \
+grep -v -e '^Luthn__Memory__AutomaticTurnRetentionDays=' \
+  -e '^Luthn__Memory__AutomaticTurnCleanupEnabled=' \
+  -e '^Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=' \
+  -e '^Luthn__Memory__AutomaticTurnCleanupBatchSize=' \
+  "$LUTHN_CONFIG_DIR/luthn.env" \
   >"$LUTHN_CONFIG_DIR/luthn.env.missing-retention"
 mv "$LUTHN_CONFIG_DIR/luthn.env.missing-retention" "$LUTHN_CONFIG_DIR/luthn.env"
 "$cli" update "$image"
 grep -q '^Luthn__Memory__AutomaticTurnRetentionDays=30$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupEnabled=true$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Memory__AutomaticTurnCleanupBatchSize=100$' "$LUTHN_CONFIG_DIR/luthn.env"
 
 echo "[5/8] reset guard"
 if "$cli" reset >/dev/null 2>&1; then

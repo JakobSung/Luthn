@@ -178,6 +178,14 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.Visibility,
                 record.ExpiresAt
             });
+            entity.HasIndex(record => new
+            {
+                record.RetentionKind,
+                record.ExternalPublicationState,
+                record.ExpiresAt,
+                record.CreatedAt,
+                record.Id
+            }).HasDatabaseName("IX_shared_memory_items_cleanup_candidates");
             entity.HasIndex(record => new { record.OwnerUserId, record.ProjectKey, record.TaskKey, record.UpdatedAt });
         });
 
@@ -333,12 +341,25 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
     private void RejectProvenanceUpdates()
     {
-        if (ChangeTracker.Entries<CollectionProvenanceRecord>()
-            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        var invalidEntry = ChangeTracker.Entries<CollectionProvenanceRecord>()
+            .FirstOrDefault(entry =>
+                entry.State == EntityState.Modified ||
+                (entry.State == EntityState.Deleted && !IsPrincipalCascadeDelete(entry.Entity)));
+        if (invalidEntry is not null)
         {
             throw new InvalidOperationException("Collection provenance records are immutable.");
         }
     }
+
+    private bool IsPrincipalCascadeDelete(CollectionProvenanceRecord provenance) =>
+        (!string.IsNullOrWhiteSpace(provenance.MemoryItemId) &&
+            ChangeTracker.Entries<SharedMemoryItemRecord>().Any(entry =>
+                entry.State == EntityState.Deleted &&
+                entry.Entity.Id == provenance.MemoryItemId)) ||
+        (!string.IsNullOrWhiteSpace(provenance.SourceEventId) &&
+            ChangeTracker.Entries<SourceEventRecord>().Any(entry =>
+                entry.State == EntityState.Deleted &&
+                entry.Entity.Id == provenance.SourceEventId));
 
     private void UpdateSearchIndexes()
     {

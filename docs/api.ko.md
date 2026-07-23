@@ -34,12 +34,24 @@ POST /api/agent/turn-summaries
 시각에 `Luthn:Memory:AutomaticTurnRetentionDays`를 더한 값이며, 기본값은 30일이고
 1일부터 365일까지 설정할 수 있습니다. Docker 설정에서는
 `Luthn__Memory__AutomaticTurnRetentionDays`를 사용합니다. 만료 시각부터 recall과
-검색 후보에서 제외하지만, 이 정책 자체가 만료 행을 물리적으로 삭제하지는 않습니다.
-기존 memory도 migration하거나 다시 쓰지 않습니다.
+검색 후보에서 제외합니다.
+
+기본 API runtime은 정리 조건을 충족한 만료 자동 turn capsule도 물리적으로 정리합니다.
+기본값은 활성화, 60분 간격, batch당 최대 100개입니다. 불변 provenance로
+`turn-summary` source event와 연결된 `Ephemeral` memory 중 `LocalOnly`이고 safe-sync
+outbox 이력이 없는 항목만 대상입니다. memory 행, 암호화 payload, provenance,
+classification, source event를 한 transaction에서 삭제합니다. 기존 audit event는
+남기고 metadata-only `turn_summary.retention.pruned` event 하나를 추가합니다.
+`Luthn__Memory__AutomaticTurnCleanupEnabled`,
+`Luthn__Memory__AutomaticTurnCleanupIntervalMinutes`(1~1440),
+`Luthn__Memory__AutomaticTurnCleanupBatchSize`(1~1000)로 제어할 수 있습니다.
+기존 Durable memory는 migration하거나 다시 쓰지 않습니다.
 
 자동 수집 보존 정책은 명시적인 `POST /api/memory/items` 쓰기와 분리되어 있습니다.
 사람이 선별한 memory는 요청한 `Durable`, `Session`, `Ephemeral` 보존 계약을 그대로
-사용하며 자동 turn 설정의 영향을 받지 않습니다.
+사용하며 자동 turn 설정의 영향을 받지 않습니다. 직접 만든 Ephemeral memory,
+turn이 아닌 source, 외부 공개가 승인 또는 취소된 memory, outbox 이력이 있는
+record도 자동 물리 정리에서 제외합니다.
 
 ```json
 {
