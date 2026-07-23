@@ -39,6 +39,9 @@ services:
       Luthn__Classification__Provider: ${Luthn__Classification__Provider:-mock}
       Luthn__Classification__AllowMock: ${Luthn__Classification__AllowMock:-true}
       Luthn__Memory__AutomaticTurnRetentionDays: ${Luthn__Memory__AutomaticTurnRetentionDays:-30}
+      Luthn__Memory__AutomaticTurnCleanupEnabled: ${Luthn__Memory__AutomaticTurnCleanupEnabled:-true}
+      Luthn__Memory__AutomaticTurnCleanupIntervalMinutes: ${Luthn__Memory__AutomaticTurnCleanupIntervalMinutes:-60}
+      Luthn__Memory__AutomaticTurnCleanupBatchSize: ${Luthn__Memory__AutomaticTurnCleanupBatchSize:-100}
       Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
       Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
       Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}

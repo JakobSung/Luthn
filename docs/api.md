@@ -45,14 +45,27 @@ Newly accepted turn summaries use `Ephemeral` retention. Their `expiresAt` is
 the server receipt time plus `Luthn:Memory:AutomaticTurnRetentionDays`, which
 defaults to 30 days and accepts values from 1 through 365. In Docker
 configuration, set `Luthn__Memory__AutomaticTurnRetentionDays`. Expired
-summaries are excluded from recall and search at or after `expiresAt`; this
-policy does not physically delete expired rows. It also does not migrate or
-rewrite existing memories.
+summaries are excluded from recall and search at or after `expiresAt`.
+
+The default API runtime also prunes eligible expired automatic turn capsules.
+Cleanup is enabled by default, runs every 60 minutes, and processes at most 100
+records per batch. It deletes only `Ephemeral` memory linked by immutable
+provenance to a `turn-summary` source event when the memory remains `LocalOnly`
+and has no safe-sync outbox history. The memory row, encrypted payload,
+provenance, classification, and source event are removed in one transaction.
+Prior audit events remain and one metadata-only
+`turn_summary.retention.pruned` event records the cleanup. Configure the loop
+with `Luthn__Memory__AutomaticTurnCleanupEnabled`,
+`Luthn__Memory__AutomaticTurnCleanupIntervalMinutes` (1 through 1440), and
+`Luthn__Memory__AutomaticTurnCleanupBatchSize` (1 through 1000). Existing
+Durable rows are not migrated or rewritten.
 
 This automatic-ingestion policy is separate from explicit
 `POST /api/memory/items` writes. Curated memory continues to use the requested
 `Durable`, `Session`, or `Ephemeral` retention contract without being changed
-by the automatic-turn setting.
+by the automatic-turn settings. Manually created Ephemeral memory, non-turn
+sources, externally approved or revoked memory, and any outbox-linked record
+are excluded from automatic physical cleanup.
 
 Request:
 

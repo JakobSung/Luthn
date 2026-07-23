@@ -41,7 +41,17 @@ builder.Services.AddOptions<LuthnMemoryOptions>()
     .Validate(
         options => options.HasValidAutomaticTurnRetention,
         LuthnMemoryOptions.AutomaticTurnRetentionValidationMessage)
+    .Validate(
+        options => options.HasValidAutomaticTurnCleanupInterval,
+        LuthnMemoryOptions.AutomaticTurnCleanupIntervalValidationMessage)
+    .Validate(
+        options => options.HasValidAutomaticTurnCleanupBatch,
+        LuthnMemoryOptions.AutomaticTurnCleanupBatchValidationMessage)
     .ValidateOnStart();
+builder.Services.AddScoped<
+    IAutomaticTurnRetentionCleanupProcessor,
+    AutomaticTurnRetentionCleanupProcessor>();
+builder.Services.AddHostedService<AutomaticTurnRetentionCleanupHostedService>();
 builder.Services.Configure<ClassificationProviderRuntimeOptions>(builder.Configuration.GetSection("Luthn:Classification:Runtime"));
 builder.Services.AddHttpClient(nameof(ConfiguredContentClassifier), client =>
 {

@@ -319,6 +319,15 @@ the 30-day default when the key is absent and preserves an existing operator
 value. The setting controls only newly ingested automatic turn summaries;
 explicit curated memory and existing database rows are unchanged.
 
+Automatic physical cleanup is also provisioned with
+`Luthn__Memory__AutomaticTurnCleanupEnabled=true`,
+`Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60`, and
+`Luthn__Memory__AutomaticTurnCleanupBatchSize=100`. The interval accepts 1
+through 1440 minutes and the batch accepts 1 through 1000 records. Install and
+update preserve valid operator overrides and add defaults only when keys are
+absent. Cleanup remains limited to expired local-only automatic turn capsules;
+manual memory and external-publication/outbox records are excluded.
+
 ## Lifecycle Commands
 
 The following full lifecycle is currently available on macOS and Linux:

@@ -246,6 +246,26 @@ implementation path.
 - Typesense vector and hybrid search: keyword and semantic search combined by
   rank fusion: <https://typesense.org/docs/30.2/api/vector-search.html>
 
+## Automatic turn retention cleanup
+
+The default API process runs the automatic-turn cleanup loop. It is enabled by
+default, runs every 60 minutes, and deletes at most 100 eligible capsules per
+transactional batch. Configure or disable it with:
+
+```dotenv
+Luthn__Memory__AutomaticTurnCleanupEnabled=true
+Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60
+Luthn__Memory__AutomaticTurnCleanupBatchSize=100
+```
+
+The interval range is 1 through 1440 minutes and the batch range is 1 through
+1000. Invalid values fail startup validation. A successful deletion keeps prior
+audit events and adds `turn_summary.retention.pruned` with metadata-only
+redaction. Cleanup failures are logged and retried on a later interval without
+terminating API availability. Externally approved, revoked, outbox-linked,
+manually created, non-turn, unexpired, Session, and Durable memory are never
+automatic cleanup candidates.
+
 ## External Memory Service Adapter Boundary
 
 External memory services are optional adapters. They are not a second raw
