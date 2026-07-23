@@ -509,6 +509,7 @@ POSTGRES_USER=luthn
 POSTGRES_HOST_AUTH_METHOD=trust
 Luthn__Classification__Provider=mock
 Luthn__Classification__AllowMock=true
+Luthn__Memory__AutomaticTurnRetentionDays=30
 Luthn__Auth__RequireServiceToken=true
 Luthn__Identity__Mode=SingleOwner
 Luthn__Identity__SingleOwnerUserId=local-owner
@@ -1121,6 +1122,7 @@ install_luthn() {
     ensure_config_value Luthn__Classification__Provider mock
     ensure_config_value Luthn__Classification__AllowMock true
     upgrade_legacy_classification_default
+    ensure_config_value Luthn__Memory__AutomaticTurnRetentionDays 30
     ensure_config_value Luthn__Auth__RequireServiceToken true
     ensure_config_value Luthn__Identity__Mode SingleOwner
     ensure_config_value Luthn__Identity__SingleOwnerUserId local-owner
@@ -2221,6 +2223,7 @@ update_luthn() {
   cp -p "$compose_file" "$runtime_rollback_dir/compose.yaml"
   cp -p "$cli_path" "$runtime_rollback_dir/luthn"
   cp -p "$config_file" "$runtime_rollback_dir/luthn.env"
+  ensure_config_value Luthn__Memory__AutomaticTurnRetentionDays 30
   previous_operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
   if [[ -f "$previous_operator_token_file" ]]; then
     cp -p "$previous_operator_token_file" "$runtime_rollback_dir/operator-token"

@@ -36,6 +36,12 @@ builder.Services.AddScoped<SensitiveMemoryPayloadMigrator>();
 builder.Services.Configure<OperatorConfigOptions>(builder.Configuration.GetSection("Luthn:OperatorConfig"));
 builder.Services.AddSingleton<IOperatorClassificationSettingsStore, OperatorClassificationSettingsStore>();
 builder.Services.Configure<LuthnHostOperationalOptions>(builder.Configuration.GetSection("Luthn:Host"));
+builder.Services.AddOptions<LuthnMemoryOptions>()
+    .Bind(builder.Configuration.GetSection("Luthn:Memory"))
+    .Validate(
+        options => options.HasValidAutomaticTurnRetention,
+        LuthnMemoryOptions.AutomaticTurnRetentionValidationMessage)
+    .ValidateOnStart();
 builder.Services.Configure<ClassificationProviderRuntimeOptions>(builder.Configuration.GetSection("Luthn:Classification:Runtime"));
 builder.Services.AddHttpClient(nameof(ConfiguredContentClassifier), client =>
 {

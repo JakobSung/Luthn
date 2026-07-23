@@ -41,6 +41,19 @@ small batch of turns. This endpoint is for summaries, not raw transcripts.
 Luthn classifies the submitted summary, resolved title, and Core tags as one
 agent-visible projection before it becomes shared memory.
 
+Newly accepted turn summaries use `Ephemeral` retention. Their `expiresAt` is
+the server receipt time plus `Luthn:Memory:AutomaticTurnRetentionDays`, which
+defaults to 30 days and accepts values from 1 through 365. In Docker
+configuration, set `Luthn__Memory__AutomaticTurnRetentionDays`. Expired
+summaries are excluded from recall and search at or after `expiresAt`; this
+policy does not physically delete expired rows. It also does not migrate or
+rewrite existing memories.
+
+This automatic-ingestion policy is separate from explicit
+`POST /api/memory/items` writes. Curated memory continues to use the requested
+`Durable`, `Session`, or `Ephemeral` retention contract without being changed
+by the automatic-turn setting.
+
 Request:
 
 ```json

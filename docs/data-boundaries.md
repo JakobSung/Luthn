@@ -120,6 +120,14 @@ terminate a detached uploader. Delivery remains fail-open on every platform,
 although an unavailable service can delay a Windows turn until the bounded
 request fails.
 
+Each newly accepted automatic turn capsule becomes an `Ephemeral` memory with
+a bounded expiry based on the server receipt time. The default is 30 days and
+operators may configure 1 through 365 days. At expiry the memory is no longer a
+recall, search, sync, or publication candidate. The first bounded-retention
+slice does not delete expired rows or alter historical rows. Explicit curated
+memory retains its independently requested `Durable`, `Session`, or
+`Ephemeral` lifecycle.
+
 Default auto-recall does not expose the private store. It asks the scoped MCP
 surface for one small agent-safe context pack at a new task or material topic
 change. The same classification, policy, and safe-projection rules apply to
