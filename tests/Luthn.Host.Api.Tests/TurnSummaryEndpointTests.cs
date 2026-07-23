@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api.Tests;
 
@@ -91,6 +92,8 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.Equal(StorageDecisionKind.WikiCandidate, classification.StorageDecision);
         Assert.Equal(SensitivityLevel.Public, memory.Sensitivity);
         Assert.Equal(MemoryVisibility.SharedAcrossAgents, memory.Visibility);
+        Assert.Equal(MemoryRetentionKind.Ephemeral, memory.RetentionKind);
+        Assert.Equal(source.ReceivedAt.AddDays(30), memory.ExpiresAt);
         Assert.True(memory.AllowsAgentContext);
         Assert.Equal("session-safe-1", memory.SourceSessionId);
         Assert.Equal("luthn", memory.ProjectKey);
@@ -228,6 +231,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             classifier,
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
+            Options.Create(new LuthnMemoryOptions()),
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -272,12 +276,102 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.Equal(1, await db.SharedMemoryItems.CountAsync());
     }
 
-    private WebApplicationFactory<Program> CreateFactory()
+    [Fact]
+    public async Task ExpiredAutomaticTurnSummaryIsExcludedFromRecall()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var intake = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-expiring-summary",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = "Bounded automatic retention verification note.",
+            coreTags = new[] { "retention" },
+            idempotencyKey = "summary-expiring-1"
+        });
+        Assert.Equal(HttpStatusCode.Created, intake.StatusCode);
+
+        using var beforeExpiry = await client.PostAsJsonAsync("/api/agent/context-packs", new
+        {
+            query = "bounded automatic retention",
+            coreTags = new[] { "retention" },
+            maxItems = 10
+        });
+        using var beforeBody = await JsonDocument.ParseAsync(await beforeExpiry.Content.ReadAsStreamAsync());
+        Assert.Single(beforeBody.RootElement.GetProperty("items").EnumerateArray());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            var memory = await db.SharedMemoryItems.SingleAsync();
+            memory.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+            await db.SaveChangesAsync();
+        }
+
+        using var afterExpiry = await client.PostAsJsonAsync("/api/agent/context-packs", new
+        {
+            query = "bounded automatic retention",
+            coreTags = new[] { "retention" },
+            maxItems = 10
+        });
+        using var afterBody = await JsonDocument.ParseAsync(await afterExpiry.Content.ReadAsStreamAsync());
+        Assert.Empty(afterBody.RootElement.GetProperty("items").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ConfiguredAutomaticTurnRetentionControlsExpiration()
+    {
+        using var factory = CreateFactory(retentionDays: 45);
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-custom-retention",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = "Custom automatic retention verification note.",
+            coreTags = new[] { "retention" },
+            idempotencyKey = "summary-custom-retention"
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var source = await db.SourceEvents.SingleAsync();
+        var memory = await db.SharedMemoryItems.SingleAsync();
+        Assert.Equal(MemoryRetentionKind.Ephemeral, memory.RetentionKind);
+        Assert.Equal(source.ReceivedAt.AddDays(45), memory.ExpiresAt);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(366)]
+    public void InvalidAutomaticTurnRetentionFailsStartup(int retentionDays)
+    {
+        using var factory = CreateFactory(retentionDays);
+
+        var error = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+
+        Assert.Contains(
+            LuthnMemoryOptions.AutomaticTurnRetentionValidationMessage,
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    private WebApplicationFactory<Program> CreateFactory(int? retentionDays = null)
     {
         return _factory.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
+            if (retentionDays is not null)
+            {
+                builder.UseSetting(
+                    "Luthn:Memory:AutomaticTurnRetentionDays",
+                    retentionDays.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
         });
     }
 

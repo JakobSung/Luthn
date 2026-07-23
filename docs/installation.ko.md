@@ -140,6 +140,13 @@ Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를
 
 새 설치는 로컬 `mock` 분류기를 사용하므로 별도 provider 설정 없이 분류가 필요한 쓰기와 `/readyz`가 바로 동작합니다. mock은 결정론적 로컬 분류기이므로 provider 기반 분류가 필요하면 운영자 화면에서 원하는 provider로 교체하세요. `luthn install`과 `luthn update`는 이전 기본값 조합인 `unconfigured`/`false`만 `mock`/`true`로 바꾸며, 그 밖의 설정 값은 유지합니다.
 
+### 자동 turn memory 보존기간
+
+새 설치는 비공개 설정에 `Luthn__Memory__AutomaticTurnRetentionDays=30`을 추가합니다.
+지원 범위는 1일부터 365일까지입니다. `luthn update`는 key가 없으면 30일 기본값을
+추가하고 운영자가 설정한 기존 값은 보존합니다. 이 설정은 새로 수집되는 자동 turn
+요약에만 적용하며, 명시적으로 선별한 memory와 기존 database 행은 바꾸지 않습니다.
+
 `version`은 update channel과 변경 불가 설치 image 참조·실행 digest, source revision, CLI/connector template
 version, MCP schema version과 image에 존재하는 stable release version을
 보고합니다. `update check`는 설정된 공식 registry channel의 원격

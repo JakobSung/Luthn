@@ -8,6 +8,7 @@ using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api;
 
@@ -29,6 +30,7 @@ public static class TurnSummaryEndpoints
         IContentClassifier classifier,
         IPolicyEngine policyEngine,
         ISensitiveMemoryPayloadProtector payloadProtector,
+        IOptions<LuthnMemoryOptions> memoryOptions,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -136,7 +138,8 @@ public static class TurnSummaryEndpoints
             classification.Sensitivity,
             normalizedTags,
             visibility,
-            MemoryRetentionPolicy.Durable(),
+            MemoryRetentionPolicy.Ephemeral(
+                memoryOptions.Value.GetAutomaticTurnExpiration(receivedAt)),
             new PublicRecordId(request.SessionId.Trim()));
 
         db.SourceEvents.Add(new SourceEventRecord

@@ -30,6 +30,17 @@ POST /api/agent/turn-summaries
 
 대화 turn 뒤 제한된 요약을 제출하는 endpoint이며 원본 대화 기록용이 아닙니다. Luthn은 공유 기억으로 만들기 전에 제출된 요약, 확정된 title, Core tag를 하나의 agent 표시 가능 투영으로 함께 분류합니다.
 
+새로 수집한 turn 요약은 `Ephemeral`로 보존합니다. `expiresAt`은 server 수신
+시각에 `Luthn:Memory:AutomaticTurnRetentionDays`를 더한 값이며, 기본값은 30일이고
+1일부터 365일까지 설정할 수 있습니다. Docker 설정에서는
+`Luthn__Memory__AutomaticTurnRetentionDays`를 사용합니다. 만료 시각부터 recall과
+검색 후보에서 제외하지만, 이 정책 자체가 만료 행을 물리적으로 삭제하지는 않습니다.
+기존 memory도 migration하거나 다시 쓰지 않습니다.
+
+자동 수집 보존 정책은 명시적인 `POST /api/memory/items` 쓰기와 분리되어 있습니다.
+사람이 선별한 memory는 요청한 `Durable`, `Session`, `Ephemeral` 보존 계약을 그대로
+사용하며 자동 turn 설정의 영향을 받지 않습니다.
+
 ```json
 {
   "sessionId": "session-1",

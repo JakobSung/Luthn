@@ -311,6 +311,14 @@ operator-configured provider when you need provider-backed classification.
 `unconfigured`/`false` with `mock`/`true`; any other configured value remains
 unchanged.
 
+### Automatic turn memory retention
+
+New installs set `Luthn__Memory__AutomaticTurnRetentionDays=30` in the private
+configuration. The supported range is 1 through 365 days. `luthn update` adds
+the 30-day default when the key is absent and preserves an existing operator
+value. The setting controls only newly ingested automatic turn summaries;
+explicit curated memory and existing database rows are unchanged.
+
 ## Lifecycle Commands
 
 The following full lifecycle is currently available on macOS and Linux:

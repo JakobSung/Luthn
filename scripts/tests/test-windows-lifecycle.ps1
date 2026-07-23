@@ -403,6 +403,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_ENVIRONMENT=Production$") "new installs should use the Production environment"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=mock$") "new installs should select the mock classifier"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__AllowMock=true$") "new installs should enable mock classification"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Memory__AutomaticTurnRetentionDays=30$") "new installs should default automatic turn memory retention to 30 days"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_OPERATOR_VOLUME=luthn-operator$") "new installs should use the separate persistent Data Protection key volume"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($token))) "Docker arguments and logs should not contain the token"
     Assert-True (-not ([IO.File]::ReadAllText($fakeDockerLog).Contains($operatorToken))) "Docker arguments and logs should not contain the operator token"
@@ -650,6 +651,13 @@ esac
         "Luthn__Auth__Tokens__1__Scopes__1=*",
         "Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z"
     )
+    $validLegacyConfig = @($validLegacyConfig | ForEach-Object {
+        if ($_ -ceq "Luthn__Memory__AutomaticTurnRetentionDays=30") {
+            "Luthn__Memory__AutomaticTurnRetentionDays=45"
+        } else {
+            $_
+        }
+    })
     [IO.File]::WriteAllText($configFile, (($validLegacyConfig -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
     $update = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($update.ExitCode -eq 0) "Windows update should succeed: $($update.Output)"
@@ -668,6 +676,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($operatorTokenFile) -ceq $operatorToken) "update should preserve the local operator credential"
     $updatedConfig = [IO.File]::ReadAllText($configFile)
     Assert-True ($updatedConfig -cmatch "(?m)^LUTHN_OPERATOR_VOLUME=luthn-operator$") "update should preserve the separate Data Protection key volume selection"
+    Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Memory__AutomaticTurnRetentionDays=45$") "update should preserve an operator automatic turn memory retention override"
     Assert-True ($updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Name=local-operator$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__IsOperator=true$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$" -and $updatedConfig -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__1=config\.write$") "update should reuse the Compose-exposed operator slot with configuration access"
     Assert-True ($updatedConfig -cnotmatch "(?m)^Luthn__Auth__Tokens__1__ExpiresAt=") "update should normalize the managed operator slot without expiry metadata"
     $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $windowsRoot "state/backups") -Filter "*.dump")
@@ -694,7 +703,8 @@ esac
 
     $configBeforeFullScopeUpdate = [IO.File]::ReadAllText($configFile)
     $nonScopeConfig = @([IO.File]::ReadAllLines($configFile) | Where-Object {
-        $_ -notmatch '^Luthn__Auth__Tokens__0__Scopes__\d+='
+        $_ -notmatch '^Luthn__Auth__Tokens__0__Scopes__\d+=' -and
+        $_ -cnotmatch '^Luthn__Memory__AutomaticTurnRetentionDays='
     })
     [IO.File]::WriteAllText(
         $configFile,
@@ -704,6 +714,7 @@ esac
     Assert-True ($fullScopeUpdate.ExitCode -eq 0) "update should not fail for a full custom scope table without connector ownership: $($fullScopeUpdate.Output)"
     Assert-True ($fullScopeUpdate.Output -match "scope table is full") "update should warn when it cannot add access.request to a full custom scope table"
     Assert-True ([IO.File]::ReadAllText($configFile) -match "(?m)^Luthn__Auth__Tokens__0__Scopes__15=custom\.scope\.15$") "update should preserve a full custom scope table"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Memory__AutomaticTurnRetentionDays=30$") "update should provision the default automatic turn memory retention for legacy installs"
     [IO.File]::WriteAllText($configFile, $configBeforeFullScopeUpdate, [Text.UTF8Encoding]::new($false))
 
     $updatedHash = (Get-FileHash -LiteralPath $installedCli -Algorithm SHA256).Hash
