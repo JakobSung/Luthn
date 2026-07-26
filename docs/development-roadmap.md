@@ -21,15 +21,13 @@ Next action: create the next slice plan on the current delivery branch, or ask f
 | ID | Status | Priority | Title | Idea Artifact | First Slice Candidate |
 | --- | --- | --- | --- | --- | --- |
 | PLUGIN-001 | gated | P2 | Dynamic plugin loading and marketplace | `none` | - |
-| WORK-002 | evidence-pending | P1 | Claude Code connector connection repair and documentation alignment | `docs/01-plan/claude-code-connector-connection-repair-and-documentation-alignment/001-idea.md` | - |
-| WORK-005 | ready | P1 | 데이터 경계와 MEMORY.md 대안 신뢰 문서 | `none` | - |
+| WORK-005 | evidence-pending | P1 | 데이터 경계와 MEMORY.md 보완 관계 신뢰 문서 | `docs/01-plan/memory.md/001-idea.md` | - |
 | none | backlog | - | No additional planned quality slice | `none` | - |
 
 ## Planned
 
 | ID | Priority | Title | Goal | Plan |
 | --- | --- | --- | --- | --- |
-| WORK-005 | P1 | 데이터 경계와 MEMORY.md 대안 신뢰 문서 | Stop hook의 제한된 전송 범위와 저장·차단 경계, 그리고 Luthn과 MEMORY.md의 용도 차이를 공개 문서로 명확히 한다. | `none` |
 | none | - | No additional planned quality slice | The approved classification, recall, telemetry, encryption, provenance, ownership, and agent-connection hardening program is complete. | `none` |
 
 ## Done
@@ -53,6 +51,7 @@ Next action: create the next slice plan on the current delivery branch, or ask f
 | RET-001 | Retrieval backend abstraction | Retrieval backend abstraction routes context-pack, agent search, and memory query paths through the backend boundary while deterministic search remains default and pgvector remains the first vector-provider candidate. Focused Core/Host API/build/docker validation passed. |
 | SEARCH-001 | Search adoption policy | Deterministic safe search remains default; pgvector is the first vector candidate; external search remains gated by public-safe indexing. Product-code validation profile passed. |
 | SEC-001 | Limited redacted sensitive-access output | Approved sensitive-access requests can return limited redacted output without opening a raw Vault/source read path. Focused security, SDK, and connector validation passed. |
+| WORK-002 | Claude Code connector connection repair and documentation alignment | {'criterion': 'luthn connect claude passes every hook argument that begins with double hyphens to the helper as a value, not as a helper option. AC-002: a clean temporary Claude configuration receives exactly one Luthn-owned MCP registration, Stop hook, and auto-recall instruction through the standard connect command. AC-003: luthn connection status claude recognizes the installed owned configuration without a parser error. AC-004: English and Korean installation and agent quickstart documents describe the repaired connect/status/disconnect lifecycle and the mock readiness contract without obsolete planned wording. AC-005: failure paths preserve unrelated Claude configuration and do not persist API keys.', 'evidence': 'merged PR 43; merge 0371ae4ac4567cf378063556bfdf5cabd3f16b1a; closeout docs/01-plan/delivery-batches/codex-claude-code/002-close-delivery-batch.json'} |
 | add-additive-native-windows-docker-install-and-codex-mcp-baseline | Native Windows Docker lifecycle and Codex integration | The owner confirmed the merged Windows Docker Desktop lifecycle and Codex integration operate correctly on Windows. |
 | agent-neutral-container-release-and-lifecycle-channels | Agent-neutral container release and lifecycle channels | docs/01-plan/agent-neutral-container-release-and-lifecycle-channels/003-close-slice-agent-neutral-container-release-and-lifecycle-channels.json |
 | auditable-bounded-cleanup-for-expired-automatic-turn-capsules | Auditable bounded cleanup for expired automatic turn capsules | docs/01-plan/auditable-bounded-cleanup-for-expired-automatic-turn-capsules/003-close-slice-auditable-bounded-cleanup-for-expired-automatic-turn-capsules.json |

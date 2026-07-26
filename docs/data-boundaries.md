@@ -103,6 +103,32 @@ relay corpus text to its configured classifier. An optional bearer token can be
 read only from the named environment variable supplied with `--token-env`; the
 token value is never included in evaluator output.
 
+## MEMORY.md And Luthn
+
+`MEMORY.md` and Luthn solve different parts of long-running agent work; neither
+replaces the other. A `MEMORY.md` file is a human-curated operating reference:
+it can record stable project conventions, decisions, and repeatable procedures
+that an agent reads from its local environment. Luthn is a self-hosted runtime
+memory service: it captures bounded agent output, applies classification and
+policy, and returns only eligible safe projections through auto-recall or MCP.
+
+Use `MEMORY.md` for reviewed, durable working guidance. Use Luthn for bounded,
+task-scoped context that Codex and Claude Code can safely reuse from the same
+installation. Do not treat a `MEMORY.md` file as an automatic export of Luthn,
+or Luthn as an instruction-file replacement. They do not automatically sync.
+
+The boundary is deliberate:
+
+- A connected Stop hook sends only a bounded final assistant-response capsule;
+  MCP reads and explicit writes remain policy-controlled.
+- Classification and policy decide whether a stored candidate becomes an
+  agent-visible safe projection. Storage alone never grants agent access.
+- `MEMORY.md` should likewise contain reviewed operational guidance, not raw
+  transcripts, credentials, customer records, or other private source data.
+
+The next section describes the exact capture and recall limits enforced by the
+Luthn connector.
+
 ## Codex Capture And Recall Boundary
 
 On macOS, Linux, and Windows, the trusted Codex Stop hook accepts a bounded
