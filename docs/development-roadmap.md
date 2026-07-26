@@ -6,7 +6,9 @@
 
 Current active slice: none selected
 
-Next action: Run `$drig:drig-idea` to select development work.
+Queued slices awaiting final QA: 1
+
+Next action: create the next slice plan on the current delivery branch, or ask for `$drig:drig-qa` when the delivery batch is complete.
 
 ## Active Slice
 
@@ -19,12 +21,15 @@ Next action: Run `$drig:drig-idea` to select development work.
 | ID | Status | Priority | Title | Idea Artifact | First Slice Candidate |
 | --- | --- | --- | --- | --- | --- |
 | PLUGIN-001 | gated | P2 | Dynamic plugin loading and marketplace | `none` | - |
+| WORK-002 | evidence-pending | P1 | Claude Code connector connection repair and documentation alignment | `docs/01-plan/claude-code-connector-connection-repair-and-documentation-alignment/001-idea.md` | - |
+| WORK-005 | ready | P1 | 데이터 경계와 MEMORY.md 대안 신뢰 문서 | `none` | - |
 | none | backlog | - | No additional planned quality slice | `none` | - |
 
 ## Planned
 
 | ID | Priority | Title | Goal | Plan |
 | --- | --- | --- | --- | --- |
+| WORK-005 | P1 | 데이터 경계와 MEMORY.md 대안 신뢰 문서 | Stop hook의 제한된 전송 범위와 저장·차단 경계, 그리고 Luthn과 MEMORY.md의 용도 차이를 공개 문서로 명확히 한다. | `none` |
 | none | - | No additional planned quality slice | The approved classification, recall, telemetry, encryption, provenance, ownership, and agent-connection hardening program is complete. | `none` |
 
 ## Done

@@ -21,7 +21,7 @@ configuration, Codex configuration, hooks, and unrelated MCP registrations.
 Repair recoverable PowerShell, PATH, Docker daemon/context, and Codex CLI
 discovery problems, then finish the installation.
 
-Connect Codex, verify health and readiness, confirm that `luthn mcp
+Connect Codex or Claude Code, verify health and readiness, confirm that `luthn mcp
 --list-tools` includes `get_context_pack`, and show me the operator console URL.
 Keep the default lightweight auto-recall enabled unless I explicitly request
 `--no-auto-recall`. Never print, copy, or commit the service token or other
@@ -108,11 +108,14 @@ source-free Compose bundle, resolves `ghcr.io/jakobsung/luthn:stable` to an
 immutable digest, creates a
 local service token, starts PostgreSQL, applies migrations before API startup,
 seeds public-safe demo data, and waits until the API is healthy. A fresh install
-starts with classification explicitly `unconfigured`; `/readyz` remains
-`not_ready` until the operator selects a production provider.
+starts with the deterministic local `mock` classifier and `AllowMock=true`, so
+`/readyz` is ready without an external provider. It becomes `setup-required` or
+`not_ready` only if the operator changes the provider to `unconfigured` or
+disables mock classification.
 With `--connect-codex`, the same bootstrap also configures the Codex hook, MCP
 registration, and default auto-recall, then prints the required restart and
-`/hooks` Trust steps.
+`/hooks` Trust steps. To connect an installed Claude Code CLI instead, use
+`--connect-claude` or run `luthn connect claude` after installation.
 
 If `~/.local/bin` is not already on `PATH`, use the export command printed by
 the installer and add it to your shell profile.
@@ -576,8 +579,9 @@ tools work after a new install or update. Approval and denial remain outside MCP
 
 ### Additional Agents
 
-- Claude Code is planned to use the same connector lifecycle and status
-  contract with Claude-native hooks/plugin registration plus MCP.
+- Claude Code currently uses `luthn connect claude`, `luthn connection status
+  claude`, and `luthn disconnect claude` for the same MCP, Stop hook, and
+  auto-recall lifecycle.
 - Hermes is planned as a separate integration through its official
   MemoryProvider interface, with MCP only where that provider does not cover an
   active operation.

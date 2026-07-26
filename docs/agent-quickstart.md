@@ -2,7 +2,7 @@
 
 [한국어](agent-quickstart.ko.md)
 
-This guide explains how Codex connects to an installed self-hosted Luthn, how
+This guide explains how Codex and Claude Code connect to an installed self-hosted Luthn, how
 completed work becomes reusable memory, and how later tasks retrieve it.
 
 Install Luthn first with the [installation guide](installation.md). A source
@@ -191,12 +191,14 @@ Inspect the connector channels on every host with:
 
 ```bash
 luthn connection status codex
+luthn connection status claude
 ```
 
 Disconnect with:
 
 ```bash
 luthn disconnect codex
+luthn disconnect claude
 ```
 
 Disconnect removes only the Luthn-owned hook, optional Luthn-managed
@@ -212,7 +214,7 @@ printf '%s\n' '{"sessionId":"session-1","turnId":"turn-1","sourceAgent":"custom"
   | luthn adapter
 ```
 
-Claude Code support is planned behind the same lifecycle contract. Hermes is a
+Claude Code currently uses the same lifecycle contract. Hermes remains a
 separate planned integration using its official MemoryProvider interface.
 
 The installer seeds only public-safe demo context. Real agent writes remain

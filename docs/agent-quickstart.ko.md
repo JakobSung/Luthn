@@ -2,7 +2,7 @@
 
 [English](agent-quickstart.md)
 
-이 문서는 설치된 직접 호스팅 Luthn과 Codex를 연결하고, 완료된 작업을 다시 쓸 수 있는 기억으로 만들며, 이후 작업에서 불러오는 방법을 설명합니다. 먼저 [설치 안내](installation.ko.md)를 따라 Luthn을 설치하세요. 원본 저장소나 로컬 .NET SDK는 필요하지 않습니다.
+이 문서는 설치된 직접 호스팅 Luthn과 Codex·Claude Code를 연결하고, 완료된 작업을 다시 쓸 수 있는 기억으로 만들며, 이후 작업에서 불러오는 방법을 설명합니다. 먼저 [설치 안내](installation.ko.md)를 따라 Luthn을 설치하세요. 원본 저장소나 로컬 .NET SDK는 필요하지 않습니다.
 
 ## 지속되는 기억 흐름
 
@@ -116,7 +116,9 @@ get_sensitive_access_result
 luthn status
 luthn mcp --list-tools
 luthn connection status codex
+luthn connection status claude
 luthn disconnect codex
+luthn disconnect claude
 ```
 
 연결 해제는 Luthn 소유 hook, 선택적 자동 회상 블록, 일치하는 MCP 등록, 비밀이 아닌 소유 상태만 제거합니다. 관계없는 설정은 보존합니다.
@@ -128,4 +130,4 @@ printf '%s\n' '{"sessionId":"session-1","turnId":"turn-1","sourceAgent":"custom"
   | luthn adapter
 ```
 
-Claude Code 지원은 같은 수명주기 계약 아래 계획되어 있고, Hermes는 공식 MemoryProvider interface를 쓰는 별도 연동으로 계획되어 있습니다. 설치 과정은 공개해도 안전한 예제 맥락만 넣습니다. 실제 에이전트 쓰기는 분류와 정책이 안전 투영을 허용하기 전까지 신뢰하지 않는 후보로 취급합니다.
+Claude Code는 현재 같은 수명주기 계약을 지원하며, Hermes는 공식 MemoryProvider interface를 쓰는 별도 연동으로 계획되어 있습니다. 설치 과정은 공개해도 안전한 예제 맥락만 넣습니다. 실제 에이전트 쓰기는 분류와 정책이 안전 투영을 허용하기 전까지 신뢰하지 않는 후보로 취급합니다.
