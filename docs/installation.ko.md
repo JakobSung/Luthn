@@ -11,7 +11,7 @@ Install and configure Luthn locally by following the instructions here:
 https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 ```
 
-에이전트는 운영체제를 확인해 해당 절차만 사용하고, 기존 Docker volume·Luthn/Codex 설정·hook·관계없는 MCP 등록을 보존해야 합니다. token이나 자격 증명 파일을 출력하면 안 됩니다. 새 설치의 완료 조건은 `luthn status`의 health가 `ready`이고 readiness가 분류 provider 설정 필요 상태를 정확히 보고하는 것, 운영자 화면 URL 확인, `luthn mcp --list-tools`의 `get_context_pack` 확인, Codex MCP 등록 확인입니다. 운영자가 실제 분류 provider를 설정한 뒤에는 readiness도 `ready`여야 합니다. 사용자만 할 수 있는 provider 선택·재시작·hook Trust가 남으면 정확히 안내해야 합니다.
+에이전트는 운영체제를 확인해 해당 절차만 사용하고, 기존 Docker volume·Luthn·Codex·Claude Code 설정·hook·관계없는 MCP 등록을 보존해야 합니다. token이나 자격 증명 파일을 출력하면 안 됩니다. 새 설치의 완료 조건은 `luthn status`의 health와 readiness가 모두 `ready`인 것, 운영자 화면 URL 확인, `luthn mcp --list-tools`의 `get_context_pack` 확인, 선택한 Codex 또는 Claude Code MCP 등록 확인입니다. provider를 `unconfigured`으로 바꾸거나 mock을 비활성화한 경우에만 setup-required/not_ready 상태를 정확히 안내해야 합니다. 사용자만 할 수 있는 재시작·hook Trust가 남으면 정확히 안내해야 합니다.
 
 ## 요구 사항
 
@@ -53,9 +53,12 @@ curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/instal
 설치 과정은 `~/.local/bin/luthn` CLI와 원본 없는 Compose 묶음을 설치하고,
 `ghcr.io/jakobsung/luthn:stable`을 변경 불가 digest로 확정해 로컬 서비스 token을
 만들며, PostgreSQL 시작·migration·공개 안전 예제 자료 입력·health 확인을
-수행합니다. 새 설치의 분류 상태는 명시적인 `unconfigured`이며 운영자가 실제
-provider를 선택하기 전까지 `/readyz`는 `not_ready`입니다. `--connect-codex`는
-Codex hook, MCP, 기본 자동 회상도 설정합니다.
+수행합니다. 새 설치는 결정론적 로컬 `mock` 분류기와 `AllowMock=true`로 시작하므로
+외부 provider 없이도 `/readyz`가 `ready`입니다. 운영자가 provider를
+`unconfigured`으로 바꾸거나 mock 분류를 비활성화한 경우에만
+setup-required/not_ready가 됩니다. `--connect-codex`는 Codex hook, MCP, 기본
+자동 회상을 설정합니다. 설치된 Claude Code CLI를 연결하려면 `--connect-claude`를
+사용하거나 설치 뒤 `luthn connect claude`를 실행합니다.
 
 | 용도 | 기본 경로 |
 |---|---|

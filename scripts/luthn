@@ -2530,7 +2530,7 @@ claude_instructions_path() { printf '%s' "${LUTHN_CLAUDE_INSTRUCTIONS_FILE:-${CL
 
 claude_hook_args() {
   helper="$(codex_helper_path)"; base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"; service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"; managed_operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
-  printf '%s\n' --arg "$helper" --arg claude-hook-run --arg --base-url --arg "$base_url" --arg --token-file --arg "$service_token_file" --arg --excluded-token-file --arg "$managed_operator_token_file" --arg --connector-version --arg "$codex_connector_version"
+  printf '%s\n' "--arg=$helper" --arg=claude-hook-run --arg=--base-url "--arg=$base_url" --arg=--token-file "--arg=$service_token_file" --arg=--excluded-token-file "--arg=$managed_operator_token_file" --arg=--connector-version "--arg=$codex_connector_version"
 }
 
 sha256_text() {
