@@ -220,6 +220,10 @@ luthn connect codex
 luthn connect codex --no-auto-recall
 luthn connection status codex
 luthn disconnect codex
+luthn connect claude
+luthn connect claude --no-auto-recall
+luthn connection status claude
+luthn disconnect claude
 luthn mcp --list-tools
 ```
 
@@ -241,6 +245,12 @@ commentary에 `Luthn 메모리 N개 참고`를 한 번 표시합니다. 반복 �
 luthn connection status codex
 luthn doctor --json
 ```
+
+Claude Code 연결은 사용자 범위의 `luthn` MCP 등록, Luthn 소유 Stop hook,
+`CLAUDE.md`의 자동 회상 블록을 설치합니다. `luthn connection status claude`는
+자동 수집, MCP, 자동 회상 상태를 함께 확인합니다. `luthn disconnect claude`는
+Luthn이 소유한 hook, 자동 회상 블록, 일치하는 MCP 등록과 비밀이 아닌 소유
+상태만 제거하며 관계없는 Claude 설정과 MCP 등록은 보존합니다.
 
 예상 MCP tool은 `get_context_pack`, `search_safe_context`, `get_wiki_proposal`, `classify_preview`, `create_shared_memory`, `query_shared_memory`, `get_shared_memory_item`, `create_sensitive_access_request`, `get_sensitive_access_request`, `get_sensitive_access_result`입니다. 기본 connector token에는 `access.request`가 포함되어 새 설치와 update 뒤 요청·상태·결과 도구가 바로 동작합니다. 승인·거절은 MCP 밖의 신뢰된 운영자 경로에 남습니다.
 
