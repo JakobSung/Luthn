@@ -21,13 +21,19 @@ Next action: create the next slice plan on the current delivery branch, or ask f
 | ID | Status | Priority | Title | Idea Artifact | First Slice Candidate |
 | --- | --- | --- | --- | --- | --- |
 | PLUGIN-001 | gated | P2 | Dynamic plugin loading and marketplace | `none` | - |
-| WORK-005 | evidence-pending | P1 | 데이터 경계와 MEMORY.md 보완 관계 신뢰 문서 | `docs/01-plan/memory.md/001-idea.md` | - |
+| WORK-011 | backlog | P2 | Money-sensitive classification with person-name exclusion | `docs/01-plan/money-sensitive-classification-with-person-name-exclusion/001-idea.md` | - |
+| WORK-012 | backlog | P2 | Agent memory mutation denial contract | `docs/01-plan/agent-memory-mutation-denial-contract/001-idea.md` | - |
+| WORK-013 | backlog | P2 | Cross-agent recall-first enforcement for Codex and Claude | `docs/01-plan/cross-agent-recall-first-enforcement-for-codex-and-claude/001-idea.md` | - |
+| WORK-014 | evidence-pending | P2 | Field-level sensitive redaction with safe event memory | `docs/01-plan/field-level-sensitive-redaction-with-safe-event-memory/001-idea.md` | - |
 | none | backlog | - | No additional planned quality slice | `none` | - |
 
 ## Planned
 
 | ID | Priority | Title | Goal | Plan |
 | --- | --- | --- | --- | --- |
+| WORK-011 | P2 | Money-sensitive classification with person-name exclusion | 사람 이름만 있는 문장은 민감정보가 아니며 한국어·영어의 금액·매출·연봉·가격 등 돈 관련 데이터는 일관되게 Confidential 이상으로 분류되고 provider가 낮게 판정해도 deterministic guard가 이를 낮추지 않는다. | `none` |
+| WORK-012 | P2 | Agent memory mutation denial contract | 사용자가 어떤 표현으로 요청해도 Agent는 공유 메모리와 민감데이터의 수정·삭제를 수행하지 않고 명시적으로 거절하며, Agent용 MCP·SDK·서비스 토큰으로는 상태 변경이 서버에서도 불가능하다. | `none` |
+| WORK-013 | P2 | Cross-agent recall-first enforcement for Codex and Claude | 특정 Agent·다른 Agent·이전 작업·과거 결정·작업 상태를 묻는 요청에서는 Codex와 Claude가 답변 전에 Luthn 안전 회상을 우선 시도하고, 부족하면 상세 안전 검색으로 이어지며 실패 시 추정하지 않는다. | `none` |
 | none | - | No additional planned quality slice | The approved classification, recall, telemetry, encryption, provenance, ownership, and agent-connection hardening program is complete. | `none` |
 
 ## Done
@@ -52,6 +58,7 @@ Next action: create the next slice plan on the current delivery branch, or ask f
 | SEARCH-001 | Search adoption policy | Deterministic safe search remains default; pgvector is the first vector candidate; external search remains gated by public-safe indexing. Product-code validation profile passed. |
 | SEC-001 | Limited redacted sensitive-access output | Approved sensitive-access requests can return limited redacted output without opening a raw Vault/source read path. Focused security, SDK, and connector validation passed. |
 | WORK-002 | Claude Code connector connection repair and documentation alignment | {'criterion': 'luthn connect claude passes every hook argument that begins with double hyphens to the helper as a value, not as a helper option. AC-002: a clean temporary Claude configuration receives exactly one Luthn-owned MCP registration, Stop hook, and auto-recall instruction through the standard connect command. AC-003: luthn connection status claude recognizes the installed owned configuration without a parser error. AC-004: English and Korean installation and agent quickstart documents describe the repaired connect/status/disconnect lifecycle and the mock readiness contract without obsolete planned wording. AC-005: failure paths preserve unrelated Claude configuration and do not persist API keys.', 'evidence': 'merged PR 43; merge 0371ae4ac4567cf378063556bfdf5cabd3f16b1a; closeout docs/01-plan/delivery-batches/codex-claude-code/002-close-delivery-batch.json'} |
+| WORK-005 | 데이터 경계와 MEMORY.md 보완 관계 신뢰 문서 | {'criterion': 'README.md와 README.ko.md의 데이터 경계 진입점이 한·영 canonical 문서를 계속 가리키고, 문서 변경에 깨진 상대 링크나 공백 오류가 없다.', 'evidence': 'merged PR 44; merge 15f913f64f738b4ba14ef4d61776bfcf0aa56a1e; closeout docs/01-plan/delivery-batches/codex-memory.md/002-close-delivery-batch.json'}; {'criterion': 'docs/data-boundaries.md와 docs/data-boundaries.ko.md가 Luthn과 MEMORY.md가 대체가 아닌 보완 관계임을 각각 설명하고, 사람 관리 운영 지식과 Luthn의 안전한 런타임 공유 맥락의 역할·입력·조회 차이를 명시한다.', 'evidence': 'merged PR 44; merge 15f913f64f738b4ba14ef4d61776bfcf0aa56a1e; closeout docs/01-plan/delivery-batches/codex-memory.md/002-close-delivery-batch.json'}; {'criterion': '두 문서가 Stop hook과 MCP의 제한된 입력, 분류·정책·안전 투영 후 agent-visible 상태, 그리고 전체 transcript·user prompt·working directory·transcript path·credential를 읽거나 전송하지 않는 경계를 구현 문서와 모순 없이 설명한다.', 'evidence': 'merged PR 44; merge 15f913f64f738b4ba14ef4d61776bfcf0aa56a1e; closeout docs/01-plan/delivery-batches/codex-memory.md/002-close-delivery-batch.json'} |
 | add-additive-native-windows-docker-install-and-codex-mcp-baseline | Native Windows Docker lifecycle and Codex integration | The owner confirmed the merged Windows Docker Desktop lifecycle and Codex integration operate correctly on Windows. |
 | agent-neutral-container-release-and-lifecycle-channels | Agent-neutral container release and lifecycle channels | docs/01-plan/agent-neutral-container-release-and-lifecycle-channels/003-close-slice-agent-neutral-container-release-and-lifecycle-channels.json |
 | auditable-bounded-cleanup-for-expired-automatic-turn-capsules | Auditable bounded cleanup for expired automatic turn capsules | docs/01-plan/auditable-bounded-cleanup-for-expired-automatic-turn-capsules/003-close-slice-auditable-bounded-cleanup-for-expired-automatic-turn-capsules.json |

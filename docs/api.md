@@ -568,15 +568,19 @@ projections. They do not expose private owner memory, restricted shared memory,
 raw Vault/source data, or participant-specific private context.
 
 Memory writes are classified before storage. The classifier receives the
-combined `title`, `safeSummary`, and every `coreTags` entry. If any field is
-sensitive, Luthn keeps the record behind the private memory boundary instead of
-making it agent-visible. Sensitive or otherwise non-agent-visible user fields
-are stored only as an authenticated protected payload in the separate
-`sensitive_memory_payloads` table. The ordinary row, write response, and search
-indexes use `[protected-memory]` / `[protected-payload]` placeholders with empty
-tags and recall metadata. No public API returns the ciphertext or decrypts this
-payload. `/readyz` reports `sensitive-memory-protection`; protected API routes
-return `503` when the key ring or existing ciphertext cannot be verified.
+combined `title`, `safeSummary`, every `coreTags` entry, and optional recall
+metadata. When the deterministic local guard can remove every recognized
+sensitive value, Luthn classifies the redacted projection again. A meaningful
+public result may remain agent-visible while the original title and summary are
+stored only as an authenticated protected payload in the separate
+`sensitive_memory_payloads` table. Incomplete redaction, a non-meaningful
+remainder, sensitive metadata, or a failed projection classification keeps the
+whole item behind the private boundary. That fallback uses
+`[protected-memory]` / `[protected-payload]` placeholders with empty tags and
+recall metadata in the ordinary row, write response, and search indexes. No
+public API returns the ciphertext or decrypts this payload. `/readyz` reports
+`sensitive-memory-protection`; protected API routes return `503` when the key
+ring or existing ciphertext cannot be verified.
 
 Writes to `/api/memory/items`, `/api/sources`, and
 `/api/agent/turn-summaries` accept the same optional structured `provenance`
