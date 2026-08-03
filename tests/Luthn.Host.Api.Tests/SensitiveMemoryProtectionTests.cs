@@ -90,6 +90,7 @@ public sealed class SensitiveMemoryProtectionTests
             "홍길동 사원의 주소는 [redacted]이고 신규 견적을 발행했다.");
         record.Sensitivity = SensitivityLevel.Public;
         record.Visibility = MemoryVisibility.SharedAcrossAgents;
+        record.SourceSessionId = null;
         record.AllowsAgentContext = true;
         var original = Payload(
             "홍길동 견적 메모",

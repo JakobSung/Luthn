@@ -216,7 +216,8 @@ internal static class SensitiveMemoryPersistence
             string.IsNullOrWhiteSpace(record.Title) ||
             string.IsNullOrWhiteSpace(record.SafeSummary) ||
             record.Title == ProtectedTitle ||
-            record.SafeSummary == ProtectedSummary)
+            record.SafeSummary == ProtectedSummary ||
+            record.SourceSessionId is not null)
         {
             return false;
         }
