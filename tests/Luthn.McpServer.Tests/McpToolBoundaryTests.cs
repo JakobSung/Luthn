@@ -167,6 +167,34 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task LightweightContextPackSearchesPastCandidatesThatCannotFitBudget()
+    {
+        var client = new FakeLuthnClient
+        {
+            ContextPackResult = new ContextPackDto(
+                ["project"],
+                Enumerable.Range(1, 12)
+                    .Select(index => new ContextPackItemDto(
+                        new string((char)('a' + index), 2_000),
+                        $"Oversized memory {index}",
+                        "Relevant but impossible to fit.",
+                        "Public",
+                        ["project"]))
+                    .Append(ContextPack("memory-13", "First candidate that fits").Items[0])
+                    .ToArray())
+        };
+        var tool = new GetContextPackTool(client);
+        using var args = JsonDocument.Parse("""{"maxItems":3,"maxTokens":600}""");
+
+        var result = Assert.IsType<ContextPackDto>(await tool.InvokeAsync(args.RootElement));
+
+        Assert.Equal(["memory-13"], result.Items.Select(item => item.Id));
+        Assert.True(EstimateTokens(result.Items) <= 600);
+        Assert.Equal(2, client.ContextPackCallCount);
+        Assert.Equal(50, client.LastMaxItems);
+    }
+
+    [Fact]
     public async Task LightweightContextPackRetriesWithFewerItemsWhenEqualSlotsAreTooSmall()
     {
         var client = new FakeLuthnClient
@@ -586,7 +614,11 @@ public sealed class McpToolBoundaryTests
             {
                 throw ContextPackException;
             }
-            return ContextPackResult with { CoreTags = coreTags };
+            return ContextPackResult with
+            {
+                CoreTags = coreTags,
+                Items = ContextPackResult.Items.Take(maxItems).ToArray()
+            };
         }
 
         public Task<ContextPackDto> GetContextPackAsync(
