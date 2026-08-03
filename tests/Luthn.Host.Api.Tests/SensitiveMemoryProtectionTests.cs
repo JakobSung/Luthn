@@ -80,6 +80,88 @@ public sealed class SensitiveMemoryProtectionTests
     }
 
     [Fact]
+    public async Task AgentVisibleSafeProjectionCanRetainVerifiedEncryptedOriginal()
+    {
+        var options = CreateOptions();
+        await using var db = new LuthnDbContext(options);
+        var record = LegacyRecord(
+            "memory-redacted",
+            "홍길동 견적 메모",
+            "홍길동 사원의 주소는 [redacted]이고 신규 견적을 발행했다.");
+        record.Sensitivity = SensitivityLevel.Public;
+        record.Visibility = MemoryVisibility.SharedAcrossAgents;
+        record.SourceSessionId = null;
+        record.AllowsAgentContext = true;
+        var original = Payload(
+            "홍길동 견적 메모",
+            "홍길동 사원의 주소는 person@example.com이고 신규 견적을 발행했다.");
+        var protector = CreateProtector();
+        db.SharedMemoryItems.Add(record);
+        db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.ProtectOriginalForSafeProjection(
+            record,
+            original,
+            protector,
+            new DeterministicSensitiveDataDetector(),
+            record.CreatedAt));
+        await db.SaveChangesAsync();
+
+        var state = new SensitiveMemoryProtectionState();
+        var migrator = CreateMigrator(db, protector, state);
+        await migrator.MigrateAndVerifyAsync();
+        await migrator.MigrateAndVerifyAsync();
+
+        Assert.True(state.IsReady);
+        Assert.Equal(0, state.MigratedRecords);
+        var stored = await db.SharedMemoryItems.AsNoTracking().SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.AsNoTracking().SingleAsync();
+        Assert.True(stored.AllowsAgentContext);
+        Assert.Equal(SensitivityLevel.Public, stored.Sensitivity);
+        Assert.Equal(record.Title, stored.Title);
+        Assert.Equal(record.SafeSummary, stored.SafeSummary);
+        Assert.DoesNotContain("person@example.com", encrypted.ProtectedPayload, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            original.SafeSummary,
+            protector.Unprotect(stored.Id, encrypted.ProtectedPayload).SafeSummary);
+        Assert.Empty(await db.AuditEvents.AsNoTracking().ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task StartupVerificationRejectsSensitiveAgentVisibleProjectionWithEncryptedSidecar()
+    {
+        var options = CreateOptions();
+        var protector = CreateProtector();
+        await using (var seed = new LuthnDbContext(options))
+        {
+            var record = LegacyRecord(
+                "memory-unsafe-projection",
+                "홍길동 연락처 메모",
+                "홍길동의 주소는 person@example.com이다.");
+            record.Sensitivity = SensitivityLevel.Public;
+            record.Visibility = MemoryVisibility.SharedAcrossAgents;
+            record.AllowsAgentContext = true;
+            var payload = Payload(record.Title, record.SafeSummary);
+            seed.SharedMemoryItems.Add(record);
+            seed.SensitiveMemoryPayloads.Add(new SensitiveMemoryPayloadRecord
+            {
+                MemoryItemId = record.Id,
+                ContractVersion = SensitiveMemoryPayload.CurrentContractVersion,
+                ProtectionScheme = protector.ProtectionScheme,
+                ProtectedPayload = protector.Protect(record.Id, payload),
+                CreatedAt = record.CreatedAt,
+                UpdatedAt = record.UpdatedAt
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = new LuthnDbContext(options);
+        var state = new SensitiveMemoryProtectionState();
+        var migrator = CreateMigrator(db, protector, state);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => migrator.MigrateAndVerifyAsync());
+        Assert.False(state.IsReady);
+    }
+
+    [Fact]
     public async Task LegacyMigrationFailureDoesNotOverwritePlaintextOrPersistPartialCiphertext()
     {
         var options = CreateOptions();
@@ -203,6 +285,7 @@ public sealed class SensitiveMemoryProtectionTests
         await Assert.ThrowsAsync<CryptographicException>(() => MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             new FailingValidationProtector(),
             db,
@@ -258,6 +341,7 @@ public sealed class SensitiveMemoryProtectionTests
         new(
             db,
             protector,
+            new DeterministicSensitiveDataDetector(),
             state,
             TimeProvider.System,
             NullLogger<SensitiveMemoryPayloadMigrator>.Instance);

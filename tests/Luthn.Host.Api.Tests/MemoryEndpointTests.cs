@@ -41,6 +41,7 @@ public sealed class MemoryEndpointTests
         var createResult = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,
@@ -120,6 +121,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,
@@ -146,6 +148,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             protector,
             db,
@@ -185,6 +188,256 @@ public sealed class MemoryEndpointTests
     }
 
     [Fact]
+    public async Task MemoryWriteRedactsSensitiveValueAndRetainsAgentVisibleEventProjection()
+    {
+        await using var db = CreateDbContext();
+        var request = new CreateMemoryItemRequest
+        {
+            Title = "홍길동 견적 메모",
+            SafeSummary = "홍길동 사원의 주소는 person@example.com이고 신규 견적을 발행했다.",
+            CoreTags = ["sales", "quote"],
+            Visibility = MemoryVisibility.SharedAcrossAgents
+        };
+        var protector = TestSensitiveMemoryProtection.Create();
+
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            request,
+            new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
+            new PolicyEngine(),
+            protector,
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result).Value!;
+        Assert.True(created.AllowsAgentContext);
+        Assert.Equal(SensitivityLevel.Public, created.Sensitivity);
+        Assert.Equal(MemoryVisibility.SharedAcrossAgents, created.Visibility);
+        Assert.Contains("홍길동", created.SafeSummary, StringComparison.Ordinal);
+        Assert.Contains("견적을 발행했다", created.SafeSummary, StringComparison.Ordinal);
+        Assert.Contains(
+            DeterministicSensitiveDataDetector.RedactionMarker,
+            created.SafeSummary,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("person@example.com", created.SafeSummary, StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.SharedMemoryItems.AsNoTracking().SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.AsNoTracking().SingleAsync();
+        Assert.True(SensitiveMemoryPersistence.HasValidProjectionForProtectedPayload(
+            stored,
+            new DeterministicSensitiveDataDetector()));
+        Assert.False(SensitiveMemoryPersistence.IsInertProjection(stored));
+        Assert.DoesNotContain("person@example.com", encrypted.ProtectedPayload, StringComparison.OrdinalIgnoreCase);
+        var plaintext = protector.Unprotect(stored.Id, encrypted.ProtectedPayload);
+        Assert.Equal(request.Title, plaintext.Title);
+        Assert.Equal(request.SafeSummary, plaintext.SafeSummary);
+
+        var read = await MemoryEndpoints.ReadMemoryItem(
+            created.Id,
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+        var readItem = Assert.IsType<Ok<MemoryItemResponse>>(read.Result).Value!;
+        Assert.Equal(created.SafeSummary, readItem.SafeSummary);
+
+        var safeQuery = await MemoryEndpoints.QueryMemoryItems(
+            new MemoryQueryRequest("견적", ["sales"], 10),
+            new DeterministicRetrievalBackend(new SafeSearchIndex()),
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
+            db,
+            new OperationalMetrics(),
+            TimeProvider.System,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+        Assert.Equal(created.Id, Assert.Single(Assert.IsType<Ok<MemoryQueryResponse>>(safeQuery.Result).Value!.Items).Id);
+
+        var sensitiveQuery = await MemoryEndpoints.QueryMemoryItems(
+            new MemoryQueryRequest("person@example.com", ["sales"], 10),
+            new DeterministicRetrievalBackend(new SafeSearchIndex()),
+            new DbBackedRetrievalCandidateSelector(db, TimeProvider.System),
+            db,
+            new OperationalMetrics(),
+            TimeProvider.System,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+        Assert.Empty(Assert.IsType<Ok<MemoryQueryResponse>>(sensitiveQuery.Result).Value!.Items);
+
+        var audit = await db.AuditEvents.SingleAsync(record => record.Action == "memory.item.classified");
+        Assert.Equal("metadata-only", audit.PayloadClass);
+        Assert.Equal("safe-projection-with-encrypted-original", audit.RedactionState);
+    }
+
+    [Fact]
+    public async Task MemoryWriteDoesNotExposeSensitiveSourceSessionInSafeProjection()
+    {
+        await using var db = CreateDbContext();
+        var request = new CreateMemoryItemRequest
+        {
+            Title = "홍길동 견적 메모",
+            SafeSummary = "홍길동 사원의 주소는 person@example.com이고 신규 견적을 발행했다.",
+            CoreTags = ["sales", "quote"],
+            Visibility = MemoryVisibility.SharedAcrossAgents,
+            SourceSessionId = "person@example.com"
+        };
+        var protector = TestSensitiveMemoryProtection.Create();
+
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            request,
+            new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
+            new PolicyEngine(),
+            protector,
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result).Value!;
+        Assert.True(created.AllowsAgentContext);
+        Assert.Null(created.SourceSessionId);
+
+        var stored = await db.SharedMemoryItems.AsNoTracking().SingleAsync();
+        Assert.Null(stored.SourceSessionId);
+        var encrypted = await db.SensitiveMemoryPayloads.AsNoTracking().SingleAsync();
+        var plaintext = protector.Unprotect(stored.Id, encrypted.ProtectedPayload);
+        Assert.Equal(request.SourceSessionId, plaintext.SourceSessionId);
+    }
+
+    [Fact]
+    public async Task MemoryWriteKeepsSensitiveSourceSessionPrivateWhenContentIsPublic()
+    {
+        await using var db = CreateDbContext();
+        var request = new CreateMemoryItemRequest
+        {
+            Title = "Release memory",
+            SafeSummary = "Public-safe deployment memory.",
+            CoreTags = ["release"],
+            Visibility = MemoryVisibility.SharedAcrossAgents,
+            SourceSessionId = "person@example.com"
+        };
+        var protector = TestSensitiveMemoryProtection.Create();
+
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            request,
+            new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
+            new PolicyEngine(),
+            protector,
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result).Value!;
+        Assert.False(created.AllowsAgentContext);
+        Assert.Equal(SensitiveMemoryPersistence.ProtectedTitle, created.Title);
+        Assert.Null(created.SourceSessionId);
+        var stored = await db.SharedMemoryItems.AsNoTracking().SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.AsNoTracking().SingleAsync();
+        Assert.Equal(
+            request.SourceSessionId,
+            protector.Unprotect(stored.Id, encrypted.ProtectedPayload).SourceSessionId);
+    }
+
+    [Fact]
+    public async Task MemoryWriteKeepsItemPrivateWhenRedactionLeavesNoMeaningfulSummary()
+    {
+        await using var db = CreateDbContext();
+        var request = new CreateMemoryItemRequest
+        {
+            Title = "연락처 메모",
+            SafeSummary = "person@example.com",
+            CoreTags = ["contact"],
+            Visibility = MemoryVisibility.SharedAcrossAgents
+        };
+
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            request,
+            new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
+            new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result).Value!;
+        Assert.False(created.AllowsAgentContext);
+        Assert.Equal(MemoryVisibility.PrivateToOwner, created.Visibility);
+        Assert.Equal(SensitiveMemoryPersistence.ProtectedSummary, created.SafeSummary);
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(
+            await db.SharedMemoryItems.AsNoTracking().SingleAsync()));
+    }
+
+    [Fact]
+    public async Task MemoryWriteKeepsContactOnlyProjectionPrivateWhenTextRemains()
+    {
+        await using var db = CreateDbContext();
+        var request = new CreateMemoryItemRequest
+        {
+            Title = "홍길동 연락처",
+            SafeSummary = "홍길동의 주소는 person@example.com입니다.",
+            CoreTags = ["contact"],
+            Visibility = MemoryVisibility.SharedAcrossAgents
+        };
+
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            request,
+            new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
+            new PolicyEngine(),
+            TestSensitiveMemoryProtection.Create(),
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result).Value!;
+        Assert.False(created.AllowsAgentContext);
+        Assert.Equal(SensitiveMemoryPersistence.ProtectedSummary, created.SafeSummary);
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(
+            await db.SharedMemoryItems.AsNoTracking().SingleAsync()));
+    }
+
+    [Fact]
+    public async Task MemoryWriteFallsBackToPrivatePayloadWhenRedactedProjectionIsExpired()
+    {
+        await using var db = CreateDbContext();
+        var request = new CreateMemoryItemRequest
+        {
+            Title = "홍길동 견적 메모",
+            SafeSummary = "홍길동 사원의 주소는 person@example.com이고 신규 견적을 발행했다.",
+            CoreTags = ["sales", "quote"],
+            Visibility = MemoryVisibility.SharedAcrossAgents,
+            RetentionKind = MemoryRetentionKind.Session,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        };
+        var protector = TestSensitiveMemoryProtection.Create();
+
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            request,
+            new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
+            new PolicyEngine(),
+            protector,
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result).Value!;
+        Assert.False(created.AllowsAgentContext);
+        var stored = await db.SharedMemoryItems.AsNoTracking().SingleAsync();
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(stored));
+        var encrypted = await db.SensitiveMemoryPayloads.AsNoTracking().SingleAsync();
+        var plaintext = protector.Unprotect(stored.Id, encrypted.ProtectedPayload);
+        Assert.Equal(request.SafeSummary, plaintext.SafeSummary);
+        Assert.Equal(
+            "encrypted-payload-only",
+            await db.AuditEvents
+                .Where(record => record.Action == "memory.item.classified")
+                .Select(record => record.RedactionState)
+                .SingleAsync());
+    }
+
+    [Fact]
     public async Task KoreanSensitiveTitleAloneKeepsSharedMemoryPrivate()
     {
         await using var db = CreateDbContext();
@@ -199,6 +452,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,
@@ -228,6 +482,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,
@@ -255,6 +510,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new UnavailableContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,
@@ -284,6 +540,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,
@@ -310,6 +567,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,
@@ -376,6 +634,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,
@@ -461,6 +720,7 @@ public sealed class MemoryEndpointTests
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
             new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
             new PolicyEngine(),
             TestSensitiveMemoryProtection.Create(),
             db,

@@ -193,6 +193,7 @@ public sealed class PostgresIntegrationSmokeTests
         var payloadMigrator = new SensitiveMemoryPayloadMigrator(
             db,
             payloadProtector,
+            new DeterministicSensitiveDataDetector(),
             protectionState,
             TimeProvider.System,
             NullLogger<SensitiveMemoryPayloadMigrator>.Instance);

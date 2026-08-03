@@ -57,6 +57,61 @@ public sealed class DeterministicSensitiveDataDetectorTests
     }
 
     [Fact]
+    public void RedactorRemovesHighConfidenceValuesWithoutRemovingPersonNameOrEvent()
+    {
+        const string content =
+            "홍길동 사원이 person@example.com, 010-1234-5678, 900101-1234568, " +
+            "4111 1111 1111 1111을 확인했고 비밀번호: correct-horse-battery-staple로 견적을 발행했다.";
+        var detector = new DeterministicSensitiveDataDetector();
+
+        var result = detector.Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.Contains("홍길동 사원", result.Text, StringComparison.Ordinal);
+        Assert.Contains("견적을 발행했다", result.Text, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("person@example.com", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("010-1234-5678", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("900101-1234568", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("4111 1111 1111 1111", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("correct-horse-battery-staple", result.Text, StringComparison.Ordinal);
+        Assert.Contains("email", result.Categories);
+        Assert.Contains("personal identifier", result.Categories);
+        Assert.Contains("payment", result.Categories);
+        Assert.Contains("credential", result.Categories);
+    }
+
+    [Theory]
+    [InlineData("ghp_short")]
+    [InlineData("010-123-456")]
+    [InlineData("900230-1234567")]
+    [InlineData("4111 1111 1111 1112")]
+    [InlineData("release@example")]
+    [InlineData("홍길동 사원이 공개 견적을 발행했다")]
+    public void RedactorLeavesBenignNearMissesAndNamesUnchanged(string content)
+    {
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.False(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.Equal(content, result.Text);
+        Assert.Empty(result.Categories);
+    }
+
+    [Fact]
+    public void RedactorFailsClosedForIncompletePrivateKeyBlock()
+    {
+        const string content = "-----BEGIN OPENSSH PRIVATE KEY-----\nunterminated-private-key-body";
+
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.False(result.Changed);
+        Assert.False(result.IsComplete);
+        Assert.Equal(content, result.Text);
+    }
+
+    [Fact]
     public async Task HybridClassifierOverridesPublicProviderFalseNegative()
     {
         var provider = new StaticClassifier(new ClassificationResult(

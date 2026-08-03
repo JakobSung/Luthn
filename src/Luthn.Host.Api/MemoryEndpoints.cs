@@ -13,6 +13,67 @@ namespace Luthn.Host.Api;
 
 public static class MemoryEndpoints
 {
+    private static readonly string[] MeaningfulEventMarkers =
+    [
+        "진행",
+        "발행",
+        "완료",
+        "생성",
+        "수정",
+        "삭제",
+        "결정",
+        "논의",
+        "요청",
+        "승인",
+        "거절",
+        "배포",
+        "출시",
+        "처리",
+        "등록",
+        "작성",
+        "전달",
+        "확인",
+        "변경",
+        "검토",
+        "조치",
+        "교체",
+        "발급",
+        "수신",
+        "발송",
+        "설정",
+        "연결",
+        "시작",
+        "종료",
+        "예약",
+        "할당",
+        "해결",
+        "approved",
+        "created",
+        "updated",
+        "deleted",
+        "decided",
+        "discussed",
+        "requested",
+        "completed",
+        "deployed",
+        "released",
+        "processed",
+        "registered",
+        "written",
+        "sent",
+        "received",
+        "reviewed",
+        "changed",
+        "fixed",
+        "issued",
+        "renewed",
+        "scheduled",
+        "assigned",
+        "resolved",
+        "started",
+        "finished"
+    ];
+
     public static IEndpointRouteBuilder MapMemoryItems(this IEndpointRouteBuilder app)
     {
         var memory = app.MapGroup("/api/memory");
@@ -35,6 +96,7 @@ public static class MemoryEndpoints
     public static async Task<Results<Created<MemoryItemResponse>, BadRequest<ProblemDetails>, ProblemHttpResult>> CreateMemoryItem(
         CreateMemoryItemRequest request,
         IContentClassifier classifier,
+        DeterministicSensitiveDataDetector sensitiveDataDetector,
         IPolicyEngine policyEngine,
         ISensitiveMemoryPayloadProtector payloadProtector,
         LuthnDbContext db,
@@ -77,46 +139,40 @@ public static class MemoryEndpoints
         }
         var sourceId = new PublicRecordId(memoryId);
         var normalizedTags = NormalizeTags(request.CoreTags!);
-        var classificationInput = AgentVisibleClassificationInput.Compose(
-            content: null,
-            request.Title,
-            request.SafeSummary,
-            normalizedTags,
-            recallMetadata.ProjectKey,
-            recallMetadata.TaskKey,
-            recallMetadata.TopicTags);
-        ClassificationResult classification;
+        MemoryProjectionSelection projection;
         try
         {
-            classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
+            projection = await SelectProjectionAsync(
+                request,
                 sourceId,
-                classificationInput,
-                "shared-memory",
-                cancellationToken));
+                normalizedTags,
+                recallMetadata,
+                classifier,
+                sensitiveDataDetector,
+                policyEngine,
+                cancellationToken);
         }
         catch (ClassificationProviderException error)
         {
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
-        var effectiveClassification = ApplyRequestedSensitivity(classification, request.Sensitivity);
-        var decision = policyEngine.Decide(effectiveClassification);
-        var visibility = decision.AllowsAgentContext
+        var visibility = projection.Decision.AllowsAgentContext
             ? request.Visibility
             : MemoryVisibility.PrivateToOwner;
         var retention = BuildRetentionPolicy(request.RetentionKind, request.ExpiresAt);
         var item = new SharedMemoryItem(
             new PublicRecordId(memoryId),
-            request.Title.Trim(),
-            request.SafeSummary.Trim(),
-            effectiveClassification.Sensitivity,
+            projection.Title,
+            projection.SafeSummary,
+            projection.Classification.Sensitivity,
             normalizedTags,
             visibility,
             retention,
-            string.IsNullOrWhiteSpace(request.SourceSessionId)
+            projection.RetainsEncryptedOriginal || string.IsNullOrWhiteSpace(request.SourceSessionId)
                 ? null
                 : new PublicRecordId(request.SourceSessionId.Trim()));
 
-        var allowsAgentContext = decision.AllowsAgentContext && AllowsAgentContext(item, createdAt);
+        var allowsAgentContext = projection.Decision.AllowsAgentContext && AllowsAgentContext(item, createdAt);
         var record = new SharedMemoryItemRecord
         {
             Id = item.Id.Value,
@@ -139,9 +195,31 @@ public static class MemoryEndpoints
         };
         db.SharedMemoryItems.Add(record);
         db.CollectionProvenance.Add(provenance);
-        if (SensitiveMemoryPersistence.RequiresProtection(record))
+        var originalPayload = projection.RetainsEncryptedOriginal
+            ? new SensitiveMemoryPayload(
+                SensitiveMemoryPayload.CurrentContractVersion,
+                request.Title.Trim(),
+                request.SafeSummary.Trim(),
+                normalizedTags,
+                recallMetadata.ProjectKey,
+                recallMetadata.TaskKey,
+                recallMetadata.TopicTags,
+                string.IsNullOrWhiteSpace(request.SourceSessionId)
+                    ? null
+                    : request.SourceSessionId.Trim())
+            : null;
+        if (projection.RetainsEncryptedOriginal && allowsAgentContext)
         {
-            var payload = SensitiveMemoryPersistence.FromRecord(record);
+            db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.ProtectOriginalForSafeProjection(
+                record,
+                originalPayload!,
+                payloadProtector,
+                sensitiveDataDetector,
+                createdAt));
+        }
+        else if (SensitiveMemoryPersistence.RequiresProtection(record))
+        {
+            var payload = originalPayload ?? SensitiveMemoryPersistence.FromRecord(record);
             db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.Protect(
                 record,
                 payload,
@@ -157,7 +235,11 @@ public static class MemoryEndpoints
             Action = "memory.item.classified",
             SubjectId = item.Id.Value,
             PayloadClass = "metadata-only",
-            RedactionState = allowsAgentContext ? "safe-projection-only" : "encrypted-payload-only"
+            RedactionState = projection.RetainsEncryptedOriginal && allowsAgentContext
+                ? "safe-projection-with-encrypted-original"
+                : allowsAgentContext
+                    ? "safe-projection-only"
+                    : "encrypted-payload-only"
         });
 
         await db.SaveChangesAsync(cancellationToken);
@@ -407,6 +489,159 @@ public static class MemoryEndpoints
         };
     }
 
+    private static async ValueTask<MemoryProjectionSelection> SelectProjectionAsync(
+        CreateMemoryItemRequest request,
+        PublicRecordId sourceId,
+        IReadOnlyList<string> normalizedTags,
+        NormalizedRecallMetadata recallMetadata,
+        IContentClassifier classifier,
+        DeterministicSensitiveDataDetector sensitiveDataDetector,
+        IPolicyEngine policyEngine,
+        CancellationToken cancellationToken)
+    {
+        var originalTitle = request.Title.Trim();
+        var originalSummary = request.SafeSummary.Trim();
+        var originalInput = AgentVisibleClassificationInput.Compose(
+            content: null,
+            originalTitle,
+            originalSummary,
+            normalizedTags,
+            recallMetadata.ProjectKey,
+            recallMetadata.TaskKey,
+            recallMetadata.TopicTags);
+        var originalClassification = ApplyRequestedSensitivity(
+            MergeLocalSourceSessionGuard(
+                await ClassifyWithLocalGuardAsync(
+                    sourceId,
+                    originalInput,
+                    classifier,
+                    sensitiveDataDetector,
+                    cancellationToken),
+                sourceId,
+                request.SourceSessionId,
+                sensitiveDataDetector),
+            request.Sensitivity);
+        var originalDecision = policyEngine.Decide(originalClassification);
+        var original = new MemoryProjectionSelection(
+            originalTitle,
+            originalSummary,
+            originalClassification,
+            originalDecision,
+            RetainsEncryptedOriginal: false);
+
+        if (request.Sensitivity != SensitivityLevel.Public ||
+            request.Visibility is not (MemoryVisibility.PublicSafe or MemoryVisibility.SharedAcrossAgents) ||
+            originalDecision.AllowsAgentContext)
+        {
+            return original;
+        }
+
+        var titleRedaction = sensitiveDataDetector.Redact(originalTitle);
+        var summaryRedaction = sensitiveDataDetector.Redact(originalSummary);
+        if (!titleRedaction.IsComplete ||
+            !summaryRedaction.IsComplete ||
+            (!titleRedaction.Changed && !summaryRedaction.Changed) ||
+            !HasMeaningfulProjectionText(titleRedaction.Text, minimumCharacters: 2) ||
+            !HasMeaningfulProjectionText(
+                summaryRedaction.Text,
+                minimumCharacters: 8,
+                requiresEventSignal: true))
+        {
+            return original;
+        }
+
+        var projectedInput = AgentVisibleClassificationInput.Compose(
+            content: null,
+            titleRedaction.Text,
+            summaryRedaction.Text,
+            normalizedTags,
+            recallMetadata.ProjectKey,
+            recallMetadata.TaskKey,
+            recallMetadata.TopicTags);
+        var projectedClassification = ApplyRequestedSensitivity(
+            await ClassifyWithLocalGuardAsync(
+                sourceId,
+                projectedInput,
+                classifier,
+                sensitiveDataDetector,
+                cancellationToken),
+            request.Sensitivity);
+        var projectedDecision = policyEngine.Decide(projectedClassification);
+        if (!projectedDecision.AllowsAgentContext)
+        {
+            return original;
+        }
+
+        return new MemoryProjectionSelection(
+            titleRedaction.Text,
+            summaryRedaction.Text,
+            projectedClassification,
+            projectedDecision,
+            RetainsEncryptedOriginal: true);
+    }
+
+    private static async ValueTask<ClassificationResult> ClassifyWithLocalGuardAsync(
+        PublicRecordId sourceId,
+        string input,
+        IContentClassifier classifier,
+        DeterministicSensitiveDataDetector sensitiveDataDetector,
+        CancellationToken cancellationToken)
+    {
+        var configured = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
+            sourceId,
+            input,
+            "shared-memory",
+            cancellationToken));
+        var local = sensitiveDataDetector.Detect(sourceId, input);
+        return ConservativeClassificationMerger.Merge(configured, local);
+    }
+
+    private static ClassificationResult MergeLocalSourceSessionGuard(
+        ClassificationResult classification,
+        PublicRecordId sourceId,
+        string? sourceSessionId,
+        DeterministicSensitiveDataDetector sensitiveDataDetector)
+    {
+        if (string.IsNullOrWhiteSpace(sourceSessionId))
+        {
+            return classification;
+        }
+
+        var sourceSessionValue = sourceSessionId.Trim();
+        var deterministic = sensitiveDataDetector.Detect(sourceId, sourceSessionValue);
+        var taxonomyCategories = ClassificationTaxonomy.DetectCategories(sourceSessionValue);
+        var taxonomySensitivity = taxonomyCategories
+            .Select(ClassificationTaxonomy.MinimumSensitivityFor)
+            .Where(level => level is not null)
+            .Select(level => level!.Value)
+            .DefaultIfEmpty(SensitivityLevel.Public)
+            .Max();
+        var taxonomy = new ClassificationResult(
+            sourceId,
+            taxonomySensitivity,
+            taxonomyCategories.Count == 0 ? 0 : 1,
+            taxonomyCategories,
+            taxonomySensitivity is SensitivityLevel.Confidential or SensitivityLevel.Restricted);
+
+        return ConservativeClassificationMerger.Merge(
+            classification,
+            ConservativeClassificationMerger.Merge(deterministic, taxonomy));
+    }
+
+    private static bool HasMeaningfulProjectionText(
+        string value,
+        int minimumCharacters,
+        bool requiresEventSignal = false)
+    {
+        var withoutMarkers = value.Replace(
+            DeterministicSensitiveDataDetector.RedactionMarker,
+            "",
+            StringComparison.Ordinal);
+        return withoutMarkers.Count(char.IsLetterOrDigit) >= minimumCharacters &&
+            (!requiresEventSignal || MeaningfulEventMarkers.Any(marker =>
+                withoutMarkers.Contains(marker, StringComparison.OrdinalIgnoreCase)));
+    }
+
     private static ProblemDetails CreateValidationProblem(string detail) =>
         ApiValidation.CreateProblem("Invalid memory item request.", detail);
 
@@ -416,6 +651,13 @@ public static class MemoryEndpoints
             .Select(tag => tag.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    private sealed record MemoryProjectionSelection(
+        string Title,
+        string SafeSummary,
+        ClassificationResult Classification,
+        StorageDecision Decision,
+        bool RetainsEncryptedOriginal);
 
     private static MemoryItemResponse ToResponse(SharedMemoryItemRecord record) =>
         ToResponse(

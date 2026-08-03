@@ -195,11 +195,15 @@ Shared-memory content that is sensitive or not eligible for agent context uses
 a separate `sensitive_memory_payloads` table. Its title, summary, tags,
 project/task/topic metadata, and source-session correlation are serialized as a
 versioned payload and protected with authenticated ASP.NET Core Data Protection
-using a purpose bound to the memory record ID. The ordinary
-`shared_memory_items` row contains only fixed inert placeholders and routing
-metadata; its search fields contain no user text. Ciphertext is not returned by
-agent APIs and is not copied into recall, sync, publication, audit, logs, or
-metrics.
+using a purpose bound to the memory record ID. When the deterministic local
+guard can remove every recognized sensitive value and the remaining title,
+summary, tags, and recall metadata pass classification again, the ordinary
+`shared_memory_items` row may retain that public-safe redacted projection while
+the original stays only in the encrypted payload. If redaction is incomplete,
+leaves no meaningful summary, or fails reclassification, the ordinary row uses
+fixed inert placeholders and contains no user text in its search fields.
+Ciphertext is not returned by agent APIs and is not copied into recall, sync,
+publication, audit, logs, or metrics.
 
 The Data Protection key ring lives in the separate `luthn-operator` volume,
 not PostgreSQL. This protects a database dump or PostgreSQL-volume-only

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Luthn.Core.Classification;
+using Luthn.Core.Common;
+using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
 using Luthn.Core.Search;
 using Microsoft.AspNetCore.DataProtection;
@@ -152,11 +154,40 @@ internal static class SensitiveMemoryPersistence
             throw new InvalidOperationException("Only non-agent-visible memory can use the protected payload store.");
         }
 
-        var protectedPayload = protector.Protect(record.Id, payload);
         ApplyInertProjection(record);
+        return CreateProtectedPayloadRecord(record.Id, payload, protector, now);
+    }
+
+    public static SensitiveMemoryPayloadRecord ProtectOriginalForSafeProjection(
+        SharedMemoryItemRecord record,
+        SensitiveMemoryPayload payload,
+        ISensitiveMemoryPayloadProtector protector,
+        DeterministicSensitiveDataDetector sensitiveDataDetector,
+        DateTimeOffset now)
+    {
+        if (!IsAgentVisibleSafeProjection(record, sensitiveDataDetector))
+        {
+            throw new InvalidOperationException("Only an agent-visible safe projection can retain an encrypted original.");
+        }
+
+        return CreateProtectedPayloadRecord(record.Id, payload, protector, now);
+    }
+
+    public static bool HasValidProjectionForProtectedPayload(
+        SharedMemoryItemRecord record,
+        DeterministicSensitiveDataDetector sensitiveDataDetector) =>
+        IsInertProjection(record) || IsAgentVisibleSafeProjection(record, sensitiveDataDetector);
+
+    private static SensitiveMemoryPayloadRecord CreateProtectedPayloadRecord(
+        string memoryItemId,
+        SensitiveMemoryPayload payload,
+        ISensitiveMemoryPayloadProtector protector,
+        DateTimeOffset now)
+    {
+        var protectedPayload = protector.Protect(memoryItemId, payload);
         return new SensitiveMemoryPayloadRecord
         {
-            MemoryItemId = record.Id,
+            MemoryItemId = memoryItemId,
             ContractVersion = payload.ContractVersion,
             ProtectionScheme = protector.ProtectionScheme,
             ProtectedPayload = protectedPayload,
@@ -174,6 +205,38 @@ internal static class SensitiveMemoryPersistence
         record.TopicTags.Count == 0 &&
         record.SourceSessionId is null &&
         !record.AllowsAgentContext;
+
+    private static bool IsAgentVisibleSafeProjection(
+        SharedMemoryItemRecord record,
+        DeterministicSensitiveDataDetector sensitiveDataDetector)
+    {
+        if (!record.AllowsAgentContext ||
+            record.Sensitivity != SensitivityLevel.Public ||
+            record.Visibility is not (MemoryVisibility.PublicSafe or MemoryVisibility.SharedAcrossAgents) ||
+            string.IsNullOrWhiteSpace(record.Title) ||
+            string.IsNullOrWhiteSpace(record.SafeSummary) ||
+            record.Title == ProtectedTitle ||
+            record.SafeSummary == ProtectedSummary ||
+            record.SourceSessionId is not null)
+        {
+            return false;
+        }
+
+        var input = AgentVisibleClassificationInput.Compose(
+            content: null,
+            record.Title,
+            record.SafeSummary,
+            record.CoreTags,
+            record.ProjectKey,
+            record.TaskKey,
+            record.TopicTags);
+        var local = sensitiveDataDetector.Detect(new PublicRecordId(record.Id), input);
+        var taxonomyContainsSensitiveMaterial = ClassificationTaxonomy
+            .DetectCategories(input)
+            .Select(ClassificationTaxonomy.MinimumSensitivityFor)
+            .Any(level => level is SensitivityLevel.Confidential or SensitivityLevel.Restricted);
+        return !local.ContainsSensitiveMaterial && !taxonomyContainsSensitiveMaterial;
+    }
 
     private static void ApplyInertProjection(SharedMemoryItemRecord record)
     {
@@ -206,6 +269,7 @@ public sealed class SensitiveMemoryProtectionState
 public sealed class SensitiveMemoryPayloadMigrator(
     LuthnDbContext db,
     ISensitiveMemoryPayloadProtector protector,
+    DeterministicSensitiveDataDetector sensitiveDataDetector,
     SensitiveMemoryProtectionState state,
     TimeProvider timeProvider,
     ILogger<SensitiveMemoryPayloadMigrator> logger)
@@ -243,7 +307,9 @@ public sealed class SensitiveMemoryPayloadMigrator(
                     if (protectedRecord.ContractVersion != SensitiveMemoryPayload.CurrentContractVersion ||
                         protectedRecord.ProtectionScheme != protector.ProtectionScheme ||
                         !protectedMemoryById.TryGetValue(protectedRecord.MemoryItemId, out var memory) ||
-                        !SensitiveMemoryPersistence.IsInertProjection(memory))
+                        !SensitiveMemoryPersistence.HasValidProjectionForProtectedPayload(
+                            memory,
+                            sensitiveDataDetector))
                     {
                         throw new InvalidOperationException("Sensitive memory protection metadata is inconsistent.");
                     }

@@ -153,9 +153,12 @@ provenance, classification, source event를 한 transaction에서 지우며, 기
 `sensitive_memory_payloads` table에 저장합니다. 제목, 요약, tag,
 project/task/topic metadata, source-session 연계값을 versioned payload로 직렬화하고,
 memory record ID에 purpose-bound된 ASP.NET Core Data Protection으로 인증 암호화합니다.
-일반 `shared_memory_items` 행에는 고정된 비활성 placeholder와 routing metadata만
-남으며 search 필드에는 사용자 원문이 들어가지 않습니다. 암호문도 agent API,
-recall, sync, publication, audit, log, metric으로 복사하지 않습니다.
+결정적 로컬 guard가 인식한 민감값을 모두 제거하고 남은 제목·요약·tag·회상 metadata가
+재분류를 통과하면, 일반 `shared_memory_items` 행에는 공개 가능한 마스킹 투영을 남기고
+원본은 암호화 payload에만 보존할 수 있습니다. 제거가 불완전하거나 의미 있는 요약이
+남지 않거나 재분류에 실패하면 일반 행에는 고정된 비활성 placeholder만 남고 search
+필드에는 사용자 원문이 들어가지 않습니다. 암호문도 agent API, recall, sync,
+publication, audit, log, metric으로 복사하지 않습니다.
 
 Data Protection key ring은 PostgreSQL이 아니라 별도 `luthn-operator` volume에
 있습니다. 따라서 database dump 또는 PostgreSQL volume만 유출된 경우를 방어하지만,
