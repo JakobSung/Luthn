@@ -107,20 +107,35 @@ public sealed class GetContextPackTool : ILuthnMcpTool
         var effectiveCancellationToken = timeoutSource?.Token ?? cancellationToken;
 
         ContextPackDto result;
+        ContextPackDto bounded;
         try
         {
             var candidateMaxItems = maxTokens is null
                 ? maxItems
                 : Math.Min(MaximumCandidatePoolSize, maxItems * CandidatePoolMultiplier);
-            result = await _client.GetContextPackAsync(
-                new ContextPackRequestDto(
-                    coreTags,
-                    candidateMaxItems,
-                    query,
-                    projectKey,
-                    taskKey,
-                    topicTags),
-                effectiveCancellationToken);
+            var request = new ContextPackRequestDto(
+                coreTags,
+                candidateMaxItems,
+                query,
+                projectKey,
+                taskKey,
+                topicTags);
+            result = await _client.GetContextPackAsync(request, effectiveCancellationToken);
+            bounded = ApplyBounds(result, maxItems, maxTokens);
+
+            // maxTokens limits the returned projection, not the safe search scope.
+            // If the initial bounded pool is entirely too large to project, retry
+            // with the larger bounded pool so a later fitting candidate can surface.
+            if (maxTokens is not null &&
+                bounded.Items.Count == 0 &&
+                result.Items.Count >= candidateMaxItems &&
+                candidateMaxItems < MaximumCandidatePoolSize)
+            {
+                result = await _client.GetContextPackAsync(
+                    request with { MaxItems = MaximumCandidatePoolSize },
+                    effectiveCancellationToken);
+                bounded = ApplyBounds(result, maxItems, maxTokens);
+            }
         }
         catch (OperationCanceledException) when (
             timeoutSource?.IsCancellationRequested == true &&
@@ -150,7 +165,6 @@ public sealed class GetContextPackTool : ILuthnMcpTool
             throw;
         }
 
-        var bounded = ApplyBounds(result, maxItems, maxTokens);
         if (effectiveCacheKey is not null)
         {
             PruneCache(now);
