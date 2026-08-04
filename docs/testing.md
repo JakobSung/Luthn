@@ -10,10 +10,11 @@ default execution path, not the importance of the coverage.
 
 Before the inventory slice, the repository contained 53 test-related files:
 36 C# test sources, 7 .NET test projects, and 10 files under `scripts/tests/`.
-The inventory checker then made the canonical inventory 54 files. This timing
-slice adds the timing harness itself, so the current canonical inventory is 55
-files. The latest full .NET run covered 392 test cases; the .NET test-case
-baseline remains 392 because no product test was removed or merged.
+The inventory checker then made the canonical inventory 54 files. The timing
+slice added the timing harness itself, and the environmental runner contract
+adds one more test script, so the current canonical inventory is 56 files. The
+latest full .NET run covered 392 test cases; the .NET test-case baseline remains
+392 because no product test was removed or merged.
 
 File count and test-case count are tracked separately. A future reduction must
 show the retained security, sensitive-data, retrieval, recall, ownership, and
@@ -66,6 +67,8 @@ check.
 | --- | --- | --- |
 | `fast` | `./scripts/tests/test-test-inventory.sh` | Prove every file under `tests/` and `scripts/tests/` appears exactly once in the canonical matrix with an allowed tier. |
 | `fast` | `./scripts/tests/test-test-tier-timing.sh` | Capture representative fast/focused elapsed time, case counts, and environmental availability without running lifecycle tests. |
+| `fast` | `bash scripts/run-environmental-tests.sh --list` | Enumerate environmental suites without checking prerequisites or executing lifecycle tests. |
+| `fast` | `bash scripts/run-environmental-tests.sh --check` | Report Docker and Windows prerequisite availability without executing lifecycle tests. |
 | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | Run deterministic core classification, policy, retrieval, projection, ingestion, and rendering contracts. |
 | `fast` | `dotnet test tests/Luthn.AgentConnector.Tests/Luthn.AgentConnector.Tests.csproj --no-restore` | Run connector client contract tests without a live agent runtime. |
 | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore` | Run SDK contract tests. |
@@ -88,6 +91,14 @@ check.
 | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Validate the Windows Codex hook smoke path. |
 | `environmental` | `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | Validate Windows install, update, migration, backup, rollback, and cleanup behavior. |
 
+The environmental runner is an orchestration contract around the existing
+lifecycle scripts. `--list` never probes or starts an environment. `--check`
+reports `available` or `unavailable` and exits successfully by default so that
+ordinary local checks remain usable without Docker or Windows. `--strict`
+returns failure when the selected environment is unavailable, and `--run`
+executes the existing scripts only after prerequisite handling. The direct
+scripts remain supported for targeted runs.
+
 The full and environmental commands are not required for every local edit.
 They are required when the changed surface or the delivery contract calls for
 them. The full solution command is intentionally retained as a delivery
@@ -108,6 +119,7 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `scripts/tests/test-postgres-integration-smoke.sh` | `environmental` | `bash scripts/tests/test-postgres-integration-smoke.sh` | Opt-in PostgreSQL integration smoke coverage. |
 | `scripts/tests/test-test-inventory.sh` | `fast` | `./scripts/tests/test-test-inventory.sh` | Exact synchronization between the live test tree and this matrix. |
 | `scripts/tests/test-test-tier-timing.sh` | `fast` | `./scripts/tests/test-test-tier-timing.sh` | Repeatable fast/focused timing baseline and environmental availability report. |
+| `scripts/tests/test-environmental-runner.sh` | `fast` | `bash scripts/tests/test-environmental-runner.sh` | Deterministic list, check, and invalid-scope contract for the environmental runner. |
 | `scripts/tests/test-windows-codex-hook-smoke.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Windows Codex hook smoke behavior. |
 | `scripts/tests/test-windows-lifecycle.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | Windows lifecycle, update, migration, backup, rollback, and cleanup. |
 | `scripts/tests/test_codex_connector.py` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | Deterministic Codex hook, instruction, and turn-capsule contracts. |
