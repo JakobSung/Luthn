@@ -8,15 +8,43 @@ default execution path, not the importance of the coverage.
 
 ## Current baseline
 
-Before this slice, the repository contained 53 test-related files: 36 C# test
-sources, 7 .NET test projects, and 10 files under `scripts/tests/`. The latest
-full .NET run covered 392 test cases. The inventory checker added by this
-slice is itself mapped below, so the canonical inventory now contains 54
-files; the .NET test-case baseline remains 392.
+Before the inventory slice, the repository contained 53 test-related files:
+36 C# test sources, 7 .NET test projects, and 10 files under `scripts/tests/`.
+The inventory checker then made the canonical inventory 54 files. This timing
+slice adds the timing harness itself, so the current canonical inventory is 55
+files. The latest full .NET run covered 392 test cases; the .NET test-case
+baseline remains 392 because no product test was removed or merged.
 
 File count and test-case count are tracked separately. A future reduction must
 show the retained security, sensitive-data, retrieval, recall, ownership, and
 platform coverage before removing or consolidating cases.
+
+## Timing baseline
+
+`./scripts/tests/test-test-tier-timing.sh` runs representative fast and
+focused commands, captures the executed case count and elapsed milliseconds,
+and reports environmental availability without executing lifecycle tests. A
+test-file count is the number of `.cs` and `.csproj` files in the owning .NET
+test project, or `.py` files in `scripts/tests`; it is not a claim that every
+file in that project was touched by a filtered command. The baseline below was
+measured on `Darwin-25.5.0-arm64`, .NET SDK `10.0.300`, and Python `3.9.6`.
+
+| Measurement | Tier | Command | Test files | Cases | Elapsed ms | Environment / availability |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| `fast-core` | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | 13 | 109 | 1886 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `fast-python` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | 3 | 35 | 2468 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-classification` | `focused` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore --filter FullyQualifiedName~ClassificationContractTests` | 13 | 17 | 1628 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-memory` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~MemoryEndpointTests` | 18 | 18 | 3852 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-sensitive-memory` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveMemoryProtectionTests` | 18 | 8 | 3813 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-retrieval` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~RetrievalEndpointTests` | 18 | 4 | 3548 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-ownership` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OwnershipIsolationTests` | 18 | 6 | 4177 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-mcp` | `focused` | `dotnet test tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj --no-restore --filter FullyQualifiedName~McpToolBoundaryTests` | 2 | 24 | 2770 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `environmental-docker` | `environmental` | lifecycle and PostgreSQL scripts | n/a | n/a | n/a | Not sampled; Docker is available. |
+| `environmental-windows` | `environmental` | PowerShell Windows lifecycle scripts | n/a | n/a | n/a | Unavailable locally; Windows runner required. |
+
+These are single local samples for comparison, not deletion thresholds. The
+environmental rows explicitly distinguish “not sampled” from “unavailable”;
+neither state is treated as a passing zero-cost result.
 
 ## Tiers
 
@@ -37,6 +65,7 @@ check.
 | Tier | Command | Purpose |
 | --- | --- | --- |
 | `fast` | `./scripts/tests/test-test-inventory.sh` | Prove every file under `tests/` and `scripts/tests/` appears exactly once in the canonical matrix with an allowed tier. |
+| `fast` | `./scripts/tests/test-test-tier-timing.sh` | Capture representative fast/focused elapsed time, case counts, and environmental availability without running lifecycle tests. |
 | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | Run deterministic core classification, policy, retrieval, projection, ingestion, and rendering contracts. |
 | `fast` | `dotnet test tests/Luthn.AgentConnector.Tests/Luthn.AgentConnector.Tests.csproj --no-restore` | Run connector client contract tests without a live agent runtime. |
 | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore` | Run SDK contract tests. |
@@ -78,6 +107,7 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `scripts/tests/test-local-script-safety.sh` | `fast` | `bash scripts/tests/test-local-script-safety.sh` | Local script safety and generated configuration checks. |
 | `scripts/tests/test-postgres-integration-smoke.sh` | `environmental` | `bash scripts/tests/test-postgres-integration-smoke.sh` | Opt-in PostgreSQL integration smoke coverage. |
 | `scripts/tests/test-test-inventory.sh` | `fast` | `./scripts/tests/test-test-inventory.sh` | Exact synchronization between the live test tree and this matrix. |
+| `scripts/tests/test-test-tier-timing.sh` | `fast` | `./scripts/tests/test-test-tier-timing.sh` | Repeatable fast/focused timing baseline and environmental availability report. |
 | `scripts/tests/test-windows-codex-hook-smoke.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Windows Codex hook smoke behavior. |
 | `scripts/tests/test-windows-lifecycle.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | Windows lifecycle, update, migration, backup, rollback, and cleanup. |
 | `scripts/tests/test_codex_connector.py` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | Deterministic Codex hook, instruction, and turn-capsule contracts. |
@@ -142,5 +172,20 @@ compares focused execution time with the current baseline.
 | `OwnershipIsolationTests.cs` / `AgentConnectionEndpointTests.cs` | Both cover owner-derived agent state and multi-user authorization, but one protects memory/publication state while the other protects connection observations. | Owner-scoped memory, sensitive references, and forbidden mutation; independent connection read/write scopes and owner-scoped channel state. |
 | `test-agent-connector-lifecycle.sh` / `test-claude-connector-lifecycle.sh` / `test-windows-lifecycle.ps1` | They share connector/lifecycle failure themes while covering different agents or platforms. | Agent-specific connector behavior, Windows lifecycle and rollback semantics, and distribution/runtime persistence checks. |
 
+### Method-level retained coverage map
+
+The timing candidates above are still overlap candidates, not deletion
+decisions. The retained methods and focused commands below make the boundary
+explicit enough for a later consolidation review.
+
+| Candidate group | Retained methods or behavior boundaries | Focused verification commands | Decision in this slice |
+| --- | --- | --- | --- |
+| Classification | `ClassificationContractTests.MockClassifierMatchesBoundedKoreanEnglishAndMixedGoldenCases`; `ClassificationGoldenEvaluationTests.EvaluateReportsDeterministicFalseNegativeAndMismatchCounts`; `ClassificationEvaluationCommandTests.DefaultMockProducesKnownBaselineWithoutRawCorpusText` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore --filter FullyQualifiedName~ClassificationContractTests`; `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore --filter FullyQualifiedName~ClassificationGoldenEvaluationTests`; `dotnet test tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj --no-restore --filter FullyQualifiedName~ClassificationEvaluationCommandTests` | Retain all three boundaries; no classification test deletion. |
+| Memory and sensitive projection | `MemoryEndpointTests.MemoryWriteRedactsSensitiveValueAndRetainsAgentVisibleEventProjection`; `AgentSafeEndpointTests.AgentSearchEndpointNeverReturnsConfidentialOrAgentBlockedRecords`; `SensitiveMemoryProtectionTests.SensitiveWriteProtectionFailurePersistsNoPlaintextOrAudit` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~MemoryEndpointTests`; `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~AgentSafeEndpointTests`; `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveMemoryProtectionTests` | Retain endpoint redaction, safe-route filtering, and encrypted fail-closed storage separately. |
+| Retrieval and telemetry | `RetrievalEndpointTests.AgentSearchFindsOlderMatchingProjectionWhenCorpusExceedsCandidateCap`; `RetrievalCandidateSelectorTests.CandidateSelectionExcludesUnsafePrivateAndExpiredRecords`; `OperationalMetricsTests.SearchObservationAndFeedbackRequireWriteScopeAndRejectUnsafePayloads` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~RetrievalEndpointTests`; `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~RetrievalCandidateSelectorTests`; `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OperationalMetricsTests` | Retain result correctness, bounded candidate safety, and telemetry authorization separately. |
+| Ownership and agent state | `OwnershipIsolationTests.SensitiveReferencesAndAccessRequestsStayWithinOwnerBoundary`; `OwnershipIsolationTests.AgentMutationRequestsAreRejectedWithoutChangingMemoryOrSensitiveState`; `AgentConnectionEndpointTests.MultiUserConnectionsAreOwnerScopedAndOperatorsCanDistinguishOwners` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OwnershipIsolationTests`; `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~AgentConnectionEndpointTests` | Retain memory/sensitive owner isolation and connector-state owner isolation separately. |
+| Connector and platform lifecycle | Connector setup, hook count, failed/disconnected channel, update/rollback, and Windows lifecycle boundaries remain environment-specific even when their failure themes overlap. | `bash scripts/tests/test-agent-connector-lifecycle.sh`; `bash scripts/tests/test-claude-connector-lifecycle.sh`; `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | No consolidation; environmental coverage remains retained and was not sampled locally. |
+
 No candidate is deleted or merged by this slice. The next optimization slice
-must attach a coverage map and before/after timing evidence to any change.
+must attach before/after timing and retained-coverage evidence to any proposed
+consolidation.

@@ -21,7 +21,7 @@ Next action: create the next slice plan on the current delivery branch, or ask f
 | ID | Status | Priority | Title | Idea Artifact | First Slice Candidate |
 | --- | --- | --- | --- | --- | --- |
 | PLUGIN-001 | gated | P2 | Dynamic plugin loading and marketplace | `none` | - |
-| WORK-015 | evidence-pending | P2 | Test suite cost and redundancy reduction | `docs/01-plan/test-suite-cost-and-redundancy-reduction/001-idea.md` | - |
+| WORK-015 | evidence-pending | P2 | Measure tier timings and map duplicate coverage | `docs/01-plan/measure-tier-timings-and-map-duplicate-coverage/001-idea.md` | - |
 | none | backlog | - | No additional planned quality slice | `none` | - |
 
 ## Planned
