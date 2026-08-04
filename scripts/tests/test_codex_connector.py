@@ -235,6 +235,19 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
                 "memory titles, content, IDs, queries, scores, sources", installed
             )
             self.assertIn("normal assistant response or final response", installed)
+            self.assertIn("Agent memory mutation boundary", installed)
+            self.assertIn(
+                "Never delete, modify, overwrite, approve, or deny Luthn memory",
+                installed,
+            )
+            self.assertIn(
+                "Agent memory mutation boundary",
+                CONNECTOR.CLAUDE_AUTO_RECALL_INSTRUCTION,
+            )
+            self.assertIn(
+                "Never delete, modify, overwrite, approve, or deny Luthn memory",
+                CONNECTOR.CLAUDE_AUTO_RECALL_INSTRUCTION,
+            )
             self.assertTrue(
                 CONNECTOR.auto_recall_instruction_is_installed(instructions_path)
             )

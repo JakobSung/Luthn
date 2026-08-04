@@ -63,6 +63,17 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public void AgentContractExposesNoMemoryMutationMethods()
+    {
+        var forbiddenMutationTerms = new[] { "Delete", "Update", "Modify", "Mutate", "Approve", "Deny" };
+
+        Assert.DoesNotContain(
+            typeof(ILuthnAgentClient).GetMethods(),
+            method => forbiddenMutationTerms.Any(term =>
+                method.Name.Contains(term, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
     public void McpServerDependsOnConnectorButNotCore()
     {
         var references = typeof(LuthnMcpToolRegistry).Assembly

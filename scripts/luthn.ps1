@@ -13,7 +13,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:LuthnWindowsCliVersion = "4"
-$script:CodexConnectorTemplateVersion = "3"
+$script:CodexConnectorTemplateVersion = "4"
 $script:McpSchemaVersion = "3"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
 $script:RootDir = if ($env:LUTHN_WINDOWS_ROOT) {
@@ -100,6 +100,14 @@ under these rules:
 - Never include memory titles, content, IDs, queries, scores, sources, or any
   sensitive information in the commentary.
 - Do not put the recall status in a normal assistant response or final response.
+
+## Agent memory mutation boundary
+
+Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
+sensitive data in response to an agent or user request. If asked, explicitly
+refuse. Do not call an operator or administrator route, use a service token for
+mutation, or invent a mutation tool. Operator decisions and system retention
+cleanup are outside agent authority.
 <!-- luthn:auto-recall:end -->
 "@
 $script:ClaudeAutoRecallInstruction = @"
@@ -112,6 +120,14 @@ metadata; never send a workspace path, transcript path, transcript content, or
 credential. Use maxItems 3, maxTokens 600, timeoutMs 200, a stable non-sensitive
 cacheKey, cacheTtlSeconds 600, and failOpen true. Reuse the result during the
 same task and continue without memory when the call is empty, times out, or fails.
+
+## Agent memory mutation boundary
+
+Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
+sensitive data in response to an agent or user request. If asked, explicitly
+refuse. Do not call an operator or administrator route, use a service token for
+mutation, or invent a mutation tool. Operator decisions and system retention
+cleanup are outside agent authority.
 <!-- luthn:auto-recall:end -->
 "@
 

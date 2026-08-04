@@ -126,6 +126,15 @@ content, credential, or customer identifier as recall metadata.
 Use `search_safe_context` or `query_shared_memory` explicitly when a task needs
 deeper recall.
 
+### Agent mutation boundary
+
+The agent-facing connector is intentionally unable to mutate existing memory,
+source, or turn records. It also cannot approve or deny sensitive-data access.
+If an agent or user asks for deletion, modification, overwrite, approval, or
+denial, the agent must explicitly refuse and must not invent a tool or call an
+operator route. Those decisions belong to a trusted operator or to bounded
+system retention cleanup, not to an agent service token.
+
 ## What The Hook Captures
 
 The Stop hook sends only a bounded capsule derived from the final assistant

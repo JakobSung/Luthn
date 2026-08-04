@@ -199,6 +199,127 @@ public sealed class OwnershipIsolationTests
         Assert.Equal("alice", (await db.SensitiveAccessRequests.SingleAsync()).OwnerUserId);
     }
 
+    [Fact]
+    public async Task AgentMutationRequestsAreRejectedWithoutChangingMemoryOrSensitiveState()
+    {
+        using var factory = CreateFactory();
+        using var alice = Client(factory, AliceBearer);
+
+        using var memoryResponse = await alice.PostAsJsonAsync("/api/memory/items", new
+        {
+            title = "Agent mutation target",
+            safeSummary = "This memory must remain unchanged.",
+            coreTags = new[] { "mutation-boundary" },
+            visibility = "SharedAcrossAgents"
+        });
+        Assert.Equal(HttpStatusCode.Created, memoryResponse.StatusCode);
+        using var memoryBody = await JsonDocument.ParseAsync(await memoryResponse.Content.ReadAsStreamAsync());
+        var memoryId = memoryBody.RootElement.GetProperty("id").GetString();
+
+        using var sourceResponse = await alice.PostAsJsonAsync("/api/sources", new
+        {
+            sourceSystem = "local",
+            sourceType = "note",
+            content = "Internal recovery note contains a private key.",
+            title = "Sensitive mutation target",
+            safeSummary = "Only the redacted reference is agent-visible.",
+            coreTags = new[] { "mutation-boundary" }
+        });
+        Assert.Equal(HttpStatusCode.Created, sourceResponse.StatusCode);
+        using var sourceBody = await JsonDocument.ParseAsync(await sourceResponse.Content.ReadAsStreamAsync());
+        var sensitiveReferenceId = sourceBody.RootElement.GetProperty("sensitiveReferenceId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(sensitiveReferenceId));
+
+        using var accessResponse = await alice.PostAsJsonAsync("/api/access-requests", new
+        {
+            sensitiveReferenceId,
+            reason = "Need the redacted summary for a safe task.",
+            sessionId = "agent-mutation-boundary-session",
+            expiresInSeconds = 600
+        });
+        Assert.Equal(HttpStatusCode.Created, accessResponse.StatusCode);
+        using var accessBody = await JsonDocument.ParseAsync(await accessResponse.Content.ReadAsStreamAsync());
+        var accessRequestId = accessBody.RootElement.GetProperty("id").GetString();
+
+        using var beforeScope = factory.Services.CreateScope();
+        var beforeDb = beforeScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var beforeMemory = await beforeDb.SharedMemoryItems.SingleAsync(item => item.Id == memoryId);
+        var beforeAccess = await beforeDb.SensitiveAccessRequests.SingleAsync(item => item.Id == accessRequestId);
+        var before = new
+        {
+            SourceEvents = await beforeDb.SourceEvents.CountAsync(),
+            MemoryItems = await beforeDb.SharedMemoryItems.CountAsync(),
+            SensitiveReferences = await beforeDb.SensitiveRecordReferences.CountAsync(),
+            AccessRequests = await beforeDb.SensitiveAccessRequests.CountAsync(),
+            AccessDecisions = await beforeDb.SensitiveAccessDecisions.CountAsync(),
+            AuditEvents = await beforeDb.AuditEvents.CountAsync(),
+            MemoryTitle = beforeMemory.Title,
+            MemorySummary = beforeMemory.SafeSummary,
+            AccessStatus = beforeAccess.Status,
+            AccessDecidedBy = beforeAccess.DecidedBy,
+            AccessDecidedAt = beforeAccess.DecidedAt
+        };
+
+        foreach (var method in new[] { HttpMethod.Put, new HttpMethod("PATCH"), HttpMethod.Delete })
+        {
+            await AssertRejectedAsync(
+                alice,
+                method,
+                $"/api/memory/items/{memoryId}",
+                new { title = "Unauthorized mutation", safeSummary = "Must not be applied." });
+            await AssertRejectedAsync(
+                alice,
+                method,
+                "/api/sources",
+                new { content = "Unauthorized source mutation." });
+            await AssertRejectedAsync(
+                alice,
+                method,
+                "/api/agent/turn-summaries",
+                new { summary = "Unauthorized turn mutation." });
+        }
+
+        foreach (var decision in new[] { "approve", "deny" })
+        {
+            using var response = await alice.PostAsJsonAsync(
+                $"/api/access-requests/{accessRequestId}/{decision}",
+                new { reason = "Agent mutation probe." });
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+
+        using var afterScope = factory.Services.CreateScope();
+        var afterDb = afterScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var afterMemory = await afterDb.SharedMemoryItems.SingleAsync(item => item.Id == memoryId);
+        var afterAccess = await afterDb.SensitiveAccessRequests.SingleAsync(item => item.Id == accessRequestId);
+        Assert.Equal(before.SourceEvents, await afterDb.SourceEvents.CountAsync());
+        Assert.Equal(before.MemoryItems, await afterDb.SharedMemoryItems.CountAsync());
+        Assert.Equal(before.SensitiveReferences, await afterDb.SensitiveRecordReferences.CountAsync());
+        Assert.Equal(before.AccessRequests, await afterDb.SensitiveAccessRequests.CountAsync());
+        Assert.Equal(before.AccessDecisions, await afterDb.SensitiveAccessDecisions.CountAsync());
+        Assert.Equal(before.AuditEvents, await afterDb.AuditEvents.CountAsync());
+        Assert.Equal(before.MemoryTitle, afterMemory.Title);
+        Assert.Equal(before.MemorySummary, afterMemory.SafeSummary);
+        Assert.Equal(before.AccessStatus, afterAccess.Status);
+        Assert.Equal(before.AccessDecidedBy, afterAccess.DecidedBy);
+        Assert.Equal(before.AccessDecidedAt, afterAccess.DecidedAt);
+    }
+
+    private static async Task AssertRejectedAsync(
+        HttpClient client,
+        HttpMethod method,
+        string uri,
+        object payload)
+    {
+        using var request = new HttpRequestMessage(method, uri)
+        {
+            Content = JsonContent.Create(payload)
+        };
+        using var response = await client.SendAsync(request);
+        Assert.False(
+            response.IsSuccessStatusCode,
+            $"{method} {uri} unexpectedly succeeded with {(int)response.StatusCode}.");
+    }
+
     private static WebApplicationFactory<Program> CreateFactory(bool includeUnboundToken = false) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
