@@ -16,6 +16,19 @@
       "expectedStorageDecision": "WikiCandidate"
     },
     {
+      "id": "ko-public-date-version-quantity",
+      "language": "Korean",
+      "sourceType": "note",
+      "content": "2026-08-04에 v1.2.3을 배포했고 3개 항목을 처리했다.",
+      "title": null,
+      "safeSummary": null,
+      "coreTags": [],
+      "expectedSensitivity": "Public",
+      "expectedCategories": [],
+      "expectedContainsSensitiveMaterial": false,
+      "expectedStorageDecision": "WikiCandidate"
+    },
+    {
       "id": "ko-private-key-title",
       "language": "Korean",
       "sourceType": "note",

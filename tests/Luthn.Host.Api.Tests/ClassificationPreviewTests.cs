@@ -831,6 +831,23 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
+    public async Task PreviewKeepsDateVersionAndOrdinaryQuantityPublic()
+    {
+        var response = await new ClassificationPreviewService(
+            new MockContentClassifier(),
+            new PolicyEngine())
+            .PreviewAsync(new ClassificationPreviewRequest(
+                "source-benign-numbers",
+                "2026-08-04에 v1.2.3을 배포했고 3개 항목을 처리했다.",
+                "note"));
+
+        Assert.Equal(SensitivityLevel.Public, response.Classification.Sensitivity);
+        Assert.Empty(response.Classification.Categories);
+        Assert.False(response.Classification.ContainsSensitiveMaterial);
+        Assert.Equal(StorageDecisionKind.WikiCandidate, response.StorageDecision.Kind);
+    }
+
+    [Fact]
     public void MockProviderRequiresExplicitOptInAndNoExternalProvider()
     {
         var options = new ClassificationProviderOptions
