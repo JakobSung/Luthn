@@ -37,11 +37,9 @@ public static class ExternalPublicationEndpoints
         CancellationToken cancellationToken)
     {
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        var outbox = db.SafeProjectionSyncOutbox.AsNoTracking();
-        if (!principal.IsOperator)
-        {
-            outbox = outbox.Where(record => record.OwnerUserId == principal.UserId);
-        }
+        var outbox = db.SafeProjectionSyncOutbox
+            .AsNoTracking()
+            .Where(record => record.WorkspaceId == principal.WorkspaceId);
         var counts = await outbox
             .GroupBy(record => record.State)
             .Select(group => new { State = group.Key, Count = group.Count() })
@@ -93,8 +91,7 @@ public static class ExternalPublicationEndpoints
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
         var result = await service.GetAsync(
             id.Trim(),
-            principal.UserId,
-            principal.IsOperator,
+            principal.WorkspaceId,
             cancellationToken);
         return result is null
             ? TypedResults.NotFound()
@@ -151,15 +148,13 @@ public static class ExternalPublicationEndpoints
                     id.Trim(),
                     ServiceTokenAuthorization.GetActor(httpContext),
                     timeProvider.GetUtcNow(),
-                    principal.UserId,
-                    principal.IsOperator,
+                    principal.WorkspaceId,
                     cancellationToken)
                 : await service.RevokeAsync(
                     id.Trim(),
                     ServiceTokenAuthorization.GetActor(httpContext),
                     timeProvider.GetUtcNow(),
-                    principal.UserId,
-                    principal.IsOperator,
+                    principal.WorkspaceId,
                     cancellationToken);
             return TypedResults.Ok(ToResponse(result));
         }

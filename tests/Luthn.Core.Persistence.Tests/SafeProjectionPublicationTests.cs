@@ -188,6 +188,7 @@ public sealed class SafeProjectionPublicationTests
         await using var db = CreateDbContext();
         var now = DateTimeOffset.Parse("2026-07-13T01:00:00Z");
         var upsert = SafeProjectionSyncPolicy.CreateUpsert(
+            "default",
             "instance-test",
             "memory-1",
             2,
@@ -200,6 +201,7 @@ public sealed class SafeProjectionPublicationTests
             now.AddMinutes(-2),
             expiresAt: null);
         var revoke = SafeProjectionSyncPolicy.CreateRevoke(
+            "default",
             "instance-test",
             "memory-1",
             3,
@@ -277,6 +279,7 @@ public sealed class SafeProjectionPublicationTests
     private static SharedMemoryItemRecord CreateSafeMemory(DateTimeOffset now) => new()
     {
         Id = "memory-1",
+        WorkspaceId = "default",
         Title = "private-title-token",
         SafeSummary = "Public-safe deployment steps.",
         Sensitivity = SensitivityLevel.Public,
@@ -292,6 +295,7 @@ public sealed class SafeProjectionPublicationTests
     private static SafeProjectionSyncOutboxRecord CreateOutbox(DateTimeOffset now)
     {
         var envelope = SafeProjectionSyncPolicy.CreateRevoke(
+            "default",
             "instance-test",
             "memory-1",
             2,
@@ -310,6 +314,7 @@ public sealed class SafeProjectionPublicationTests
             IdempotencyKey = SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope),
             OriginInstanceId = envelope.OriginInstanceId,
             LocalRecordId = envelope.LocalRecordId,
+            WorkspaceId = envelope.WorkspaceId,
             Revision = envelope.Revision,
             Operation = envelope.Operation,
             ContractVersion = envelope.ContractVersion,

@@ -18,6 +18,7 @@ public sealed class RetrievalEndpointTests
             new WikiProposalRecord
             {
                 Id = "wiki-title-match",
+                WorkspaceId = "default",
                 SourceEventId = "source-title-match",
                 Title = "Billing outage runbook",
                 SafeSummary = "Queue restart steps.",
@@ -29,6 +30,7 @@ public sealed class RetrievalEndpointTests
             new WikiProposalRecord
             {
                 Id = "wiki-summary-match",
+                WorkspaceId = "default",
                 SourceEventId = "source-summary-match",
                 Title = "Operations fallback",
                 SafeSummary = "Billing outage mitigation runbook.",
@@ -40,6 +42,7 @@ public sealed class RetrievalEndpointTests
             new WikiProposalRecord
             {
                 Id = "wiki-confidential",
+                WorkspaceId = "default",
                 SourceEventId = "source-confidential",
                 Title = "Billing outage private source",
                 SafeSummary = "Private customer raw details.",
@@ -133,6 +136,7 @@ public sealed class RetrievalEndpointTests
         db.WikiProposals.Add(new WikiProposalRecord
         {
             Id = "wiki-old-match",
+            WorkspaceId = "default",
             SourceEventId = "source-old-match",
             Title = "Needle recovery runbook",
             SafeSummary = "Public-safe recovery steps.",
@@ -144,6 +148,7 @@ public sealed class RetrievalEndpointTests
         db.WikiProposals.AddRange(Enumerable.Range(0, 1001).Select(index => new WikiProposalRecord
         {
             Id = $"wiki-newer-unmatched-{index}",
+            WorkspaceId = "default",
             SourceEventId = $"source-newer-unmatched-{index}",
             Title = $"General release note {index}",
             SafeSummary = "Public-safe unmatched summary.",

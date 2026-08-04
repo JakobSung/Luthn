@@ -45,7 +45,8 @@ public sealed class SdkContractTests
     public void SafeProjectionSyncEnvelopeUsesVersionedPublicSafeContract()
     {
         var envelope = new SafeProjectionSyncEnvelopeDto(
-            1,
+            2,
+            "default",
             "instance-1",
             "memory-1",
             2,
@@ -70,13 +71,14 @@ public sealed class SdkContractTests
             .ToArray();
         var expectedProperties = new[]
         {
-            "contractVersion", "originInstanceId", "localRecordId", "revision", "operation",
+            "contractVersion", "workspaceId", "originInstanceId", "localRecordId", "revision", "operation",
             "title", "safeSummary", "coreTags", "projectionKind", "payloadClass",
             "redactionState", "createdAt", "updatedAt", "decidedAt", "expiresAt"
         }.OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
         Assert.Equal(expectedProperties, actualProperties);
-        Assert.Contains("\"contractVersion\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"contractVersion\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"workspaceId\":\"default\"", json, StringComparison.Ordinal);
         Assert.Contains("\"originInstanceId\"", json, StringComparison.Ordinal);
         Assert.Contains("\"localRecordId\"", json, StringComparison.Ordinal);
         Assert.Contains("\"revision\":2", json, StringComparison.Ordinal);
@@ -90,7 +92,8 @@ public sealed class SdkContractTests
     public void SafeProjectionRevokeDtoOmitsProjectionBody()
     {
         var envelope = new SafeProjectionSyncEnvelopeDto(
-            1,
+            2,
+            "default",
             "instance-1",
             "memory-1",
             3,
@@ -257,6 +260,55 @@ public sealed class SdkContractTests
         Assert.Equal("source-1", result.SourceId);
         Assert.Equal(result.SourceId, result.SourceEventId);
         Assert.Equal("wiki-1", result.WikiProposalId);
+    }
+
+    [Fact]
+    public void CollectionProvenanceWorkspaceIsAdditiveToVersionOneContract()
+    {
+        var legacy = new CollectionProvenanceDto(
+            "provenance-1",
+            1,
+            "source-1",
+            null,
+            "service-token:agent",
+            "owner.one",
+            "service-token",
+            "trusted-claims",
+            null,
+            "codex",
+            "codex.desktop",
+            null,
+            null,
+            null,
+            DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch);
+        var scoped = JsonSerializer.Deserialize<CollectionProvenanceDto>("""
+            {
+              "id": "provenance-2",
+              "contractVersion": 1,
+              "sourceEventId": "source-2",
+              "memoryItemId": null,
+              "authenticatedActor": "service-token:agent",
+              "authenticatedUserId": "owner.one",
+              "actorTrust": "service-token",
+              "claimsTrust": "trusted-claims",
+              "claimedUserId": null,
+              "agentId": "codex",
+              "applicationId": "codex.desktop",
+              "pluginId": null,
+              "connectorId": null,
+              "connectorVersion": null,
+              "collectedAt": "1970-01-01T00:00:00Z",
+              "receivedAt": "1970-01-01T00:00:00Z",
+              "workspaceId": "team-alpha"
+            }
+            """);
+
+        Assert.Equal("default", legacy.WorkspaceId);
+        Assert.Contains("\"workspaceId\":\"default\"", JsonSerializer.Serialize(legacy), StringComparison.Ordinal);
+        Assert.NotNull(scoped);
+        Assert.Equal("team-alpha", scoped.WorkspaceId);
+        Assert.Equal(1, scoped.ContractVersion);
     }
 
     [Fact]

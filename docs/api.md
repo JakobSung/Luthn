@@ -12,23 +12,28 @@ aliases are not part of the public API. Source intake responses include
 `sourceEventId` as a backward-compatible alias, but `sourceId` is the canonical
 public source identifier for new API, SDK, connector, and MCP contracts.
 
-## Server-derived ownership
+## Server-derived workspace boundary
 
-`SingleOwner` is the default identity mode and resolves every protected record
-to the normalized configured owner, `local-owner` by default. `MultiUser`
-requires service-token authentication and a bounded `userId` on every
-non-operator token. The server derives authorization identity from the matched
-token; request bodies, SDKs, connectors, and MCP tools expose no owner override.
+`WorkspaceId` is the security and sharing boundary for protected product data.
+The server derives workspace, user, actor kind, and actor ID from the matched
+service-token configuration; request bodies, SDKs, connectors, and MCP tools
+expose no workspace or owner override. `OwnerUserId` and
+`AuthenticatedUserId` remain attribution and compatibility fields, not query
+boundaries.
 
-Memory, source, wiki, sensitive-access, publication, safe-search, context-pack,
-and turn-summary idempotency operations are scoped to that owner. In this
-contract `SharedAcrossAgents` means agents authenticated for the same owner.
-An explicitly configured operator token may perform the documented bounded
-cross-owner administration routes, which retain metadata-only audit evidence.
-`/readyz` reports the `identity` boundary separately from service-token health.
-In `MultiUser` mode the audit-event listing is operator-only because legacy
-audit rows do not carry an owner partition; same-owner provenance reads remain
-available to scoped non-operator tokens.
+`SingleOwner` uses the `default` workspace. Existing `MultiUser` tokens without
+an explicit workspace retain compatibility through `personal:{userId}`. To
+share team data, bind distinct user and agent tokens to the same `WorkspaceId`
+in server configuration. Memory, source, wiki, sensitive-access, publication,
+safe-search, context-pack, and turn-summary idempotency are workspace-scoped;
+`SharedAcrossAgents` means agents authenticated for that workspace. Operators
+do not bypass the product-data workspace boundary and must be explicitly bound
+to the workspace they administer. `/readyz` reports invalid or missing identity
+bindings separately from service-token health.
+
+In `MultiUser` mode the audit-event listing remains operator-only because
+legacy audit rows do not carry a workspace partition. Provenance reads are
+limited to the caller's workspace.
 
 ## Agent turn-summary intake
 
@@ -125,12 +130,12 @@ POST /api/agent-connections/{agentId}/observations
 ```
 
 Agent connectors report metadata-only state for each supported channel. The
-API replaces the latest row for an owner/agent/channel tuple; it is a status
-surface, not a connection event log. Ownership is derived from the matched
-service token and is never accepted from the observation body. Non-operator
-callers can read and update only their own rows. An operator token can list all
-owners, and `ownerUserId` keeps otherwise identical agent IDs unambiguous.
-`SingleOwner` continues to use the configured local owner.
+API replaces the latest row for a workspace/agent/channel tuple; it is a status
+surface, not a connection event log. Workspace identity is derived from the
+matched service token and is never accepted from the observation body. Callers,
+including operators, can read and update only rows in their bound workspace.
+`workspaceId` keeps otherwise identical agent IDs unambiguous, while
+`ownerUserId` records the observation author.
 
 Observation request:
 

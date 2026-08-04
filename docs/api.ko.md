@@ -6,21 +6,25 @@
 
 Core로 거른 맥락 선택에는 `coreTags`, 공개 원본 식별자에는 `sourceId`를 사용합니다. 예약된 예전 tag 별칭은 공개 API에 포함하지 않습니다. 기존 source intake 응답의 `sourceEventId`는 하위 호환 별칭이지만 새 API·SDK·connector·MCP 계약은 `sourceId`를 표준으로 사용합니다.
 
-## 서버가 정하는 소유권
+## 서버가 정하는 Workspace 경계
 
-기본 identity mode인 `SingleOwner`는 모든 보호 record의 owner를 설정된 값으로
-결정하며 기본값은 `local-owner`입니다. `MultiUser`는 service-token 인증과 모든
-비운영자 token의 제한된 `userId` 설정이 필요합니다. 인증·인가 user는 일치한
-token에서 server가 정하며 request body, SDK, connector, MCP tool은 owner 덮어쓰기
-필드를 노출하지 않습니다.
+보호 데이터의 보안·공유 경계는 `WorkspaceId`입니다. 서버는 일치한 service-token
+설정으로 workspace, 사용자, actor 종류와 actor ID를 정합니다. request body, SDK,
+connector, MCP tool은 workspace나 owner를 덮어쓰는 필드를 노출하지 않습니다.
+`OwnerUserId`와 `AuthenticatedUserId`는 작성자 귀속·하위 호환 정보이며 조회 경계가
+아닙니다.
 
+`SingleOwner`의 기본 workspace는 `default`입니다. 명시적 workspace가 없는 기존
+`MultiUser` token은 호환 규칙에 따라 `personal:{userId}`를 사용합니다. 팀 공유는
+서로 다른 사용자·agent token에 같은 `WorkspaceId`를 서버 설정으로 연결합니다.
 memory, source, wiki, 민감 접근, 외부 공개, 안전 검색, context pack, turn-summary
-idempotency는 모두 같은 owner 안에서만 동작합니다. `SharedAcrossAgents`는 같은 owner의
-agent 사이 공유를 뜻합니다. 명시적으로 운영자 역할이 설정된 token만 문서화된 제한적
-교차-owner 관리 작업을 할 수 있고 metadata-only audit 근거를 남깁니다. `/readyz`는
-`identity` 준비 상태를 service-token 상태와 분리해 보고합니다.
-기존 audit row에는 owner partition이 없으므로 `MultiUser` mode의 audit-event 목록은
-운영자 전용입니다. scope가 있는 비운영자 token의 same-owner provenance 조회는 유지합니다.
+idempotency는 모두 workspace 안에서만 동작하고 `SharedAcrossAgents`도 같은 workspace의
+agent 사이 공유를 뜻합니다. operator 역시 product data에 대한 cross-workspace bypass가
+없으며 관리할 workspace에 명시적으로 연결되어야 합니다. `/readyz`는 잘못되거나 빠진
+identity binding을 service-token 상태와 분리해 보고합니다.
+
+기존 audit row에는 workspace partition이 없으므로 `MultiUser` mode의 audit-event 목록은
+운영자 전용입니다. scope가 있는 호출자의 provenance 조회는 자기 workspace로 제한됩니다.
 
 ## 에이전트 Turn 요약 수집
 
@@ -77,11 +81,11 @@ GET  /api/agent-connections
 POST /api/agent-connections/{agentId}/observations
 ```
 
-connector가 channel별 메타데이터 상태를 보고합니다. owner/agent/channel 조합의 최신
-row를 교체하는 상태 표면이며 사건 기록이 아닙니다. owner는 일치한 service token에서
-server가 정하고 관측 body에서는 받지 않습니다. 비운영자는 자기 row만 읽고 갱신하며,
-운영자 token은 모든 owner를 조회할 수 있습니다. 응답의 `ownerUserId`가 같은 agent ID를
-owner별로 구분합니다. `SingleOwner`는 계속 설정된 local owner를 사용합니다.
+connector가 channel별 메타데이터 상태를 보고합니다. workspace/agent/channel 조합의 최신
+row를 교체하는 상태 표면이며 사건 기록이 아닙니다. workspace는 일치한 service token에서
+server가 정하고 관측 body에서는 받지 않습니다. 호출자는 자기 workspace의 row만 읽고
+갱신하며 operator도 이 경계를 우회하지 않습니다. 응답의 `workspaceId`가 같은 agent ID를
+workspace별로 구분하고 `ownerUserId`는 관측 작성자를 나타냅니다.
 
 ```json
 {

@@ -968,6 +968,8 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Name=local-agent",
         "Luthn__Auth__Tokens__0__Sha256Digest=$Digest",
         "Luthn__Auth__Tokens__0__UserId=local-owner",
+        "Luthn__Auth__Tokens__0__WorkspaceId=default",
+        "Luthn__Auth__Tokens__0__ActorKind=Agent",
         "Luthn__Auth__Tokens__0__IsOperator=false",
         "Luthn__Auth__Tokens__0__Scopes__0=agent.read",
         "Luthn__Auth__Tokens__0__Scopes__1=agent.write.summary",
@@ -980,6 +982,8 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Scopes__8=metrics.write",
         "Luthn__Auth__Tokens__1__Name=local-operator",
         "Luthn__Auth__Tokens__1__Sha256Digest=$OperatorDigest",
+        "Luthn__Auth__Tokens__1__WorkspaceId=default",
+        "Luthn__Auth__Tokens__1__ActorKind=Service",
         "Luthn__Auth__Tokens__1__IsOperator=true",
         "Luthn__Auth__Tokens__1__Scopes__0=access.decide",
         "Luthn__Auth__Tokens__1__Scopes__1=config.write"
@@ -1034,6 +1038,8 @@ function Ensure-OperatorCredential {
     Remove-ConfigPrefix $operatorPrefix
     Set-ConfigValue "${operatorPrefix}Name" "local-operator"
     Set-ConfigValue "${operatorPrefix}Sha256Digest" $operatorDigest
+    Set-ConfigValue "${operatorPrefix}WorkspaceId" "default"
+    Set-ConfigValue "${operatorPrefix}ActorKind" "Service"
     Set-ConfigValue "${operatorPrefix}IsOperator" "true"
     Set-ConfigValue "${operatorPrefix}Scopes__0" "access.decide"
     Set-ConfigValue "${operatorPrefix}Scopes__1" "config.write"
@@ -1218,6 +1224,8 @@ function Install-Luthn {
         Ensure-ConfigValue "Luthn__Identity__SingleOwnerUserId" "local-owner"
         Ensure-ConfigValue "Luthn__Auth__Tokens__0__Name" "local-agent"
         Ensure-ConfigValue "Luthn__Auth__Tokens__0__UserId" "local-owner"
+        Ensure-ConfigValue "Luthn__Auth__Tokens__0__WorkspaceId" "default"
+        Ensure-ConfigValue "Luthn__Auth__Tokens__0__ActorKind" "Agent"
         Ensure-ConfigValue "Luthn__Auth__Tokens__0__IsOperator" "false"
         $scopes = @("agent.read", "agent.write.summary", "memory.write", "memory.read", "classification.preview", "agent.connection.read", "agent.connection.write")
         for ($index = 0; $index -lt $scopes.Count; $index++) {

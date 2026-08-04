@@ -987,6 +987,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = "source-sensitive-1",
+            WorkspaceId = "default",
             SourceSystem = "local",
             SourceType = "note",
             ReceivedAt = DateTimeOffset.UtcNow,
@@ -996,6 +997,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = "source-sensitive-without-safe-output",
+            WorkspaceId = "default",
             SourceSystem = "local",
             SourceType = "note",
             ReceivedAt = DateTimeOffset.UtcNow,
@@ -1005,6 +1007,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {
             Id = "sensitive-ref-1",
+            WorkspaceId = "default",
             SourceEventId = "source-sensitive-1",
             SourceSystem = "local",
             SourceType = "note",
@@ -1015,6 +1018,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {
             Id = "sensitive-ref-without-safe-output",
+            WorkspaceId = "default",
             SourceEventId = "source-sensitive-without-safe-output",
             SourceSystem = "local",
             SourceType = "note",
@@ -1026,6 +1030,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         db.WikiProposals.Add(new WikiProposalRecord
         {
             Id = "wiki-public-runbook",
+            WorkspaceId = "default",
             SourceEventId = "source-sensitive-1",
             Title = "Release runbook",
             SafeSummary = "Public-safe release steps.",
@@ -1037,6 +1042,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         db.WikiProposals.Add(new WikiProposalRecord
         {
             Id = "wiki-private-blocked",
+            WorkspaceId = "default",
             SourceEventId = "source-sensitive-1",
             Title = "Blocked private source terms",
             SafeSummary = "Private customer raw vault terms.",

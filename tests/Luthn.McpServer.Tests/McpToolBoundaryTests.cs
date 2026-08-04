@@ -29,7 +29,13 @@ public sealed class McpToolBoundaryTests
         Assert.NotEqual(aliceKey, bobKey);
         Assert.DoesNotContain("alice-bearer-secret", alicePartition, StringComparison.Ordinal);
         Assert.DoesNotContain("alice-bearer-secret", aliceKey, StringComparison.Ordinal);
-        Assert.Equal("single-owner-local", PrincipalCachePartition.Create(null));
+        Assert.StartsWith("sha256:", PrincipalCachePartition.Create(null), StringComparison.Ordinal);
+        Assert.NotEqual(
+            PrincipalCachePartition.Create("alice-bearer-secret", new Uri("http://luthn-a"), "team-a"),
+            PrincipalCachePartition.Create("alice-bearer-secret", new Uri("http://luthn-a"), "team-b"));
+        Assert.NotEqual(
+            PrincipalCachePartition.Create("alice-bearer-secret", new Uri("http://luthn-a"), "team-a"),
+            PrincipalCachePartition.Create("alice-bearer-secret", new Uri("http://luthn-b"), "team-a"));
     }
 
     [Fact]

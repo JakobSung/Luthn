@@ -56,16 +56,16 @@ public static class TurnSummaryEndpoints
         var contentDigest = NormalizeDigest(request.ContentDigest) ?? ComputeSha256Digest(request.Summary);
         var actor = ServiceTokenAuthorization.GetActor(httpContext);
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        var summaryId = CreateStableSummaryId(request, contentDigest, principal.UserId);
+        var summaryId = CreateStableSummaryId(request, contentDigest, principal.WorkspaceId);
         var sourceEventId = summaryId;
         var existingSource = await db.SourceEvents
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                record => record.Id == sourceEventId && record.OwnerUserId == principal.UserId,
+                record => record.Id == sourceEventId && record.WorkspaceId == principal.WorkspaceId,
                 cancellationToken);
         if (existingSource is not null)
         {
-            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.UserId, cancellationToken);
+            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.WorkspaceId, cancellationToken);
             return TypedResults.Ok(existing);
         }
 
@@ -77,6 +77,7 @@ public static class TurnSummaryEndpoints
             request.Provenance,
             actor,
             principal.UserId,
+            principal.WorkspaceId,
             ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
             receivedAt,
             out var provenance,
@@ -150,6 +151,7 @@ public static class TurnSummaryEndpoints
             ReceivedAt = receivedAt,
             ContentDigest = contentDigest,
             ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial,
+            WorkspaceId = principal.WorkspaceId,
             OwnerUserId = principal.UserId
         });
         db.CollectionProvenance.Add(provenance);
@@ -183,6 +185,7 @@ public static class TurnSummaryEndpoints
             CreatedAt = receivedAt,
             UpdatedAt = receivedAt,
             CreatedBy = actor,
+            WorkspaceId = principal.WorkspaceId,
             OwnerUserId = principal.UserId
         };
         db.SharedMemoryItems.Add(memoryRecord);
@@ -211,12 +214,16 @@ public static class TurnSummaryEndpoints
         }
         catch (DbUpdateException)
         {
-            if (!await ExistingSourceEventExistsAsync(db, sourceEventId, cancellationToken))
+            if (!await ExistingSourceEventExistsAsync(
+                    db,
+                    sourceEventId,
+                    principal.WorkspaceId,
+                    cancellationToken))
             {
                 throw;
             }
 
-            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.UserId, cancellationToken);
+            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.WorkspaceId, cancellationToken);
             return TypedResults.Ok(existing);
         }
 
@@ -237,16 +244,20 @@ public static class TurnSummaryEndpoints
     private static async Task<TurnSummaryIntakeResponse> BuildExistingResponseAsync(
         LuthnDbContext db,
         string sourceEventId,
-        string ownerUserId,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
-        var classification = await db.ClassificationResults
-            .AsNoTracking()
-            .SingleAsync(record => record.SourceEventId == sourceEventId, cancellationToken);
+        var classification = await (
+                from classificationRecord in db.ClassificationResults.AsNoTracking()
+                join source in db.SourceEvents.AsNoTracking()
+                    on classificationRecord.SourceEventId equals source.Id
+                where classificationRecord.SourceEventId == sourceEventId && source.WorkspaceId == workspaceId
+                select classificationRecord)
+            .SingleAsync(cancellationToken);
         var memory = await db.SharedMemoryItems
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                record => record.Id == $"memory-{sourceEventId}" && record.OwnerUserId == ownerUserId,
+                record => record.Id == $"memory-{sourceEventId}" && record.WorkspaceId == workspaceId,
                 cancellationToken);
         var audit = await db.AuditEvents
             .AsNoTracking()
@@ -277,12 +288,15 @@ public static class TurnSummaryEndpoints
     private static async Task<bool> ExistingSourceEventExistsAsync(
         LuthnDbContext db,
         string sourceEventId,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         db.ChangeTracker.Clear();
         return await db.SourceEvents
             .AsNoTracking()
-            .AnyAsync(record => record.Id == sourceEventId, cancellationToken);
+            .AnyAsync(
+                record => record.Id == sourceEventId && record.WorkspaceId == workspaceId,
+                cancellationToken);
     }
 
     private static StorageDecision RehydrateDecision(ClassificationResultRecord record) =>
@@ -439,12 +453,36 @@ public static class TurnSummaryEndpoints
     private static string CreateStableSummaryId(
         TurnSummaryIntakeRequest request,
         string contentDigest,
-        string ownerUserId)
+        string workspaceId)
     {
-        var key = string.IsNullOrWhiteSpace(request.IdempotencyKey)
-            ? $"{request.SourceAgent.Trim()}:{request.SessionId.Trim()}:{request.TurnId?.Trim()}:{request.TurnRange?.Trim()}:{contentDigest}"
-            : request.IdempotencyKey.Trim();
-        return $"turn-summary-{HashFragment($"{ownerUserId}:{key}")}";
+        var stableInput = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? EncodeStableKeyParts(
+                "derived",
+                workspaceId,
+                request.SourceAgent.Trim(),
+                request.SessionId.Trim(),
+                request.TurnId?.Trim(),
+                request.TurnRange?.Trim(),
+                contentDigest)
+            : EncodeStableKeyParts("explicit", workspaceId, request.IdempotencyKey.Trim());
+        return $"turn-summary-{HashFragment(stableInput)}";
+    }
+
+    private static string EncodeStableKeyParts(params string?[] parts)
+    {
+        var builder = new StringBuilder();
+        foreach (var part in parts)
+        {
+            if (part is null)
+            {
+                builder.Append("-1:");
+                continue;
+            }
+
+            builder.Append(part.Length).Append(':').Append(part);
+        }
+
+        return builder.ToString();
     }
 
     private static string? NormalizeDigest(string? contentDigest) =>

@@ -67,6 +67,8 @@ printf '%s' "$LUTHN_SERVICE_VALUE" \
 Luthn__Identity__Mode=SingleOwner
 Luthn__Identity__SingleOwnerUserId=local-owner
 Luthn__Auth__Tokens__0__UserId=local-owner
+Luthn__Auth__Tokens__0__WorkspaceId=default
+Luthn__Auth__Tokens__0__ActorKind=Agent
 Luthn__Auth__Tokens__0__IsOperator=false
 ```
 
@@ -78,14 +80,21 @@ ID를 연결합니다. ID는 소문자로 정규화하며 첫 글자는 영문�
 ```bash
 Luthn__Identity__Mode=MultiUser
 Luthn__Auth__Tokens__0__UserId=alice
+Luthn__Auth__Tokens__0__WorkspaceId=team-alpha
+Luthn__Auth__Tokens__0__ActorKind=Agent
 Luthn__Auth__Tokens__0__IsOperator=false
 Luthn__Auth__Tokens__1__Name=local-operator
+Luthn__Auth__Tokens__1__UserId=operator
+Luthn__Auth__Tokens__1__WorkspaceId=team-alpha
+Luthn__Auth__Tokens__1__ActorKind=Service
 Luthn__Auth__Tokens__1__IsOperator=true
 ```
 
-user 또는 connector마다 별도 최소권한 token을 사용합니다. `IsOperator=true`는 명시적인
-교차-owner 관리 역할이며 `X-Luthn-Operator` header는 계속 audit metadata일 뿐 역할을
-부여하지 않습니다. identity 설정 변경 뒤 `/readyz`를 확인합니다.
+user 또는 connector마다 별도 최소권한 token을 사용합니다. 같은 팀에서 공유할 token은
+같은 `WorkspaceId`에 연결하고, 다른 workspace token과 데이터가 섞이지 않게 합니다.
+`IsOperator=true`도 product data의 workspace 경계를 우회하지 않습니다.
+`X-Luthn-Operator` header는 계속 audit metadata일 뿐 역할을 부여하지 않습니다. identity
+설정 변경 뒤 `/readyz`를 확인합니다.
 
 ## 분류 Provider 설정
 

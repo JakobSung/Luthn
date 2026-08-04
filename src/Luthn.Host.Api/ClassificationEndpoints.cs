@@ -309,7 +309,7 @@ public static class ClassificationEndpoints
                     normalizedRequest.ProjectKey,
                     normalizedRequest.TaskKey,
                     normalizedRequest.TopicTags),
-                ServiceTokenAuthorization.GetPrincipal(httpContext).UserId,
+                ServiceTokenAuthorization.GetPrincipal(httpContext).WorkspaceId,
                 cancellationToken);
             var pack = builder.Build(normalizedRequest, candidates) with
             {
@@ -376,7 +376,7 @@ public static class ClassificationEndpoints
         {
             var candidates = await candidateSelector.SelectAgentContextAsync(
                 normalizedRequest,
-                ServiceTokenAuthorization.GetPrincipal(httpContext).UserId,
+                ServiceTokenAuthorization.GetPrincipal(httpContext).WorkspaceId,
                 cancellationToken);
             var search = retrievalBackend.Search(normalizedRequest, candidates) with
             {
@@ -409,10 +409,10 @@ public static class ClassificationEndpoints
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        var ownerUserId = ServiceTokenAuthorization.GetPrincipal(httpContext).UserId;
+        var workspaceId = ServiceTokenAuthorization.GetPrincipal(httpContext).WorkspaceId;
         var proposal = await db.WikiProposals
             .AsNoTracking()
-            .Where(record => record.OwnerUserId == ownerUserId &&
+            .Where(record => record.WorkspaceId == workspaceId &&
                 record.Id == id &&
                 record.AllowsAgentContext &&
                 record.Sensitivity == SensitivityLevel.Public)

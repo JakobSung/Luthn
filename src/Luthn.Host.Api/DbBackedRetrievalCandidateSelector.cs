@@ -18,12 +18,12 @@ public interface IRetrievalCandidateSelector
 {
     Task<IReadOnlyList<ContextPackCandidate>> SelectAgentContextAsync(
         SafeSearchRequest request,
-        string ownerUserId,
+        string workspaceId,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ContextPackCandidate>> SelectSharedMemoryAsync(
         SafeSearchRequest request,
-        string ownerUserId,
+        string workspaceId,
         CancellationToken cancellationToken);
 }
 
@@ -35,7 +35,7 @@ public sealed class DbBackedRetrievalCandidateSelector(
     private readonly IOperationalMetrics _metrics = metrics ?? NullOperationalMetrics.Instance;
     public async Task<IReadOnlyList<ContextPackCandidate>> SelectAgentContextAsync(
         SafeSearchRequest request,
-        string ownerUserId,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -47,8 +47,8 @@ public sealed class DbBackedRetrievalCandidateSelector(
             request.ProjectKey,
             request.TaskKey,
             request.TopicTags);
-        var wikiCandidates = await SelectWikiAsync(normalizedRequest, ownerUserId, cancellationToken);
-        var memoryCandidates = await SelectMemoryAsync(normalizedRequest, ownerUserId, cancellationToken);
+        var wikiCandidates = await SelectWikiAsync(normalizedRequest, workspaceId, cancellationToken);
+        var memoryCandidates = await SelectMemoryAsync(normalizedRequest, workspaceId, cancellationToken);
 
         LuthnHostMetrics.SafeSearchCandidateCount.Record(
             wikiCandidates.Length,
@@ -64,7 +64,7 @@ public sealed class DbBackedRetrievalCandidateSelector(
 
     public async Task<IReadOnlyList<ContextPackCandidate>> SelectSharedMemoryAsync(
         SafeSearchRequest request,
-        string ownerUserId,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -77,7 +77,7 @@ public sealed class DbBackedRetrievalCandidateSelector(
                 request.ProjectKey,
                 request.TaskKey,
                 request.TopicTags),
-            ownerUserId,
+            workspaceId,
             cancellationToken);
         LuthnHostMetrics.SafeSearchCandidateCount.Record(
             candidates.Length,
@@ -88,12 +88,12 @@ public sealed class DbBackedRetrievalCandidateSelector(
 
     private async Task<ContextPackCandidate[]> SelectWikiAsync(
         SafeSearchRequest request,
-        string ownerUserId,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         var query = db.WikiProposals
             .AsNoTracking()
-            .Where(record => record.OwnerUserId == ownerUserId &&
+            .Where(record => record.WorkspaceId == workspaceId &&
                 record.AllowsAgentContext &&
                 record.Sensitivity == SensitivityLevel.Public);
 
@@ -123,13 +123,13 @@ public sealed class DbBackedRetrievalCandidateSelector(
 
     private async Task<ContextPackCandidate[]> SelectMemoryAsync(
         SafeSearchRequest request,
-        string ownerUserId,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
         var query = db.SharedMemoryItems
             .AsNoTracking()
-            .Where(record => record.OwnerUserId == ownerUserId &&
+            .Where(record => record.WorkspaceId == workspaceId &&
                 record.AllowsAgentContext &&
                 record.Sensitivity == SensitivityLevel.Public &&
                 (record.Visibility == MemoryVisibility.PublicSafe ||

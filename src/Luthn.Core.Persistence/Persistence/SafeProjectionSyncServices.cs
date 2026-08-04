@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -76,26 +77,25 @@ public sealed class SafeProjectionPublicationService(
     public async Task<ExternalPublicationResult?> GetAsync(
         string memoryItemId,
         CancellationToken cancellationToken)
-        => await GetAsync(memoryItemId, "local-owner", isOperator: false, cancellationToken);
+        => await GetAsync(memoryItemId, WorkspaceIds.Default, cancellationToken);
 
     public async Task<ExternalPublicationResult?> GetAsync(
         string memoryItemId,
-        string ownerUserId,
-        bool isOperator,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         var memory = await db.SharedMemoryItems
             .AsNoTracking()
             .SingleOrDefaultAsync(
                 record => record.Id == memoryItemId &&
-                    (isOperator || record.OwnerUserId == ownerUserId),
+                    record.WorkspaceId == workspaceId,
                 cancellationToken);
         if (memory is null)
         {
             return null;
         }
 
-        var syncState = await LatestSyncStateAsync(memory.Id, cancellationToken);
+        var syncState = await LatestSyncStateAsync(memory.Id, memory.WorkspaceId, cancellationToken);
         return ToResult(memory, syncState);
     }
 
@@ -104,20 +104,19 @@ public sealed class SafeProjectionPublicationService(
         string actor,
         DateTimeOffset now,
         CancellationToken cancellationToken)
-        => await ApproveAsync(memoryItemId, actor, now, "local-owner", isOperator: false, cancellationToken);
+        => await ApproveAsync(memoryItemId, actor, now, WorkspaceIds.Default, cancellationToken);
 
     public async Task<ExternalPublicationResult> ApproveAsync(
         string memoryItemId,
         string actor,
         DateTimeOffset now,
-        string ownerUserId,
-        bool isOperator,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         var memory = await db.SharedMemoryItems
             .SingleOrDefaultAsync(
                 record => record.Id == memoryItemId &&
-                    (isOperator || record.OwnerUserId == ownerUserId),
+                    record.WorkspaceId == workspaceId,
                 cancellationToken)
             ?? throw new KeyNotFoundException("Shared memory item was not found.");
 
@@ -128,7 +127,7 @@ public sealed class SafeProjectionPublicationService(
 
         if (memory.ExternalPublicationState == ExternalPublicationState.ApprovedForExternal)
         {
-            var currentSyncState = await LatestSyncStateAsync(memory.Id, cancellationToken);
+            var currentSyncState = await LatestSyncStateAsync(memory.Id, memory.WorkspaceId, cancellationToken);
             return ToResult(memory, currentSyncState);
         }
 
@@ -151,6 +150,7 @@ public sealed class SafeProjectionPublicationService(
         memory.Revision = Math.Max(1, memory.Revision) + 1;
 
         var envelope = SafeProjectionSyncPolicy.CreateUpsert(
+            memory.WorkspaceId,
             installation.OriginInstanceId,
             memory.Id,
             memory.Revision,
@@ -174,20 +174,19 @@ public sealed class SafeProjectionPublicationService(
         string actor,
         DateTimeOffset now,
         CancellationToken cancellationToken)
-        => await RevokeAsync(memoryItemId, actor, now, "local-owner", isOperator: false, cancellationToken);
+        => await RevokeAsync(memoryItemId, actor, now, WorkspaceIds.Default, cancellationToken);
 
     public async Task<ExternalPublicationResult> RevokeAsync(
         string memoryItemId,
         string actor,
         DateTimeOffset now,
-        string ownerUserId,
-        bool isOperator,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         var memory = await db.SharedMemoryItems
             .SingleOrDefaultAsync(
                 record => record.Id == memoryItemId &&
-                    (isOperator || record.OwnerUserId == ownerUserId),
+                    record.WorkspaceId == workspaceId,
                 cancellationToken)
             ?? throw new KeyNotFoundException("Shared memory item was not found.");
 
@@ -198,7 +197,7 @@ public sealed class SafeProjectionPublicationService(
 
         if (memory.ExternalPublicationState == ExternalPublicationState.Revoked)
         {
-            var currentSyncState = await LatestSyncStateAsync(memory.Id, cancellationToken);
+            var currentSyncState = await LatestSyncStateAsync(memory.Id, memory.WorkspaceId, cancellationToken);
             return ToResult(memory, currentSyncState);
         }
 
@@ -210,6 +209,7 @@ public sealed class SafeProjectionPublicationService(
         memory.Revision = Math.Max(1, memory.Revision) + 1;
 
         var envelope = SafeProjectionSyncPolicy.CreateRevoke(
+            memory.WorkspaceId,
             installation.OriginInstanceId,
             memory.Id,
             memory.Revision,
@@ -244,6 +244,7 @@ public sealed class SafeProjectionPublicationService(
             IdempotencyKey = SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope),
             OriginInstanceId = envelope.OriginInstanceId,
             LocalRecordId = envelope.LocalRecordId,
+            WorkspaceId = envelope.WorkspaceId,
             OwnerUserId = ownerUserId,
             Revision = envelope.Revision,
             Operation = envelope.Operation,
@@ -270,10 +271,11 @@ public sealed class SafeProjectionPublicationService(
 
     private async Task<SafeProjectionSyncOutboxState?> LatestSyncStateAsync(
         string memoryItemId,
+        string workspaceId,
         CancellationToken cancellationToken) =>
         await db.SafeProjectionSyncOutbox
             .AsNoTracking()
-            .Where(record => record.LocalRecordId == memoryItemId)
+            .Where(record => record.WorkspaceId == workspaceId && record.LocalRecordId == memoryItemId)
             .OrderByDescending(record => record.Revision)
             .Select(record => (SafeProjectionSyncOutboxState?)record.State)
             .FirstOrDefaultAsync(cancellationToken);
@@ -360,6 +362,7 @@ public sealed class SafeProjectionOutboxProcessor(
                 record.AttemptCount < maxAttempts &&
                 (record.NextAttemptAt == null || record.NextAttemptAt <= now) &&
                 !db.SafeProjectionSyncOutbox.Any(older =>
+                    older.WorkspaceId == record.WorkspaceId &&
                     older.OriginInstanceId == record.OriginInstanceId &&
                     older.LocalRecordId == record.LocalRecordId &&
                     older.Revision < record.Revision &&
@@ -409,7 +412,7 @@ public sealed class SafeProjectionOutboxProcessor(
                 record.RemoteCheckpoint = Bound(result.Checkpoint, 512);
                 if (!string.IsNullOrWhiteSpace(result.Checkpoint))
                 {
-                    await UpsertCheckpointAsync(result.Checkpoint, now, cancellationToken);
+                    await UpsertCheckpointAsync(record.WorkspaceId, result.Checkpoint, now, cancellationToken);
                 }
                 acknowledged++;
             }
@@ -477,6 +480,7 @@ public sealed class SafeProjectionOutboxProcessor(
                     (record.State == SafeProjectionSyncOutboxState.Pending ||
                         record.State == SafeProjectionSyncOutboxState.Failed) &&
                     db.SafeProjectionSyncOutbox.Any(newer =>
+                        newer.WorkspaceId == record.WorkspaceId &&
                         newer.OriginInstanceId == record.OriginInstanceId &&
                         newer.LocalRecordId == record.LocalRecordId &&
                         newer.Revision > record.Revision))
@@ -494,6 +498,7 @@ public sealed class SafeProjectionOutboxProcessor(
             .Where(record =>
                 record.State is SafeProjectionSyncOutboxState.Pending or SafeProjectionSyncOutboxState.Failed &&
                 records.Any(newer =>
+                    newer.WorkspaceId == record.WorkspaceId &&
                     newer.OriginInstanceId == record.OriginInstanceId &&
                     newer.LocalRecordId == record.LocalRecordId &&
                     newer.Revision > record.Revision))
@@ -529,6 +534,7 @@ public sealed class SafeProjectionOutboxProcessor(
                     record.AttemptCount < maxAttempts &&
                     (record.NextAttemptAt == null || record.NextAttemptAt <= now) &&
                     !db.SafeProjectionSyncOutbox.Any(older =>
+                        older.WorkspaceId == record.WorkspaceId &&
                         older.OriginInstanceId == record.OriginInstanceId &&
                         older.LocalRecordId == record.LocalRecordId &&
                         older.Revision < record.Revision &&
@@ -551,6 +557,7 @@ public sealed class SafeProjectionOutboxProcessor(
             record.NextAttemptAt is { } nextAttemptAt && nextAttemptAt > now ||
             await db.SafeProjectionSyncOutbox.AnyAsync(
                 older =>
+                    older.WorkspaceId == record.WorkspaceId &&
                     older.OriginInstanceId == record.OriginInstanceId &&
                     older.LocalRecordId == record.LocalRecordId &&
                     older.Revision < record.Revision &&
@@ -568,18 +575,20 @@ public sealed class SafeProjectionOutboxProcessor(
     }
 
     private async Task UpsertCheckpointAsync(
+        string workspaceId,
         string checkpoint,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         var transportName = transport.Name;
         var record = await db.SafeProjectionSyncCheckpoints.SingleOrDefaultAsync(
-            item => item.TransportName == transportName,
+            item => item.WorkspaceId == workspaceId && item.TransportName == transportName,
             cancellationToken);
         if (record is null)
         {
             db.SafeProjectionSyncCheckpoints.Add(new SafeProjectionSyncCheckpointRecord
             {
+                WorkspaceId = workspaceId,
                 TransportName = transportName,
                 Checkpoint = Bound(checkpoint, 512)!,
                 UpdatedAt = now

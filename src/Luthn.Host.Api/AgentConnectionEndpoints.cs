@@ -32,21 +32,18 @@ public static partial class AgentConnectionEndpoints
         CancellationToken cancellationToken)
     {
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        var query = db.AgentConnectionChannels.AsNoTracking();
-        if (!principal.IsOperator)
-        {
-            query = query.Where(record => record.OwnerUserId == principal.UserId);
-        }
+        var query = db.AgentConnectionChannels
+            .AsNoTracking()
+            .Where(record => record.WorkspaceId == principal.WorkspaceId);
 
         var records = await query
-            .OrderBy(record => record.OwnerUserId)
-            .ThenBy(record => record.AgentId)
+            .OrderBy(record => record.AgentId)
             .ThenBy(record => record.Channel)
             .ToListAsync(cancellationToken);
 
         var connections = records
             .GroupBy(
-                record => new { record.OwnerUserId, record.AgentId })
+                record => new { record.WorkspaceId, record.AgentId })
             .Select(ToConnectionResponse)
             .ToArray();
 
@@ -66,7 +63,9 @@ public static partial class AgentConnectionEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
-        var ownerUserId = ServiceTokenAuthorization.GetPrincipal(httpContext).UserId;
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        var ownerUserId = principal.UserId;
+        var workspaceId = principal.WorkspaceId;
         var normalizedAgentId = agentId.Trim();
         var observedAt = DateTimeOffset.UtcNow;
         var requestedChannels = request.Channels!
@@ -79,6 +78,7 @@ public static partial class AgentConnectionEndpoints
         {
             await UpsertAsync(
                 db,
+                workspaceId,
                 ownerUserId,
                 normalizedAgentId,
                 request,
@@ -92,6 +92,7 @@ public static partial class AgentConnectionEndpoints
             db.ChangeTracker.Clear();
             await UpsertAsync(
                 db,
+                workspaceId,
                 ownerUserId,
                 normalizedAgentId,
                 request,
@@ -104,7 +105,7 @@ public static partial class AgentConnectionEndpoints
         var records = await db.AgentConnectionChannels
             .AsNoTracking()
             .Where(record =>
-                record.OwnerUserId == ownerUserId &&
+                record.WorkspaceId == workspaceId &&
                 record.AgentId == normalizedAgentId)
             .OrderBy(record => record.AgentId)
             .ThenBy(record => record.Channel)
@@ -115,6 +116,7 @@ public static partial class AgentConnectionEndpoints
 
     private static async Task UpsertAsync(
         LuthnDbContext db,
+        string workspaceId,
         string ownerUserId,
         string agentId,
         AgentConnectionObservationRequest request,
@@ -125,7 +127,7 @@ public static partial class AgentConnectionEndpoints
     {
         var existing = await db.AgentConnectionChannels
             .Where(record =>
-                record.OwnerUserId == ownerUserId &&
+                record.WorkspaceId == workspaceId &&
                 record.AgentId == agentId &&
                 channelNames.Contains(record.Channel))
             .ToDictionaryAsync(record => record.Channel, StringComparer.Ordinal, cancellationToken);
@@ -137,6 +139,7 @@ public static partial class AgentConnectionEndpoints
                 record = new AgentConnectionChannelRecord
                 {
                     Id = $"agent-connection:{Guid.NewGuid():N}",
+                    WorkspaceId = workspaceId,
                     OwnerUserId = ownerUserId,
                     AgentId = agentId,
                     Channel = channel.Channel,
@@ -229,7 +232,10 @@ public static partial class AgentConnectionEndpoints
             ResolveOverallState(records),
             channels.Max(channel => channel.LastSuccessfulActivityAt),
             channels.Max(channel => channel.UpdatedAt),
-            channels);
+            channels)
+        {
+            WorkspaceId = latest.WorkspaceId
+        };
     }
 
     private static AgentConnectionState ResolveOverallState(
@@ -527,7 +533,10 @@ public sealed record AgentConnectionResponse(
     AgentConnectionState State,
     DateTimeOffset? LastSuccessfulActivityAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<AgentConnectionChannelResponse> Channels);
+    IReadOnlyList<AgentConnectionChannelResponse> Channels)
+{
+    public string WorkspaceId { get; init; } = "default";
+}
 
 public sealed record AgentConnectionChannelResponse(
     string Channel,

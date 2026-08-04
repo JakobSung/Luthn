@@ -137,6 +137,8 @@ Fresh installs use the backward-compatible single-owner identity boundary:
 Luthn__Identity__Mode=SingleOwner
 Luthn__Identity__SingleOwnerUserId=local-owner
 Luthn__Auth__Tokens__0__UserId=local-owner
+Luthn__Auth__Tokens__0__WorkspaceId=default
+Luthn__Auth__Tokens__0__ActorKind=Agent
 Luthn__Auth__Tokens__0__IsOperator=false
 ```
 
@@ -149,15 +151,21 @@ return `503`, and caller JSON cannot override them.
 ```bash
 Luthn__Identity__Mode=MultiUser
 Luthn__Auth__Tokens__0__UserId=alice
+Luthn__Auth__Tokens__0__WorkspaceId=team-alpha
+Luthn__Auth__Tokens__0__ActorKind=Agent
 Luthn__Auth__Tokens__0__IsOperator=false
 Luthn__Auth__Tokens__1__Name=local-operator
+Luthn__Auth__Tokens__1__UserId=operator
+Luthn__Auth__Tokens__1__WorkspaceId=team-alpha
+Luthn__Auth__Tokens__1__ActorKind=Service
 Luthn__Auth__Tokens__1__IsOperator=true
 ```
 
-Use a distinct least-privilege token per user or connector. `IsOperator=true`
-is an explicit cross-owner administrative role; the `X-Luthn-Operator` header
-remains audit metadata and never grants that role. Verify `/readyz` after any
-identity configuration change.
+Use a distinct least-privilege token per user or connector. Bind tokens that
+share team data to the same `WorkspaceId`; tokens bound to other workspaces stay
+isolated. `IsOperator=true` does not bypass the product-data workspace boundary.
+The `X-Luthn-Operator` header remains audit metadata and never grants that role.
+Verify `/readyz` after any identity configuration change.
 
 Supported scopes include `agent.read`, `agent.write.summary`,
 `agent.connection.read`, `agent.connection.write`, `classification.preview`,

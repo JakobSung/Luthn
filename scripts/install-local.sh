@@ -165,6 +165,8 @@ ensure_local_service_token() {
   append_env_if_missing "Luthn__Identity__SingleOwnerUserId" "local-owner"
   append_env_if_missing "Luthn__Auth__Tokens__0__Name" "local-agent"
   append_env_if_missing "Luthn__Auth__Tokens__0__UserId" "local-owner"
+  append_env_if_missing "Luthn__Auth__Tokens__0__WorkspaceId" "default"
+  append_env_if_missing "Luthn__Auth__Tokens__0__ActorKind" "Agent"
   append_env_if_missing "Luthn__Auth__Tokens__0__IsOperator" "false"
   append_env_if_missing "Luthn__Auth__Tokens__0__Scopes__0" "agent.read"
   append_env_if_missing "Luthn__Auth__Tokens__0__Scopes__1" "agent.write.summary"

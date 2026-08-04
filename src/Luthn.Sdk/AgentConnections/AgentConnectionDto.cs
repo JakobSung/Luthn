@@ -27,7 +27,8 @@ public sealed record AgentConnectionDto(
     [property: JsonPropertyName("lastSuccessfulActivityAt")] DateTimeOffset? LastSuccessfulActivityAt,
     [property: JsonPropertyName("updatedAt")] DateTimeOffset UpdatedAt,
     [property: JsonPropertyName("channels")] IReadOnlyList<AgentConnectionChannelDto> Channels,
-    [property: JsonPropertyName("ownerUserId")] string OwnerUserId = "");
+    [property: JsonPropertyName("ownerUserId")] string OwnerUserId = "",
+    [property: JsonPropertyName("workspaceId")] string WorkspaceId = "default");
 
 public sealed record AgentConnectionChannelDto(
     [property: JsonPropertyName("channel")] string Channel,

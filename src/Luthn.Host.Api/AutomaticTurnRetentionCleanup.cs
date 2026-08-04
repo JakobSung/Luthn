@@ -66,14 +66,18 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                         && memory.ExpiresAt <= now
                         && memory.ExternalPublicationState == ExternalPublicationState.LocalOnly
                         && source.SourceType == "turn-summary"
+                        && memory.WorkspaceId == source.WorkspaceId
+                        && memory.WorkspaceId == provenance.WorkspaceId
                         && memory.OwnerUserId == source.OwnerUserId
                         && memory.OwnerUserId == provenance.AuthenticatedUserId
                         && !db.SafeProjectionSyncOutbox.Any(
-                            outbox => outbox.LocalRecordId == memory.Id)
+                            outbox => outbox.WorkspaceId == memory.WorkspaceId &&
+                                outbox.LocalRecordId == memory.Id)
                     orderby memory.ExpiresAt, memory.CreatedAt, memory.Id
                     select new AutomaticTurnCleanupCandidate(
                         memory.Id,
                         source.Id,
+                        memory.WorkspaceId,
                         memory.OwnerUserId))
                 .AsNoTracking()
                 .Take(batchSize)
@@ -108,6 +112,7 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                 {
                     record.MemoryItemId,
                     record.SourceEventId,
+                    record.WorkspaceId,
                     record.AuthenticatedUserId
                 })
                 .ToArrayAsync(cancellationToken);
@@ -133,6 +138,7 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                 .Where(candidate =>
                     memories.Any(memory =>
                         memory.Id == candidate.MemoryItemId &&
+                        memory.WorkspaceId == candidate.WorkspaceId &&
                         memory.OwnerUserId == candidate.OwnerUserId &&
                         memory.RetentionKind == MemoryRetentionKind.Ephemeral &&
                         memory.ExpiresAt is not null &&
@@ -140,11 +146,13 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                         memory.ExternalPublicationState == ExternalPublicationState.LocalOnly) &&
                     sources.Any(source =>
                         source.Id == candidate.SourceEventId &&
+                        source.WorkspaceId == candidate.WorkspaceId &&
                         source.OwnerUserId == candidate.OwnerUserId &&
                         source.SourceType == "turn-summary") &&
                     provenanceLinks.Any(provenance =>
                         provenance.MemoryItemId == candidate.MemoryItemId &&
                         provenance.SourceEventId == candidate.SourceEventId &&
+                        provenance.WorkspaceId == candidate.WorkspaceId &&
                         provenance.AuthenticatedUserId == candidate.OwnerUserId) &&
                     !outboxMemoryIds.Contains(candidate.MemoryItemId))
                 .ToArray();
@@ -190,6 +198,7 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
     private sealed record AutomaticTurnCleanupCandidate(
         string MemoryItemId,
         string SourceEventId,
+        string WorkspaceId,
         string OwnerUserId);
 }
 

@@ -169,6 +169,7 @@ public sealed class AutomaticTurnRetentionCleanupTests
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = id,
+            WorkspaceId = "default",
             SourceSystem = "codex",
             SourceType = sourceType,
             ReceivedAt = Now.AddDays(-3),
@@ -190,6 +191,7 @@ public sealed class AutomaticTurnRetentionCleanupTests
         db.SharedMemoryItems.Add(new SharedMemoryItemRecord
         {
             Id = memoryItemId,
+            WorkspaceId = "default",
             Title = $"Memory {id}",
             SafeSummary = sensitive ? "[protected]" : $"Summary {id}",
             Sensitivity = sensitive ? SensitivityLevel.Restricted : SensitivityLevel.Public,
@@ -209,6 +211,7 @@ public sealed class AutomaticTurnRetentionCleanupTests
         db.CollectionProvenance.Add(new CollectionProvenanceRecord
         {
             Id = $"provenance-{id}",
+            WorkspaceId = "default",
             SourceEventId = id,
             MemoryItemId = memoryItemId,
             AuthenticatedActor = "local-agent",
@@ -244,6 +247,7 @@ public sealed class AutomaticTurnRetentionCleanupTests
             db.SafeProjectionSyncOutbox.Add(new SafeProjectionSyncOutboxRecord
             {
                 Id = $"outbox-{id}",
+                WorkspaceId = "default",
                 IdempotencyKey = $"test:{id}:1",
                 OriginInstanceId = "test-origin",
                 LocalRecordId = memoryItemId,
@@ -266,6 +270,7 @@ public sealed class AutomaticTurnRetentionCleanupTests
         db.SharedMemoryItems.Add(new SharedMemoryItemRecord
         {
             Id = memoryItemId,
+            WorkspaceId = "default",
             Title = "Manual memory",
             SafeSummary = "Manually-created ephemeral memory.",
             Sensitivity = SensitivityLevel.Public,
@@ -280,6 +285,7 @@ public sealed class AutomaticTurnRetentionCleanupTests
         db.CollectionProvenance.Add(new CollectionProvenanceRecord
         {
             Id = $"provenance-{id}",
+            WorkspaceId = "default",
             MemoryItemId = memoryItemId,
             AuthenticatedActor = "memory-writer",
             ActorTrust = CollectionProvenance.ServiceTokenActorTrust,

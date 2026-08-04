@@ -673,6 +673,7 @@ public sealed class MemoryEndpointTests
         db.SharedMemoryItems.Add(new SharedMemoryItemRecord
         {
             Id = "memory-old-match",
+            WorkspaceId = "default",
             Title = "Needle recovery memory",
             SafeSummary = "Public-safe recovery memory.",
             Sensitivity = Luthn.Core.Classification.SensitivityLevel.Public,
@@ -686,6 +687,7 @@ public sealed class MemoryEndpointTests
         db.SharedMemoryItems.AddRange(Enumerable.Range(0, 1001).Select(index => new SharedMemoryItemRecord
         {
             Id = $"memory-newer-unmatched-{index}",
+            WorkspaceId = "default",
             Title = $"General release memory {index}",
             SafeSummary = "Public-safe unmatched memory.",
             Sensitivity = Luthn.Core.Classification.SensitivityLevel.Public,

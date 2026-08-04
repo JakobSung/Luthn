@@ -130,6 +130,7 @@ public static class MemoryEndpoints
             request.Provenance,
             actor,
             principal.UserId,
+            principal.WorkspaceId,
             ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
             createdAt,
             out var provenance);
@@ -191,6 +192,7 @@ public static class MemoryEndpoints
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
             CreatedBy = actor,
+            WorkspaceId = principal.WorkspaceId,
             OwnerUserId = principal.UserId
         };
         db.SharedMemoryItems.Add(record);
@@ -259,7 +261,7 @@ public static class MemoryEndpoints
         var record = await ReadAgentSafeMemoryItems(
                 db,
                 now,
-                ServiceTokenAuthorization.GetPrincipal(httpContext).UserId)
+                ServiceTokenAuthorization.GetPrincipal(httpContext).WorkspaceId)
             .Where(item => item.Id == id)
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -309,7 +311,7 @@ public static class MemoryEndpoints
         {
             var candidates = await candidateSelector.SelectSharedMemoryAsync(
                 searchRequest,
-                ServiceTokenAuthorization.GetPrincipal(httpContext).UserId,
+                ServiceTokenAuthorization.GetPrincipal(httpContext).WorkspaceId,
                 cancellationToken);
             var search = retrievalBackend.Search(
                 searchRequest,
@@ -321,7 +323,7 @@ public static class MemoryEndpoints
                 : await ReadAgentSafeMemoryItems(
                         db,
                         now,
-                        ServiceTokenAuthorization.GetPrincipal(httpContext).UserId)
+                        ServiceTokenAuthorization.GetPrincipal(httpContext).WorkspaceId)
                     .Where(record => resultIds.Contains(record.Id))
                     .ToArrayAsync(cancellationToken);
             var recordsById = records.ToDictionary(record => record.Id, StringComparer.Ordinal);
@@ -360,10 +362,10 @@ public static class MemoryEndpoints
     private static IQueryable<SharedMemoryItemRecord> ReadAgentSafeMemoryItems(
         LuthnDbContext db,
         DateTimeOffset now,
-        string ownerUserId) =>
+        string workspaceId) =>
         db.SharedMemoryItems
             .AsNoTracking()
-            .Where(record => record.OwnerUserId == ownerUserId &&
+            .Where(record => record.WorkspaceId == workspaceId &&
                 record.AllowsAgentContext &&
                 record.Sensitivity == SensitivityLevel.Public &&
                 (record.Visibility == MemoryVisibility.PublicSafe ||

@@ -53,6 +53,8 @@ services:
       Luthn__Auth__Tokens__0__Name: ${Luthn__Auth__Tokens__0__Name:-local-agent}
       Luthn__Auth__Tokens__0__Sha256Digest: ${Luthn__Auth__Tokens__0__Sha256Digest:?service token digest is required}
       Luthn__Auth__Tokens__0__UserId: ${Luthn__Auth__Tokens__0__UserId:-local-owner}
+      Luthn__Auth__Tokens__0__WorkspaceId: ${Luthn__Auth__Tokens__0__WorkspaceId:-default}
+      Luthn__Auth__Tokens__0__ActorKind: ${Luthn__Auth__Tokens__0__ActorKind:-Agent}
       Luthn__Auth__Tokens__0__IsOperator: ${Luthn__Auth__Tokens__0__IsOperator:-false}
       Luthn__Auth__Tokens__0__Scopes__0: ${Luthn__Auth__Tokens__0__Scopes__0:-agent.read}
       Luthn__Auth__Tokens__0__Scopes__1: ${Luthn__Auth__Tokens__0__Scopes__1:-agent.write.summary}
@@ -76,6 +78,8 @@ services:
       # non-secret fallback keeps that bootstrap path working; API readiness
       # rejects it, and installers write the real digest before startup.
       Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:-luthn-compose-validation-only}
+      Luthn__Auth__Tokens__1__WorkspaceId: ${Luthn__Auth__Tokens__1__WorkspaceId:-default}
+      Luthn__Auth__Tokens__1__ActorKind: ${Luthn__Auth__Tokens__1__ActorKind:-Service}
       Luthn__Auth__Tokens__1__IsOperator: ${Luthn__Auth__Tokens__1__IsOperator:-true}
       Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
       Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-}
@@ -110,6 +114,7 @@ services:
     stdin_open: true
     environment:
       LUTHN_BASE_URL: http://api:8080
+      LUTHN_WORKSPACE_ID: ${Luthn__Auth__Tokens__0__WorkspaceId:-default}
       LUTHN_SERVICE_BEARER_FILE: /run/secrets/service-token
     secrets:
       - service-token

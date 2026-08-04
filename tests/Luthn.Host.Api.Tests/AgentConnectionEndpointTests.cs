@@ -373,7 +373,7 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
     }
 
     [Fact]
-    public async Task MultiUserConnectionsAreOwnerScopedAndOperatorsCanDistinguishOwners()
+    public async Task MultiUserConnectionsAreWorkspaceScopedAndOperatorsCannotBypassWorkspace()
     {
         using var factory = CreateMultiUserFactory();
         using var alice = CreateAuthorizedClient(factory, AliceBearer);
@@ -411,15 +411,14 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
             .ToArray();
 
         Assert.Equal("alice", aliceConnection.GetProperty("ownerUserId").GetString());
+        Assert.Equal("team-alice", aliceConnection.GetProperty("workspaceId").GetString());
         Assert.Equal("Active", aliceConnection.GetProperty("state").GetString());
         Assert.Equal("bob", bobConnection.GetProperty("ownerUserId").GetString());
+        Assert.Equal("team-bob", bobConnection.GetProperty("workspaceId").GetString());
         Assert.Equal("Verified", bobConnection.GetProperty("state").GetString());
-        Assert.Equal(2, operatorConnections.Length);
-        Assert.Equal(
-            ["alice", "bob"],
-            operatorConnections
-                .Select(connection => connection.GetProperty("ownerUserId").GetString()!)
-                .ToArray());
+        var operatorConnection = Assert.Single(operatorConnections);
+        Assert.Equal("alice", operatorConnection.GetProperty("ownerUserId").GetString());
+        Assert.Equal("team-alice", operatorConnection.GetProperty("workspaceId").GetString());
 
         using var aliceDisconnected = await alice.PostAsJsonAsync(
             "/api/agent-connections/codex/observations",
@@ -495,20 +494,23 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
                 "alice-connection",
                 AliceBearer,
                 ["agent.connection.read", "agent.connection.write"],
-                userId: "Alice");
+                userId: "Alice",
+                workspaceId: "team-alice");
             ConfigureToken(
                 builder,
                 1,
                 "bob-connection",
                 BobBearer,
                 ["agent.connection.read", "agent.connection.write"],
-                userId: "Bob");
+                userId: "Bob",
+                workspaceId: "team-bob");
             ConfigureToken(
                 builder,
                 2,
                 "operator-connection",
                 OperatorBearer,
                 ["agent.connection.read"],
+                workspaceId: "team-alice",
                 isOperator: true);
         });
 
@@ -528,6 +530,7 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
         string bearer,
         IReadOnlyList<string> scopes,
         string? userId = null,
+        string? workspaceId = null,
         bool isOperator = false)
     {
         builder.UseSetting($"Luthn:Auth:Tokens:{index}:Name", name);
@@ -539,6 +542,10 @@ public sealed class AgentConnectionEndpointTests : IClassFixture<WebApplicationF
         if (userId is not null)
         {
             builder.UseSetting($"Luthn:Auth:Tokens:{index}:UserId", userId);
+        }
+        if (workspaceId is not null)
+        {
+            builder.UseSetting($"Luthn:Auth:Tokens:{index}:WorkspaceId", workspaceId);
         }
         builder.UseSetting($"Luthn:Auth:Tokens:{index}:IsOperator", isOperator.ToString());
     }

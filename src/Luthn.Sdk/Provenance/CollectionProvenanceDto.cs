@@ -27,4 +27,8 @@ public sealed record CollectionProvenanceDto(
     [property: JsonPropertyName("connectorId")] string? ConnectorId,
     [property: JsonPropertyName("connectorVersion")] string? ConnectorVersion,
     [property: JsonPropertyName("collectedAt")] DateTimeOffset? CollectedAt,
-    [property: JsonPropertyName("receivedAt")] DateTimeOffset ReceivedAt);
+    [property: JsonPropertyName("receivedAt")] DateTimeOffset ReceivedAt)
+{
+    [JsonPropertyName("workspaceId")]
+    public string WorkspaceId { get; init; } = "default";
+}

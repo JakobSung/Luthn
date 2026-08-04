@@ -139,6 +139,7 @@ public sealed class CollectionProvenanceTests
         db.SharedMemoryItems.Add(new SharedMemoryItemRecord
         {
             Id = "memory-immutable",
+            WorkspaceId = "default",
             Title = "Immutable",
             SafeSummary = "Immutable provenance test.",
             Sensitivity = SensitivityLevel.Public,
@@ -152,6 +153,7 @@ public sealed class CollectionProvenanceTests
         db.CollectionProvenance.Add(new CollectionProvenanceRecord
         {
             Id = "provenance-immutable",
+            WorkspaceId = "default",
             MemoryItemId = "memory-immutable",
             AuthenticatedActor = "test",
             ActorTrust = CollectionProvenance.ServiceTokenActorTrust,

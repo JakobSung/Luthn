@@ -1,4 +1,5 @@
 using Luthn.Core.Classification;
+using Luthn.Core.Common;
 using Microsoft.EntityFrameworkCore;
 
 namespace Luthn.Core.Persistence;
@@ -28,7 +29,8 @@ public static class DemoDataSeeder
                 SourceType = "public-runbook",
                 ReceivedAt = timestamp,
                 ContentDigest = "sha256:demo-public-runbook",
-                ContainsSensitiveMaterial = false
+                ContainsSensitiveMaterial = false,
+                WorkspaceId = WorkspaceIds.Default
             });
             created = true;
         }
@@ -44,7 +46,8 @@ public static class DemoDataSeeder
                 Sensitivity = SensitivityLevel.Public,
                 CoreTags = ["runbook", "demo"],
                 AllowsAgentContext = true,
-                CreatedAt = timestamp
+                CreatedAt = timestamp,
+                WorkspaceId = WorkspaceIds.Default
             });
             created = true;
         }
@@ -61,6 +64,7 @@ public static class DemoDataSeeder
                 AuthenticatedActor = "luthn-tools",
                 ActorTrust = "local-runtime",
                 ClaimsTrust = "no-claims",
+                WorkspaceId = WorkspaceIds.Default,
                 ReceivedAt = timestamp
             });
             created = true;

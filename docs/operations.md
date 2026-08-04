@@ -70,20 +70,24 @@ backfills every legacy source, memory, wiki, sensitive reference/request,
 provenance, safe-sync outbox, and agent-connection row to `local-owner`, then adds non-empty
 constraints and owner-leading indexes. The temporary backfill defaults are
 removed in the same migration so later writes missing trusted owner stamping
-fail instead of silently becoming `local-owner`. Keep the pre-migration database backup
-until `/readyz` reports both `identity` and `database` ready and focused
-same-owner/cross-owner checks pass. Rollback requires stopping API, MCP, and
+fail instead of silently becoming `local-owner`. The subsequent workspace
+migration deterministically maps `local-owner` rows to `default` and other
+owners to `personal:{ownerUserId}`. Product-data indexes, agent-connection
+uniqueness, safe-sync outbox, and checkpoints use `WorkspaceId`; author fields
+remain attribution. Keep the pre-migration database backup until `/readyz`
+reports both `identity` and `database` ready and focused
+same-workspace/cross-workspace checks pass. Rollback requires stopping API, MCP, and
 adapter writes, restoring the pre-migration backup if the older image cannot
 read the expanded schema, restoring the matching operator key volume, and
 starting the matching previous image. Do not change `SingleOwnerUserId` after
 data exists without an explicit data migration; the setting does not relabel
 persisted owners.
 
-The agent-connection migration replaces global agent/channel uniqueness with
-owner/agent/channel uniqueness. Identically named connectors can therefore
-coexist for different owners after upgrade. SDK and connector requests do not
-gain an owner selector; identity continues to come only from their service
-token.
+The current workspace migration replaces the prior owner-based
+agent-connection uniqueness with workspace/agent/channel uniqueness.
+Identically named connectors can therefore coexist in different workspaces.
+SDK and connector requests do not gain a workspace or owner selector; identity
+continues to come only from their service token.
 
 ## Self-Host Migration Model
 
