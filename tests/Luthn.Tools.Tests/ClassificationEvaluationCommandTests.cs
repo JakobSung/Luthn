@@ -28,8 +28,8 @@ public sealed class ClassificationEvaluationCommandTests
         Assert.Empty(error.ToString());
         var report = DeserializeReport(output.ToString());
         Assert.Equal("mock", report.Provider);
-        Assert.Equal(25, report.Summary.TotalCount);
-        Assert.Equal(19, report.Summary.PassedCount);
+        Assert.Equal(26, report.Summary.TotalCount);
+        Assert.Equal(20, report.Summary.PassedCount);
         Assert.Equal(5, report.Summary.FalseNegativeCount);
         Assert.Equal(1, report.Summary.FalsePositiveCount);
         Assert.Equal(6, report.Summary.SensitivityMismatchCount);
@@ -57,8 +57,8 @@ public sealed class ClassificationEvaluationCommandTests
         Assert.Empty(error.ToString());
         var report = DeserializeReport(output.ToString());
         Assert.Equal("guarded-mock", report.Provider);
-        Assert.Equal(25, report.Summary.TotalCount);
-        Assert.Equal(23, report.Summary.PassedCount);
+        Assert.Equal(26, report.Summary.TotalCount);
+        Assert.Equal(24, report.Summary.PassedCount);
         Assert.All(
             report.Cases.Where(result => result.Id.EndsWith("-shape", StringComparison.Ordinal)),
             result => Assert.True(result.Passed, result.Id));
@@ -156,10 +156,10 @@ public sealed class ClassificationEvaluationCommandTests
         Assert.Empty(error.ToString());
         Assert.Equal(new Uri("http://127.0.0.1:5089"), capturedUrl);
         Assert.Equal(tokenValue, capturedToken);
-        Assert.Equal(25, client.CallCount);
+        Assert.Equal(26, client.CallCount);
         var report = DeserializeReport(output.ToString());
         Assert.Equal("configured-api", report.Provider);
-        Assert.Equal(25, report.Summary.PassedCount);
+        Assert.Equal(26, report.Summary.PassedCount);
         Assert.DoesNotContain(tokenValue, output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(tokenValue, error.ToString(), StringComparison.Ordinal);
     }
