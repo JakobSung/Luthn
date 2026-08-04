@@ -101,6 +101,7 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.Contains("홍길동 사원", result.Text, StringComparison.Ordinal);
         Assert.Contains("신규 견적을 발행했다", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("1,000원", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("금액", result.Text, StringComparison.Ordinal);
         Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
         Assert.Contains("finance", result.Categories);
     }

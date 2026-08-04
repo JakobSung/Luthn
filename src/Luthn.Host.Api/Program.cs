@@ -65,6 +65,7 @@ builder.Services.AddScoped<IContentClassifier>(provider =>
         provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
 builder.Services.Configure<ClassificationProviderOptions>(builder.Configuration.GetSection("Luthn:Classification"));
 builder.Services.AddSingleton<IPolicyEngine, PolicyEngine>();
+builder.Services.AddScoped<AgentSafeMemoryProjectionSelector>();
 builder.Services.AddScoped<ClassificationPreviewService>();
 builder.Services.AddSingleton<SafeSearchIndex>();
 builder.Services.AddSingleton<IRetrievalBackend, DeterministicRetrievalBackend>();

@@ -284,9 +284,10 @@ public sealed class SensitiveMemoryProtectionTests
 
         await Assert.ThrowsAsync<CryptographicException>(() => MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            new AgentSafeMemoryProjectionSelector(
+                new MockContentClassifier(),
+                new DeterministicSensitiveDataDetector(),
+                new PolicyEngine()),
             new FailingValidationProtector(),
             db,
             new DefaultHttpContext(),
