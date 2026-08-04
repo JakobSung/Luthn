@@ -19,6 +19,12 @@ public sealed class ClassificationContractTests
         { "Customer 고객 원문을 보관합니다.", SensitivityLevel.Restricted, "customer original" }
     };
 
+    public static TheoryData<string, double, string[], bool, SensitivityLevel> ContradictorySensitiveInputs => new()
+    {
+        { "source-category", 0.91, ["private key"], false, SensitivityLevel.Restricted },
+        { "source-sensitive-boolean", 0.8, [], true, SensitivityLevel.Confidential }
+    };
+
     [Theory]
     [MemberData(nameof(KoreanFirstGoldenCases))]
     public async Task MockClassifierMatchesBoundedKoreanEnglishAndMixedGoldenCases(
@@ -58,17 +64,23 @@ public sealed class ClassificationContractTests
         Assert.Contains("coreTag:\ntag-two", input, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void SensitiveCategoryOverridesContradictoryPublicProviderFields()
+    [Theory]
+    [MemberData(nameof(ContradictorySensitiveInputs))]
+    public void ContradictoryPublicSensitiveSignalsUseSafeStorage(
+        string sourceId,
+        double confidence,
+        string[] categories,
+        bool containsSensitiveMaterial,
+        SensitivityLevel expectedSensitivity)
     {
         var result = ClassificationResultNormalizer.Normalize(new ClassificationResult(
-            new PublicRecordId("source-contradictory"),
+            new PublicRecordId(sourceId),
             SensitivityLevel.Public,
-            0.91,
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "private key" },
-            ContainsSensitiveMaterial: false));
+            confidence,
+            new HashSet<string>(categories, StringComparer.OrdinalIgnoreCase),
+            containsSensitiveMaterial));
 
-        Assert.Equal(SensitivityLevel.Restricted, result.Sensitivity);
+        Assert.Equal(expectedSensitivity, result.Sensitivity);
         Assert.True(result.ContainsSensitiveMaterial);
         Assert.Equal(StorageDecisionKind.SensitiveDbOnly, new PolicyEngine().Decide(result).Kind);
     }
@@ -104,21 +116,6 @@ public sealed class ClassificationContractTests
         Assert.DoesNotContain("Private Key", result.Categories, StringComparer.Ordinal);
         Assert.DoesNotContain("CONTRACT", result.Categories, StringComparer.Ordinal);
         Assert.Equal(SensitivityLevel.Restricted, result.Sensitivity);
-    }
-
-    [Fact]
-    public void SensitiveBooleanOverridesContradictoryPublicSensitivity()
-    {
-        var result = ClassificationResultNormalizer.Normalize(new ClassificationResult(
-            new PublicRecordId("source-sensitive-boolean"),
-            SensitivityLevel.Public,
-            0.8,
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            ContainsSensitiveMaterial: true));
-
-        Assert.Equal(SensitivityLevel.Confidential, result.Sensitivity);
-        Assert.True(result.ContainsSensitiveMaterial);
-        Assert.Equal(StorageDecisionKind.SensitiveDbOnly, new PolicyEngine().Decide(result).Kind);
     }
 
     [Fact]
