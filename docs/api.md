@@ -126,6 +126,15 @@ agent context/search results. Sensitive summaries are kept as private memory
 boundary records and are not returned through default agent context APIs.
 `idempotencyKey` prevents duplicate writes from retrying adapters.
 
+When deterministic field redaction can remove every detected high-confidence
+sensitive value while preserving a meaningful event, Luthn reclassifies that
+safe projection and may store it as `SharedAcrossAgents`. The response
+classification and storage decision describe the selected safe projection,
+while the source event remains marked as containing sensitive material and the
+original title, summary, metadata, and session identifier remain only in the
+owner-scoped encrypted payload. Incomplete, still-sensitive, or meaningless
+redactions keep the whole turn summary behind the private inert boundary.
+
 ## Agent connection observations
 
 ```http

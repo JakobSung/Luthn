@@ -27,8 +27,7 @@ public static class TurnSummaryEndpoints
 
     public static async Task<Results<Created<TurnSummaryIntakeResponse>, Ok<TurnSummaryIntakeResponse>, BadRequest<ProblemDetails>, ProblemHttpResult>> IntakeTurnSummary(
         TurnSummaryIntakeRequest request,
-        IContentClassifier classifier,
-        IPolicyEngine policyEngine,
+        AgentSafeMemoryProjectionSelector projectionSelector,
         ISensitiveMemoryPayloadProtector payloadProtector,
         IOptions<LuthnMemoryOptions> memoryOptions,
         LuthnDbContext db,
@@ -88,43 +87,46 @@ public static class TurnSummaryEndpoints
             return TypedResults.BadRequest(provenanceError);
         }
         var sourceId = new PublicRecordId(sourceEventId);
-        var classificationInput = AgentVisibleClassificationInput.Compose(
-            content: null,
-            ResolveTitle(request),
-            request.Summary,
-            normalizedTags,
-            recallMetadata.ProjectKey,
-            recallMetadata.TaskKey,
-            recallMetadata.TopicTags);
+        var resolvedTitle = ResolveTitle(request);
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
         db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
             principal,
             actor,
             "turn_summary.classification_provider.invoked",
             sourceEventId,
-            classifier.Boundary.PayloadClass,
-            classifier.Boundary.RedactionState,
+            projectionSelector.Boundary.PayloadClass,
+            projectionSelector.Boundary.RedactionState,
             receivedAt,
             subjectType: "source_event",
             outcome: "started",
             id: providerAuditEventId));
         await db.SaveChangesAsync(cancellationToken);
 
-        ClassificationResult classification;
+        AgentSafeMemoryProjectionSelection projection;
         try
         {
-            classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
+            projection = await projectionSelector.SelectAsync(
+                new AgentSafeMemoryProjectionCandidate(
+                    resolvedTitle,
+                    request.Summary,
+                    SensitivityLevel.Public,
+                    MemoryVisibility.SharedAcrossAgents,
+                    normalizedTags,
+                    recallMetadata.ProjectKey,
+                    recallMetadata.TaskKey,
+                    recallMetadata.TopicTags,
+                    request.SessionId),
                 sourceId,
-                classificationInput,
                 "turn-summary",
-                cancellationToken));
+                cancellationToken);
         }
         catch (ClassificationProviderException error)
         {
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
 
-        var decision = policyEngine.Decide(classification);
+        var classification = projection.Classification;
+        var decision = projection.Decision;
         var allowsAgentContext = decision.AllowsAgentContext &&
             classification.Sensitivity == SensitivityLevel.Public &&
             !classification.ContainsSensitiveMaterial;
@@ -135,14 +137,16 @@ public static class TurnSummaryEndpoints
             : MemoryVisibility.PrivateToOwner;
         var memory = new SharedMemoryItem(
             new PublicRecordId(memoryItemId),
-            ResolveTitle(request),
-            request.Summary.Trim(),
+            projection.Title,
+            projection.SafeSummary,
             classification.Sensitivity,
             normalizedTags,
             visibility,
             MemoryRetentionPolicy.Ephemeral(
                 memoryOptions.Value.GetAutomaticTurnExpiration(receivedAt)),
-            new PublicRecordId(request.SessionId.Trim()));
+            projection.RetainsEncryptedOriginal
+                ? null
+                : new PublicRecordId(request.SessionId.Trim()));
 
         db.SourceEvents.Add(new SourceEventRecord
         {
@@ -151,7 +155,7 @@ public static class TurnSummaryEndpoints
             SourceType = "turn-summary",
             ReceivedAt = receivedAt,
             ContentDigest = contentDigest,
-            ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial,
+            ContainsSensitiveMaterial = projection.OriginalClassification.ContainsSensitiveMaterial,
             WorkspaceId = principal.WorkspaceId,
             OwnerUserId = principal.UserId
         });
@@ -190,9 +194,29 @@ public static class TurnSummaryEndpoints
             OwnerUserId = principal.UserId
         };
         db.SharedMemoryItems.Add(memoryRecord);
-        if (SensitiveMemoryPersistence.RequiresProtection(memoryRecord))
+        var originalPayload = projection.RetainsEncryptedOriginal
+            ? new SensitiveMemoryPayload(
+                SensitiveMemoryPayload.CurrentContractVersion,
+                resolvedTitle,
+                request.Summary.Trim(),
+                normalizedTags,
+                recallMetadata.ProjectKey,
+                recallMetadata.TaskKey,
+                recallMetadata.TopicTags,
+                request.SessionId.Trim())
+            : null;
+        if (projection.RetainsEncryptedOriginal && allowsAgentContext)
         {
-            var payload = SensitiveMemoryPersistence.FromRecord(memoryRecord);
+            db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.ProtectOriginalForSafeProjection(
+                memoryRecord,
+                originalPayload!,
+                payloadProtector,
+                projectionSelector.SensitiveDataDetector,
+                receivedAt));
+        }
+        else if (SensitiveMemoryPersistence.RequiresProtection(memoryRecord))
+        {
+            var payload = originalPayload ?? SensitiveMemoryPersistence.FromRecord(memoryRecord);
             db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.Protect(
                 memoryRecord,
                 payload,
@@ -205,7 +229,11 @@ public static class TurnSummaryEndpoints
             "turn_summary.intake.classified",
             sourceEventId,
             "metadata-only",
-            allowsAgentContext ? "safe-projection-only" : "encrypted-payload-only",
+            projection.RetainsEncryptedOriginal && allowsAgentContext
+                ? "safe-projection-with-encrypted-original"
+                : allowsAgentContext
+                    ? "safe-projection-only"
+                    : "encrypted-payload-only",
             receivedAt,
             subjectType: "source_event",
             outcome: "completed",

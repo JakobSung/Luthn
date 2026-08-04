@@ -78,6 +78,14 @@ record도 자동 물리 정리에서 제외합니다.
 
 응답은 `summaryId`, `sourceEventId`, `classificationResultId`, `memoryItemId`, `auditEventId`, `allowsAgentContext`, `duplicate`, `classification`, `storageDecision`을 반환합니다. 공개 안전 요약은 `SharedAcrossAgents` 기억이 될 수 있고, 민감 요약은 기본 에이전트 API에서 반환하지 않습니다. `idempotencyKey`가 재시도 중복 쓰기를 막습니다.
 
+결정적 필드 마스킹으로 탐지된 고신뢰 민감 값을 모두 제거하면서 의미 있는 업무
+사건을 보존할 수 있으면, Luthn은 안전 투영을 다시 분류해 `SharedAcrossAgents`로
+저장할 수 있습니다. 응답의 classification과 storage decision은 선택된 안전 투영을
+설명하고, source event에는 원본이 민감정보를 포함했다는 상태가 유지됩니다. 원본
+title·summary·metadata·session identifier는 owner 범위의 암호화 payload에만 남습니다.
+마스킹이 불완전하거나 민감정보가 남거나 의미 있는 사건이 사라지면 전체 turn 요약을
+기존 private inert 경계에 유지합니다.
+
 ## 에이전트 연결 관측
 
 ```http

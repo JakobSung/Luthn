@@ -40,9 +40,7 @@ public sealed class MemoryEndpointTests
 
         var createResult = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             httpContext,
@@ -120,9 +118,7 @@ public sealed class MemoryEndpointTests
         };
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -147,9 +143,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             protector,
             db,
             new DefaultHttpContext(),
@@ -202,9 +196,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             protector,
             db,
             new DefaultHttpContext(),
@@ -284,9 +276,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             protector,
             db,
             new DefaultHttpContext(),
@@ -319,9 +309,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             protector,
             db,
             new DefaultHttpContext(),
@@ -352,9 +340,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -382,9 +368,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -414,9 +398,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             protector,
             db,
             new DefaultHttpContext(),
@@ -451,9 +433,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -481,9 +461,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -509,9 +487,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new UnavailableContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(new UnavailableContentClassifier()),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -539,9 +515,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -566,9 +540,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -633,9 +605,7 @@ public sealed class MemoryEndpointTests
 
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -721,9 +691,7 @@ public sealed class MemoryEndpointTests
     {
         var result = await MemoryEndpoints.CreateMemoryItem(
             request,
-            new MockContentClassifier(),
-            new DeterministicSensitiveDataDetector(),
-            new PolicyEngine(),
+            CreateProjectionSelector(),
             TestSensitiveMemoryProtection.Create(),
             db,
             new DefaultHttpContext(),
@@ -732,6 +700,13 @@ public sealed class MemoryEndpointTests
 
         return created.Value!.Id;
     }
+
+    private static AgentSafeMemoryProjectionSelector CreateProjectionSelector(
+        IContentClassifier? classifier = null) =>
+        new(
+            classifier ?? new MockContentClassifier(),
+            new DeterministicSensitiveDataDetector(),
+            new PolicyEngine());
 
     private static LuthnDbContext CreateDbContext()
     {

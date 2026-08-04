@@ -113,6 +113,100 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
+    public async Task SensitiveTurnSummaryCreatesRedactedAgentVisibleEventProjection()
+    {
+        const string sensitiveEmail = "person@example.com";
+        const string sensitiveAmount = "1,000원";
+        const string originalSummary =
+            $"홍길동 사원의 주소는 {sensitiveEmail}이고 견적금액은 {sensitiveAmount}이며 신규 견적을 발행했다.";
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-redacted-1",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = originalSummary,
+            coreTags = new[] { "sales", "quote" },
+            title = "홍길동 견적 기록",
+            idempotencyKey = "summary-redacted-1"
+        });
+        var responseJson = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(responseJson);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.True(body.RootElement.GetProperty("allowsAgentContext").GetBoolean());
+        Assert.Equal("Public", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.DoesNotContain(sensitiveEmail, responseJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sensitiveAmount, responseJson, StringComparison.Ordinal);
+
+        using var contextResponse = await client.PostAsJsonAsync("/api/agent/context-packs", new
+        {
+            query = "신규 견적 발행",
+            coreTags = new[] { "sales" },
+            maxItems = 10
+        });
+        using var contextBody = await JsonDocument.ParseAsync(await contextResponse.Content.ReadAsStreamAsync());
+        var item = Assert.Single(contextBody.RootElement.GetProperty("items").EnumerateArray());
+        var safeSummary = item.GetProperty("safeSummary").GetString()!;
+
+        Assert.Equal(HttpStatusCode.OK, contextResponse.StatusCode);
+        Assert.Contains("홍길동 사원", safeSummary, StringComparison.Ordinal);
+        Assert.Contains("신규 견적을 발행했다", safeSummary, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, safeSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveEmail, safeSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sensitiveAmount, safeSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("금액", safeSummary, StringComparison.Ordinal);
+
+        foreach (var sensitiveQuery in new[] { sensitiveEmail, sensitiveAmount })
+        {
+            using var sensitiveResponse = await client.PostAsJsonAsync("/api/agent/context-packs", new
+            {
+                query = sensitiveQuery,
+                coreTags = new[] { "sales" },
+                maxItems = 10
+            });
+            using var sensitiveBody = await JsonDocument.ParseAsync(await sensitiveResponse.Content.ReadAsStreamAsync());
+
+            Assert.Equal(HttpStatusCode.OK, sensitiveResponse.StatusCode);
+            Assert.Empty(sensitiveBody.RootElement.GetProperty("items").EnumerateArray());
+        }
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var source = await db.SourceEvents.SingleAsync();
+        var classification = await db.ClassificationResults.SingleAsync();
+        var memory = await db.SharedMemoryItems.SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.SingleAsync();
+
+        Assert.True(source.ContainsSensitiveMaterial);
+        Assert.Equal(SensitivityLevel.Public, classification.Sensitivity);
+        Assert.Equal(StorageDecisionKind.WikiCandidate, classification.StorageDecision);
+        Assert.Equal(SensitivityLevel.Public, memory.Sensitivity);
+        Assert.Equal(MemoryVisibility.SharedAcrossAgents, memory.Visibility);
+        Assert.True(memory.AllowsAgentContext);
+        Assert.Null(memory.SourceSessionId);
+        Assert.False(SensitiveMemoryPersistence.IsInertProjection(memory));
+        Assert.DoesNotContain(sensitiveEmail, memory.SafeSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sensitiveAmount, memory.SafeSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveEmail, encrypted.ProtectedPayload, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sensitiveAmount, encrypted.ProtectedPayload, StringComparison.Ordinal);
+
+        var protector = factory.Services.GetRequiredService<ISensitiveMemoryPayloadProtector>();
+        var plaintext = protector.Unprotect(memory.Id, encrypted.ProtectedPayload);
+        Assert.Equal(originalSummary, plaintext.SafeSummary);
+        Assert.Equal("session-redacted-1", plaintext.SourceSessionId);
+
+        var audit = await db.AuditEvents.SingleAsync(record => record.Action == "turn_summary.intake.classified");
+        Assert.Equal("metadata-only", audit.PayloadClass);
+        Assert.Equal("safe-projection-with-encrypted-original", audit.RedactionState);
+        var auditJson = JsonSerializer.Serialize(await db.AuditEvents.AsNoTracking().ToArrayAsync());
+        Assert.DoesNotContain(sensitiveEmail, auditJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sensitiveAmount, auditJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RawProjectPathAndFreeFormSourceMetadataAreRejected()
     {
         using var factory = CreateFactory();
@@ -228,8 +322,10 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
                 CoreTags = ["release"],
                 IdempotencyKey = "summary-single-payload"
             },
-            classifier,
-            new PolicyEngine(),
+            new AgentSafeMemoryProjectionSelector(
+                classifier,
+                new DeterministicSensitiveDataDetector(),
+                new PolicyEngine()),
             TestSensitiveMemoryProtection.Create(),
             Options.Create(new LuthnMemoryOptions()),
             db,

@@ -146,7 +146,12 @@ public sealed class DeterministicSensitiveDataDetector
             "payment",
             ranges,
             categories);
+        var hasMonetaryAmount = MonetaryAmountPattern.IsMatch(value);
         AddMatches(MonetaryAmountPattern, value, "finance", ranges, categories);
+        if (hasMonetaryAmount)
+        {
+            AddMatches(MonetaryContextPattern, value, "finance", ranges, categories);
+        }
 
         if (ranges.Count == 0)
         {
