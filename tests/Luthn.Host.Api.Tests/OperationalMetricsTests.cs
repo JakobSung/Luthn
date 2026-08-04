@@ -12,6 +12,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Luthn.Host.Api.Tests;
 
+[CollectionDefinition("Operational metrics", DisableParallelization = true)]
+public sealed class OperationalMetricsTestCollection;
+
+[Collection("Operational metrics")]
 public sealed class OperationalMetricsTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private const string MetricsBearer = "metrics-read-local";

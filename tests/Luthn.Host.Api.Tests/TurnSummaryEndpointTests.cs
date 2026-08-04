@@ -236,9 +236,10 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             new DefaultHttpContext(),
             CancellationToken.None);
 
-        Assert.Equal(1, CountOccurrences(classifier.Content, summary));
-        Assert.DoesNotContain($"content:\n{summary}", classifier.Content, StringComparison.Ordinal);
-        Assert.Contains($"safeSummary:\n{summary}", classifier.Content, StringComparison.Ordinal);
+        var normalizedContent = classifier.Content.Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(normalizedContent, summary));
+        Assert.DoesNotContain($"content:\n{summary}", normalizedContent, StringComparison.Ordinal);
+        Assert.Contains($"safeSummary:\n{summary}", normalizedContent, StringComparison.Ordinal);
     }
 
     [Fact]

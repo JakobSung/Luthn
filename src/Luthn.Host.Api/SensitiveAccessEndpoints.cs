@@ -59,11 +59,9 @@ public static class SensitiveAccessEndpoints
         var take = Math.Clamp(limit ?? 25, 1, 100);
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
         await ExpirePendingRequestsAsync(db, requestId: null, principal, cancellationToken);
-        var query = db.SensitiveAccessRequests.AsNoTracking();
-        if (!principal.IsOperator)
-        {
-            query = query.Where(record => record.OwnerUserId == principal.UserId);
-        }
+        var query = db.SensitiveAccessRequests
+            .AsNoTracking()
+            .Where(record => record.WorkspaceId == principal.WorkspaceId);
         if (!string.IsNullOrWhiteSpace(status))
         {
             if (!Enum.TryParse<SensitiveAccessRequestStatus>(
@@ -114,8 +112,8 @@ public static class SensitiveAccessEndpoints
         var reference = await db.SensitiveRecordReferences
             .AsNoTracking()
             .Where(record => record.Id == request.SensitiveReferenceId.Trim() &&
-                record.OwnerUserId == principal.UserId)
-            .Select(record => new { record.Id, record.OwnerUserId })
+                record.WorkspaceId == principal.WorkspaceId)
+            .Select(record => new { record.Id, record.WorkspaceId, record.OwnerUserId })
             .SingleOrDefaultAsync(cancellationToken);
         if (reference is null)
         {
@@ -139,6 +137,7 @@ public static class SensitiveAccessEndpoints
             CreatedAt = observedAt,
             ExpiresAt = observedAt.AddSeconds(expiresInSeconds),
             UpdatedAt = observedAt,
+            WorkspaceId = reference.WorkspaceId,
             OwnerUserId = reference.OwnerUserId
         };
 
@@ -173,7 +172,7 @@ public static class SensitiveAccessEndpoints
         var request = await db.SensitiveAccessRequests
             .SingleOrDefaultAsync(
                 record => record.Id == id &&
-                    (principal.IsOperator || record.OwnerUserId == principal.UserId),
+                    record.WorkspaceId == principal.WorkspaceId,
                 cancellationToken);
 
         if (request is null)
@@ -199,7 +198,7 @@ public static class SensitiveAccessEndpoints
         var request = await db.SensitiveAccessRequests
             .SingleOrDefaultAsync(
                 record => record.Id == id &&
-                    (principal.IsOperator || record.OwnerUserId == principal.UserId),
+                    record.WorkspaceId == principal.WorkspaceId,
                 cancellationToken);
 
         if (request is not null)
@@ -299,7 +298,7 @@ public static class SensitiveAccessEndpoints
         var accessRequest = await db.SensitiveAccessRequests
             .SingleOrDefaultAsync(
                 record => record.Id == id &&
-                    (principal.IsOperator || record.OwnerUserId == principal.UserId),
+                    record.WorkspaceId == principal.WorkspaceId,
                 cancellationToken);
         if (accessRequest is null)
         {
@@ -696,7 +695,7 @@ public static class SensitiveAccessEndpoints
             .Where(request =>
                 request.Status == SensitiveAccessRequestStatus.Pending &&
                 request.ExpiresAt <= observedAt &&
-                (principal.IsOperator || request.OwnerUserId == principal.UserId) &&
+                request.WorkspaceId == principal.WorkspaceId &&
                 (requestId == null || request.Id == requestId))
             .Select(request => request.Id)
             .ToArrayAsync(cancellationToken);

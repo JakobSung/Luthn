@@ -519,6 +519,8 @@ Luthn__Identity__SingleOwnerUserId=local-owner
 Luthn__Auth__Tokens__0__Name=local-agent
 Luthn__Auth__Tokens__0__Sha256Digest=$digest
 Luthn__Auth__Tokens__0__UserId=local-owner
+Luthn__Auth__Tokens__0__WorkspaceId=default
+Luthn__Auth__Tokens__0__ActorKind=Agent
 Luthn__Auth__Tokens__0__IsOperator=false
 Luthn__Auth__Tokens__0__Scopes__0=agent.read
 Luthn__Auth__Tokens__0__Scopes__1=agent.write.summary
@@ -531,6 +533,8 @@ Luthn__Auth__Tokens__0__Scopes__7=access.request
 Luthn__Auth__Tokens__0__Scopes__8=metrics.write
 Luthn__Auth__Tokens__1__Name=local-operator
 Luthn__Auth__Tokens__1__Sha256Digest=$operator_digest
+Luthn__Auth__Tokens__1__WorkspaceId=default
+Luthn__Auth__Tokens__1__ActorKind=Service
 Luthn__Auth__Tokens__1__IsOperator=true
 Luthn__Auth__Tokens__1__Scopes__0=access.decide
 Luthn__Auth__Tokens__1__Scopes__1=config.write
@@ -606,6 +610,8 @@ ensure_operator_credential() {
   remove_config_prefix "$operator_prefix"
   set_config "${operator_prefix}Name" local-operator
   set_config "${operator_prefix}Sha256Digest" "$operator_digest"
+  set_config "${operator_prefix}WorkspaceId" default
+  set_config "${operator_prefix}ActorKind" Service
   set_config "${operator_prefix}IsOperator" true
   set_config "${operator_prefix}Scopes__0" access.decide
   set_config "${operator_prefix}Scopes__1" config.write
@@ -1134,6 +1140,8 @@ install_luthn() {
     ensure_config_value Luthn__Identity__SingleOwnerUserId local-owner
     ensure_config_value Luthn__Auth__Tokens__0__Name local-agent
     ensure_config_value Luthn__Auth__Tokens__0__UserId local-owner
+    ensure_config_value Luthn__Auth__Tokens__0__WorkspaceId default
+    ensure_config_value Luthn__Auth__Tokens__0__ActorKind Agent
     ensure_config_value Luthn__Auth__Tokens__0__IsOperator false
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__0 agent.read
     ensure_config_value Luthn__Auth__Tokens__0__Scopes__1 agent.write.summary

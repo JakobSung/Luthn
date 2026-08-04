@@ -203,22 +203,29 @@ public sealed class PostgresIntegrationSmokeTests
             .SingleAsync(record => record.Id == "access-legacy-approved");
         Assert.Equal("Reviewed legacy output.", migratedRequest.RedactedSummary);
         Assert.Equal("local-owner", migratedRequest.OwnerUserId);
+        Assert.Equal("default", migratedRequest.WorkspaceId);
         Assert.Equal(
             "local-owner",
             (await db.SensitiveRecordReferences.SingleAsync(record => record.Id == "sensitive-ref-legacy-approved")).OwnerUserId);
+        Assert.Equal(
+            "default",
+            (await db.SensitiveRecordReferences.SingleAsync(record => record.Id == "sensitive-ref-legacy-approved")).WorkspaceId);
         var migratedWiki = await db.WikiProposals.SingleAsync(record => record.Id == "wiki-legacy-recall");
         Assert.Equal("local-owner", migratedWiki.OwnerUserId);
+        Assert.Equal("default", migratedWiki.WorkspaceId);
         Assert.Null(migratedWiki.ProjectKey);
         Assert.Null(migratedWiki.TaskKey);
         Assert.Empty(migratedWiki.TopicTags);
         var migratedMemory = await db.SharedMemoryItems.SingleAsync(record => record.Id == "memory-legacy-recall");
         Assert.Equal("local-owner", migratedMemory.OwnerUserId);
+        Assert.Equal("default", migratedMemory.WorkspaceId);
         Assert.Null(migratedMemory.ProjectKey);
         Assert.Null(migratedMemory.TaskKey);
         Assert.Empty(migratedMemory.TopicTags);
         var migratedAgentConnection = await db.AgentConnectionChannels
             .SingleAsync(record => record.Id == "codex:mcp");
         Assert.Equal("local-owner", migratedAgentConnection.OwnerUserId);
+        Assert.Equal("default", migratedAgentConnection.WorkspaceId);
         var migratedSensitiveMemory = await db.SharedMemoryItems
             .AsNoTracking()
             .SingleAsync(record => record.Id == "memory-legacy-sensitive");
@@ -239,6 +246,7 @@ public sealed class PostgresIntegrationSmokeTests
         Assert.All(legacyProvenance, record =>
         {
             Assert.Equal(1, record.ContractVersion);
+            Assert.Equal("default", record.WorkspaceId);
             Assert.Equal(CollectionProvenance.LegacyUnknownTrust, record.AuthenticatedActor);
             Assert.Equal("local-owner", record.AuthenticatedUserId);
             Assert.Equal(CollectionProvenance.LegacyUnknownTrust, record.ActorTrust);
@@ -271,7 +279,7 @@ public sealed class PostgresIntegrationSmokeTests
 
         var pending = await db.Database.GetPendingMigrationsAsync();
         Assert.Empty(pending);
-        var retainedOwnerDefaults = await db.Database.SqlQueryRaw<int>(
+        var retainedScopeDefaults = await db.Database.SqlQueryRaw<int>(
                 """
                 SELECT COUNT(*)::int AS "Value"
                 FROM pg_attrdef defaults
@@ -287,15 +295,25 @@ public sealed class PostgresIntegrationSmokeTests
                     ('sensitive_access_requests', 'OwnerUserId'),
                     ('safe_projection_sync_outbox', 'OwnerUserId'),
                     ('collection_provenance', 'AuthenticatedUserId'),
-                    ('agent_connection_channels', 'OwnerUserId'))
+                    ('agent_connection_channels', 'OwnerUserId'),
+                    ('source_events', 'WorkspaceId'),
+                    ('wiki_proposals', 'WorkspaceId'),
+                    ('shared_memory_items', 'WorkspaceId'),
+                    ('sensitive_record_references', 'WorkspaceId'),
+                    ('sensitive_access_requests', 'WorkspaceId'),
+                    ('safe_projection_sync_outbox', 'WorkspaceId'),
+                    ('safe_projection_sync_checkpoints', 'WorkspaceId'),
+                    ('collection_provenance', 'WorkspaceId'),
+                    ('agent_connection_channels', 'WorkspaceId'))
                 """)
             .SingleAsync();
-        Assert.Equal(0, retainedOwnerDefaults);
+        Assert.Equal(0, retainedScopeDefaults);
 
         db.AgentConnectionChannels.AddRange(
             new AgentConnectionChannelRecord
             {
                 Id = "agent-connection-owner-alice",
+                WorkspaceId = "personal:alice",
                 OwnerUserId = "alice",
                 AgentId = "shared-agent",
                 AgentName = "Shared agent",
@@ -311,6 +329,7 @@ public sealed class PostgresIntegrationSmokeTests
             new AgentConnectionChannelRecord
             {
                 Id = "agent-connection-owner-bob",
+                WorkspaceId = "personal:bob",
                 OwnerUserId = "bob",
                 AgentId = "shared-agent",
                 AgentName = "Shared agent",
@@ -389,6 +408,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = "source-other-owner-match",
+            WorkspaceId = "personal:other-owner",
             OwnerUserId = "other-owner",
             SourceSystem = "test",
             SourceType = "postgres-smoke",
@@ -398,6 +418,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.CollectionProvenance.Add(new CollectionProvenanceRecord
         {
             Id = "provenance-other-owner-match",
+            WorkspaceId = "personal:other-owner",
             SourceEventId = "source-other-owner-match",
             AuthenticatedActor = "postgres-smoke",
             AuthenticatedUserId = "other-owner",
@@ -408,10 +429,11 @@ public sealed class PostgresIntegrationSmokeTests
         db.WikiProposals.Add(new WikiProposalRecord
         {
             Id = "wiki-other-owner-match",
+            WorkspaceId = "personal:other-owner",
             OwnerUserId = "other-owner",
             SourceEventId = "source-other-owner-match",
             Title = "Needle recovery runbook",
-            SafeSummary = "A newer cross-owner result must remain invisible.",
+            SafeSummary = "A newer cross-workspace result must remain invisible.",
             Sensitivity = SensitivityLevel.Public,
             CoreTags = ["needle"],
             AllowsAgentContext = true,
@@ -516,7 +538,7 @@ public sealed class PostgresIntegrationSmokeTests
         var selector = new DbBackedRetrievalCandidateSelector(db, TimeProvider.System);
         var candidates = await selector.SelectAgentContextAsync(
             new SafeSearchRequest("needle", ["needle"], 10),
-            "local-owner",
+            "default",
             CancellationToken.None);
         var candidate = Assert.Single(candidates);
         Assert.Equal("wiki-old-db-match", candidate.Id);

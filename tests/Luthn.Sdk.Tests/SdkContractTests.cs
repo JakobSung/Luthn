@@ -45,7 +45,8 @@ public sealed class SdkContractTests
     public void SafeProjectionSyncEnvelopeUsesVersionedPublicSafeContract()
     {
         var envelope = new SafeProjectionSyncEnvelopeDto(
-            1,
+            2,
+            "default",
             "instance-1",
             "memory-1",
             2,
@@ -70,13 +71,14 @@ public sealed class SdkContractTests
             .ToArray();
         var expectedProperties = new[]
         {
-            "contractVersion", "originInstanceId", "localRecordId", "revision", "operation",
+            "contractVersion", "workspaceId", "originInstanceId", "localRecordId", "revision", "operation",
             "title", "safeSummary", "coreTags", "projectionKind", "payloadClass",
             "redactionState", "createdAt", "updatedAt", "decidedAt", "expiresAt"
         }.OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
         Assert.Equal(expectedProperties, actualProperties);
-        Assert.Contains("\"contractVersion\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"contractVersion\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"workspaceId\":\"default\"", json, StringComparison.Ordinal);
         Assert.Contains("\"originInstanceId\"", json, StringComparison.Ordinal);
         Assert.Contains("\"localRecordId\"", json, StringComparison.Ordinal);
         Assert.Contains("\"revision\":2", json, StringComparison.Ordinal);
@@ -90,7 +92,8 @@ public sealed class SdkContractTests
     public void SafeProjectionRevokeDtoOmitsProjectionBody()
     {
         var envelope = new SafeProjectionSyncEnvelopeDto(
-            1,
+            2,
+            "default",
             "instance-1",
             "memory-1",
             3,

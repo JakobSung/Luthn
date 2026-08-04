@@ -5,6 +5,7 @@ using Luthn.McpServer.Tools;
 var baseUrl = Environment.GetEnvironmentVariable("LUTHN_BASE_URL");
 var bearer = Environment.GetEnvironmentVariable("LUTHN_SERVICE_BEARER") ??
     Environment.GetEnvironmentVariable("LUTHN_SERVICE_VALUE");
+var workspaceId = Environment.GetEnvironmentVariable("LUTHN_WORKSPACE_ID");
 var options = new LuthnClientOptions
 {
     BaseUrl = string.IsNullOrWhiteSpace(baseUrl)
@@ -13,7 +14,7 @@ var options = new LuthnClientOptions
     BearerToken = string.IsNullOrWhiteSpace(bearer) ? null : bearer
 };
 var client = new LuthnClient(options);
-var principalCachePartition = PrincipalCachePartition.Create(bearer);
+var principalCachePartition = PrincipalCachePartition.Create(bearer, options.BaseUrl, workspaceId);
 var tools = LuthnMcpToolRegistry.CreateDefault(client, principalCachePartition);
 var command = args.FirstOrDefault()?.Trim().ToLowerInvariant();
 
@@ -46,4 +47,5 @@ static void PrintUsage()
     Console.WriteLine("  LUTHN_BASE_URL=http://localhost:8080");
     Console.WriteLine("  LUTHN_SERVICE_BEARER=<external bearer value>");
     Console.WriteLine("  LUTHN_SERVICE_VALUE=<local .env bearer value>");
+    Console.WriteLine("  LUTHN_WORKSPACE_ID=<optional cache partition hint>");
 }

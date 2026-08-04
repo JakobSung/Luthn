@@ -32,6 +32,7 @@ public static class CollectionProvenance
         CollectionProvenanceClaims? claims,
         string authenticatedActor,
         string authenticatedUserId,
+        string workspaceId,
         bool isServiceTokenAuthenticated,
         DateTimeOffset receivedAt,
         out CollectionProvenanceRecord record,
@@ -91,6 +92,7 @@ public static class CollectionProvenance
             MemoryItemId = memoryItemId,
             AuthenticatedActor = authenticatedActor,
             AuthenticatedUserId = authenticatedUserId,
+            WorkspaceId = workspaceId,
             ActorTrust = isServiceTokenAuthenticated ? ServiceTokenActorTrust : LocalRuntimeActorTrust,
             ClaimsTrust = hasClaims ? CallerClaimsTrust : NoClaimsTrust,
             ClaimedUserId = normalized.UserId,
@@ -174,10 +176,7 @@ public static class CollectionProvenanceEndpoints
         LuthnRequestPrincipal principal,
         CancellationToken cancellationToken)
     {
-        if (!principal.IsOperator)
-        {
-            query = query.Where(record => record.AuthenticatedUserId == principal.UserId);
-        }
+        query = query.Where(record => record.WorkspaceId == principal.WorkspaceId);
         var record = await query.AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         return record is null
             ? TypedResults.NotFound()
@@ -189,6 +188,7 @@ public static class CollectionProvenanceEndpoints
         record.ContractVersion,
         record.SourceEventId,
         record.MemoryItemId,
+        record.WorkspaceId,
         record.AuthenticatedActor,
         record.AuthenticatedUserId,
         record.ActorTrust,
@@ -208,6 +208,7 @@ public sealed record CollectionProvenanceResponse(
     int ContractVersion,
     string? SourceEventId,
     string? MemoryItemId,
+    string WorkspaceId,
     string AuthenticatedActor,
     string AuthenticatedUserId,
     string ActorTrust,

@@ -56,16 +56,16 @@ public static class TurnSummaryEndpoints
         var contentDigest = NormalizeDigest(request.ContentDigest) ?? ComputeSha256Digest(request.Summary);
         var actor = ServiceTokenAuthorization.GetActor(httpContext);
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        var summaryId = CreateStableSummaryId(request, contentDigest, principal.UserId);
+        var summaryId = CreateStableSummaryId(request, contentDigest, principal.WorkspaceId);
         var sourceEventId = summaryId;
         var existingSource = await db.SourceEvents
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                record => record.Id == sourceEventId && record.OwnerUserId == principal.UserId,
+                record => record.Id == sourceEventId && record.WorkspaceId == principal.WorkspaceId,
                 cancellationToken);
         if (existingSource is not null)
         {
-            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.UserId, cancellationToken);
+            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.WorkspaceId, cancellationToken);
             return TypedResults.Ok(existing);
         }
 
@@ -77,6 +77,7 @@ public static class TurnSummaryEndpoints
             request.Provenance,
             actor,
             principal.UserId,
+            principal.WorkspaceId,
             ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
             receivedAt,
             out var provenance,
@@ -150,6 +151,7 @@ public static class TurnSummaryEndpoints
             ReceivedAt = receivedAt,
             ContentDigest = contentDigest,
             ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial,
+            WorkspaceId = principal.WorkspaceId,
             OwnerUserId = principal.UserId
         });
         db.CollectionProvenance.Add(provenance);
@@ -183,6 +185,7 @@ public static class TurnSummaryEndpoints
             CreatedAt = receivedAt,
             UpdatedAt = receivedAt,
             CreatedBy = actor,
+            WorkspaceId = principal.WorkspaceId,
             OwnerUserId = principal.UserId
         };
         db.SharedMemoryItems.Add(memoryRecord);
@@ -216,7 +219,7 @@ public static class TurnSummaryEndpoints
                 throw;
             }
 
-            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.UserId, cancellationToken);
+            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.WorkspaceId, cancellationToken);
             return TypedResults.Ok(existing);
         }
 
@@ -237,7 +240,7 @@ public static class TurnSummaryEndpoints
     private static async Task<TurnSummaryIntakeResponse> BuildExistingResponseAsync(
         LuthnDbContext db,
         string sourceEventId,
-        string ownerUserId,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         var classification = await db.ClassificationResults
@@ -246,7 +249,7 @@ public static class TurnSummaryEndpoints
         var memory = await db.SharedMemoryItems
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                record => record.Id == $"memory-{sourceEventId}" && record.OwnerUserId == ownerUserId,
+                record => record.Id == $"memory-{sourceEventId}" && record.WorkspaceId == workspaceId,
                 cancellationToken);
         var audit = await db.AuditEvents
             .AsNoTracking()
@@ -439,12 +442,12 @@ public static class TurnSummaryEndpoints
     private static string CreateStableSummaryId(
         TurnSummaryIntakeRequest request,
         string contentDigest,
-        string ownerUserId)
+        string workspaceId)
     {
         var key = string.IsNullOrWhiteSpace(request.IdempotencyKey)
             ? $"{request.SourceAgent.Trim()}:{request.SessionId.Trim()}:{request.TurnId?.Trim()}:{request.TurnRange?.Trim()}:{contentDigest}"
             : request.IdempotencyKey.Trim();
-        return $"turn-summary-{HashFragment($"{ownerUserId}:{key}")}";
+        return $"turn-summary-{HashFragment($"{workspaceId}:{key}")}";
     }
 
     private static string? NormalizeDigest(string? contentDigest) =>

@@ -21,8 +21,9 @@ public sealed class SafeProjectionSyncTests
         var envelope = CreateUpsert(ExternalPublicationState.ApprovedForExternal);
 
         Assert.Equal(SafeProjectionSyncOperation.Upsert, envelope.Operation);
-        Assert.Equal(1, envelope.ContractVersion);
-        Assert.Equal("instance-1:memory-1:1:Upsert", SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope));
+        Assert.Equal(2, envelope.ContractVersion);
+        Assert.Equal("default", envelope.WorkspaceId);
+        Assert.Equal("default:instance-1:memory-1:1:Upsert", SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope));
         Assert.Null(envelope.Title);
         Assert.Empty(envelope.CoreTags);
     }
@@ -31,6 +32,7 @@ public sealed class SafeProjectionSyncTests
     public void RevokeCarriesNoProjectionBody()
     {
         var envelope = SafeProjectionSyncPolicy.CreateRevoke(
+            "default",
             "instance-1",
             "memory-1",
             revision: 2,
@@ -79,6 +81,7 @@ public sealed class SafeProjectionSyncTests
         SensitivityLevel sensitivity = SensitivityLevel.Public,
         MemoryVisibility visibility = MemoryVisibility.SharedAcrossAgents) =>
         SafeProjectionSyncPolicy.CreateUpsert(
+            "default",
             "instance-1",
             "memory-1",
             revision: 1,

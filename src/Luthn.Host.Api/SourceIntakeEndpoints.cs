@@ -57,6 +57,7 @@ public static class SourceIntakeEndpoints
             request.Provenance,
             actor,
             principal.UserId,
+            principal.WorkspaceId,
             ServiceTokenAuthorization.IsServiceTokenAuthenticated(httpContext),
             receivedAt,
             out var provenance,
@@ -110,6 +111,7 @@ public static class SourceIntakeEndpoints
             ReceivedAt = receivedAt,
             ContentDigest = ComputeSha256Digest(request.Content),
             ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial,
+            WorkspaceId = principal.WorkspaceId,
             OwnerUserId = principal.UserId
         });
         db.CollectionProvenance.Add(provenance);
@@ -145,6 +147,7 @@ public static class SourceIntakeEndpoints
                 TopicTags = recallMetadata.TopicTags.ToList(),
                 AllowsAgentContext = decision.AllowsAgentContext,
                 CreatedAt = receivedAt,
+                WorkspaceId = principal.WorkspaceId,
                 OwnerUserId = principal.UserId
             });
         }
@@ -163,6 +166,7 @@ public static class SourceIntakeEndpoints
                 ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial,
                 ReferenceLabel = $"sensitive-record:{sourceEventId}",
                 RedactedSummary = "",
+                WorkspaceId = principal.WorkspaceId,
                 OwnerUserId = principal.UserId
             });
         }

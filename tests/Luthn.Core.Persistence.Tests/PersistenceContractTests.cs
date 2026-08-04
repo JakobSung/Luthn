@@ -136,6 +136,9 @@ public sealed class PersistenceContractTests
         var connection = await db.AgentConnectionChannels.SingleAsync();
         Assert.Equal("mcp", connection.Channel);
         Assert.Equal("local-owner", connection.OwnerUserId);
+        Assert.All(
+            db.ChangeTracker.Entries<IWorkspaceScopedRecord>(),
+            entry => Assert.Equal("default", entry.Entity.WorkspaceId));
         Assert.Equal(AuditEventPayloadVersions.Current, (await db.AuditEvents.SingleAsync()).PayloadVersion);
         Assert.DoesNotContain(
             db.Model.GetEntityTypes().SelectMany(entity => entity.GetProperties()).Select(property => property.Name),
@@ -149,6 +152,25 @@ public sealed class PersistenceContractTests
                 || propertyName.Contains("Prompt", StringComparison.OrdinalIgnoreCase)
                 || propertyName.Contains("Transcript", StringComparison.OrdinalIgnoreCase)
                 || propertyName.Contains("Path", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task DbContextRejectsBlankWorkspaceScopeBeforePersistence()
+    {
+        await using var db = CreateDbContext();
+        db.SourceEvents.Add(new SourceEventRecord
+        {
+            Id = "source-blank-workspace",
+            WorkspaceId = " ",
+            SourceSystem = "local",
+            SourceType = "note",
+            ReceivedAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z"),
+            ContentDigest = "sha256:example"
+        });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+
+        Assert.Contains("WorkspaceId", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -178,6 +200,7 @@ public sealed class PersistenceContractTests
         var migrations = db.Database.GetMigrations().ToArray();
 
         Assert.Contains(migrations, migration => migration.EndsWith("_InitialCreate", StringComparison.Ordinal));
+        Assert.Contains(migrations, migration => migration.EndsWith("_AddWorkspaceScopedDataPlane", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -229,6 +252,11 @@ public sealed class PersistenceContractTests
             "ALTER TABLE agent_connection_channels ALTER COLUMN \"OwnerUserId\" DROP DEFAULT",
             script,
             StringComparison.Ordinal);
+        Assert.Contains("\"WorkspaceId\"", script, StringComparison.Ordinal);
+        Assert.Contains("IX_agent_connection_channels_WorkspaceId_AgentId_Channel", script, StringComparison.Ordinal);
+        Assert.Contains("CK_agent_connection_channels_workspace_id", script, StringComparison.Ordinal);
+        Assert.Contains("personal:' || lower(\"OwnerUserId\")", script, StringComparison.Ordinal);
+        Assert.Contains("'{contractVersion}'", script, StringComparison.Ordinal);
         Assert.DoesNotContain("raw_content", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("raw_source", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DEFAULT 'LocalOnly'", script, StringComparison.Ordinal);

@@ -223,28 +223,29 @@ recovery set. Never commit, print, or copy key XML into ordinary logs or an
 unencrypted repository. Losing the key ring makes encrypted memory
 unrecoverable; generating a new key ring does not decrypt existing payloads.
 
-## Server-Trusted Ownership Boundary
+## Server-Trusted Workspace Boundary
 
-Authorization ownership is a server-side property, not collection metadata.
-`SingleOwner` maps existing anonymous and service-token operation to one
-normalized local owner. `MultiUser` fails closed unless each non-operator
+Authorization workspace is a server-side property, not collection metadata.
+`SingleOwner` maps existing anonymous operation to the `default` workspace and
+a normalized local owner. `MultiUser` fails closed unless each non-operator
 product token has a bounded configured user identity. Caller-supplied
 `provenance.userId`, request JSON, headers, agent names, application names, and
-connector metadata never select or change the owner.
+connector metadata never select or change a workspace or owner.
 
-Owned source events, shared memory, wiki proposals, sensitive references and
+Source events, shared memory, wiki proposals, sensitive references and
 requests, provenance, safe-sync outbox rows, and agent-connection state are
-stamped in their write transaction. Every agent-safe read and ranking query
-filters by owner before selection. Agent-connection upsert and status grouping
-use owner plus agent plus channel; only explicit operators can list all owners,
-with bounded owner attribution. Turn-summary idempotency includes the owner partition, and MCP
-context-pack cache keys include a non-reversible credential partition. No user
-identity, bearer digest, or provenance claim enters safe projections or cache
-status output. Sensitive-access status polling uses the same partition with a
-one-second bounded cache so state changes cannot remain stale beyond that
-window. Operators are explicit token configuration, not a caller
-header; their cross-owner actions stay limited to management routes and
-metadata-only audit records.
+stamped with the server-derived `WorkspaceId` and author attribution in their
+write transaction. Every agent-safe read and ranking query filters by workspace
+before selection. Agent-connection upsert and status grouping use workspace
+plus agent plus channel. Operators do not receive a product-data cross-workspace
+bypass and must be bound to the workspace they administer. Turn-summary and
+safe-sync idempotency include the workspace partition. MCP context-pack cache
+keys include endpoint, workspace, and a non-reversible credential partition.
+No user identity, bearer digest, or provenance claim enters safe projections or
+cache status output. Sensitive-access status polling uses the same partition
+with a one-second bounded cache so state changes cannot remain stale beyond that
+window. Operator authority comes from explicit token configuration, never a
+caller header.
 
 ## Collection Provenance Boundary
 

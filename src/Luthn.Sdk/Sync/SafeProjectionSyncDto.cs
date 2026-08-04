@@ -4,6 +4,7 @@ namespace Luthn.Sdk.Sync;
 
 public sealed record SafeProjectionSyncEnvelopeDto(
     [property: JsonPropertyName("contractVersion")] int ContractVersion,
+    [property: JsonPropertyName("workspaceId")] string WorkspaceId,
     [property: JsonPropertyName("originInstanceId")] string OriginInstanceId,
     [property: JsonPropertyName("localRecordId")] string LocalRecordId,
     [property: JsonPropertyName("revision")] long Revision,

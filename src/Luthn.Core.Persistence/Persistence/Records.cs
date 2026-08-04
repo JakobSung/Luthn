@@ -3,7 +3,12 @@ using Luthn.Core.Memory;
 
 namespace Luthn.Core.Persistence;
 
-public sealed class SourceEventRecord
+public interface IWorkspaceScopedRecord
+{
+    string WorkspaceId { get; set; }
+}
+
+public sealed class SourceEventRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public string SourceSystem { get; set; } = "";
@@ -11,6 +16,7 @@ public sealed class SourceEventRecord
     public DateTimeOffset ReceivedAt { get; set; }
     public string ContentDigest { get; set; } = "";
     public bool ContainsSensitiveMaterial { get; set; }
+    public string WorkspaceId { get; set; } = "default";
     public string OwnerUserId { get; set; } = "local-owner";
 }
 
@@ -26,7 +32,7 @@ public sealed class ClassificationResultRecord
     public SourceEventRecord? SourceEvent { get; set; }
 }
 
-public sealed class WikiProposalRecord
+public sealed class WikiProposalRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public string SourceEventId { get; set; } = "";
@@ -41,11 +47,12 @@ public sealed class WikiProposalRecord
     public string SearchTagKeys { get; set; } = "||";
     public bool AllowsAgentContext { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public string WorkspaceId { get; set; } = "default";
     public string OwnerUserId { get; set; } = "local-owner";
     public SourceEventRecord? SourceEvent { get; set; }
 }
 
-public sealed class SensitiveRecordReferenceRecord
+public sealed class SensitiveRecordReferenceRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public string SourceEventId { get; set; } = "";
@@ -55,6 +62,7 @@ public sealed class SensitiveRecordReferenceRecord
     public bool ContainsSensitiveMaterial { get; set; }
     public string ReferenceLabel { get; set; } = "";
     public string RedactedSummary { get; set; } = "";
+    public string WorkspaceId { get; set; } = "default";
     public string OwnerUserId { get; set; } = "local-owner";
     public SourceEventRecord? SourceEvent { get; set; }
 }
@@ -73,7 +81,7 @@ public enum SensitiveAccessDecisionKind
     Denied
 }
 
-public sealed class SensitiveAccessRequestRecord
+public sealed class SensitiveAccessRequestRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public string SensitiveRecordReferenceId { get; set; } = "";
@@ -87,6 +95,7 @@ public sealed class SensitiveAccessRequestRecord
     public DateTimeOffset UpdatedAt { get; set; }
     public string? DecidedBy { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
+    public string WorkspaceId { get; set; } = "default";
     public string OwnerUserId { get; set; } = "local-owner";
     public SensitiveRecordReferenceRecord? SensitiveRecordReference { get; set; }
 }
@@ -104,7 +113,7 @@ public sealed class SensitiveAccessDecisionRecord
     public SensitiveAccessRequestRecord? SensitiveAccessRequest { get; set; }
 }
 
-public sealed class SharedMemoryItemRecord
+public sealed class SharedMemoryItemRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public string Title { get; set; } = "";
@@ -124,6 +133,7 @@ public sealed class SharedMemoryItemRecord
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string CreatedBy { get; set; } = "";
+    public string WorkspaceId { get; set; } = "default";
     public string OwnerUserId { get; set; } = "local-owner";
     public long Revision { get; set; } = 1;
     public ExternalPublicationState ExternalPublicationState { get; set; } = ExternalPublicationState.LocalOnly;
@@ -141,7 +151,7 @@ public sealed class SensitiveMemoryPayloadRecord
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-public sealed class CollectionProvenanceRecord
+public sealed class CollectionProvenanceRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public int ContractVersion { get; set; } = 1;
@@ -150,6 +160,7 @@ public sealed class CollectionProvenanceRecord
     public string AuthenticatedActor { get; set; } = "";
     public string ActorTrust { get; set; } = "";
     public string ClaimsTrust { get; set; } = "";
+    public string WorkspaceId { get; set; } = "default";
     public string AuthenticatedUserId { get; set; } = "local-owner";
     public string? ClaimedUserId { get; set; }
     public string? AgentId { get; set; }
@@ -179,12 +190,13 @@ public enum SafeProjectionSyncOutboxState
     Acknowledged
 }
 
-public sealed class SafeProjectionSyncOutboxRecord
+public sealed class SafeProjectionSyncOutboxRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public string IdempotencyKey { get; set; } = "";
     public string OriginInstanceId { get; set; } = "";
     public string LocalRecordId { get; set; } = "";
+    public string WorkspaceId { get; set; } = "default";
     public string OwnerUserId { get; set; } = "local-owner";
     public long Revision { get; set; }
     public SafeProjectionSyncOperation Operation { get; set; }
@@ -201,8 +213,9 @@ public sealed class SafeProjectionSyncOutboxRecord
     public string? RemoteCheckpoint { get; set; }
 }
 
-public sealed class SafeProjectionSyncCheckpointRecord
+public sealed class SafeProjectionSyncCheckpointRecord : IWorkspaceScopedRecord
 {
+    public string WorkspaceId { get; set; } = "default";
     public string TransportName { get; set; } = "";
     public string Checkpoint { get; set; } = "";
     public DateTimeOffset UpdatedAt { get; set; }
@@ -222,9 +235,10 @@ public enum AgentConnectionActivityState
     Failed
 }
 
-public sealed class AgentConnectionChannelRecord
+public sealed class AgentConnectionChannelRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
+    public string WorkspaceId { get; set; } = "default";
     public string OwnerUserId { get; set; } = "";
     public string AgentId { get; set; } = "";
     public string AgentName { get; set; } = "";

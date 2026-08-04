@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Luthn.Core.Search;
 
@@ -25,16 +26,19 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     {
         modelBuilder.Entity<SourceEventRecord>(entity =>
         {
-            entity.ToTable("source_events", table => table.HasCheckConstraint(
-                "CK_source_events_owner_user_id",
-                "\"OwnerUserId\" <> ''"));
+            entity.ToTable("source_events", table =>
+            {
+                table.HasCheckConstraint("CK_source_events_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_source_events_workspace_id", "\"WorkspaceId\" <> ''");
+            });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SourceSystem).HasMaxLength(128).IsRequired();
             entity.Property(record => record.SourceType).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ContentDigest).HasMaxLength(256).IsRequired();
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
-            entity.HasIndex(record => record.OwnerUserId);
+            entity.HasIndex(record => new { record.WorkspaceId, record.ReceivedAt });
         });
 
         modelBuilder.Entity<ClassificationResultRecord>(entity =>
@@ -54,9 +58,11 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<WikiProposalRecord>(entity =>
         {
-            entity.ToTable("wiki_proposals", table => table.HasCheckConstraint(
-                "CK_wiki_proposals_owner_user_id",
-                "\"OwnerUserId\" <> ''"));
+            entity.ToTable("wiki_proposals", table =>
+            {
+                table.HasCheckConstraint("CK_wiki_proposals_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_wiki_proposals_workspace_id", "\"WorkspaceId\" <> ''");
+            });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
@@ -69,6 +75,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.TopicTags).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
             entity.Property(record => record.SearchTerms).HasColumnType("text").HasDefaultValue("||");
             entity.Property(record => record.SearchTagKeys).HasColumnType("text").HasDefaultValue("||");
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new
             {
@@ -76,7 +83,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.Sensitivity,
                 record.CreatedAt
             });
-            entity.HasIndex(record => new { record.OwnerUserId, record.ProjectKey, record.TaskKey, record.CreatedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.ProjectKey, record.TaskKey, record.CreatedAt });
             entity.HasOne(record => record.SourceEvent)
                 .WithMany()
                 .HasForeignKey(record => record.SourceEventId)
@@ -85,9 +92,11 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<SensitiveRecordReferenceRecord>(entity =>
         {
-            entity.ToTable("sensitive_record_references", table => table.HasCheckConstraint(
-                "CK_sensitive_record_references_owner_user_id",
-                "\"OwnerUserId\" <> ''"));
+            entity.ToTable("sensitive_record_references", table =>
+            {
+                table.HasCheckConstraint("CK_sensitive_record_references_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_record_references_workspace_id", "\"WorkspaceId\" <> ''");
+            });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
@@ -95,8 +104,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.SourceType).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ReferenceLabel).HasMaxLength(256).IsRequired();
             entity.Property(record => record.RedactedSummary).HasMaxLength(4000).IsRequired();
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
-            entity.HasIndex(record => record.OwnerUserId);
+            entity.HasIndex(record => new { record.WorkspaceId, record.ReceivedAt });
             entity.HasOne(record => record.SourceEvent)
                 .WithMany()
                 .HasForeignKey(record => record.SourceEventId)
@@ -105,9 +115,11 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<SensitiveAccessRequestRecord>(entity =>
         {
-            entity.ToTable("sensitive_access_requests", table => table.HasCheckConstraint(
-                "CK_sensitive_access_requests_owner_user_id",
-                "\"OwnerUserId\" <> ''"));
+            entity.ToTable("sensitive_access_requests", table =>
+            {
+                table.HasCheckConstraint("CK_sensitive_access_requests_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_requests_workspace_id", "\"WorkspaceId\" <> ''");
+            });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SensitiveRecordReferenceId).HasMaxLength(128).IsRequired();
@@ -117,9 +129,10 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.RedactedSummary).HasMaxLength(4000).IsRequired();
             entity.Property(record => record.Status).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.DecidedBy).HasMaxLength(128);
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new { record.Status, record.ExpiresAt, record.UpdatedAt });
-            entity.HasIndex(record => new { record.OwnerUserId, record.Status, record.UpdatedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.Status, record.UpdatedAt });
             entity.HasOne(record => record.SensitiveRecordReference)
                 .WithMany()
                 .HasForeignKey(record => record.SensitiveRecordReferenceId)
@@ -145,9 +158,11 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<SharedMemoryItemRecord>(entity =>
         {
-            entity.ToTable("shared_memory_items", table => table.HasCheckConstraint(
-                "CK_shared_memory_items_owner_user_id",
-                "\"OwnerUserId\" <> ''"));
+            entity.ToTable("shared_memory_items", table =>
+            {
+                table.HasCheckConstraint("CK_shared_memory_items_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_shared_memory_items_workspace_id", "\"WorkspaceId\" <> ''");
+            });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.Title).HasMaxLength(200).IsRequired();
@@ -163,6 +178,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.RetentionKind).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.SourceSessionId).HasMaxLength(128);
             entity.Property(record => record.CreatedBy).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.Revision).HasDefaultValue(1L);
             entity.Property(record => record.Revision).IsConcurrencyToken();
@@ -186,7 +202,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 record.CreatedAt,
                 record.Id
             }).HasDatabaseName("IX_shared_memory_items_cleanup_candidates");
-            entity.HasIndex(record => new { record.OwnerUserId, record.ProjectKey, record.TaskKey, record.UpdatedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.ProjectKey, record.TaskKey, record.UpdatedAt });
         });
 
         modelBuilder.Entity<SensitiveMemoryPayloadRecord>(entity =>
@@ -213,6 +229,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 table.HasCheckConstraint(
                     "CK_collection_provenance_authenticated_user_id",
                     "\"AuthenticatedUserId\" <> ''");
+                table.HasCheckConstraint(
+                    "CK_collection_provenance_workspace_id",
+                    "\"WorkspaceId\" <> ''");
             });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(64);
@@ -222,6 +241,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.AuthenticatedActor).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ActorTrust).HasMaxLength(32).IsRequired();
             entity.Property(record => record.ClaimsTrust).HasMaxLength(32).IsRequired();
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.AuthenticatedUserId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ClaimedUserId).HasMaxLength(128);
             entity.Property(record => record.AgentId).HasMaxLength(128);
@@ -231,6 +251,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.ConnectorVersion).HasMaxLength(64);
             entity.HasIndex(record => record.SourceEventId).IsUnique();
             entity.HasIndex(record => record.MemoryItemId).IsUnique();
+            entity.HasIndex(record => new { record.WorkspaceId, record.ReceivedAt });
             entity.HasOne<SourceEventRecord>()
                 .WithOne()
                 .HasForeignKey<CollectionProvenanceRecord>(record => record.SourceEventId)
@@ -252,48 +273,57 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<SafeProjectionSyncOutboxRecord>(entity =>
         {
-            entity.ToTable("safe_projection_sync_outbox", table => table.HasCheckConstraint(
-                "CK_safe_projection_sync_outbox_owner_user_id",
-                "\"OwnerUserId\" <> ''"));
+            entity.ToTable("safe_projection_sync_outbox", table =>
+            {
+                table.HasCheckConstraint("CK_safe_projection_sync_outbox_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_safe_projection_sync_outbox_workspace_id", "\"WorkspaceId\" <> ''");
+            });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.IdempotencyKey).HasMaxLength(512).IsRequired();
             entity.Property(record => record.OriginInstanceId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.LocalRecordId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.Operation).HasConversion<string>().HasMaxLength(32);
             entity.Property(record => record.SafeEnvelopeJson).HasColumnType("jsonb").IsRequired();
             entity.Property(record => record.State).HasConversion<string>().HasMaxLength(32);
             entity.Property(record => record.LastErrorCode).HasMaxLength(128);
             entity.Property(record => record.RemoteCheckpoint).HasMaxLength(512);
-            entity.HasIndex(record => record.IdempotencyKey).IsUnique();
+            entity.HasIndex(record => new { record.WorkspaceId, record.IdempotencyKey }).IsUnique();
             entity.HasIndex(record => new
             {
+                record.WorkspaceId,
                 record.OriginInstanceId,
                 record.LocalRecordId,
                 record.Revision,
                 record.Operation
             }).IsUnique();
             entity.HasIndex(record => new { record.State, record.NextAttemptAt, record.CreatedAt });
-            entity.HasIndex(record => new { record.OwnerUserId, record.State, record.CreatedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.State, record.CreatedAt });
         });
 
         modelBuilder.Entity<SafeProjectionSyncCheckpointRecord>(entity =>
         {
-            entity.ToTable("safe_projection_sync_checkpoints");
-            entity.HasKey(record => record.TransportName);
+            entity.ToTable("safe_projection_sync_checkpoints", table => table.HasCheckConstraint(
+                "CK_safe_projection_sync_checkpoints_workspace_id",
+                "\"WorkspaceId\" <> ''"));
+            entity.HasKey(record => new { record.WorkspaceId, record.TransportName });
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength);
             entity.Property(record => record.TransportName).HasMaxLength(128);
             entity.Property(record => record.Checkpoint).HasMaxLength(512).IsRequired();
         });
 
         modelBuilder.Entity<AgentConnectionChannelRecord>(entity =>
         {
-            entity.ToTable("agent_connection_channels");
+            entity.ToTable("agent_connection_channels", table =>
+            {
+                table.HasCheckConstraint("CK_agent_connection_channels_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_agent_connection_channels_workspace_id", "\"WorkspaceId\" <> ''");
+            });
             entity.HasKey(record => record.Id);
-            entity.ToTable(table => table.HasCheckConstraint(
-                "CK_agent_connection_channels_owner_user_id",
-                "\"OwnerUserId\" <> ''"));
             entity.Property(record => record.Id).HasMaxLength(160);
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.AgentId).HasMaxLength(64).IsRequired();
             entity.Property(record => record.AgentName).HasMaxLength(128).IsRequired();
@@ -304,8 +334,8 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.VerificationState).HasConversion<string>().HasMaxLength(32);
             entity.Property(record => record.ActivityState).HasConversion<string>().HasMaxLength(32);
             entity.Property(record => record.FailureCode).HasMaxLength(64);
-            entity.HasIndex(record => new { record.OwnerUserId, record.AgentId, record.Channel }).IsUnique();
-            entity.HasIndex(record => record.UpdatedAt);
+            entity.HasIndex(record => new { record.WorkspaceId, record.AgentId, record.Channel }).IsUnique();
+            entity.HasIndex(record => new { record.WorkspaceId, record.UpdatedAt });
         });
 
         modelBuilder.Entity<AuditEventRecord>(entity =>
@@ -325,6 +355,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        ValidateWorkspaceScopes();
         RejectProvenanceUpdates();
         UpdateSearchIndexes();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -334,9 +365,24 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
+        ValidateWorkspaceScopes();
         RejectProvenanceUpdates();
         UpdateSearchIndexes();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ValidateWorkspaceScopes()
+    {
+        var invalidEntry = ChangeTracker.Entries<IWorkspaceScopedRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (string.IsNullOrWhiteSpace(entry.Entity.WorkspaceId) ||
+                    entry.Entity.WorkspaceId.Length > WorkspaceIds.MaxLength));
+        if (invalidEntry is not null)
+        {
+            throw new InvalidOperationException(
+                $"{invalidEntry.Metadata.ClrType.Name} requires a valid WorkspaceId.");
+        }
     }
 
     private void RejectProvenanceUpdates()

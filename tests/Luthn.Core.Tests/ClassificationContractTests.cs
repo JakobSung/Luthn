@@ -50,12 +50,13 @@ public sealed class ClassificationContractTests
             "projection title",
             "safe summary",
             ["tag-one", "tag-two"]);
+        var normalizedInput = input.Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        Assert.Contains("content:\nsource body", input, StringComparison.Ordinal);
-        Assert.Contains("title:\nprojection title", input, StringComparison.Ordinal);
-        Assert.Contains("safeSummary:\nsafe summary", input, StringComparison.Ordinal);
-        Assert.Contains("coreTag:\ntag-one", input, StringComparison.Ordinal);
-        Assert.Contains("coreTag:\ntag-two", input, StringComparison.Ordinal);
+        Assert.Contains("content:\nsource body", normalizedInput, StringComparison.Ordinal);
+        Assert.Contains("title:\nprojection title", normalizedInput, StringComparison.Ordinal);
+        Assert.Contains("safeSummary:\nsafe summary", normalizedInput, StringComparison.Ordinal);
+        Assert.Contains("coreTag:\ntag-one", normalizedInput, StringComparison.Ordinal);
+        Assert.Contains("coreTag:\ntag-two", normalizedInput, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -24,11 +24,12 @@ public enum SafeProjectionSyncTransportState
 
 public static class SafeProjectionSyncContractVersions
 {
-    public const int Current = 1;
+    public const int Current = 2;
 }
 
 public sealed record SafeProjectionSyncEnvelope(
     int ContractVersion,
+    string WorkspaceId,
     string OriginInstanceId,
     string LocalRecordId,
     long Revision,
@@ -93,6 +94,7 @@ public static class SafeProjectionSyncPolicy
             now);
 
     public static SafeProjectionSyncEnvelope CreateUpsert(
+        string workspaceId,
         string originInstanceId,
         string localRecordId,
         long revision,
@@ -115,6 +117,7 @@ public static class SafeProjectionSyncPolicy
         ValidateRevision(revision);
         return new SafeProjectionSyncEnvelope(
             SafeProjectionSyncContractVersions.Current,
+            RequiredToken(workspaceId, nameof(workspaceId)),
             RequiredToken(originInstanceId, nameof(originInstanceId)),
             RequiredToken(localRecordId, nameof(localRecordId)),
             revision,
@@ -132,6 +135,7 @@ public static class SafeProjectionSyncPolicy
     }
 
     public static SafeProjectionSyncEnvelope CreateRevoke(
+        string workspaceId,
         string originInstanceId,
         string localRecordId,
         long revision,
@@ -142,6 +146,7 @@ public static class SafeProjectionSyncPolicy
         ValidateRevision(revision);
         return new SafeProjectionSyncEnvelope(
             SafeProjectionSyncContractVersions.Current,
+            RequiredToken(workspaceId, nameof(workspaceId)),
             RequiredToken(originInstanceId, nameof(originInstanceId)),
             RequiredToken(localRecordId, nameof(localRecordId)),
             revision,
@@ -161,7 +166,7 @@ public static class SafeProjectionSyncPolicy
     public static string CreateIdempotencyKey(SafeProjectionSyncEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
-        return $"{envelope.OriginInstanceId}:{envelope.LocalRecordId}:{envelope.Revision}:{envelope.Operation}";
+        return $"{envelope.WorkspaceId}:{envelope.OriginInstanceId}:{envelope.LocalRecordId}:{envelope.Revision}:{envelope.Operation}";
     }
 
     private static void ValidateRevision(long revision)

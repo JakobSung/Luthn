@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Luthn.Core.Common;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
 
@@ -39,7 +40,17 @@ public sealed class LuthnServiceTokenOptions
     public List<string> Scopes { get; set; } = [];
     public DateTimeOffset? ExpiresAt { get; set; }
     public string? UserId { get; set; }
+    public string? WorkspaceId { get; set; }
+    public LuthnActorKind ActorKind { get; set; } = LuthnActorKind.Service;
     public bool IsOperator { get; set; }
+}
+
+public enum LuthnActorKind
+{
+    User,
+    Agent,
+    Service,
+    System
 }
 
 public enum LuthnIdentityMode
@@ -56,10 +67,18 @@ public sealed class LuthnIdentityOptions
     public string SingleOwnerUserId { get; set; } = DefaultSingleOwnerUserId;
 }
 
-public sealed record LuthnRequestPrincipal(string UserId, bool IsOperator)
+public sealed record LuthnRequestPrincipal(
+    string UserId,
+    string WorkspaceId,
+    LuthnActorKind ActorKind,
+    string ActorId,
+    bool IsOperator)
 {
-    public bool CanAccess(string ownerUserId) =>
-        IsOperator || string.Equals(UserId, ownerUserId, StringComparison.Ordinal);
+    public bool CanAccessWorkspace(string workspaceId) =>
+        string.Equals(WorkspaceId, workspaceId, StringComparison.Ordinal);
+
+    public bool CanAccessPrivateUserData(string ownerUserId) =>
+        string.Equals(UserId, ownerUserId, StringComparison.Ordinal);
 }
 
 public static class ServiceTokenAuthorization
@@ -114,7 +133,12 @@ public static class ServiceTokenAuthorization
             return principal;
         }
 
-        return new LuthnRequestPrincipal(LuthnIdentityOptions.DefaultSingleOwnerUserId, IsOperator: false);
+        return new LuthnRequestPrincipal(
+            LuthnIdentityOptions.DefaultSingleOwnerUserId,
+            WorkspaceIds.Default,
+            LuthnActorKind.System,
+            "local-anonymous",
+            IsOperator: false);
     }
 
     public static string? NormalizeUserId(string? value)
@@ -130,6 +154,26 @@ public static class ServiceTokenAuthorization
             normalized.Any(character =>
                 !IsAsciiLetterOrDigit(character) &&
                 character is not '.' and not '_' and not ':' and not '@' and not '-'))
+        {
+            return null;
+        }
+
+        return normalized;
+    }
+
+    public static string? NormalizeWorkspaceId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        if (normalized.Length > WorkspaceIds.MaxLength ||
+            !IsAsciiLetterOrDigit(normalized[0]) ||
+            normalized.Any(character =>
+                !IsAsciiLetterOrDigit(character) &&
+                character is not '.' and not '_' and not ':' and not '-'))
         {
             return null;
         }
@@ -168,10 +212,16 @@ public static class ServiceTokenAuthorization
             }
 
             httpContext.Items[ServiceTokenAuthenticatedItemKey] = false;
-            httpContext.Items[PrincipalItemKey] = new LuthnRequestPrincipal(singleOwnerUserId, IsOperator: true);
-            httpContext.Items[ActorItemKey] = ComposeActor(
+            var localActor = ComposeActor(
                 "local-anonymous",
                 httpContext.Request.Headers[OperatorHeaderName].ToString());
+            httpContext.Items[PrincipalItemKey] = new LuthnRequestPrincipal(
+                singleOwnerUserId,
+                WorkspaceIds.ForLegacyUser(singleOwnerUserId),
+                LuthnActorKind.System,
+                localActor,
+                IsOperator: true);
+            httpContext.Items[ActorItemKey] = localActor;
             return await ContinueWhenSensitiveMemoryProtectionIsReady(context, next);
         }
 
@@ -207,15 +257,40 @@ public static class ServiceTokenAuthorization
                 "Multi-user mode requires a valid server-configured userId for every non-operator token.");
         }
 
-        httpContext.Items[ServiceTokenAuthenticatedItemKey] = true;
-        httpContext.Items[PrincipalItemKey] = new LuthnRequestPrincipal(
-            identityOptions.Mode == LuthnIdentityMode.SingleOwner
-                ? singleOwnerUserId
-                : configuredUserId ?? singleOwnerUserId,
-            matchedToken.IsOperator);
-        httpContext.Items[ActorItemKey] = ComposeActor(
+        if (!Enum.IsDefined(matchedToken.ActorKind))
+        {
+            return IdentityConfigurationProblem("The service token actor kind is invalid.");
+        }
+
+        var resolvedUserId = identityOptions.Mode == LuthnIdentityMode.SingleOwner
+            ? singleOwnerUserId
+            : configuredUserId ?? singleOwnerUserId;
+        var configuredWorkspaceId = NormalizeWorkspaceId(matchedToken.WorkspaceId);
+        if (!string.IsNullOrWhiteSpace(matchedToken.WorkspaceId) && configuredWorkspaceId is null)
+        {
+            return IdentityConfigurationProblem("The service token workspaceId is invalid.");
+        }
+        if (identityOptions.Mode == LuthnIdentityMode.MultiUser &&
+            matchedToken.IsOperator &&
+            configuredUserId is null &&
+            configuredWorkspaceId is null)
+        {
+            return IdentityConfigurationProblem(
+                "Multi-user operator tokens require a workspaceId or userId binding.");
+        }
+
+        var actor = ComposeActor(
             matchedToken.Name.Trim(),
             httpContext.Request.Headers[OperatorHeaderName].ToString());
+
+        httpContext.Items[ServiceTokenAuthenticatedItemKey] = true;
+        httpContext.Items[PrincipalItemKey] = new LuthnRequestPrincipal(
+            resolvedUserId,
+            configuredWorkspaceId ?? WorkspaceIds.ForLegacyUser(resolvedUserId),
+            matchedToken.ActorKind,
+            actor,
+            matchedToken.IsOperator);
+        httpContext.Items[ActorItemKey] = actor;
         return await ContinueWhenSensitiveMemoryProtectionIsReady(context, next);
     }
 
@@ -281,11 +356,31 @@ public static class ServiceTokenAuthorization
             return "Every active service token must declare at least one scope.";
         }
 
+        if (activeTokens.Any(token => !Enum.IsDefined(token.ActorKind)))
+        {
+            return "Every active service token must declare a valid actorKind.";
+        }
+
+        if (activeTokens.Any(token =>
+                !string.IsNullOrWhiteSpace(token.WorkspaceId) &&
+                NormalizeWorkspaceId(token.WorkspaceId) is null))
+        {
+            return "Every configured service token workspaceId must be valid.";
+        }
+
 
         if (identityOptions.Mode == LuthnIdentityMode.MultiUser &&
             activeTokens.Any(token => !token.IsOperator && NormalizeUserId(token.UserId) is null))
         {
             return "Every active non-operator token requires a valid userId in multi-user mode.";
+        }
+
+        if (identityOptions.Mode == LuthnIdentityMode.MultiUser &&
+            activeTokens.Any(token => token.IsOperator &&
+                NormalizeUserId(token.UserId) is null &&
+                NormalizeWorkspaceId(token.WorkspaceId) is null))
+        {
+            return "Every active operator token requires a workspaceId or userId binding in multi-user mode.";
         }
 
         return null;
@@ -318,8 +413,15 @@ public static class ServiceTokenAuthorization
         }
 
         var activeTokens = options.Tokens.Where(token => !IsExpired(token, now));
-        return activeTokens.Any(token => !token.IsOperator && NormalizeUserId(token.UserId) is null)
-            ? "Every active non-operator token requires a valid userId in multi-user mode."
+        if (activeTokens.Any(token => !token.IsOperator && NormalizeUserId(token.UserId) is null))
+        {
+            return "Every active non-operator token requires a valid userId in multi-user mode.";
+        }
+
+        return activeTokens.Any(token => token.IsOperator &&
+                NormalizeUserId(token.UserId) is null &&
+                NormalizeWorkspaceId(token.WorkspaceId) is null)
+            ? "Every active operator token requires a workspaceId or userId binding in multi-user mode."
             : null;
     }
 
