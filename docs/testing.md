@@ -12,7 +12,7 @@ Before the inventory slice, the repository contained 53 test-related files:
 36 C# test sources, 7 .NET test projects, and 10 files under `scripts/tests/`.
 The inventory checker then made the canonical inventory 54 files. The timing
 slice added the timing harness itself, and the environmental runner contract
-adds two more test scripts, so the current canonical inventory is 57 files. The
+adds three more test scripts, so the current canonical inventory is 58 files. The
 latest full .NET run covered 392 test cases; the .NET test-case baseline remains
 392 because no product test was removed or merged.
 
@@ -22,29 +22,31 @@ platform coverage before removing or consolidating cases.
 
 ## Timing baseline
 
-`./scripts/tests/test-test-tier-timing.sh` runs representative fast and
-focused commands, captures the executed case count and elapsed milliseconds,
-and reports environmental availability without executing lifecycle tests. A
+`./scripts/tests/test-test-tier-timing.sh --runs 3` runs representative fast
+and focused commands repeatedly, captures the executed case count, and
+reports min/median/p95/max elapsed milliseconds and population variance without
+executing lifecycle tests. A
 test-file count is the number of `.cs` and `.csproj` files in the owning .NET
 test project, or `.py` files in `scripts/tests`; it is not a claim that every
 file in that project was touched by a filtered command. The baseline below was
-measured on `Darwin-25.5.0-arm64`, .NET SDK `10.0.300`, and Python `3.9.6`.
+measured with `--runs 2` on `Darwin-25.5.0-arm64`, .NET SDK `10.0.300`, and
+Python `3.9.6`.
 
-| Measurement | Tier | Command | Test files | Cases | Elapsed ms | Environment / availability |
-| --- | --- | --- | ---: | ---: | ---: | --- |
-| `fast-core` | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | 13 | 109 | 1886 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `fast-python` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | 3 | 35 | 2468 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `focused-classification` | `focused` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore --filter FullyQualifiedName~ClassificationContractTests` | 13 | 17 | 1628 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `focused-memory` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~MemoryEndpointTests` | 18 | 18 | 3852 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `focused-sensitive-memory` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveMemoryProtectionTests` | 18 | 8 | 3813 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `focused-retrieval` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~RetrievalEndpointTests` | 18 | 4 | 3548 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `focused-ownership` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OwnershipIsolationTests` | 18 | 6 | 4177 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `focused-host-safety-batch` | `focused` | `bash scripts/run-focused-tests.sh --run host-safety` | 18 | 75 | 5290 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `focused-mcp` | `focused` | `dotnet test tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj --no-restore --filter FullyQualifiedName~McpToolBoundaryTests` | 2 | 24 | 2770 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `environmental-docker` | `environmental` | lifecycle and PostgreSQL scripts | n/a | n/a | n/a | Not sampled; Docker is available. |
-| `environmental-windows` | `environmental` | PowerShell Windows lifecycle scripts | n/a | n/a | n/a | Unavailable locally; Windows runner required. |
+| Measurement | Tier | Command | Test files | Cases | Runs | Min ms | Median ms | P95 ms | Max ms | Variance ms2 | Environment / availability |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `fast-core` | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | 13 | 109 | 2 | 2062 | 2118 | 2174 | 2174 | 3136 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `fast-python` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | 3 | 35 | 2 | 2383 | 2455.5 | 2528 | 2528 | 5256.2 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-classification` | `focused` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore --filter FullyQualifiedName~ClassificationContractTests` | 13 | 17 | 2 | 1787 | 1854.5 | 1922 | 1922 | 4556.2 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-memory` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~MemoryEndpointTests` | 18 | 18 | 2 | 3806 | 3891.5 | 3977 | 3977 | 7310.2 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-sensitive-memory` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveMemoryProtectionTests` | 18 | 8 | 2 | 3801 | 3817.5 | 3834 | 3834 | 272.2 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-retrieval` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~RetrievalEndpointTests` | 18 | 4 | 2 | 3576 | 3602.5 | 3629 | 3629 | 702.2 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-ownership` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OwnershipIsolationTests` | 18 | 6 | 2 | 4412 | 4413.5 | 4415 | 4415 | 2.2 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-host-safety-batch` | `focused` | `bash scripts/run-focused-tests.sh --run host-safety` | 18 | 75 | 2 | 5266 | 5328 | 5390 | 5390 | 3844 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-mcp` | `focused` | `dotnet test tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj --no-restore --filter FullyQualifiedName~McpToolBoundaryTests` | 2 | 24 | 2 | 2695 | 2735 | 2775 | 2775 | 1600 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `environmental-docker` | `environmental` | lifecycle and PostgreSQL scripts | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Not sampled; Docker is available. |
+| `environmental-windows` | `environmental` | PowerShell Windows lifecycle scripts | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Unavailable locally; Windows runner required. |
 
-These are single local samples for comparison, not deletion thresholds. The
+These are bounded local samples for comparison, not deletion thresholds. The
 environmental rows explicitly distinguish “not sampled” from “unavailable”;
 neither state is treated as a passing zero-cost result.
 
@@ -67,7 +69,7 @@ check.
 | Tier | Command | Purpose |
 | --- | --- | --- |
 | `fast` | `./scripts/tests/test-test-inventory.sh` | Prove every file under `tests/` and `scripts/tests/` appears exactly once in the canonical matrix with an allowed tier. |
-| `fast` | `./scripts/tests/test-test-tier-timing.sh` | Capture representative fast/focused elapsed time, case counts, and environmental availability without running lifecycle tests. |
+| `fast` | `./scripts/tests/test-test-tier-timing.sh --runs 3` | Capture repeated fast/focused timing statistics, case counts, and environmental availability without running lifecycle tests. |
 | `fast` | `bash scripts/run-environmental-tests.sh --list` | Enumerate environmental suites without checking prerequisites or executing lifecycle tests. |
 | `fast` | `bash scripts/run-environmental-tests.sh --check` | Report Docker and Windows prerequisite availability without executing lifecycle tests. |
 | `fast` | `bash scripts/run-focused-tests.sh --list` | Enumerate the same-project focused batch and its retained class filters without executing tests. |
@@ -132,6 +134,7 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `scripts/tests/test-test-tier-timing.sh` | `fast` | `./scripts/tests/test-test-tier-timing.sh` | Repeatable fast/focused timing baseline and environmental availability report. |
 | `scripts/tests/test-environmental-runner.sh` | `fast` | `bash scripts/tests/test-environmental-runner.sh` | Deterministic list, check, and invalid-scope contract for the environmental runner. |
 | `scripts/tests/test-focused-batching.sh` | `fast` | `bash scripts/tests/test-focused-batching.sh` | Deterministic focused-batch listing and invalid-group contract. |
+| `scripts/tests/test-test-tier-timing-contract.sh` | `fast` | `bash scripts/tests/test-test-tier-timing-contract.sh` | Deterministic timing run-count and option contract without executing test suites. |
 | `scripts/tests/test-windows-codex-hook-smoke.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Windows Codex hook smoke behavior. |
 | `scripts/tests/test-windows-lifecycle.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | Windows lifecycle, update, migration, backup, rollback, and cleanup. |
 | `scripts/tests/test_codex_connector.py` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | Deterministic Codex hook, instruction, and turn-capsule contracts. |

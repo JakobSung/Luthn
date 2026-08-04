@@ -21,7 +21,7 @@ Next action: create the next slice plan on the current delivery branch, or ask f
 | ID | Status | Priority | Title | Idea Artifact | First Slice Candidate |
 | --- | --- | --- | --- | --- | --- |
 | PLUGIN-001 | gated | P2 | Dynamic plugin loading and marketplace | `none` | - |
-| WORK-015 | evidence-pending | P2 | Batch focused Host API test execution | `docs/01-plan/batch-focused-host-api-test-execution/001-idea.md` | - |
+| WORK-015 | evidence-pending | P2 | Stabilize repeated test timing baselines | `docs/01-plan/stabilize-repeated-test-timing-baselines/001-idea.md` | - |
 | none | backlog | - | No additional planned quality slice | `none` | - |
 
 ## Planned
