@@ -165,16 +165,18 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
             db.ClassificationResults.RemoveRange(classifications);
             db.SharedMemoryItems.RemoveRange(memories);
             db.SourceEvents.RemoveRange(sources);
-            db.AuditEvents.AddRange(completeCandidates.Select(candidate => new AuditEventRecord
-            {
-                Id = $"audit-{Guid.NewGuid():N}",
-                OccurredAt = now,
-                Actor = "luthn-retention-cleanup",
-                Action = "turn_summary.retention.pruned",
-                SubjectId = candidate.SourceEventId,
-                PayloadClass = "metadata-only",
-                RedactionState = "expired-turn-capsule-deleted"
-            }));
+            db.AuditEvents.AddRange(completeCandidates.Select(candidate => AuditEventFactory.ForWorkspace(
+                candidate.WorkspaceId,
+                actorUserId: null,
+                actorKind: "system",
+                actor: "luthn-retention-cleanup",
+                action: "turn_summary.retention.pruned",
+                subjectId: candidate.SourceEventId,
+                payloadClass: "metadata-only",
+                redactionState: "expired-turn-capsule-deleted",
+                occurredAt: now,
+                subjectType: "source_event",
+                outcome: "pruned")));
 
             await db.SaveChangesAsync(cancellationToken);
             if (transaction is not null)

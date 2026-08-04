@@ -103,15 +103,26 @@ public sealed class SafeProjectionPublicationService(
         string memoryItemId,
         string actor,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
-        => await ApproveAsync(memoryItemId, actor, now, WorkspaceIds.Default, cancellationToken);
+        CancellationToken cancellationToken,
+        string? actorUserId = null,
+        string actorKind = "service")
+        => await ApproveAsync(
+            memoryItemId,
+            actor,
+            now,
+            WorkspaceIds.Default,
+            cancellationToken,
+            actorUserId,
+            actorKind);
 
     public async Task<ExternalPublicationResult> ApproveAsync(
         string memoryItemId,
         string actor,
         DateTimeOffset now,
         string workspaceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? actorUserId = null,
+        string actorKind = "service")
     {
         var memory = await db.SharedMemoryItems
             .SingleOrDefaultAsync(
@@ -163,7 +174,7 @@ public sealed class SafeProjectionPublicationService(
             now,
             memory.ExpiresAt);
         AddOutbox(envelope, memory.OwnerUserId, now);
-        AddAudit(memory.Id, actor, "memory.external_publication.approved", now);
+        AddAudit(memory, actor, "memory.external_publication.approved", now, actorUserId, actorKind);
 
         await SavePublicationAsync(cancellationToken);
         return ToResult(memory, SafeProjectionSyncOutboxState.Pending);
@@ -173,15 +184,26 @@ public sealed class SafeProjectionPublicationService(
         string memoryItemId,
         string actor,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
-        => await RevokeAsync(memoryItemId, actor, now, WorkspaceIds.Default, cancellationToken);
+        CancellationToken cancellationToken,
+        string? actorUserId = null,
+        string actorKind = "service")
+        => await RevokeAsync(
+            memoryItemId,
+            actor,
+            now,
+            WorkspaceIds.Default,
+            cancellationToken,
+            actorUserId,
+            actorKind);
 
     public async Task<ExternalPublicationResult> RevokeAsync(
         string memoryItemId,
         string actor,
         DateTimeOffset now,
         string workspaceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? actorUserId = null,
+        string actorKind = "service")
     {
         var memory = await db.SharedMemoryItems
             .SingleOrDefaultAsync(
@@ -217,7 +239,7 @@ public sealed class SafeProjectionPublicationService(
             memory.UpdatedAt,
             now);
         AddOutbox(envelope, memory.OwnerUserId, now);
-        AddAudit(memory.Id, actor, "memory.external_publication.revoked", now);
+        AddAudit(memory, actor, "memory.external_publication.revoked", now, actorUserId, actorKind);
 
         await SavePublicationAsync(cancellationToken);
         return ToResult(memory, SafeProjectionSyncOutboxState.Pending);
@@ -255,15 +277,29 @@ public sealed class SafeProjectionPublicationService(
         });
     }
 
-    private void AddAudit(string memoryItemId, string actor, string action, DateTimeOffset now)
+    private void AddAudit(
+        SharedMemoryItemRecord memory,
+        string actor,
+        string action,
+        DateTimeOffset now,
+        string? actorUserId,
+        string actorKind)
     {
         db.AuditEvents.Add(new AuditEventRecord
         {
             Id = $"audit-{Guid.NewGuid():N}",
             OccurredAt = now,
+            ScopeKind = AuditEventScopeKind.Workspace,
+            WorkspaceId = memory.WorkspaceId,
             Actor = BoundActor(actor),
+            ActorUserId = actorUserId,
+            ActorKind = actorKind,
             Action = action,
-            SubjectId = memoryItemId,
+            SubjectId = memory.Id,
+            SubjectType = "memory_item",
+            Outcome = action.EndsWith("approved", StringComparison.Ordinal)
+                ? "approved"
+                : "revoked",
             PayloadClass = ExternalMemoryAdapterCatalog.MetadataOnlyPayload,
             RedactionState = ExternalMemoryAdapterCatalog.SafeProjectionOnly
         });

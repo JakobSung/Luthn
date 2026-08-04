@@ -121,6 +121,9 @@ public static class ServiceTokenAuthorization
         return "local-anonymous";
     }
 
+    public static string GetActorKind(LuthnRequestPrincipal principal) =>
+        principal.ActorKind.ToString().ToLowerInvariant();
+
     public static bool IsServiceTokenAuthenticated(HttpContext httpContext) =>
         httpContext.Items.TryGetValue(ServiceTokenAuthenticatedItemKey, out var value) &&
         value is true;

@@ -76,9 +76,14 @@ public static class DemoDataSeeder
             {
                 Id = AuditEventId,
                 OccurredAt = timestamp,
+                ScopeKind = AuditEventScopeKind.Workspace,
+                WorkspaceId = WorkspaceIds.Default,
                 Actor = "luthn-tools",
+                ActorKind = "system",
                 Action = "demo.seed",
                 SubjectId = WikiProposalId,
+                SubjectType = "wiki_proposal",
+                Outcome = "completed",
                 PayloadClass = "public-safe-demo",
                 RedactionState = "safe-projection-only"
             });

@@ -77,16 +77,17 @@ public static class SourceIntakeEndpoints
             recallMetadata.TaskKey,
             recallMetadata.TopicTags);
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
-        db.AuditEvents.Add(new AuditEventRecord
-        {
-            Id = providerAuditEventId,
-            OccurredAt = receivedAt,
-            Actor = actor,
-            Action = "classification.provider.invoked",
-            SubjectId = sourceEventId,
-            PayloadClass = classifier.Boundary.PayloadClass,
-            RedactionState = classifier.Boundary.RedactionState
-        });
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "classification.provider.invoked",
+            sourceEventId,
+            classifier.Boundary.PayloadClass,
+            classifier.Boundary.RedactionState,
+            receivedAt,
+            subjectType: "source_event",
+            outcome: "started",
+            id: providerAuditEventId));
         await db.SaveChangesAsync(cancellationToken);
 
         ClassificationResult classification;
@@ -172,16 +173,17 @@ public static class SourceIntakeEndpoints
         }
 
         var auditEventId = $"audit-{Guid.NewGuid():N}";
-        db.AuditEvents.Add(new AuditEventRecord
-        {
-            Id = auditEventId,
-            OccurredAt = receivedAt,
-            Actor = actor,
-            Action = "source.intake.classified",
-            SubjectId = sourceEventId,
-            PayloadClass = decision.AllowsWikiProjection ? "metadata-only" : "sensitive-reference-only",
-            RedactionState = decision.AllowsWikiProjection ? "safe-projection-only" : "sensitive-boundary-only"
-        });
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "source.intake.classified",
+            sourceEventId,
+            decision.AllowsWikiProjection ? "metadata-only" : "sensitive-reference-only",
+            decision.AllowsWikiProjection ? "safe-projection-only" : "sensitive-boundary-only",
+            receivedAt,
+            subjectType: "source_event",
+            outcome: "completed",
+            id: auditEventId));
 
         await db.SaveChangesAsync(cancellationToken);
 

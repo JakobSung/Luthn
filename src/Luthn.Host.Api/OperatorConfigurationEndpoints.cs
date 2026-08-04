@@ -169,16 +169,20 @@ public static class OperatorConfigurationEndpoints
         string action,
         string subjectId,
         OperatorClassificationProviderSettings settings) =>
-        new()
-        {
-            Id = $"audit-{Guid.NewGuid():N}",
-            OccurredAt = DateTimeOffset.UtcNow,
-            Actor = ServiceTokenAuthorization.GetActor(httpContext),
-            Action = action,
-            SubjectId = subjectId,
-            PayloadClass = settings.PayloadClass,
-            RedactionState = settings.RedactionState
-        };
+        AuditEventFactory.ForInstallation(
+            ServiceTokenAuthorization.GetActor(httpContext),
+            action,
+            subjectId,
+            settings.PayloadClass,
+            settings.RedactionState,
+            DateTimeOffset.UtcNow,
+            actorKind: ServiceTokenAuthorization.GetActorKind(
+                ServiceTokenAuthorization.GetPrincipal(httpContext)),
+            subjectType: "classification_provider",
+            outcome: action.EndsWith("updated", StringComparison.Ordinal)
+                ? "completed"
+                : "tested",
+            actorUserId: ServiceTokenAuthorization.GetPrincipal(httpContext).UserId);
 
     private static ProblemDetails CreateProblem(string detail) =>
         new()

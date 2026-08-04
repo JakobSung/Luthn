@@ -97,16 +97,17 @@ public static class TurnSummaryEndpoints
             recallMetadata.TaskKey,
             recallMetadata.TopicTags);
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
-        db.AuditEvents.Add(new AuditEventRecord
-        {
-            Id = providerAuditEventId,
-            OccurredAt = receivedAt,
-            Actor = actor,
-            Action = "turn_summary.classification_provider.invoked",
-            SubjectId = sourceEventId,
-            PayloadClass = classifier.Boundary.PayloadClass,
-            RedactionState = classifier.Boundary.RedactionState
-        });
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "turn_summary.classification_provider.invoked",
+            sourceEventId,
+            classifier.Boundary.PayloadClass,
+            classifier.Boundary.RedactionState,
+            receivedAt,
+            subjectType: "source_event",
+            outcome: "started",
+            id: providerAuditEventId));
         await db.SaveChangesAsync(cancellationToken);
 
         ClassificationResult classification;
@@ -198,16 +199,17 @@ public static class TurnSummaryEndpoints
                 payloadProtector,
                 receivedAt));
         }
-        db.AuditEvents.Add(new AuditEventRecord
-        {
-            Id = auditEventId,
-            OccurredAt = receivedAt,
-            Actor = actor,
-            Action = "turn_summary.intake.classified",
-            SubjectId = sourceEventId,
-            PayloadClass = "metadata-only",
-            RedactionState = allowsAgentContext ? "safe-projection-only" : "encrypted-payload-only"
-        });
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "turn_summary.intake.classified",
+            sourceEventId,
+            "metadata-only",
+            allowsAgentContext ? "safe-projection-only" : "encrypted-payload-only",
+            receivedAt,
+            subjectType: "source_event",
+            outcome: "completed",
+            id: auditEventId));
         try
         {
             await db.SaveChangesAsync(cancellationToken);

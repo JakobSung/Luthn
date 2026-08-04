@@ -149,13 +149,17 @@ public static class ExternalPublicationEndpoints
                     ServiceTokenAuthorization.GetActor(httpContext),
                     timeProvider.GetUtcNow(),
                     principal.WorkspaceId,
-                    cancellationToken)
+                    cancellationToken,
+                    principal.UserId,
+                    ServiceTokenAuthorization.GetActorKind(principal))
                 : await service.RevokeAsync(
                     id.Trim(),
                     ServiceTokenAuthorization.GetActor(httpContext),
                     timeProvider.GetUtcNow(),
                     principal.WorkspaceId,
-                    cancellationToken);
+                    cancellationToken,
+                    principal.UserId,
+                    ServiceTokenAuthorization.GetActorKind(principal));
             return TypedResults.Ok(ToResponse(result));
         }
         catch (KeyNotFoundException)

@@ -31,9 +31,13 @@ do not bypass the product-data workspace boundary and must be explicitly bound
 to the workspace they administer. `/readyz` reports invalid or missing identity
 bindings separately from service-token health.
 
-In `MultiUser` mode the audit-event listing remains operator-only because
-legacy audit rows do not carry a workspace partition. Provenance reads are
-limited to the caller's workspace.
+Audit events now carry a `ScopeKind` (`Workspace` or `Installation`), the
+server-derived `WorkspaceId` when applicable, actor attribution, bounded
+subject/outcome metadata, and an optional opaque `CorrelationId`. The default
+audit listing returns only workspace events for the caller's bound workspace;
+operators can request installation events with `scope=installation`. Legacy
+rows receive the `default` workspace during migration and remain metadata-only.
+Provenance reads are limited to the caller's workspace.
 
 ## Agent turn-summary intake
 
@@ -354,9 +358,15 @@ MCP reports its bounded cache and timeout outcomes through
 `POST /api/agent/search-telemetry/observations`; explicit feedback uses
 `POST /api/agent/search-telemetry/feedback`. Both require `metrics.write`.
 Observation accepts only allowlisted surface/outcome/cache values, duration,
-and result count. Feedback accepts only the opaque `retrievalId` returned by a
-safe retrieval response and `helpful` or `unhelpful`. Neither endpoint stores
-event rows, identifiers, query content, tags, or projection data.
+result count, and an optional opaque `retrievalId`; when omitted, the response
+returns a generated retrieval ID for later feedback. Feedback accepts only the
+opaque ID and `helpful` or `unhelpful`. The local aggregate snapshot and
+database do not store event rows, query content, tags, or projection data.
+The host also exposes a vendor-neutral `ActivitySource` named
+`Luthn.Host.Api` for `retrieval.completed`, `retrieval.observed`, and
+`retrieval.feedback` events. No exporter is enabled by default; an
+OpenTelemetry host integration can subscribe to that source and receive only
+bounded fields plus the opaque retrieval correlation.
 
 ## Source intake
 
@@ -738,7 +748,7 @@ Result response:
 ## Audit events
 
 ```http
-GET /api/audit-events?subjectId=access-...&limit=50
+GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
 ```
 
 Returns metadata-only audit entries:
@@ -748,9 +758,16 @@ Returns metadata-only audit entries:
   "events": [
     {
       "id": "audit-...",
+      "scopeKind": "Workspace",
+      "workspaceId": "default",
       "actor": "agent-service",
+      "actorUserId": "local-owner",
+      "actorKind": "agent",
       "action": "sensitive_access.requested",
       "subjectId": "access-...",
+      "subjectType": "sensitive_access_request",
+      "outcome": "requested",
+      "correlationId": null,
       "payloadVersion": 1,
       "payloadClass": "metadata-only",
       "redactionState": "sensitive-boundary-only"

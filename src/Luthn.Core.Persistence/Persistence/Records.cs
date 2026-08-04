@@ -1,4 +1,5 @@
 using Luthn.Core.Classification;
+using Luthn.Core.Common;
 using Luthn.Core.Memory;
 
 namespace Luthn.Core.Persistence;
@@ -262,13 +263,26 @@ public static class AuditEventPayloadVersions
     public const int Current = 1;
 }
 
+public enum AuditEventScopeKind
+{
+    Workspace,
+    Installation
+}
+
 public sealed class AuditEventRecord
 {
     public string Id { get; set; } = "";
     public DateTimeOffset OccurredAt { get; set; }
+    public AuditEventScopeKind ScopeKind { get; set; } = AuditEventScopeKind.Workspace;
+    public string WorkspaceId { get; set; } = WorkspaceIds.Default;
     public string Actor { get; set; } = "";
+    public string? ActorUserId { get; set; }
+    public string ActorKind { get; set; } = "system";
     public string Action { get; set; } = "";
     public string SubjectId { get; set; } = "";
+    public string SubjectType { get; set; } = "unknown";
+    public string Outcome { get; set; } = "unspecified";
+    public string? CorrelationId { get; set; }
     public int PayloadVersion { get; set; } = AuditEventPayloadVersions.Current;
     public string PayloadClass { get; set; } = "";
     public string RedactionState { get; set; } = "";

@@ -23,8 +23,12 @@ agent 사이 공유를 뜻합니다. operator 역시 product data에 대한 cros
 없으며 관리할 workspace에 명시적으로 연결되어야 합니다. `/readyz`는 잘못되거나 빠진
 identity binding을 service-token 상태와 분리해 보고합니다.
 
-기존 audit row에는 workspace partition이 없으므로 `MultiUser` mode의 audit-event 목록은
-운영자 전용입니다. scope가 있는 호출자의 provenance 조회는 자기 workspace로 제한됩니다.
+audit 사건은 이제 `ScopeKind`(`Workspace` 또는 `Installation`), 해당할 때 server가 정한
+`WorkspaceId`, actor 귀속, 제한된 subject/outcome 메타데이터와 선택적 opaque
+`CorrelationId`를 가집니다. 기본 audit 목록은 호출자의 workspace에 속한 workspace
+사건만 반환하고, operator는 `scope=installation`으로 installation 사건을 읽을 수
+있습니다. 기존 row는 migration에서 `default` workspace로 채우며 metadata-only로
+유지합니다. provenance 조회는 호출자의 workspace로 제한됩니다.
 
 ## 에이전트 Turn 요약 수집
 
@@ -190,9 +194,13 @@ GET /api/operator/metrics/export
 MCP cache·timeout 결과는 `POST /api/agent/search-telemetry/observations`, 명시적
 feedback은 `POST /api/agent/search-telemetry/feedback`으로 보고하며 둘 다
 `metrics.write`가 필요합니다. observation은 allowlist surface/outcome/cache 상태,
-시간, 결과 수만 받고 feedback은 안전 조회 응답의 opaque `retrievalId`와
-`helpful|unhelpful`만 받습니다. 사건 row, 식별자, query, tag, 투영 내용은 저장하지
-않습니다.
+시간·결과 수와 선택적 opaque `retrievalId`를 받으며, 생략하면 나중 feedback에 쓸
+ID를 응답합니다. feedback은 opaque ID와 `helpful|unhelpful`만 받습니다. 로컬
+aggregate snapshot과 database에는 사건 row, query, tag, 투영 내용을 저장하지
+않습니다. Host는 `Luthn.Host.Api`라는 vendor-neutral `ActivitySource`에서
+`retrieval.completed`, `retrieval.observed`, `retrieval.feedback` 사건도 내보냅니다.
+기본 exporter는 없으며 OpenTelemetry host 연동 시 bounded 값과 opaque retrieval
+correlation만 수집할 수 있습니다.
 
 ## 원본 수집
 
@@ -364,16 +372,23 @@ metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관�
 ## 감사 사건
 
 ```http
-GET /api/audit-events?subjectId=access-...&limit=50
+GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
 ```
 
 ```json
 {
   "events": [{
     "id": "audit-...",
+    "scopeKind": "Workspace",
+    "workspaceId": "default",
     "actor": "agent-service",
+    "actorUserId": "local-owner",
+    "actorKind": "agent",
     "action": "sensitive_access.requested",
     "subjectId": "access-...",
+    "subjectType": "sensitive_access_request",
+    "outcome": "requested",
+    "correlationId": null,
     "payloadVersion": 1,
     "payloadClass": "metadata-only",
     "redactionState": "sensitive-boundary-only"

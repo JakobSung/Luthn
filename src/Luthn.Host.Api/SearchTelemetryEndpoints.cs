@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Serialization;
 
 namespace Luthn.Host.Api;
 
@@ -26,7 +27,22 @@ public static class SearchTelemetryEndpoints
             return TypedResults.BadRequest(error);
         }
 
-        metrics.RecordSearchRequest(
+        var retrievalId = request.RetrievalId ?? SearchTelemetry.CreateRetrievalId();
+        try
+        {
+            metrics.RecordSearchRequest(
+                request.Surface,
+                request.Outcome,
+                request.CacheStatus,
+                TimeSpan.FromMilliseconds(request.DurationMilliseconds),
+                request.ResultCount);
+        }
+        catch
+        {
+            // Telemetry ingestion remains best-effort for the caller.
+        }
+        LuthnTelemetryEvents.RecordRetrievalObserved(
+            retrievalId,
             request.Surface,
             request.Outcome,
             request.CacheStatus,
@@ -34,7 +50,7 @@ public static class SearchTelemetryEndpoints
             request.ResultCount);
         return TypedResults.Accepted(
             "/api/operator/metrics",
-            new SearchTelemetryAcceptedResponse(true));
+            new SearchTelemetryAcceptedResponse(true, retrievalId));
     }
 
     public static Results<Accepted<SearchTelemetryAcceptedResponse>, BadRequest<ProblemDetails>> RecordFeedback(
@@ -55,7 +71,15 @@ public static class SearchTelemetryEndpoints
                 "judgment must be helpful or unhelpful."));
         }
 
-        metrics.RecordSearchFeedback(request.Judgment);
+        try
+        {
+            metrics.RecordSearchFeedback(request.Judgment);
+        }
+        catch
+        {
+            // Telemetry ingestion remains best-effort for the caller.
+        }
+        LuthnTelemetryEvents.RecordFeedback(request.RetrievalId, request.Judgment);
         return TypedResults.Accepted(
             "/api/operator/metrics",
             new SearchTelemetryAcceptedResponse(true));
@@ -63,6 +87,12 @@ public static class SearchTelemetryEndpoints
 
     private static ProblemDetails? ValidateObservation(SearchObservationRequest request)
     {
+        if (request.RetrievalId is not null &&
+            !SearchTelemetry.IsValidRetrievalId(request.RetrievalId))
+        {
+            return Problem("retrievalId must be an opaque Luthn retrieval id.");
+        }
+
         if (SearchTelemetry.BoundSurface(request.Surface) == "other" ||
             request.Surface != "mcp_context_pack")
         {
@@ -109,7 +139,10 @@ public sealed record SearchObservationRequest(
     string Outcome,
     string CacheStatus,
     long DurationMilliseconds,
-    int ResultCount);
+    int ResultCount,
+    string? RetrievalId = null);
 
 public sealed record SearchFeedbackRequest(string RetrievalId, string Judgment);
-public sealed record SearchTelemetryAcceptedResponse(bool Accepted);
+public sealed record SearchTelemetryAcceptedResponse(
+    bool Accepted,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RetrievalId = null);

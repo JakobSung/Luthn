@@ -145,7 +145,11 @@ public sealed class PersistenceContractTests
         Assert.All(
             db.ChangeTracker.Entries<IWorkspaceScopedRecord>(),
             entry => Assert.Equal("default", entry.Entity.WorkspaceId));
-        Assert.Equal(AuditEventPayloadVersions.Current, (await db.AuditEvents.SingleAsync()).PayloadVersion);
+        var audit = await db.AuditEvents.SingleAsync();
+        Assert.Equal(AuditEventPayloadVersions.Current, audit.PayloadVersion);
+        Assert.Equal(AuditEventScopeKind.Workspace, audit.ScopeKind);
+        Assert.Equal(WorkspaceIds.Default, audit.WorkspaceId);
+        Assert.Equal("system", audit.ActorKind);
         Assert.DoesNotContain(
             db.Model.GetEntityTypes().SelectMany(entity => entity.GetProperties()).Select(property => property.Name),
             propertyName => propertyName.Contains("Raw", StringComparison.OrdinalIgnoreCase)
@@ -179,6 +183,47 @@ public sealed class PersistenceContractTests
     }
 
     [Fact]
+    public async Task AuditEventsAllowInstallationScopeButRejectMixedScopeAndMutation()
+    {
+        await using var db = CreateDbContext();
+        var audit = new AuditEventRecord
+        {
+            Id = "audit-installation",
+            OccurredAt = DateTimeOffset.UtcNow,
+            ScopeKind = AuditEventScopeKind.Installation,
+            WorkspaceId = "",
+            Actor = "local-runtime",
+            Action = "memory.protection.migrated",
+            SubjectId = "sensitive-memory-payloads",
+            PayloadClass = "metadata-only",
+            RedactionState = "encrypted-payload-only"
+        };
+        db.AuditEvents.Add(audit);
+        await db.SaveChangesAsync();
+
+        audit.Action = "memory.protection.rewritten";
+        var mutation = await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+        Assert.Contains("immutable", mutation.Message, StringComparison.OrdinalIgnoreCase);
+
+        await using var invalidDb = CreateDbContext();
+        invalidDb.AuditEvents.Add(new AuditEventRecord
+        {
+            Id = "audit-invalid-scope",
+            OccurredAt = DateTimeOffset.UtcNow,
+            ScopeKind = AuditEventScopeKind.Installation,
+            WorkspaceId = WorkspaceIds.Default,
+            Actor = "local-runtime",
+            Action = "invalid.scope",
+            SubjectId = "invalid",
+            PayloadClass = "metadata-only",
+            RedactionState = "none"
+        });
+
+        var invalidScope = await Assert.ThrowsAsync<InvalidOperationException>(() => invalidDb.SaveChangesAsync());
+        Assert.Contains("scope", invalidScope.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task DemoSeederCreatesIdempotentPublicSafeContextData()
     {
         await using var db = CreateDbContext();
@@ -206,6 +251,7 @@ public sealed class PersistenceContractTests
 
         Assert.Contains(migrations, migration => migration.EndsWith("_InitialCreate", StringComparison.Ordinal));
         Assert.Contains(migrations, migration => migration.EndsWith("_AddWorkspaceScopedDataPlane", StringComparison.Ordinal));
+        Assert.Contains(migrations, migration => migration.EndsWith("_AddAuditEventScopeAndCorrelation", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -247,6 +293,8 @@ public sealed class PersistenceContractTests
         Assert.Contains("SET \"RedactedSummary\" = reference.\"RedactedSummary\"", script, StringComparison.Ordinal);
         Assert.Contains("request.\"Status\" = 'Approved'", script, StringComparison.Ordinal);
         Assert.Contains("IX_audit_events_SubjectId_OccurredAt", script, StringComparison.Ordinal);
+        Assert.Contains("CK_audit_events_scope_workspace", script, StringComparison.Ordinal);
+        Assert.Contains("IX_audit_events_ScopeKind_WorkspaceId_OccurredAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_agent_connection_channels_AgentId_Channel", script, StringComparison.Ordinal);
         Assert.Contains(
             "IX_agent_connection_channels_OwnerUserId_AgentId_Channel",
