@@ -173,7 +173,7 @@ public static class ServiceTokenAuthorization
             !IsAsciiLetterOrDigit(normalized[0]) ||
             normalized.Any(character =>
                 !IsAsciiLetterOrDigit(character) &&
-                character is not '.' and not '_' and not ':' and not '-'))
+                character is not '.' and not '_' and not ':' and not '@' and not '-'))
         {
             return null;
         }

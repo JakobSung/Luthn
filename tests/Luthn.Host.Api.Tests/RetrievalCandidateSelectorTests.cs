@@ -16,6 +16,7 @@ public sealed class RetrievalCandidateSelectorTests
         db.WikiProposals.AddRange(Enumerable.Range(0, 600).Select(index => new WikiProposalRecord
         {
             Id = $"wiki-common-{index:D4}",
+            WorkspaceId = "default",
             SourceEventId = $"source-common-{index:D4}",
             Title = $"Common wiki {index:D4}",
             SafeSummary = "Common public-safe projection.",
@@ -27,6 +28,7 @@ public sealed class RetrievalCandidateSelectorTests
         db.SharedMemoryItems.AddRange(Enumerable.Range(0, 600).Select(index => new SharedMemoryItemRecord
         {
             Id = $"memory-common-{index:D4}",
+            WorkspaceId = "default",
             Title = $"Common memory {index:D4}",
             SafeSummary = "Common public-safe memory.",
             Sensitivity = SensitivityLevel.Public,
@@ -126,6 +128,7 @@ public sealed class RetrievalCandidateSelectorTests
             .Select(index => new WikiProposalRecord
             {
                 Id = $"wiki-old-{index:D4}",
+                WorkspaceId = "default",
                 SourceEventId = $"source-old-{index:D4}",
                 Title = $"A old recall {index:D4}",
                 SafeSummary = "Common recall projection.",
@@ -137,6 +140,7 @@ public sealed class RetrievalCandidateSelectorTests
         db.WikiProposals.Add(new WikiProposalRecord
         {
             Id = "wiki-recent-z",
+            WorkspaceId = "default",
             SourceEventId = "source-recent-z",
             Title = "Z recent recall",
             SafeSummary = "Common recall projection.",
@@ -164,6 +168,7 @@ public sealed class RetrievalCandidateSelectorTests
         string? projectKey = null) => new()
         {
             Id = id,
+            WorkspaceId = "default",
             SourceEventId = $"source-{id}",
             Title = "Needle wiki",
             SafeSummary = "Needle public-safe projection.",
@@ -181,6 +186,7 @@ public sealed class RetrievalCandidateSelectorTests
         bool allowsAgentContext) => new()
         {
             Id = id,
+            WorkspaceId = "default",
             Title = "Needle memory",
             SafeSummary = "Needle public-safe memory.",
             Sensitivity = SensitivityLevel.Public,

@@ -144,6 +144,7 @@ public sealed class ExternalPublicationEndpointTests : IClassFixture<WebApplicat
         db.SharedMemoryItems.Add(new SharedMemoryItemRecord
         {
             Id = "memory-1",
+            WorkspaceId = "default",
             Title = "Safe runbook",
             SafeSummary = "Public-safe deployment steps.",
             Sensitivity = safeForAgents ? SensitivityLevel.Public : SensitivityLevel.Confidential,

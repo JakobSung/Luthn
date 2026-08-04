@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Luthn.Core.Common;
 using Luthn.Core.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -18,6 +19,17 @@ public sealed class OwnershipIsolationTests
     private const string BobBearer = "ownership-bob-token";
     private const string OperatorBearer = "ownership-operator-token";
     private const string UnboundBearer = "ownership-unbound-token";
+
+    [Fact]
+    public void DerivedPersonalWorkspaceAcceptsEmailStyleUserIds()
+    {
+        var userId = ServiceTokenAuthorization.NormalizeUserId("Alice@Example.com");
+
+        Assert.Equal("alice@example.com", userId);
+        var workspaceId = WorkspaceIds.ForLegacyUser(userId!);
+        Assert.Equal("personal:alice@example.com", workspaceId);
+        Assert.Equal(workspaceId, ServiceTokenAuthorization.NormalizeWorkspaceId(workspaceId));
+    }
 
     [Fact]
     public async Task MultiUserModeDerivesPersonalWorkspaceAndIsolatesReadSearchAndIdempotency()
@@ -78,6 +90,57 @@ public sealed class OwnershipIsolationTests
         Assert.Equal("alice", provenance.AuthenticatedUserId);
         Assert.Equal("personal:alice", provenance.WorkspaceId);
         Assert.Equal("caller-spoof", provenance.ClaimedUserId);
+    }
+
+    [Fact]
+    public async Task TurnSummaryIdempotencyKeyCannotCollideAcrossWorkspaceBoundaries()
+    {
+        using var factory = CreateFactory(
+            aliceWorkspaceId: "personal:alice",
+            bobWorkspaceId: "personal");
+        using var alice = Client(factory, AliceBearer);
+        using var bob = Client(factory, BobBearer);
+
+        var common = new
+        {
+            sessionId = "ambiguous-workspace-session",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = "Public workspace collision regression summary.",
+            coreTags = new[] { "ownership" }
+        };
+        using var aliceResponse = await alice.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            common.sessionId,
+            common.turnId,
+            common.sourceAgent,
+            common.summary,
+            common.coreTags,
+            idempotencyKey = "bob"
+        });
+        using var bobResponse = await bob.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            common.sessionId,
+            common.turnId,
+            common.sourceAgent,
+            common.summary,
+            common.coreTags,
+            idempotencyKey = "alice:bob"
+        });
+        using var aliceBody = await JsonDocument.ParseAsync(await aliceResponse.Content.ReadAsStreamAsync());
+        using var bobBody = await JsonDocument.ParseAsync(await bobResponse.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, aliceResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, bobResponse.StatusCode);
+        Assert.NotEqual(
+            aliceBody.RootElement.GetProperty("summaryId").GetString(),
+            bobBody.RootElement.GetProperty("summaryId").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(2, await db.SourceEvents.CountAsync());
+        Assert.Equal(2, await db.ClassificationResults.CountAsync());
+        Assert.Equal(2, await db.SharedMemoryItems.CountAsync());
     }
 
     [Fact]
@@ -379,7 +442,9 @@ public sealed class OwnershipIsolationTests
 
     private static WebApplicationFactory<Program> CreateFactory(
         bool includeUnboundToken = false,
-        bool sharedWorkspace = false) =>
+        bool sharedWorkspace = false,
+        string? aliceWorkspaceId = null,
+        string? bobWorkspaceId = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
@@ -387,11 +452,11 @@ public sealed class OwnershipIsolationTests
             builder.UseSetting("Luthn:Auth:RequireServiceToken", "true");
             builder.UseSetting("Luthn:Identity:Mode", "MultiUser");
             ConfigureToken(builder, 0, "alice-token", AliceBearer, "alice", false,
-                sharedWorkspace ? "team-alpha" : null,
+                sharedWorkspace ? "team-alpha" : aliceWorkspaceId,
                 "memory.write", "memory.read", "agent.read", "agent.write.summary", "source.write",
                 "access.request", "external-publication.read", "external-publication.write", "audit.read");
             ConfigureToken(builder, 1, "bob-token", BobBearer, "bob", false,
-                sharedWorkspace ? "team-alpha" : null,
+                sharedWorkspace ? "team-alpha" : bobWorkspaceId,
                 "memory.write", "memory.read", "agent.read", "agent.write.summary", "source.write",
                 "access.request", "external-publication.read", "external-publication.write", "audit.read");
             ConfigureToken(builder, 2, "operator-token", OperatorBearer, null, true,

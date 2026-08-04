@@ -266,6 +266,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-public",
+                        WorkspaceId = "default",
                         SourceEventId = "source-public",
                         Title = "Public runbook",
                         SafeSummary = "Public-safe release steps.",
@@ -277,6 +278,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-sensitive",
+                        WorkspaceId = "default",
                         SourceEventId = "source-sensitive",
                         Title = "Contract note",
                         SafeSummary = "Redacted sensitive placeholder.",
@@ -306,6 +308,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-summary-match",
+                        WorkspaceId = "default",
                         SourceEventId = "source-summary-match",
                         Title = "Operations fallback",
                         SafeSummary = "Billing outage mitigation runbook.",
@@ -317,6 +320,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-title-match",
+                        WorkspaceId = "default",
                         SourceEventId = "source-title-match",
                         Title = "Billing outage runbook",
                         SafeSummary = "Queue restart steps.",
@@ -328,6 +332,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-wrong-tag",
+                        WorkspaceId = "default",
                         SourceEventId = "source-wrong-tag",
                         Title = "Billing outage escalation",
                         SafeSummary = "Public-safe support summary.",
@@ -339,6 +344,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-unmatched",
+                        WorkspaceId = "default",
                         SourceEventId = "source-unmatched",
                         Title = "Release checklist",
                         SafeSummary = "Deployment smoke tests.",
@@ -350,6 +356,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-contract-public",
+                        WorkspaceId = "default",
                         SourceEventId = "source-contract-public",
                         Title = "Contract terms runbook",
                         SafeSummary = "Public-safe approval checklist.",
@@ -361,6 +368,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-contract-confidential",
+                        WorkspaceId = "default",
                         SourceEventId = "source-contract-confidential",
                         Title = "Contract terms private customer note",
                         SafeSummary = "Private customer raw vault terms.",
@@ -372,6 +380,7 @@ public sealed class AgentSafeEndpointTests : IClassFixture<WebApplicationFactory
                     new WikiProposalRecord
                     {
                         Id = "wiki-contract-blocked",
+                        WorkspaceId = "default",
                         SourceEventId = "source-contract-blocked",
                         Title = "Contract terms raw vault record",
                         SafeSummary = "Raw vault source details.",

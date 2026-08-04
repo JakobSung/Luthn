@@ -351,6 +351,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = "source-old-db-match",
+            WorkspaceId = "default",
             SourceSystem = "test",
             SourceType = "postgres-smoke",
             ReceivedAt = now.AddDays(-2),
@@ -359,6 +360,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.CollectionProvenance.Add(new CollectionProvenanceRecord
         {
             Id = "provenance-old-db-match",
+            WorkspaceId = "default",
             SourceEventId = "source-old-db-match",
             AuthenticatedActor = "postgres-smoke",
             ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
@@ -368,6 +370,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.SourceEvents.AddRange(Enumerable.Range(0, 1001).Select(index => new SourceEventRecord
         {
             Id = $"source-newer-db-nonmatch-{index}",
+            WorkspaceId = "default",
             SourceSystem = "test",
             SourceType = "postgres-smoke",
             ReceivedAt = now.AddMinutes(index),
@@ -377,6 +380,7 @@ public sealed class PostgresIntegrationSmokeTests
             new CollectionProvenanceRecord
             {
                 Id = $"provenance-newer-{index}",
+                WorkspaceId = "default",
                 SourceEventId = $"source-newer-db-nonmatch-{index}",
                 AuthenticatedActor = "postgres-smoke",
                 ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
@@ -386,6 +390,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.WikiProposals.Add(new WikiProposalRecord
         {
             Id = "wiki-old-db-match",
+            WorkspaceId = "default",
             SourceEventId = "source-old-db-match",
             Title = "Needle recovery runbook",
             SafeSummary = "Public-safe database recovery steps.",
@@ -397,6 +402,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.WikiProposals.AddRange(Enumerable.Range(0, 1001).Select(index => new WikiProposalRecord
         {
             Id = $"wiki-newer-db-nonmatch-{index}",
+            WorkspaceId = "default",
             SourceEventId = $"source-newer-db-nonmatch-{index}",
             Title = $"General database release {index}",
             SafeSummary = "Public-safe unmatched projection.",
@@ -442,6 +448,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = "source-sensitive-retry-smoke",
+            WorkspaceId = "default",
             SourceSystem = "test",
             SourceType = "postgres-smoke",
             ReceivedAt = now,
@@ -451,6 +458,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.CollectionProvenance.Add(new CollectionProvenanceRecord
         {
             Id = "provenance-sensitive-retry-smoke",
+            WorkspaceId = "default",
             SourceEventId = "source-sensitive-retry-smoke",
             AuthenticatedActor = "postgres-smoke",
             ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
@@ -460,6 +468,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {
             Id = "sensitive-ref-retry-smoke",
+            WorkspaceId = "default",
             SourceEventId = "source-sensitive-retry-smoke",
             SourceSystem = "test",
             SourceType = "postgres-smoke",
@@ -472,6 +481,7 @@ public sealed class PostgresIntegrationSmokeTests
             new SensitiveAccessRequestRecord
             {
                 Id = "access-retry-decision-smoke",
+                WorkspaceId = "default",
                 SensitiveRecordReferenceId = "sensitive-ref-retry-smoke",
                 RequestedBy = "postgres-smoke",
                 SessionId = "session-retry-decision-smoke",
@@ -484,6 +494,7 @@ public sealed class PostgresIntegrationSmokeTests
             new SensitiveAccessRequestRecord
             {
                 Id = "access-retry-expiry-smoke",
+                WorkspaceId = "default",
                 SensitiveRecordReferenceId = "sensitive-ref-retry-smoke",
                 RequestedBy = "postgres-smoke",
                 SessionId = "session-retry-expiry-smoke",
@@ -527,6 +538,7 @@ public sealed class PostgresIntegrationSmokeTests
             missingProvenanceDb.SourceEvents.Add(new SourceEventRecord
             {
                 Id = "source-missing-provenance",
+                WorkspaceId = "default",
                 SourceSystem = "test",
                 SourceType = "postgres-smoke",
                 ReceivedAt = now,
@@ -579,6 +591,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = id,
+            WorkspaceId = "default",
             SourceSystem = "codex",
             SourceType = "turn-summary",
             ReceivedAt = createdAt,
@@ -598,6 +611,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.SharedMemoryItems.Add(new SharedMemoryItemRecord
         {
             Id = memoryItemId,
+            WorkspaceId = "default",
             Title = sensitive ? "[protected]" : $"Memory {id}",
             SafeSummary = sensitive ? "[protected]" : $"Summary {id}",
             Sensitivity = sensitive ? SensitivityLevel.Restricted : SensitivityLevel.Public,
@@ -615,6 +629,7 @@ public sealed class PostgresIntegrationSmokeTests
         db.CollectionProvenance.Add(new CollectionProvenanceRecord
         {
             Id = $"provenance-{id}",
+            WorkspaceId = "default",
             SourceEventId = id,
             MemoryItemId = memoryItemId,
             AuthenticatedActor = "postgres-smoke",

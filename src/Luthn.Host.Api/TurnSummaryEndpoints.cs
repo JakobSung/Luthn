@@ -214,7 +214,11 @@ public static class TurnSummaryEndpoints
         }
         catch (DbUpdateException)
         {
-            if (!await ExistingSourceEventExistsAsync(db, sourceEventId, cancellationToken))
+            if (!await ExistingSourceEventExistsAsync(
+                    db,
+                    sourceEventId,
+                    principal.WorkspaceId,
+                    cancellationToken))
             {
                 throw;
             }
@@ -243,9 +247,13 @@ public static class TurnSummaryEndpoints
         string workspaceId,
         CancellationToken cancellationToken)
     {
-        var classification = await db.ClassificationResults
-            .AsNoTracking()
-            .SingleAsync(record => record.SourceEventId == sourceEventId, cancellationToken);
+        var classification = await (
+                from classificationRecord in db.ClassificationResults.AsNoTracking()
+                join source in db.SourceEvents.AsNoTracking()
+                    on classificationRecord.SourceEventId equals source.Id
+                where classificationRecord.SourceEventId == sourceEventId && source.WorkspaceId == workspaceId
+                select classificationRecord)
+            .SingleAsync(cancellationToken);
         var memory = await db.SharedMemoryItems
             .AsNoTracking()
             .SingleOrDefaultAsync(
@@ -280,12 +288,15 @@ public static class TurnSummaryEndpoints
     private static async Task<bool> ExistingSourceEventExistsAsync(
         LuthnDbContext db,
         string sourceEventId,
+        string workspaceId,
         CancellationToken cancellationToken)
     {
         db.ChangeTracker.Clear();
         return await db.SourceEvents
             .AsNoTracking()
-            .AnyAsync(record => record.Id == sourceEventId, cancellationToken);
+            .AnyAsync(
+                record => record.Id == sourceEventId && record.WorkspaceId == workspaceId,
+                cancellationToken);
     }
 
     private static StorageDecision RehydrateDecision(ClassificationResultRecord record) =>
@@ -444,10 +455,34 @@ public static class TurnSummaryEndpoints
         string contentDigest,
         string workspaceId)
     {
-        var key = string.IsNullOrWhiteSpace(request.IdempotencyKey)
-            ? $"{request.SourceAgent.Trim()}:{request.SessionId.Trim()}:{request.TurnId?.Trim()}:{request.TurnRange?.Trim()}:{contentDigest}"
-            : request.IdempotencyKey.Trim();
-        return $"turn-summary-{HashFragment($"{workspaceId}:{key}")}";
+        var stableInput = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? EncodeStableKeyParts(
+                "derived",
+                workspaceId,
+                request.SourceAgent.Trim(),
+                request.SessionId.Trim(),
+                request.TurnId?.Trim(),
+                request.TurnRange?.Trim(),
+                contentDigest)
+            : EncodeStableKeyParts("explicit", workspaceId, request.IdempotencyKey.Trim());
+        return $"turn-summary-{HashFragment(stableInput)}";
+    }
+
+    private static string EncodeStableKeyParts(params string?[] parts)
+    {
+        var builder = new StringBuilder();
+        foreach (var part in parts)
+        {
+            if (part is null)
+            {
+                builder.Append("-1:");
+                continue;
+            }
+
+            builder.Append(part.Length).Append(':').Append(part);
+        }
+
+        return builder.ToString();
     }
 
     private static string? NormalizeDigest(string? contentDigest) =>

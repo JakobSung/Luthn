@@ -263,6 +263,55 @@ public sealed class SdkContractTests
     }
 
     [Fact]
+    public void CollectionProvenanceWorkspaceIsAdditiveToVersionOneContract()
+    {
+        var legacy = new CollectionProvenanceDto(
+            "provenance-1",
+            1,
+            "source-1",
+            null,
+            "service-token:agent",
+            "owner.one",
+            "service-token",
+            "trusted-claims",
+            null,
+            "codex",
+            "codex.desktop",
+            null,
+            null,
+            null,
+            DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch);
+        var scoped = JsonSerializer.Deserialize<CollectionProvenanceDto>("""
+            {
+              "id": "provenance-2",
+              "contractVersion": 1,
+              "sourceEventId": "source-2",
+              "memoryItemId": null,
+              "authenticatedActor": "service-token:agent",
+              "authenticatedUserId": "owner.one",
+              "actorTrust": "service-token",
+              "claimsTrust": "trusted-claims",
+              "claimedUserId": null,
+              "agentId": "codex",
+              "applicationId": "codex.desktop",
+              "pluginId": null,
+              "connectorId": null,
+              "connectorVersion": null,
+              "collectedAt": "1970-01-01T00:00:00Z",
+              "receivedAt": "1970-01-01T00:00:00Z",
+              "workspaceId": "team-alpha"
+            }
+            """);
+
+        Assert.Equal("default", legacy.WorkspaceId);
+        Assert.Contains("\"workspaceId\":\"default\"", JsonSerializer.Serialize(legacy), StringComparison.Ordinal);
+        Assert.NotNull(scoped);
+        Assert.Equal("team-alpha", scoped.WorkspaceId);
+        Assert.Equal(1, scoped.ContractVersion);
+    }
+
+    [Fact]
     public void TurnSummaryDtosSerializeAgentSummaryContract()
     {
         var request = new TurnSummaryIntakeRequestDto(

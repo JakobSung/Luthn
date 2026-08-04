@@ -16,7 +16,6 @@ public sealed record CollectionProvenanceDto(
     [property: JsonPropertyName("contractVersion")] int ContractVersion,
     [property: JsonPropertyName("sourceEventId")] string? SourceEventId,
     [property: JsonPropertyName("memoryItemId")] string? MemoryItemId,
-    [property: JsonPropertyName("workspaceId")] string WorkspaceId,
     [property: JsonPropertyName("authenticatedActor")] string AuthenticatedActor,
     [property: JsonPropertyName("authenticatedUserId")] string AuthenticatedUserId,
     [property: JsonPropertyName("actorTrust")] string ActorTrust,
@@ -28,4 +27,8 @@ public sealed record CollectionProvenanceDto(
     [property: JsonPropertyName("connectorId")] string? ConnectorId,
     [property: JsonPropertyName("connectorVersion")] string? ConnectorVersion,
     [property: JsonPropertyName("collectedAt")] DateTimeOffset? CollectedAt,
-    [property: JsonPropertyName("receivedAt")] DateTimeOffset ReceivedAt);
+    [property: JsonPropertyName("receivedAt")] DateTimeOffset ReceivedAt)
+{
+    [JsonPropertyName("workspaceId")]
+    public string WorkspaceId { get; init; } = "default";
+}

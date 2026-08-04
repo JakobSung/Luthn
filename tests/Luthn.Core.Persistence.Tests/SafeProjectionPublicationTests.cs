@@ -279,6 +279,7 @@ public sealed class SafeProjectionPublicationTests
     private static SharedMemoryItemRecord CreateSafeMemory(DateTimeOffset now) => new()
     {
         Id = "memory-1",
+        WorkspaceId = "default",
         Title = "private-title-token",
         SafeSummary = "Public-safe deployment steps.",
         Sensitivity = SensitivityLevel.Public,

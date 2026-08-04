@@ -1,4 +1,5 @@
 using Luthn.Core.Classification;
+using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
 using Luthn.Core.Search;
@@ -23,7 +24,8 @@ public sealed class PersistenceContractTests
             SourceType = "note",
             ReceivedAt = receivedAt,
             ContentDigest = "sha256:example",
-            ContainsSensitiveMaterial = true
+            ContainsSensitiveMaterial = true,
+            WorkspaceId = WorkspaceIds.Default
         });
         db.ClassificationResults.Add(new ClassificationResultRecord
         {
@@ -47,7 +49,8 @@ public sealed class PersistenceContractTests
             TaskKey = "persistence",
             TopicTags = ["recall"],
             AllowsAgentContext = true,
-            CreatedAt = receivedAt
+            CreatedAt = receivedAt,
+            WorkspaceId = WorkspaceIds.Default
         });
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {
@@ -57,7 +60,8 @@ public sealed class PersistenceContractTests
             SourceType = "note",
             ReceivedAt = receivedAt,
             ContainsSensitiveMaterial = true,
-            ReferenceLabel = "sensitive-record:source-1"
+            ReferenceLabel = "sensitive-record:source-1",
+            WorkspaceId = WorkspaceIds.Default
         });
         db.AuditEvents.Add(new AuditEventRecord
         {
@@ -84,11 +88,13 @@ public sealed class PersistenceContractTests
             AllowsAgentContext = true,
             CreatedAt = receivedAt,
             UpdatedAt = receivedAt,
-            CreatedBy = "local-tools"
+            CreatedBy = "local-tools",
+            WorkspaceId = WorkspaceIds.Default
         });
         db.AgentConnectionChannels.Add(new AgentConnectionChannelRecord
         {
             Id = "codex:mcp",
+            WorkspaceId = WorkspaceIds.Default,
             OwnerUserId = "local-owner",
             AgentId = "codex",
             AgentName = "Codex",
@@ -155,13 +161,12 @@ public sealed class PersistenceContractTests
     }
 
     [Fact]
-    public async Task DbContextRejectsBlankWorkspaceScopeBeforePersistence()
+    public async Task DbContextRejectsMissingWorkspaceScopeBeforePersistence()
     {
         await using var db = CreateDbContext();
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = "source-blank-workspace",
-            WorkspaceId = " ",
             SourceSystem = "local",
             SourceType = "note",
             ReceivedAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z"),

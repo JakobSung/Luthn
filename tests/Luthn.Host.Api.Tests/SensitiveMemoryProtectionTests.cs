@@ -313,6 +313,7 @@ public sealed class SensitiveMemoryProtectionTests
     private static SharedMemoryItemRecord LegacyRecord(string id, string title, string summary) => new()
     {
         Id = id,
+        WorkspaceId = "default",
         Title = title,
         SafeSummary = summary,
         Sensitivity = SensitivityLevel.Restricted,
