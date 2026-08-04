@@ -148,6 +148,9 @@ public sealed class OperationalMetricsTests : IClassFixture<WebApplicationFactor
         using var extraField = await client.PostAsJsonAsync(
             "/api/agent/search-telemetry/observations",
             new { surface = "mcp_context_pack", outcome = "succeeded", cacheStatus = "hit", durationMilliseconds = 7, resultCount = 1, query = "secret query" });
+        using var invalidRetrievalId = await client.PostAsJsonAsync(
+            "/api/agent/search-telemetry/observations",
+            new { surface = "mcp_context_pack", outcome = "succeeded", cacheStatus = "hit", durationMilliseconds = 7, resultCount = 1, retrievalId = "/private/path" });
         var retrievalId = SearchTelemetry.CreateRetrievalId();
         using var feedback = await client.PostAsJsonAsync(
             "/api/agent/search-telemetry/feedback",
@@ -160,8 +163,12 @@ public sealed class OperationalMetricsTests : IClassFixture<WebApplicationFactor
         Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, extraField.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidRetrievalId.StatusCode);
         Assert.Equal(HttpStatusCode.Accepted, feedback.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, invalidFeedback.StatusCode);
+        using var acceptedBody = JsonDocument.Parse(await accepted.Content.ReadAsStringAsync());
+        Assert.True(SearchTelemetry.IsValidRetrievalId(
+            acceptedBody.RootElement.GetProperty("retrievalId").GetString()));
         var metrics = factory.Services.GetRequiredService<IOperationalMetrics>().Snapshot();
         Assert.Equal("zero_result", Assert.Single(metrics.SearchRequests).Outcome);
         Assert.Equal("helpful", Assert.Single(metrics.SearchFeedback).Judgment);

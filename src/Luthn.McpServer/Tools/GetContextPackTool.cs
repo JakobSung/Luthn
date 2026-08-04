@@ -251,13 +251,15 @@ public sealed class GetContextPackTool : ILuthnMcpTool
             startedAt,
             cacheStatus,
             pack.Items.Count == 0 ? "zero_result" : "succeeded",
-            pack.Items.Count);
+            pack.Items.Count,
+            pack.RetrievalId);
 
     private void TryReportObservation(
         DateTimeOffset startedAt,
         string cacheStatus,
         string outcome,
-        int resultCount)
+        int resultCount,
+        string? retrievalId = null)
     {
         try
         {
@@ -267,7 +269,8 @@ public sealed class GetContextPackTool : ILuthnMcpTool
                 outcome,
                 cacheStatus,
                 Math.Clamp((long)Math.Ceiling(duration.TotalMilliseconds), 0, 60_000),
-                Math.Clamp(resultCount, 0, 50));
+                Math.Clamp(resultCount, 0, 50),
+                retrievalId ?? $"retrieval-{Guid.NewGuid():N}");
             _ = ReportObservationAsync(request);
         }
         catch

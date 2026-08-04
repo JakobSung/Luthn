@@ -340,22 +340,52 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
 
         modelBuilder.Entity<AuditEventRecord>(entity =>
         {
-            entity.ToTable("audit_events");
+            entity.ToTable("audit_events", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_audit_events_scope_workspace",
+                    "(\"ScopeKind\" = 'Workspace' AND \"WorkspaceId\" <> '') OR (\"ScopeKind\" = 'Installation' AND \"WorkspaceId\" = '')");
+            });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.ScopeKind)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .HasDefaultValue(AuditEventScopeKind.Workspace);
+            entity.Property(record => record.WorkspaceId)
+                .HasMaxLength(WorkspaceIds.MaxLength)
+                .HasDefaultValue(WorkspaceIds.Default)
+                .IsRequired();
             entity.Property(record => record.Actor).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.ActorUserId).HasMaxLength(128);
+            entity.Property(record => record.ActorKind)
+                .HasMaxLength(32)
+                .HasDefaultValue("system")
+                .IsRequired();
             entity.Property(record => record.Action).HasMaxLength(128).IsRequired();
             entity.Property(record => record.SubjectId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SubjectType)
+                .HasMaxLength(64)
+                .HasDefaultValue("unknown")
+                .IsRequired();
+            entity.Property(record => record.Outcome)
+                .HasMaxLength(32)
+                .HasDefaultValue("unspecified")
+                .IsRequired();
+            entity.Property(record => record.CorrelationId).HasMaxLength(128);
             entity.Property(record => record.PayloadVersion).HasDefaultValue(AuditEventPayloadVersions.Current);
             entity.Property(record => record.PayloadClass).HasMaxLength(128).IsRequired();
             entity.Property(record => record.RedactionState).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new { record.SubjectId, record.OccurredAt });
+            entity.HasIndex(record => new { record.ScopeKind, record.WorkspaceId, record.OccurredAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.CorrelationId });
         });
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ValidateWorkspaceScopes();
+        ValidateAuditScopes();
         RejectProvenanceUpdates();
         UpdateSearchIndexes();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -366,6 +396,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         CancellationToken cancellationToken = default)
     {
         ValidateWorkspaceScopes();
+        ValidateAuditScopes();
         RejectProvenanceUpdates();
         UpdateSearchIndexes();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
@@ -382,6 +413,30 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         {
             throw new InvalidOperationException(
                 $"{invalidEntry.Metadata.ClrType.Name} requires a valid WorkspaceId.");
+        }
+    }
+
+    private void ValidateAuditScopes()
+    {
+        var invalidScope = ChangeTracker.Entries<AuditEventRecord>()
+            .FirstOrDefault(entry =>
+                (entry.State is EntityState.Added or EntityState.Modified) &&
+                ((entry.Entity.ScopeKind == AuditEventScopeKind.Workspace &&
+                    (string.IsNullOrWhiteSpace(entry.Entity.WorkspaceId) ||
+                        entry.Entity.WorkspaceId.Length > WorkspaceIds.MaxLength)) ||
+                 (entry.Entity.ScopeKind == AuditEventScopeKind.Installation &&
+                    !string.IsNullOrWhiteSpace(entry.Entity.WorkspaceId))));
+        if (invalidScope is not null)
+        {
+            throw new InvalidOperationException(
+                "Audit event scope requires a valid workspace or installation scope.");
+        }
+
+        var mutatedEntry = ChangeTracker.Entries<AuditEventRecord>()
+            .FirstOrDefault(entry => entry.State is EntityState.Modified or EntityState.Deleted);
+        if (mutatedEntry is not null)
+        {
+            throw new InvalidOperationException("Audit event records are immutable.");
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace Luthn.Host.Api;
@@ -71,18 +72,137 @@ internal sealed class SearchTelemetryScope(
             return;
         }
 
+        var duration = timeProvider.GetElapsedTime(_startedAt);
         try
         {
             metrics.RecordSearchRequest(
                 surface,
                 outcome,
                 cacheStatus,
-                timeProvider.GetElapsedTime(_startedAt),
+                duration,
                 resultCount);
         }
         catch
         {
-            // Telemetry is best-effort and must never alter retrieval behavior.
+            // Local aggregation is best-effort and must never alter retrieval behavior.
+        }
+
+        try
+        {
+            LuthnTelemetryEvents.RecordRetrievalCompleted(
+                RetrievalId,
+                surface,
+                outcome,
+                cacheStatus,
+                duration,
+                resultCount);
+        }
+        catch
+        {
+            // Activity projection is best-effort and must never alter retrieval behavior.
+        }
+    }
+}
+
+/// <summary>
+/// Vendor-neutral telemetry projection. OpenTelemetry can subscribe to the
+/// ActivitySource without making the local OSS runtime depend on an exporter.
+/// Only bounded fields and the opaque retrieval correlation are emitted.
+/// </summary>
+internal static class LuthnTelemetryEvents
+{
+    private static readonly ActivitySource Source = new("Luthn.Host.Api");
+
+    public static void RecordRetrievalCompleted(
+        string retrievalId,
+        string surface,
+        string outcome,
+        string cacheStatus,
+        TimeSpan duration,
+        int resultCount)
+    {
+        if (!SearchTelemetry.IsValidRetrievalId(retrievalId))
+        {
+            return;
+        }
+
+        Publish(
+            "retrieval.completed",
+            retrievalId,
+            new KeyValuePair<string, object?>[]
+            {
+                new("luthn.surface", SearchTelemetry.BoundSurface(surface)),
+                new("luthn.outcome", SearchTelemetry.BoundOutcome(outcome)),
+                new("luthn.cache_status", SearchTelemetry.BoundCacheStatus(cacheStatus)),
+                new("luthn.duration_ms", Math.Clamp((long)Math.Ceiling(duration.TotalMilliseconds), 0, SearchTelemetry.MaximumDurationMilliseconds)),
+                new("luthn.result_count", Math.Clamp(resultCount, 0, SearchTelemetry.MaximumResultCount))
+            });
+    }
+
+    public static void RecordRetrievalObserved(
+        string retrievalId,
+        string surface,
+        string outcome,
+        string cacheStatus,
+        TimeSpan duration,
+        int resultCount)
+    {
+        if (!SearchTelemetry.IsValidRetrievalId(retrievalId))
+        {
+            return;
+        }
+
+        Publish(
+            "retrieval.observed",
+            retrievalId,
+            new KeyValuePair<string, object?>[]
+            {
+                new("luthn.surface", SearchTelemetry.BoundSurface(surface)),
+                new("luthn.outcome", SearchTelemetry.BoundOutcome(outcome)),
+                new("luthn.cache_status", SearchTelemetry.BoundCacheStatus(cacheStatus)),
+                new("luthn.duration_ms", Math.Clamp((long)Math.Ceiling(duration.TotalMilliseconds), 0, SearchTelemetry.MaximumDurationMilliseconds)),
+                new("luthn.result_count", Math.Clamp(resultCount, 0, SearchTelemetry.MaximumResultCount))
+            });
+    }
+
+    public static void RecordFeedback(string retrievalId, string judgment)
+    {
+        if (!SearchTelemetry.IsValidRetrievalId(retrievalId))
+        {
+            return;
+        }
+
+        Publish(
+            "retrieval.feedback",
+            retrievalId,
+            [new("luthn.judgment", SearchTelemetry.BoundJudgment(judgment))]);
+    }
+
+    private static void Publish(
+        string eventName,
+        string retrievalId,
+        IReadOnlyList<KeyValuePair<string, object?>> tags)
+    {
+        try
+        {
+            using var activity = Source.StartActivity(
+                $"luthn.search.{eventName}",
+                ActivityKind.Internal);
+            if (activity is null)
+            {
+                return;
+            }
+
+            activity.SetTag("luthn.event.name", eventName);
+            activity.SetTag("luthn.retrieval.id", retrievalId);
+            foreach (var tag in tags)
+            {
+                activity.SetTag(tag.Key, tag.Value);
+            }
+        }
+        catch
+        {
+            // Telemetry must never alter retrieval or feedback behavior.
         }
     }
 }

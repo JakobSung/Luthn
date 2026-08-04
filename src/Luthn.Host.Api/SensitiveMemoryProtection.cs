@@ -336,16 +336,16 @@ public sealed class SensitiveMemoryPayloadMigrator(
 
                 if (legacyRecords.Length > 0)
                 {
-                    db.AuditEvents.Add(new AuditEventRecord
-                    {
-                        Id = $"audit-{Guid.NewGuid():N}",
-                        OccurredAt = now,
-                        Actor = "local-runtime",
-                        Action = "memory.protection.migrated",
-                        SubjectId = "sensitive-memory-payloads",
-                        PayloadClass = "metadata-only",
-                        RedactionState = "encrypted-payload-only"
-                    });
+                    db.AuditEvents.Add(AuditEventFactory.ForInstallation(
+                        actor: "local-runtime",
+                        action: "memory.protection.migrated",
+                        subjectId: "sensitive-memory-payloads",
+                        payloadClass: "metadata-only",
+                        redactionState: "encrypted-payload-only",
+                        occurredAt: now,
+                        actorKind: "system",
+                        subjectType: "memory_payloads",
+                        outcome: "migrated"));
                 }
 
                 await db.SaveChangesAsync(cancellationToken);

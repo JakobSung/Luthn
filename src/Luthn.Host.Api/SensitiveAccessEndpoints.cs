@@ -142,16 +142,16 @@ public static class SensitiveAccessEndpoints
         };
 
         db.SensitiveAccessRequests.Add(accessRequest);
-        db.AuditEvents.Add(new AuditEventRecord
-        {
-            Id = $"audit-{Guid.NewGuid():N}",
-            OccurredAt = observedAt,
-            Actor = actor,
-            Action = "sensitive_access.requested",
-            SubjectId = accessRequest.Id,
-            PayloadClass = "metadata-only",
-            RedactionState = "sensitive-boundary-only"
-        });
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "sensitive_access.requested",
+            accessRequest.Id,
+            "metadata-only",
+            "sensitive-boundary-only",
+            observedAt,
+            subjectType: "sensitive_access_request",
+            outcome: "requested"));
 
         await db.SaveChangesAsync(cancellationToken);
         metrics.RecordSensitiveAccessRequest();
@@ -205,16 +205,16 @@ public static class SensitiveAccessEndpoints
         {
             var response = ToResultResponse(request, request.RedactedSummary);
             var observedAt = DateTimeOffset.UtcNow;
-            db.AuditEvents.Add(new AuditEventRecord
-            {
-                Id = $"audit-{Guid.NewGuid():N}",
-                OccurredAt = observedAt,
-                Actor = ServiceTokenAuthorization.GetActor(httpContext),
-                Action = "sensitive_access.result_read",
-                SubjectId = request.Id,
-                PayloadClass = response.PayloadClass,
-                RedactionState = response.RedactionState
-            });
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                ServiceTokenAuthorization.GetActor(httpContext),
+                "sensitive_access.result_read",
+                request.Id,
+                response.PayloadClass,
+                response.RedactionState,
+                observedAt,
+                subjectType: "sensitive_access_request",
+                outcome: "read"));
             await db.SaveChangesAsync(cancellationToken);
 
             return TypedResults.Ok(response);
@@ -338,16 +338,16 @@ public static class SensitiveAccessEndpoints
         }
         if (redactedSummary.Error is not null)
         {
-            db.AuditEvents.Add(new AuditEventRecord
-            {
-                Id = $"audit-{Guid.NewGuid():N}",
-                OccurredAt = DateTimeOffset.UtcNow,
-                Actor = actor,
-                Action = "sensitive_access.redacted_summary_rejected",
-                SubjectId = accessRequest.Id,
-                PayloadClass = "metadata-only",
-                RedactionState = "rejected-no-output"
-            });
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "sensitive_access.redacted_summary_rejected",
+                accessRequest.Id,
+                "metadata-only",
+                "rejected-no-output",
+                DateTimeOffset.UtcNow,
+                subjectType: "sensitive_access_request",
+                outcome: "rejected"));
             await db.SaveChangesAsync(cancellationToken);
             return TypedResults.BadRequest(redactedSummary.Error);
         }
@@ -370,16 +370,16 @@ public static class SensitiveAccessEndpoints
             PayloadClass = "metadata-only",
             RedactionState = redactionState
         };
-        var auditRecord = new AuditEventRecord
-        {
-            Id = $"audit-{Guid.NewGuid():N}",
-            OccurredAt = observedAt,
-            Actor = actor,
-            Action = auditAction,
-            SubjectId = accessRequest.Id,
-            PayloadClass = "metadata-only",
-            RedactionState = redactionState
-        };
+        var auditRecord = AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            auditAction,
+            accessRequest.Id,
+            "metadata-only",
+            redactionState,
+            observedAt,
+            subjectType: "sensitive_access_request",
+            outcome: status.ToString().ToLowerInvariant());
         var transitioned = false;
         try
         {
@@ -708,16 +708,18 @@ public static class SensitiveAccessEndpoints
         {
             var auditRecords = candidates.ToDictionary(
                 candidateId => candidateId,
-                candidateId => new AuditEventRecord
-                {
-                    Id = $"audit-{Guid.NewGuid():N}",
-                    OccurredAt = observedAt,
-                    Actor = "local-expiry",
-                    Action = "sensitive_access.expired",
-                    SubjectId = candidateId,
-                    PayloadClass = "metadata-only",
-                    RedactionState = "expired-no-output"
-                });
+                candidateId => AuditEventFactory.ForWorkspace(
+                    principal.WorkspaceId,
+                    actorUserId: null,
+                    actorKind: "system",
+                    actor: "local-expiry",
+                    action: "sensitive_access.expired",
+                    subjectId: candidateId,
+                    payloadClass: "metadata-only",
+                    redactionState: "expired-no-output",
+                    occurredAt: observedAt,
+                    subjectType: "sensitive_access_request",
+                    outcome: "expired"));
             var transitionedCandidateIds = new HashSet<string>(StringComparer.Ordinal);
             var strategy = db.Database.CreateExecutionStrategy();
             await strategy.ExecuteInTransactionAsync(
@@ -786,16 +788,18 @@ public static class SensitiveAccessEndpoints
 
             request.Status = SensitiveAccessRequestStatus.Expired;
             request.UpdatedAt = observedAt;
-            db.AuditEvents.Add(new AuditEventRecord
-            {
-                Id = $"audit-{Guid.NewGuid():N}",
-                OccurredAt = observedAt,
-                Actor = "local-expiry",
-                Action = "sensitive_access.expired",
-                SubjectId = candidateId,
-                PayloadClass = "metadata-only",
-                RedactionState = "expired-no-output"
-            });
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal.WorkspaceId,
+                actorUserId: null,
+                actorKind: "system",
+                actor: "local-expiry",
+                action: "sensitive_access.expired",
+                subjectId: candidateId,
+                payloadClass: "metadata-only",
+                redactionState: "expired-no-output",
+                occurredAt: observedAt,
+                subjectType: "sensitive_access_request",
+                outcome: "expired"));
         }
         await db.SaveChangesAsync(cancellationToken);
     }

@@ -82,16 +82,18 @@ public static class ClassificationEndpoints
             return TypedResults.BadRequest(contentError);
         }
 
-        db.AuditEvents.Add(new AuditEventRecord
-        {
-            Id = $"audit-{Guid.NewGuid():N}",
-            OccurredAt = DateTimeOffset.UtcNow,
-            Actor = ServiceTokenAuthorization.GetActor(httpContext),
-            Action = "classification.provider.invoked",
-            SubjectId = sourceId.Value,
-            PayloadClass = service.ProviderBoundary.PayloadClass,
-            RedactionState = service.ProviderBoundary.RedactionState
-        });
+        var occurredAt = DateTimeOffset.UtcNow;
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            ServiceTokenAuthorization.GetActor(httpContext),
+            "classification.provider.invoked",
+            sourceId.Value,
+            service.ProviderBoundary.PayloadClass,
+            service.ProviderBoundary.RedactionState,
+            occurredAt,
+            subjectType: "source_event",
+            outcome: "started"));
         await db.SaveChangesAsync(cancellationToken);
 
         var normalizedRequest = request with { SourceId = sourceId.Value };

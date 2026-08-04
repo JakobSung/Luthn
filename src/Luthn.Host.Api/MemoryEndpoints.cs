@@ -229,20 +229,20 @@ public static class MemoryEndpoints
                 createdAt));
         }
 
-        db.AuditEvents.Add(new AuditEventRecord
-        {
-            Id = $"audit-{Guid.NewGuid():N}",
-            OccurredAt = createdAt,
-            Actor = actor,
-            Action = "memory.item.classified",
-            SubjectId = item.Id.Value,
-            PayloadClass = "metadata-only",
-            RedactionState = projection.RetainsEncryptedOriginal && allowsAgentContext
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "memory.item.classified",
+            item.Id.Value,
+            "metadata-only",
+            projection.RetainsEncryptedOriginal && allowsAgentContext
                 ? "safe-projection-with-encrypted-original"
                 : allowsAgentContext
                     ? "safe-projection-only"
-                    : "encrypted-payload-only"
-        });
+                    : "encrypted-payload-only",
+            createdAt,
+            subjectType: "memory_item",
+            outcome: "completed"));
 
         await db.SaveChangesAsync(cancellationToken);
 

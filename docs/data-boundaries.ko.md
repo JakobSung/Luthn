@@ -130,7 +130,7 @@ provenance, classification, source event를 한 transaction에서 지우며, 기
 연결 record는 자동 정리하지 않습니다. 사람이 명시적으로 선별한 memory는 별도로
 요청한 `Durable`, `Session`, `Ephemeral` 수명주기를 유지합니다.
 
-기본 자동 회상은 새 작업이나 중요한 주제 변경 때 범위가 제한된 MCP를 통해 작은 에이전트 안전 context pack 하나만 요청합니다. 자동 회상과 명시적 MCP 조회에는 같은 분류·정책·안전 투영 규칙이 적용됩니다. 선택적 `projectKey`, `taskKey`, `topicTags`는 정규화·길이 제한 후 전체 안전 투영과 함께 분류하며 비민감 식별자만 허용합니다. 원본 작업 폴더와 대화 기록 경로는 회상 메타데이터도, 저장되는 capture 필드도 아닙니다. 검색 품질 지표는 메모리 내 집계이며 allowlist surface, 결과, cache 상태, 결과 수, 시간, feedback 판단만 사용합니다. query, tag, 프로젝트·작업·주제 키, cache key, 제목, 요약, 결과 식별자, 원시 오류, 자유형 feedback은 제외합니다.
+기본 자동 회상은 새 작업이나 중요한 주제 변경 때 범위가 제한된 MCP를 통해 작은 에이전트 안전 context pack 하나만 요청합니다. 자동 회상과 명시적 MCP 조회에는 같은 분류·정책·안전 투영 규칙이 적용됩니다. 선택적 `projectKey`, `taskKey`, `topicTags`는 정규화·길이 제한 후 전체 안전 투영과 함께 분류하며 비민감 식별자만 허용합니다. 원본 작업 폴더와 대화 기록 경로는 회상 메타데이터도, 저장되는 capture 필드도 아닙니다. 검색 품질 지표는 기본적으로 메모리 내 집계이며 allowlist surface, 결과, cache 상태, 결과 수, 시간, feedback 판단만 사용합니다. query, tag, 프로젝트·작업·주제 키, cache key, 제목, 요약, 결과 식별자, 원시 오류, 자유형 feedback은 aggregate snapshot과 database에서 제외합니다. Host는 vendor-neutral `ActivitySource("Luthn.Host.Api")`로 제한된 retrieval 사건을 추가 투영할 수 있지만 기본 exporter는 없으며, OpenTelemetry listener를 켜도 opaque retrieval correlation만 전달합니다.
 
 ## 공개해도 안전한 지식
 
