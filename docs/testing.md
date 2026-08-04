@@ -12,7 +12,7 @@ Before the inventory slice, the repository contained 53 test-related files:
 36 C# test sources, 7 .NET test projects, and 10 files under `scripts/tests/`.
 The inventory checker then made the canonical inventory 54 files. The timing
 slice added the timing harness itself, and the environmental runner contract
-adds one more test script, so the current canonical inventory is 56 files. The
+adds two more test scripts, so the current canonical inventory is 57 files. The
 latest full .NET run covered 392 test cases; the .NET test-case baseline remains
 392 because no product test was removed or merged.
 
@@ -39,6 +39,7 @@ measured on `Darwin-25.5.0-arm64`, .NET SDK `10.0.300`, and Python `3.9.6`.
 | `focused-sensitive-memory` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveMemoryProtectionTests` | 18 | 8 | 3813 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
 | `focused-retrieval` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~RetrievalEndpointTests` | 18 | 4 | 3548 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
 | `focused-ownership` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OwnershipIsolationTests` | 18 | 6 | 4177 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
+| `focused-host-safety-batch` | `focused` | `bash scripts/run-focused-tests.sh --run host-safety` | 18 | 75 | 5290 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
 | `focused-mcp` | `focused` | `dotnet test tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj --no-restore --filter FullyQualifiedName~McpToolBoundaryTests` | 2 | 24 | 2770 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
 | `environmental-docker` | `environmental` | lifecycle and PostgreSQL scripts | n/a | n/a | n/a | Not sampled; Docker is available. |
 | `environmental-windows` | `environmental` | PowerShell Windows lifecycle scripts | n/a | n/a | n/a | Unavailable locally; Windows runner required. |
@@ -69,6 +70,8 @@ check.
 | `fast` | `./scripts/tests/test-test-tier-timing.sh` | Capture representative fast/focused elapsed time, case counts, and environmental availability without running lifecycle tests. |
 | `fast` | `bash scripts/run-environmental-tests.sh --list` | Enumerate environmental suites without checking prerequisites or executing lifecycle tests. |
 | `fast` | `bash scripts/run-environmental-tests.sh --check` | Report Docker and Windows prerequisite availability without executing lifecycle tests. |
+| `fast` | `bash scripts/run-focused-tests.sh --list` | Enumerate the same-project focused batch and its retained class filters without executing tests. |
+| `focused` | `bash scripts/run-focused-tests.sh --run host-safety` | Run the retained Host API memory, sensitive-memory, retrieval, telemetry, and ownership classes in one process. |
 | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | Run deterministic core classification, policy, retrieval, projection, ingestion, and rendering contracts. |
 | `fast` | `dotnet test tests/Luthn.AgentConnector.Tests/Luthn.AgentConnector.Tests.csproj --no-restore` | Run connector client contract tests without a live agent runtime. |
 | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore` | Run SDK contract tests. |
@@ -90,6 +93,14 @@ check.
 | `environmental` | `bash scripts/tests/test-postgres-integration-smoke.sh` | Start an isolated PostgreSQL container and run the opt-in integration smoke test. |
 | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Validate the Windows Codex hook smoke path. |
 | `environmental` | `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | Validate Windows install, update, migration, backup, rollback, and cleanup behavior. |
+
+The focused batch runner uses one static OR filter for the existing Host API
+test project. It covers `MemoryEndpointTests`, `AgentSafeEndpointTests`,
+`SensitiveMemoryProtectionTests`, `RetrievalCandidateSelectorTests`,
+`RetrievalEndpointTests`, `OperationalMetricsTests`, `OwnershipIsolationTests`,
+and `AgentConnectionEndpointTests`. The direct class-filter commands remain
+the narrowest choice for a single changed class; the batch is the default
+choice when the changed surface spans these adjacent boundaries.
 
 The environmental runner is an orchestration contract around the existing
 lifecycle scripts. `--list` never probes or starts an environment. `--check`
@@ -120,6 +131,7 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `scripts/tests/test-test-inventory.sh` | `fast` | `./scripts/tests/test-test-inventory.sh` | Exact synchronization between the live test tree and this matrix. |
 | `scripts/tests/test-test-tier-timing.sh` | `fast` | `./scripts/tests/test-test-tier-timing.sh` | Repeatable fast/focused timing baseline and environmental availability report. |
 | `scripts/tests/test-environmental-runner.sh` | `fast` | `bash scripts/tests/test-environmental-runner.sh` | Deterministic list, check, and invalid-scope contract for the environmental runner. |
+| `scripts/tests/test-focused-batching.sh` | `fast` | `bash scripts/tests/test-focused-batching.sh` | Deterministic focused-batch listing and invalid-group contract. |
 | `scripts/tests/test-windows-codex-hook-smoke.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Windows Codex hook smoke behavior. |
 | `scripts/tests/test-windows-lifecycle.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | Windows lifecycle, update, migration, backup, rollback, and cleanup. |
 | `scripts/tests/test_codex_connector.py` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | Deterministic Codex hook, instruction, and turn-capsule contracts. |
