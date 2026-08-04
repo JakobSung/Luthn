@@ -43,7 +43,7 @@ Python `3.9.6`.
 | `focused-ownership` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OwnershipIsolationTests` | 18 | 6 | 2 | 4412 | 4413.5 | 4415 | 4415 | 2.2 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
 | `focused-host-safety-batch` | `focused` | `bash scripts/run-focused-tests.sh --run host-safety` | 18 | 75 | 2 | 5266 | 5328 | 5390 | 5390 | 3844 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
 | `focused-mcp` | `focused` | `dotnet test tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj --no-restore --filter FullyQualifiedName~McpToolBoundaryTests` | 2 | 24 | 2 | 2695 | 2735 | 2775 | 2775 | 1600 | Darwin-25.5.0-arm64; .NET 10.0.300; Python 3.9.6 |
-| `environmental-docker` | `environmental` | lifecycle and PostgreSQL scripts | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Not sampled; Docker is available. |
+| `environmental-docker` | `environmental` | lifecycle and PostgreSQL scripts | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Not sampled; Docker and Compose are available. |
 | `environmental-windows` | `environmental` | PowerShell Windows lifecycle scripts | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Unavailable locally; Windows runner required. |
 
 These are bounded local samples for comparison, not deletion thresholds. The

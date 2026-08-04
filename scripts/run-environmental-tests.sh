@@ -34,7 +34,11 @@ docker_result() {
   fi
 
   if docker info >/dev/null 2>&1; then
-    printf '%s\n' "available|Docker daemon ready"
+    if docker compose version >/dev/null 2>&1; then
+      printf '%s\n' "available|Docker daemon and Compose ready"
+    else
+      printf '%s\n' "unavailable|Docker Compose plugin not available"
+    fi
   else
     printf '%s\n' "unavailable|Docker daemon not ready"
   fi

@@ -16,6 +16,7 @@ printf '%s\n' "$list_output" | rg -q 'not-sampled'
 check_output="$(bash "$runner" --check)"
 printf '%s\n' "$check_output" | rg -q 'environmental test environment status'
 printf '%s\n' "$check_output" | rg -q 'available|unavailable'
+printf '%s\n' "$check_output" | rg -q 'Compose'
 
 if bash "$runner" --run unknown >/dev/null 2>&1; then
   printf '%s\n' "unknown environmental scope was accepted" >&2

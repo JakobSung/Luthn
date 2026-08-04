@@ -18,9 +18,19 @@ printf '%s\n' "$list_output" | rg -q 'OperationalMetricsTests'
 printf '%s\n' "$list_output" | rg -q 'OwnershipIsolationTests'
 printf '%s\n' "$list_output" | rg -q 'AgentConnectionEndpointTests'
 printf '%s\n' "$list_output" | rg -q -- '--no-restore'
+printf '%s\n' "$list_output" | rg -q -- "command .*--filter '.*|.*'"
+if printf '%s\n' "$list_output" | rg -q -- '--run all'; then
+  printf '%s\n' "unsupported all focused batch was advertised" >&2
+  exit 1
+fi
 
 if bash "$runner" --run unknown >/dev/null 2>&1; then
   printf '%s\n' "unknown focused batch was accepted" >&2
+  exit 1
+fi
+
+if bash "$runner" --run all >/dev/null 2>&1; then
+  printf '%s\n' "unsupported all focused batch was accepted" >&2
   exit 1
 fi
 

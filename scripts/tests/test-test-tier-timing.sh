@@ -302,12 +302,18 @@ measure_dotnet \
   'dotnet test tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj --no-restore --filter FullyQualifiedName~McpToolBoundaryTests' \
   'tests/Luthn.McpServer.Tests'
 
-docker_status='unavailable: docker command not found'
+docker_status='unavailable: Docker command not found'
 if command -v docker >/dev/null 2>&1; then
-  docker_status='not sampled: docker is available'
+  if ! docker info >/dev/null 2>&1; then
+    docker_status='unavailable: Docker daemon not ready'
+  elif ! docker compose version >/dev/null 2>&1; then
+    docker_status='unavailable: Docker Compose plugin not available'
+  else
+    docker_status='not sampled: Docker and Compose are available'
+  fi
 fi
-printf '| environmental-docker | environmental | lifecycle and PostgreSQL scripts | n/a | n/a | n/a | %s |\n' "$docker_status"
-printf '| environmental-windows | environmental | PowerShell Windows lifecycle scripts | n/a | n/a | n/a | unavailable: Windows runner required |\n'
+printf '| environmental-docker | environmental | lifecycle and PostgreSQL scripts | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | %s |\n' "$docker_status"
+printf '| environmental-windows | environmental | PowerShell Windows lifecycle scripts | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | unavailable: Windows runner required |\n'
 
 if [ "$failed" -ne 0 ]; then
   exit 1
