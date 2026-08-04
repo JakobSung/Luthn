@@ -811,6 +811,26 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
+    public async Task PreviewRoutesMonetaryContentToSensitiveStoreOnlyWithLocalGuard()
+    {
+        var service = new ClassificationPreviewService(
+            new HybridContentClassifier(
+                new MockContentClassifier(),
+                new DeterministicSensitiveDataDetector()),
+            new PolicyEngine());
+
+        var response = await service.PreviewAsync(new ClassificationPreviewRequest(
+            "source-money",
+            "홍길동 사원의 견적금액은 1,000원입니다.",
+            "note"));
+
+        Assert.Equal(SensitivityLevel.Confidential, response.Classification.Sensitivity);
+        Assert.Contains("finance", response.Classification.Categories);
+        Assert.True(response.Classification.ContainsSensitiveMaterial);
+        Assert.Equal(StorageDecisionKind.SensitiveDbOnly, response.StorageDecision.Kind);
+    }
+
+    [Fact]
     public void MockProviderRequiresExplicitOptInAndNoExternalProvider()
     {
         var options = new ClassificationProviderOptions

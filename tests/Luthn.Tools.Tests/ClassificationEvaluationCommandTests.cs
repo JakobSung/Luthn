@@ -29,13 +29,13 @@ public sealed class ClassificationEvaluationCommandTests
         var report = DeserializeReport(output.ToString());
         Assert.Equal("mock", report.Provider);
         Assert.Equal(25, report.Summary.TotalCount);
-        Assert.Equal(18, report.Summary.PassedCount);
-        Assert.Equal(6, report.Summary.FalseNegativeCount);
+        Assert.Equal(19, report.Summary.PassedCount);
+        Assert.Equal(5, report.Summary.FalseNegativeCount);
         Assert.Equal(1, report.Summary.FalsePositiveCount);
-        Assert.Equal(7, report.Summary.SensitivityMismatchCount);
-        Assert.Equal(7, report.Summary.CategoryMismatchCount);
-        Assert.Equal(7, report.Summary.SensitiveFlagMismatchCount);
-        Assert.Equal(7, report.Summary.RoutingMismatchCount);
+        Assert.Equal(6, report.Summary.SensitivityMismatchCount);
+        Assert.Equal(6, report.Summary.CategoryMismatchCount);
+        Assert.Equal(6, report.Summary.SensitiveFlagMismatchCount);
+        Assert.Equal(6, report.Summary.RoutingMismatchCount);
         Assert.DoesNotContain("은행 계좌번호", output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Rotate the private key", output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("010-1234-5678", output.ToString(), StringComparison.Ordinal);
@@ -58,7 +58,7 @@ public sealed class ClassificationEvaluationCommandTests
         var report = DeserializeReport(output.ToString());
         Assert.Equal("guarded-mock", report.Provider);
         Assert.Equal(25, report.Summary.TotalCount);
-        Assert.Equal(22, report.Summary.PassedCount);
+        Assert.Equal(23, report.Summary.PassedCount);
         Assert.All(
             report.Cases.Where(result => result.Id.EndsWith("-shape", StringComparison.Ordinal)),
             result => Assert.True(result.Passed, result.Id));
