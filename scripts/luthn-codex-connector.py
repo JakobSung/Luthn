@@ -25,7 +25,7 @@ HOOK_MARKER = "luthn.agent-connector.v1"
 CLAUDE_HOOK_MARKER = "luthn.claude-agent-connector.v1"
 HOOK_STATUS_MESSAGE = "Luthn 메모리 저장 예약 중…"
 CLAUDE_HOOK_STATUS_MESSAGE = "Saving Luthn memory…"
-CONNECTOR_TEMPLATE_VERSION = "3"
+CONNECTOR_TEMPLATE_VERSION = "4"
 INSTRUCTION_START_MARKER = "<!-- luthn:auto-recall:start -->"
 INSTRUCTION_END_MARKER = "<!-- luthn:auto-recall:end -->"
 MAX_HOOK_INPUT_BYTES = 256 * 1024
@@ -50,11 +50,22 @@ sensitive data as recall metadata:
 - `cacheTtlSeconds`: 600
 - `failOpen`: true
 
+For every question about a named or specific agent, another agent's work,
+prior work, a past decision, or current work status, treat the question as a
+recall trigger even during a continued task. Call `get_context_pack` before
+answering. If the returned context does not directly answer the question, do
+not infer from the conversation alone.
+
 For continued work on the same task, reuse the context already returned in the
 conversation instead of calling the tool again. Refresh only after a material
-topic change or cache expiry. If lightweight recall returns no context, times
-out, or fails, continue without memory. Use deeper Luthn MCP search tools only
-when the bounded context pack is insufficient.
+topic change or cache expiry. Treat only items returned by Luthn as verified
+memory. If the pack is empty, irrelevant, times out, fails, or cannot fit a
+relevant item within the `maxTokens` budget, call `search_safe_context` once
+with the same query and only the same normalized non-sensitive metadata,
+bounded to `maxItems`: 20. If that fallback is empty or fails, say that Luthn
+could not verify the requested context and do not guess or present an
+unverified agent history as fact. Do not substitute local memory files for
+Luthn MCP recall.
 
 After calling `get_context_pack`, use Codex commentary for recall status only
 under these rules:
@@ -71,6 +82,14 @@ under these rules:
 - Never include memory titles, content, IDs, queries, scores, sources, or any
   sensitive information in the commentary.
 - Do not put the recall status in a normal assistant response or final response.
+
+## Agent memory mutation boundary
+
+Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
+sensitive data in response to an agent or user request. If asked, explicitly
+refuse. Do not call an operator or administrator route, use a service token for
+mutation, or invent a mutation tool. Operator decisions and system retention
+cleanup are outside agent authority.
 {INSTRUCTION_END_MARKER}"""
 
 # Claude Code loads CLAUDE.md rather than AGENTS.md.  Keep its managed block
@@ -91,10 +110,29 @@ or customer identifier as recall metadata.
 - `cacheTtlSeconds`: 600
 - `failOpen`: true
 
+For every question about a named or specific agent, another agent's work,
+prior work, a past decision, or current work status, treat the question as a
+recall trigger even during a continued task. Call `get_context_pack` before
+answering. If the returned context does not directly answer the question, do
+not infer from the conversation alone.
+
 Reuse the returned context for the current task. Refresh only after a material
-topic change or cache expiry. If recall is empty, times out, or fails, continue
-without memory. Use deeper Luthn MCP search only when the bounded context pack
-is insufficient.
+topic change or cache expiry. Treat only items returned by Luthn as verified
+memory. If the pack is empty, irrelevant, times out, fails, or cannot fit a
+relevant item within the `maxTokens` budget, call `search_safe_context` once
+with the same query and only the same normalized non-sensitive metadata,
+bounded to `maxItems`: 20. If that fallback is empty or fails, say that Luthn
+could not verify the requested context and do not guess or present an
+unverified agent history as fact. Do not substitute local memory files for
+Luthn MCP recall.
+
+## Agent memory mutation boundary
+
+Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
+sensitive data in response to an agent or user request. If asked, explicitly
+refuse. Do not call an operator or administrator route, use a service token for
+mutation, or invent a mutation tool. Operator decisions and system retention
+cleanup are outside agent authority.
 {INSTRUCTION_END_MARKER}"""
 
 

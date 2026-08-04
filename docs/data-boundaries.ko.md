@@ -43,15 +43,17 @@ agent context에 나중에 나타날 수 있는 전체 투영을 분류합니다
 - Restricted: `credential`, `private key`, `access key`, `customer original`
 - Confidential: `contract`, `invoice`, `payment`, `tax`, `customer`, `email`,
   `personal identifier`, `finance`, `accounting`, `private message`,
-  `incident log`
+  `incident log`. `finance`에는 금액·매출·연봉·급여·가격·비용·수익·예산·
+  수수료와 이에 대응하는 영어 표현이 포함됩니다.
 
 로컬 mock은 이 taxonomy에 대응하는 제한된 한국어·영어 표지를 인식합니다.
 이는 시험·실험용 동작이며 운영 품질을 보장하지 않습니다.
 
 모든 운영용 provider 결과에는 로컬 민감데이터 guard 버전 `1`을 결합합니다.
 guard는 신뢰도가 높은 private key, access token, 값이 할당된 secret, email,
-한국 전화번호·주민등록번호 형태, Luhn 검증을 통과한 결제카드 형태를 제한적으로
-탐지합니다. 결과에는 표준 category만 포함하며 일치한 값이나 일부 문장을 분류
+한국 전화번호·주민등록번호 형태, Luhn 검증을 통과한 결제카드와 금액 형태를
+제한적으로 탐지합니다. 금전 문맥도 `finance` 민감도 하한을 올리지만 사람 이름
+단독을 민감정보로 처리하지 않습니다. 결과에는 표준 category만 포함하며 일치한 값이나 일부 문장을 분류
 결과, log, metric, audit, persistence metadata에 넣지 않습니다. provider 오류는
 기존처럼 저장 전에 실패하고 detector 단독 허용으로 대체하지 않습니다.
 

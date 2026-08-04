@@ -55,7 +55,8 @@ Category taxonomy version `1` uses stable canonical category names:
 - Restricted: `credential`, `private key`, `access key`, `customer original`
 - Confidential: `contract`, `invoice`, `payment`, `tax`, `customer`, `email`,
   `personal identifier`, `finance`, `accounting`, `private message`,
-  `incident log`
+  `incident log`. The `finance` category includes monetary amounts, revenue,
+  salary, price, cost, profit, budget, fee, and their Korean equivalents.
 
 The local mock recognizes bounded English and Korean marker phrases for this
 taxonomy. It remains a test and experiment classifier, not a production
@@ -64,7 +65,9 @@ quality claim.
 Every configured operational provider is combined with local sensitive-data
 guard version `1`. The guard recognizes bounded high-confidence private-key,
 access-token, assigned-secret, email, Korean phone and resident-registration,
-and Luhn-valid payment-card shapes. It returns canonical category names only;
+Luhn-valid payment-card, and monetary amount shapes. Monetary context terms
+also raise the `finance` floor without treating a person name by itself as
+sensitive. It returns canonical category names only;
 matched values and excerpts are not added to classification results, logs,
 metrics, audits, or persistence metadata. Provider errors still fail before
 storage and never fall back to detector-only acceptance.

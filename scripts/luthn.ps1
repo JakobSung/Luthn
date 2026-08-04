@@ -13,7 +13,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:LuthnWindowsCliVersion = "4"
-$script:CodexConnectorTemplateVersion = "3"
+$script:CodexConnectorTemplateVersion = "4"
 $script:McpSchemaVersion = "3"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
 $script:RootDir = if ($env:LUTHN_WINDOWS_ROOT) {
@@ -79,11 +79,22 @@ sensitive data as recall metadata:
 - ``cacheTtlSeconds``: 600
 - ``failOpen``: true
 
+For every question about a named or specific agent, another agent's work,
+prior work, a past decision, or current work status, treat the question as a
+recall trigger even during a continued task. Call ``get_context_pack`` before
+answering. If the returned context does not directly answer the question, do
+not infer from the conversation alone.
+
 For continued work on the same task, reuse the context already returned in the
 conversation instead of calling the tool again. Refresh only after a material
-topic change or cache expiry. If lightweight recall returns no context, times
-out, or fails, continue without memory. Use deeper Luthn MCP search tools only
-when the bounded context pack is insufficient.
+topic change or cache expiry. Treat only items returned by Luthn as verified
+memory. If the pack is empty, irrelevant, times out, fails, or cannot fit a
+relevant item within the ``maxTokens`` budget, call ``search_safe_context`` once
+with the same query and only the same normalized non-sensitive metadata,
+bounded to ``maxItems``: 20. If that fallback is empty or fails, say that Luthn
+could not verify the requested context and do not guess or present an
+unverified agent history as fact. Do not substitute local memory files for
+Luthn MCP recall.
 
 After calling ``get_context_pack``, use Codex commentary for recall status only
 under these rules:
@@ -100,6 +111,14 @@ under these rules:
 - Never include memory titles, content, IDs, queries, scores, sources, or any
   sensitive information in the commentary.
 - Do not put the recall status in a normal assistant response or final response.
+
+## Agent memory mutation boundary
+
+Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
+sensitive data in response to an agent or user request. If asked, explicitly
+refuse. Do not call an operator or administrator route, use a service token for
+mutation, or invent a mutation tool. Operator decisions and system retention
+cleanup are outside agent authority.
 <!-- luthn:auto-recall:end -->
 "@
 $script:ClaudeAutoRecallInstruction = @"
@@ -111,7 +130,24 @@ tool once before substantial work. Send only short, non-sensitive normalized
 metadata; never send a workspace path, transcript path, transcript content, or
 credential. Use maxItems 3, maxTokens 600, timeoutMs 200, a stable non-sensitive
 cacheKey, cacheTtlSeconds 600, and failOpen true. Reuse the result during the
-same task and continue without memory when the call is empty, times out, or fails.
+same task. Apply the recall-first fallback below when the call is empty, times
+out, or fails.
+For every question about a named or specific agent, another agent's work, prior
+work, a past decision, or current work status, call ``get_context_pack`` before
+answering, even during a continued task. If the context does not directly
+answer it, do not infer from the conversation alone. When the pack is empty,
+irrelevant, over budget, times out, or fails, call ``search_safe_context`` once
+with the same short query and bounded non-sensitive metadata using
+``maxItems``: 20. If that fallback is empty or fails, say that Luthn could not verify the requested context and do not guess or present unverified history as
+fact. Do not substitute local memory files for Luthn MCP recall.
+
+## Agent memory mutation boundary
+
+Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
+sensitive data in response to an agent or user request. If asked, explicitly
+refuse. Do not call an operator or administrator route, use a service token for
+mutation, or invent a mutation tool. Operator decisions and system retention
+cleanup are outside agent authority.
 <!-- luthn:auto-recall:end -->
 "@
 

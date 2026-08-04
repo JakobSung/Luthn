@@ -465,8 +465,13 @@ The connection adds a marked Luthn block to the global Codex `AGENTS.md` under
 instructions.
 It requests one `get_context_pack` lookup for a new task or material topic
 change with 3 items, an estimated 600-token budget, a 200 ms fail-open
-deadline, and a 10-minute in-process cache. Continued work reuses the context
-already in the conversation instead of searching every turn.
+deadline, and a 10-minute in-process cache. Questions about a named agent,
+another agent's work, prior work, a past decision, or current status trigger
+the same lookup before answering. An empty, irrelevant, over-budget, timed-out,
+or failed pack gets one bounded `search_safe_context` fallback; if that is also
+empty or fails, the agent must say Luthn could not verify the requested context
+instead of guessing. Continued work reuses context that directly answers the
+same question, and does not replace Luthn recall with local memory files.
 
 Disable automatic recall explicitly while keeping the Stop hook and MCP
 connection:

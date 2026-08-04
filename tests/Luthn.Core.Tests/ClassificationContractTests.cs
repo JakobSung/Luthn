@@ -9,7 +9,11 @@ public sealed class ClassificationContractTests
     public static TheoryData<string, SensitivityLevel, string> KoreanFirstGoldenCases => new()
     {
         { "공개된 설치 안내입니다.", SensitivityLevel.Public, "" },
+        { "홍길동 사원이 업무를 진행했다.", SensitivityLevel.Public, "" },
+        { "홍길동 사원이 공개 견적을 발행했다.", SensitivityLevel.Public, "" },
         { "고객 계약서의 결제 조건입니다.", SensitivityLevel.Confidential, "contract" },
+        { "홍길동 사원의 연봉은 5000만원입니다.", SensitivityLevel.Confidential, "finance" },
+        { "Annual salary is USD 12000.", SensitivityLevel.Confidential, "finance" },
         { "회계 자료에 주민등록번호가 포함되어 있습니다.", SensitivityLevel.Confidential, "personal identifier" },
         { "Rotate the API 키가 포함된 운영 메모입니다.", SensitivityLevel.Restricted, "access key" },
         { "Customer 고객 원문을 보관합니다.", SensitivityLevel.Restricted, "customer original" }

@@ -16,7 +16,11 @@ public sealed class DeterministicSensitiveDataDetectorTests
         { "담당자 person@example.com", "email", SensitivityLevel.Confidential },
         { "연락처 010-1234-5678", "personal identifier", SensitivityLevel.Confidential },
         { "식별값 900101-1234568", "personal identifier", SensitivityLevel.Confidential },
-        { "결제수단 4111 1111 1111 1111", "payment", SensitivityLevel.Confidential }
+        { "결제수단 4111 1111 1111 1111", "payment", SensitivityLevel.Confidential },
+        { "견적금액은 1,000원입니다.", "finance", SensitivityLevel.Confidential },
+        { "홍길동 사원의 연봉은 5,000만원입니다.", "finance", SensitivityLevel.Confidential },
+        { "Annual salary is USD 12000.", "finance", SensitivityLevel.Confidential },
+        { "Revenue was $12000.", "finance", SensitivityLevel.Confidential }
     };
 
     [Theory]
@@ -45,6 +49,9 @@ public sealed class DeterministicSensitiveDataDetectorTests
     [InlineData("4111 1111 1111 1112")]
     [InlineData("release@example")]
     [InlineData("public contributor guide")]
+    [InlineData("홍길동 사원이 업무를 진행했다")]
+    [InlineData("홍길동 사원이 공개 견적을 발행했다")]
+    [InlineData("2026-08-04에 v1.2.3을 배포했고 3개 항목을 처리했다")]
     public void DetectorRejectsBenignNearMisses(string content)
     {
         var result = new DeterministicSensitiveDataDetector().Detect(
@@ -80,6 +87,22 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.Contains("personal identifier", result.Categories);
         Assert.Contains("payment", result.Categories);
         Assert.Contains("credential", result.Categories);
+    }
+
+    [Fact]
+    public void RedactorRemovesMonetaryAmountWithoutRemovingPersonNameOrEvent()
+    {
+        const string content = "홍길동 사원이 견적금액 1,000원으로 신규 견적을 발행했다.";
+
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.Contains("홍길동 사원", result.Text, StringComparison.Ordinal);
+        Assert.Contains("신규 견적을 발행했다", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("1,000원", result.Text, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+        Assert.Contains("finance", result.Categories);
     }
 
     [Theory]
@@ -134,6 +157,30 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.True(result.ContainsSensitiveMaterial);
         Assert.False(new PolicyEngine().Decide(result).AllowsAgentContext);
         Assert.Equal(provider.Boundary, classifier.Boundary);
+    }
+
+    [Fact]
+    public async Task HybridClassifierOverridesPublicProviderFalseNegativeForMonetaryData()
+    {
+        var provider = new StaticClassifier(new ClassificationResult(
+            new PublicRecordId("hybrid-money-source"),
+            SensitivityLevel.Public,
+            0.99,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            ContainsSensitiveMaterial: false));
+        var classifier = new HybridContentClassifier(
+            provider,
+            new DeterministicSensitiveDataDetector());
+
+        var result = await classifier.ClassifyAsync(
+            new PublicRecordId("hybrid-money-source"),
+            "홍길동 사원의 연봉은 5,000만원입니다.",
+            "note");
+
+        Assert.Equal(SensitivityLevel.Confidential, result.Sensitivity);
+        Assert.Contains("finance", result.Categories);
+        Assert.True(result.ContainsSensitiveMaterial);
+        Assert.False(new PolicyEngine().Decide(result).AllowsAgentContext);
     }
 
     [Fact]

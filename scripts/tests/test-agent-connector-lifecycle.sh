@@ -155,7 +155,7 @@ import subprocess
 import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "version":
-    print("3")
+    print("4")
     raise SystemExit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == "helper-digest":
@@ -362,6 +362,11 @@ grep -q '`maxItems`: 3' "$codex_home/AGENTS.md"
 grep -q '`maxTokens`: 600' "$codex_home/AGENTS.md"
 grep -q '`timeoutMs`: 200' "$codex_home/AGENTS.md"
 grep -q '`cacheTtlSeconds`: 600' "$codex_home/AGENTS.md"
+grep -q 'Agent memory mutation boundary' "$codex_home/AGENTS.md"
+grep -q 'Never delete, modify, overwrite, approve, or deny Luthn memory' "$codex_home/AGENTS.md"
+grep -q 'For every question about a named or specific agent' "$codex_home/AGENTS.md"
+grep -q 'search_safe_context' "$codex_home/AGENTS.md"
+grep -q 'could not verify the requested context' "$codex_home/AGENTS.md"
 status_output="$(run_luthn connection status codex)"
 grep -q '^  lightweight-recall: enabled$' <<<"$status_output"
 run_luthn connect codex --no-auto-recall >/dev/null
@@ -529,11 +534,11 @@ echo "[12/18] missing helper self-heals from the installed runtime revision"
 rm -f "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
 [[ -x "$tmp_root/connector-helper.py" ]]
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "3" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
 expected_helper_digest="$(awk -F= '$1 == "HELPER_DIGEST" { print $2 }' "$state_dir/connectors/codex.env")"
 printf '\n# same-version stale helper\n' >>"$tmp_root/connector-helper.py"
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "3" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" != "$expected_helper_digest" ]]
 run_luthn connect codex >/dev/null
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" == "$expected_helper_digest" ]]
@@ -550,7 +555,7 @@ raise SystemExit(1)
 EOF
 chmod 0700 "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "3" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
 cp "$tmp_root/connector-helper-fixture.py" "$tmp_root/connector-helper.py"
 run_luthn disconnect codex >/dev/null
 run_luthn connection status codex >/dev/null
@@ -814,7 +819,7 @@ EOF
   [[ "$reconcile_output" == *"Restart required: Luthn MCP compatibility changed"* ]]
   [[ "$reconcile_output" == *"Agent notice: restart the current Codex host before invoking Luthn tools again."* ]]
 )
-grep -q '^CONNECTOR_VERSION=3$' "$reconcile_state/connectors/codex.env"
+grep -q '^CONNECTOR_VERSION=4$' "$reconcile_state/connectors/codex.env"
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
 import sys
@@ -834,7 +839,7 @@ import sys
 path = sys.argv[1]
 content = open(path, encoding="utf-8").read()
 with open(path, "w", encoding="utf-8") as stream:
-    stream.write(content.replace("CONNECTOR_VERSION=3\n", "CONNECTOR_VERSION=1\n"))
+    stream.write(content.replace("CONNECTOR_VERSION=4\n", "CONNECTOR_VERSION=1\n"))
 PY
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
@@ -1019,7 +1024,7 @@ assert set(version) == {
 }
 assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
 assert version["cliTemplateVersion"] == "4"
-assert version["connectorTemplateVersion"] == "3"
+assert version["connectorTemplateVersion"] == "4"
 assert version["mcpSchemaVersion"] == "3"
 assert update["status"] == "current"
 assert update["candidateRevision"] == "a" * 40

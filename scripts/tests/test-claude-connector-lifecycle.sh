@@ -120,10 +120,15 @@ assert handler["command"] == "python3", handler
 assert handler["args"][1:] == [
     "claude-hook-run", "--base-url", "http://127.0.0.1:1", "--token-file",
     f"{sys.argv[2]}/service-token", "--excluded-token-file",
-    f"{sys.argv[2]}/operator-token", "--connector-version", "3",
+    f"{sys.argv[2]}/operator-token", "--connector-version", "4",
 ], handler
 PY
 grep -q '<!-- luthn:auto-recall:start -->' "$claude_home/CLAUDE.md"
+grep -q 'Agent memory mutation boundary' "$claude_home/CLAUDE.md"
+grep -q 'Never delete, modify, overwrite, approve, or deny Luthn memory' "$claude_home/CLAUDE.md"
+grep -q 'For every question about a named or specific agent' "$claude_home/CLAUDE.md"
+grep -q 'search_safe_context' "$claude_home/CLAUDE.md"
+grep -q 'could not verify the requested context' "$claude_home/CLAUDE.md"
 
 status_output="$(run_luthn connection status claude 2>/dev/null)"
 grep -q '^Local connector: configured$' <<<"$status_output"

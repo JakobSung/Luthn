@@ -235,6 +235,19 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
                 "memory titles, content, IDs, queries, scores, sources", installed
             )
             self.assertIn("normal assistant response or final response", installed)
+            self.assertIn("Agent memory mutation boundary", installed)
+            self.assertIn(
+                "Never delete, modify, overwrite, approve, or deny Luthn memory",
+                installed,
+            )
+            self.assertIn(
+                "Agent memory mutation boundary",
+                CONNECTOR.CLAUDE_AUTO_RECALL_INSTRUCTION,
+            )
+            self.assertIn(
+                "Never delete, modify, overwrite, approve, or deny Luthn memory",
+                CONNECTOR.CLAUDE_AUTO_RECALL_INSTRUCTION,
+            )
             self.assertTrue(
                 CONNECTOR.auto_recall_instruction_is_installed(instructions_path)
             )
@@ -256,6 +269,25 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
                 CONNECTOR.install_auto_recall_instruction(instructions_path)
 
             self.assertEqual(original, instructions_path.read_text(encoding="utf-8"))
+
+    def test_recall_first_fallback_contract_is_shared_by_codex_and_claude(self):
+        instructions = [
+            CONNECTOR.AUTO_RECALL_INSTRUCTION,
+            CONNECTOR.CLAUDE_AUTO_RECALL_INSTRUCTION,
+        ]
+
+        for instruction in instructions:
+            self.assertIn(
+                "For every question about a named or specific agent",
+                instruction,
+            )
+            self.assertLess(
+                instruction.index("get_context_pack"),
+                instruction.index("search_safe_context"),
+            )
+            self.assertIn("bounded to `maxItems`: 20", instruction)
+            self.assertIn("could not verify the requested context", instruction)
+            self.assertIn("Do not substitute local memory files", instruction)
 
     def test_install_preserves_instruction_symlink(self):
         with tempfile.TemporaryDirectory() as directory:
