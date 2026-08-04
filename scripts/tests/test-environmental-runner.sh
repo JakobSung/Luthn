@@ -16,7 +16,11 @@ printf '%s\n' "$list_output" | rg -q 'not-sampled'
 check_output="$(bash "$runner" --check)"
 printf '%s\n' "$check_output" | rg -q 'environmental test environment status'
 printf '%s\n' "$check_output" | rg -q 'available|unavailable'
-printf '%s\n' "$check_output" | rg -q 'Compose'
+if ! printf '%s\n' "$check_output" | rg -q \
+  'available \| Docker daemon and Compose ready|unavailable \| (docker command not found|Docker daemon not ready|Docker Compose plugin not available)'; then
+  printf '%s\n' "unexpected Docker environment status" >&2
+  exit 1
+fi
 
 if bash "$runner" --run unknown >/dev/null 2>&1; then
   printf '%s\n' "unknown environmental scope was accepted" >&2
