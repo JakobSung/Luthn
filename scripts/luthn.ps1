@@ -138,8 +138,7 @@ answering, even during a continued task. If the context does not directly
 answer it, do not infer from the conversation alone. When the pack is empty,
 irrelevant, over budget, times out, or fails, call ``search_safe_context`` once
 with the same short query and bounded non-sensitive metadata using
-``maxItems``: 20. If that fallback is empty or fails, say that Luthn could not
-verify the requested context and do not guess or present unverified history as
+``maxItems``: 20. If that fallback is empty or fails, say that Luthn could not verify the requested context and do not guess or present unverified history as
 fact. Do not substitute local memory files for Luthn MCP recall.
 
 ## Agent memory mutation boundary
