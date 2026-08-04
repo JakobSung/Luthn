@@ -6,7 +6,7 @@
 
 Current active slice: none selected
 
-Queued slices awaiting final QA: 2
+Queued slices awaiting final QA: 3
 
 Next action: create the next slice plan on the current delivery branch, or ask for `$drig:drig-qa` when the delivery batch is complete.
 
@@ -23,14 +23,13 @@ Next action: create the next slice plan on the current delivery branch, or ask f
 | PLUGIN-001 | gated | P2 | Dynamic plugin loading and marketplace | `none` | - |
 | WORK-011 | evidence-pending | P2 | Money-sensitive classification with person-name exclusion | `docs/01-plan/money-sensitive-classification-with-person-name-exclusion/001-idea.md` | - |
 | WORK-012 | evidence-pending | P2 | Agent memory mutation denial contract | `docs/01-plan/agent-memory-mutation-denial-contract/001-idea.md` | - |
-| WORK-013 | backlog | P2 | Cross-agent recall-first enforcement for Codex and Claude | `docs/01-plan/cross-agent-recall-first-enforcement-for-codex-and-claude/001-idea.md` | - |
+| WORK-013 | evidence-pending | P2 | Cross-agent recall-first enforcement for Codex and Claude | `docs/01-plan/cross-agent-recall-first-enforcement-for-codex-and-claude/001-idea.md` | - |
 | none | backlog | - | No additional planned quality slice | `none` | - |
 
 ## Planned
 
 | ID | Priority | Title | Goal | Plan |
 | --- | --- | --- | --- | --- |
-| WORK-013 | P2 | Cross-agent recall-first enforcement for Codex and Claude | 특정 Agent·다른 Agent·이전 작업·과거 결정·작업 상태를 묻는 요청에서는 Codex와 Claude가 답변 전에 Luthn 안전 회상을 우선 시도하고, 부족하면 상세 안전 검색으로 이어지며 실패 시 추정하지 않는다. | `none` |
 | none | - | No additional planned quality slice | The approved classification, recall, telemetry, encryption, provenance, ownership, and agent-connection hardening program is complete. | `none` |
 
 ## Done

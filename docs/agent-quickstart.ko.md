@@ -74,8 +74,10 @@ luthn connect codex --no-auto-recall
 Luthn 관리 블록만 Codex 지침에 추가하며 기존 사용자 지침은 보존합니다. 관리 블록은 다음을 요구합니다.
 
 - 새 작업이나 중요한 주제 변경 때 `get_context_pack`을 한 번 호출
+- 특정 agent·다른 agent의 작업·이전 작업·과거 결정·현재 상태 질문에는 답변 전에 `get_context_pack`을 먼저 호출
 - 최대 3개 항목, 예상 600 token으로 제한
-- 200ms 안에 끝내고 시간 초과·실패 시 기억 없이 계속 진행
+- 결과가 비었거나 부족하거나 600 token 안에 맞는 항목이 없거나 시간 초과·실패하면 같은 안전 메타데이터로 `search_safe_context`를 한 번 제한 호출
+- fallback도 비었거나 실패하면 추정하지 말고 Luthn이 해당 맥락을 검증하지 못했다고 명시
 - 같은 작업에서는 반환된 맥락 재사용
 - 작업이 이어지면 10분 뒤 새로 고침
 - 매 turn 자동 조회 금지
@@ -86,7 +88,9 @@ Luthn 관리 블록만 Codex 지침에 추가하며 기존 사용자 지침은 �
 작업 폴더 경로, 대화 기록 경로·내용, 자격 증명, 고객 식별자는 회상 메타데이터로
 사용하지 않습니다.
 
-더 깊은 회상이 필요하면 `search_safe_context` 또는 `query_shared_memory`를 명시적으로 사용합니다.
+이 제한된 fallback을 넘어 더 깊은 회상이 필요하면 `search_safe_context` 또는
+`query_shared_memory`를 명시적으로 사용합니다. Luthn 회상을 로컬 memory 파일이나
+검증되지 않은 대화 기록으로 대체하지 않습니다.
 
 ### 에이전트 변경 경계
 

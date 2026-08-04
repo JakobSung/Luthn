@@ -50,11 +50,22 @@ sensitive data as recall metadata:
 - `cacheTtlSeconds`: 600
 - `failOpen`: true
 
+For every question about a named or specific agent, another agent's work,
+prior work, a past decision, or current work status, treat the question as a
+recall trigger even during a continued task. Call `get_context_pack` before
+answering. If the returned context does not directly answer the question, do
+not infer from the conversation alone.
+
 For continued work on the same task, reuse the context already returned in the
 conversation instead of calling the tool again. Refresh only after a material
-topic change or cache expiry. If lightweight recall returns no context, times
-out, or fails, continue without memory. Use deeper Luthn MCP search tools only
-when the bounded context pack is insufficient.
+topic change or cache expiry. Treat only items returned by Luthn as verified
+memory. If the pack is empty, irrelevant, times out, fails, or cannot fit a
+relevant item within the `maxTokens` budget, call `search_safe_context` once
+with the same query and only the same normalized non-sensitive metadata,
+bounded to `maxItems`: 20. If that fallback is empty or fails, say that Luthn
+could not verify the requested context and do not guess or present an
+unverified agent history as fact. Do not substitute local memory files for
+Luthn MCP recall.
 
 After calling `get_context_pack`, use Codex commentary for recall status only
 under these rules:
@@ -99,10 +110,21 @@ or customer identifier as recall metadata.
 - `cacheTtlSeconds`: 600
 - `failOpen`: true
 
+For every question about a named or specific agent, another agent's work,
+prior work, a past decision, or current work status, treat the question as a
+recall trigger even during a continued task. Call `get_context_pack` before
+answering. If the returned context does not directly answer the question, do
+not infer from the conversation alone.
+
 Reuse the returned context for the current task. Refresh only after a material
-topic change or cache expiry. If recall is empty, times out, or fails, continue
-without memory. Use deeper Luthn MCP search only when the bounded context pack
-is insufficient.
+topic change or cache expiry. Treat only items returned by Luthn as verified
+memory. If the pack is empty, irrelevant, times out, fails, or cannot fit a
+relevant item within the `maxTokens` budget, call `search_safe_context` once
+with the same query and only the same normalized non-sensitive metadata,
+bounded to `maxItems`: 20. If that fallback is empty or fails, say that Luthn
+could not verify the requested context and do not guess or present an
+unverified agent history as fact. Do not substitute local memory files for
+Luthn MCP recall.
 
 ## Agent memory mutation boundary
 

@@ -421,6 +421,8 @@ esac
     Assert-True (-not ([IO.File]::ReadAllText($codexHooksFile).Contains($token))) "Codex hooks should not contain the token"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("luthn:auto-recall:start")) "one-step setup should enable auto-recall by default"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("Agent memory mutation boundary")) "Codex instructions should include the agent mutation boundary"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("For every question about a named or specific agent")) "Codex instructions should require agent-specific recall"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("search_safe_context") -and [IO.File]::ReadAllText($codexInstructionsFile).Contains("could not verify the requested context")) "Codex instructions should define bounded recall fallback"
     $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
     Assert-True ($connectorState.connectorVersion -ceq "4") "Windows connector state should record the managed template version"
@@ -466,6 +468,8 @@ esac
     Assert-True (@($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "Claude connection should preserve unrelated hooks"
     Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("luthn:auto-recall:start")) "Claude connection should enable lightweight recall by default"
     Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("Agent memory mutation boundary")) "Claude instructions should include the agent mutation boundary"
+    Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("For every question about a named or specific agent")) "Claude instructions should require agent-specific recall"
+    Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("search_safe_context") -and [IO.File]::ReadAllText($claudeInstructionsFile).Contains("could not verify the requested context")) "Claude instructions should define bounded recall fallback"
     Assert-True (-not ([IO.File]::ReadAllText($claudeSettingsFile).Contains($token)) -and -not ([IO.File]::ReadAllText($claudeOwnershipState).Contains($token))) "Claude configuration should not contain the service token"
     $claudeStatus = Invoke-LuthnProcess $installedCli @("connection", "status", "claude")
     Assert-True ($claudeStatus.ExitCode -eq 0 -and $claudeStatus.Output -match "automatic-ingestion: configured" -and $claudeStatus.Output -match "mcp: configured") "Claude status should expose hook and MCP state: $($claudeStatus.Output)"

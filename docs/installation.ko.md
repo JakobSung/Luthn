@@ -232,10 +232,14 @@ luthn mcp --list-tools
 인한 누락을 막기 위해 Stop hook 프로세스 안에서 최대 10초 동안 동기 전송하며
 실패 허용 동작을 유지합니다. macOS와 Linux는 기존 Python helper의 비동기 전송을
 사용합니다. 기본 자동 회상은 새 작업이나 중요한 주제 변경 때 최대 3개 항목·약
-600 token·200ms 실패 허용 제한·10분 cache로 `get_context_pack`을 한 번 호출하고,
-같은 작업에서는 이미 반환된 맥락을 재사용합니다. 메모리가 실제 반환된 경우에만
-commentary에 `Luthn 메모리 N개 참고`를 한 번 표시합니다. 반복 실행과 연결 해제는
-관계없는 Codex 설정을 보존합니다.
+600 token·200ms 실패 허용 제한·10분 cache로 `get_context_pack`을 한 번 호출합니다.
+특정 agent·다른 agent의 작업·이전 작업·과거 결정·현재 상태 질문도 답변 전에 같은
+회상을 먼저 시도합니다. 결과가 비었거나 부족하거나 600 token을 넘거나 시간 초과·실패하면
+같은 안전 메타데이터로 제한된 `search_safe_context` fallback을 한 번 시도하고, 그것도
+비었거나 실패하면 추정하지 않고 Luthn이 맥락을 검증하지 못했다고 명시합니다. 같은
+질문에 직접 답하는 반환 맥락은 재사용하며 로컬 memory 파일로 대체하지 않습니다.
+메모리가 실제 반환된 경우에만 commentary에 `Luthn 메모리 N개 참고`를 한 번 표시합니다.
+반복 실행과 연결 해제는 관계없는 Codex 설정을 보존합니다.
 
 최초 연결 또는 관리 hook 변경 뒤 Codex를 다시 시작하고 `/hooks`에서
 `Stop > luthn.agent-connector.v1`을 Trust합니다. Luthn은 Codex의 hook 신뢰 결정을

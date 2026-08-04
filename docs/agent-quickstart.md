@@ -111,8 +111,13 @@ The command adds only a Luthn-managed block to Codex instructions and preserves
 unrelated user instructions. That block asks Codex to:
 
 - call `get_context_pack` once at a new task or material topic change;
+- call `get_context_pack` before answering questions about a named agent,
+  another agent's work, prior work, a past decision, or current work status;
 - retrieve at most 3 items with an estimated 600-token budget;
-- use a 200 ms deadline and continue without memory on timeout or failure;
+- when the pack is empty, irrelevant, over budget, times out, or fails, try one
+  bounded `search_safe_context` lookup with the same safe metadata;
+- say that Luthn could not verify the requested context when the fallback is
+  empty or fails, rather than guessing;
 - reuse the returned context during the same task;
 - refresh after 10 minutes when the task continues;
 - avoid automatic lookup on every turn.
@@ -124,7 +129,8 @@ and recency boosts. Never use a raw workspace path, transcript path, transcript
 content, credential, or customer identifier as recall metadata.
 
 Use `search_safe_context` or `query_shared_memory` explicitly when a task needs
-deeper recall.
+deeper recall beyond this bounded fallback. Do not replace Luthn recall with
+local memory files or unverified conversation history.
 
 ### Agent mutation boundary
 
