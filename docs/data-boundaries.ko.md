@@ -44,7 +44,7 @@ agent context에 나중에 나타날 수 있는 전체 투영을 분류합니다
 - Confidential: `contract`, `invoice`, `payment`, `tax`, `customer`, `email`,
   `personal identifier`, `finance`, `accounting`, `private message`,
   `incident log`. `finance`에는 금액·매출·연봉·급여·가격·비용·수익·예산·
-  수수료·견적과 이에 대응하는 영어 표현이 포함됩니다.
+  수수료와 이에 대응하는 영어 표현이 포함됩니다.
 
 로컬 mock은 이 taxonomy에 대응하는 제한된 한국어·영어 표지를 인식합니다.
 이는 시험·실험용 동작이며 운영 품질을 보장하지 않습니다.

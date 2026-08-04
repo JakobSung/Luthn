@@ -56,8 +56,7 @@ Category taxonomy version `1` uses stable canonical category names:
 - Confidential: `contract`, `invoice`, `payment`, `tax`, `customer`, `email`,
   `personal identifier`, `finance`, `accounting`, `private message`,
   `incident log`. The `finance` category includes monetary amounts, revenue,
-  salary, price, cost, profit, budget, fee, quote, and their Korean
-  equivalents.
+  salary, price, cost, profit, budget, fee, and their Korean equivalents.
 
 The local mock recognizes bounded English and Korean marker phrases for this
 taxonomy. It remains a test and experiment classifier, not a production

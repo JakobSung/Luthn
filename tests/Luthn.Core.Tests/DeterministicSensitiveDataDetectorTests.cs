@@ -50,6 +50,7 @@ public sealed class DeterministicSensitiveDataDetectorTests
     [InlineData("release@example")]
     [InlineData("public contributor guide")]
     [InlineData("홍길동 사원이 업무를 진행했다")]
+    [InlineData("홍길동 사원이 공개 견적을 발행했다")]
     [InlineData("2026-08-04에 v1.2.3을 배포했고 3개 항목을 처리했다")]
     public void DetectorRejectsBenignNearMisses(string content)
     {

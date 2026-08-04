@@ -10,6 +10,7 @@ public sealed class ClassificationContractTests
     {
         { "공개된 설치 안내입니다.", SensitivityLevel.Public, "" },
         { "홍길동 사원이 업무를 진행했다.", SensitivityLevel.Public, "" },
+        { "홍길동 사원이 공개 견적을 발행했다.", SensitivityLevel.Public, "" },
         { "고객 계약서의 결제 조건입니다.", SensitivityLevel.Confidential, "contract" },
         { "홍길동 사원의 연봉은 5000만원입니다.", SensitivityLevel.Confidential, "finance" },
         { "Annual salary is USD 12000.", SensitivityLevel.Confidential, "finance" },
