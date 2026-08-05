@@ -121,6 +121,19 @@ network request and leaves queued records untouched. A real Luthn Ontology
 transport, tenant/auth service, billing, and shared team data plane belong to a
 separate commercial repository.
 
+### Planned central team Hub extension
+
+The approved team topology keeps this safe-projection outbox but moves Agent
+capture into one Organization-level OSS Hub. Member PCs do not run the full
+runtime. The Hub will persist ingress before classification, process it through
+bounded lease-based workers, keep sensitive payloads encrypted locally, and
+publish only safe projections through the outbox. Cloud-issued connection
+identity is mapped into the existing server-derived Workspace boundary.
+
+This is a roadmap boundary rather than current behavior. The queue, identity,
+backpressure, failure, and capacity contracts are defined in
+[`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
+
 ## Plugin Ingestion Contract
 
 Plugin ingestion starts as a metadata contract rather than a new storage path.

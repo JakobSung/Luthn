@@ -107,3 +107,14 @@ WorkspaceId와 기존 작성자 필드를 함께 기록한다. 모든 읽기가 
 - 과금, quota, entitlement
 - SSO 및 Cloud 관리 콘솔
 - 감사 데이터 v2와 외부 telemetry 계약 개선
+
+## 계획된 중앙 Hub 후속 작업
+
+팀 Cloud 구조는 구현 완료된 서버 신뢰 Workspace 경계를 중앙 OSS Hub 하나에서 그대로
+사용합니다. Cloud는 계속 Organization과 membership의 source of truth입니다. Hub는
+인증된 `HubInstallation`, `Membership`, `AgentConnection`, `AgentSession`, turn 귀속을
+추가로 기록해야 하지만, 어떤 값도 caller가 선택하는 request field가 되어서는 안 됩니다.
+
+durable Hub ingress, classification worker, scope별 rate limit, backpressure,
+dead-letter 복구, Cloud relay와 용량 검증은 별도 예정 작업입니다. 자세한 내용은
+[중앙 팀 Hub data plane 계획](cloud-hub-data-plane.ko.md)에 있습니다.

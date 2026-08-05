@@ -34,6 +34,11 @@ context.
 - Local-only operation is the invariant. External publication requires an
   operator action and exports only a versioned public-safe projection through a
   durable local outbox. The public repository contains no active cloud client.
+- The approved future team topology uses one central OSS Hub per Organization,
+  not one full installation per member PC. The Hub owns raw/sensitive intake and
+  durable processing; Cloud owns identity, relay, and safe shared memory. This
+  is planned behavior, not a claim about the current runtime. See
+  [`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
 - Local self-host smoke flows should run without provider credentials.
 - The repository must remain safe to expose: no credentials, private source
   records, customer originals, local agent artifacts, local planning state, or
@@ -58,6 +63,11 @@ Approved shared memory
   -> disabled transport boundary
   -> future commercial cloud adapter outside this repository
 ```
+
+The team Hub extension adds an asynchronous ingress and classification boundary
+before the existing publication outbox. Member Agents use Cloud-issued remote
+MCP/OAuth plus an Agent-native lifecycle integration rather than installing the
+full runtime on every PC.
 
 Runtime projects:
 
@@ -130,6 +140,8 @@ git diff --check
 - `docs/agent-quickstart.md`: agent and MCP connection path.
 - `docs/licensing.md`: package license boundary.
 - `docs/architecture.md`: Core model reference.
+- `docs/cloud-hub-data-plane.md`: planned central team Hub, queue, identity,
+  capacity, and Cloud connection contract.
 - `docs/project-structure.md`: structure and historical mapping reference.
 - `docs/data-boundaries.md`: concrete data classification examples.
 - `docs/source-references.md`: source reference shape.

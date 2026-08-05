@@ -1,0 +1,187 @@
+# 중앙 팀 Hub Data Plane 계획
+
+[English](cloud-hub-data-plane.md)
+
+상태: 제품 방향 승인, 현재 공개 runtime에는 아직 구현되지 않음
+
+## 배포 경계
+
+개인 셀프호스팅은 현재 방식을 유지합니다. 한 사용자가 Luthn을 설치하고 로컬 Agent를
+연결합니다. 팀 Cloud 모드에서는 조직 관리자가 항상 켜진 서버 또는 PC에 중앙 OSS Hub
+하나를 운영합니다. 다른 구성원 PC에는 Docker, 전체 OSS runtime, Luthn 네이티브
+클라이언트를 설치하지 않습니다.
+
+구성원은 Cloud Organization과 Workspace에 가입하고, 사용자·기기·Agent별 연결로
+Codex 또는 Claude Code를 연결합니다. OAuth를 사용하는 remote MCP는 회상과 도구를
+제공합니다. 안정적인 turn 자동 수집에는 Agent의 Stop hook, plugin 또는 관리형 설정도
+필요합니다. MCP 등록만으로 모든 Agent lifecycle event 수집이 보장되지는 않습니다.
+
+공개 저장소는 Hub data plane을 소유합니다. 비공개 Luthn Cloud는 Organization control
+plane, 구성원 identity, Agent 연결 enrollment, relay, 안전 공유 기억, 감사, 구독과 관리형
+운영을 소유합니다.
+
+## 신뢰 identity 계층
+
+```text
+Organization                 Cloud control plane
+  -> Workspace               Cloud binding, OSS 인가 경계
+     -> HubInstallation      고객 운영 OSS runtime
+     -> Membership           사람 접근
+        -> AgentConnection   구성원 + 기기 + Agent
+           -> AgentSession
+              -> Turn
+```
+
+Cloud credential은 Organization, Workspace, Membership, AgentConnection을
+바인딩합니다. Hub 요청 경계의 신뢰 middleware가 `WorkspaceId`, `UserId`,
+`ActorKind`, `ActorId`, `AgentConnectionId`, `SessionId`와 turn 멱등 identity를
+해석하고 기록합니다. request body, SDK field, connector field, MCP argument 또는 임의
+header는 이 값을 덮어쓸 수 없습니다.
+
+OSS persistence는 Organization membership, billing, entitlement 또는 Cloud role의
+source of truth가 되지 않습니다. Hub data-plane 작업의 인가, partition, 작성자 귀속,
+중복 방지와 감사를 위해 필요한 제한된 identity만 저장합니다.
+
+## 목표 수집 흐름
+
+```text
+Agent lifecycle connector
+  -> Cloud relay를 통한 인증된 Hub ingress
+  -> schema, 크기, 신뢰 identity 검증
+  -> 멱등성 확인
+  -> 암호화 raw capsule + ingress queue row 원자 저장
+  -> 202 Accepted
+
+Classification worker
+  -> ingress item lease
+  -> 제한된 provider 분류 + deterministic guard
+  -> 정책 결정
+     -> 민감/비공개: Hub 암호화 payload store
+     -> 안전/공유 가능: version 지정 safe projection
+     -> 불확실: 검토 필요
+
+Safe publication worker
+  -> 현재 durable safe-projection outbox
+  -> Cloud acknowledgement/checkpoint
+  -> 지연 revision보다 body-free revoke 우선
+```
+
+Agent가 접속하는 공개 endpoint와 인증서는 Cloud가 관리합니다. Hub는 outbound 인증
+relay 연결을 유지하므로 관리자가 inbound port를 열거나 공개 인증서를 관리하지 않습니다.
+raw capsule은 relay 전에 Hub용으로 암호화합니다. Cloud는 제한된 TTL 동안 Hub 암호문
+envelope만 임시 보관할 수 있고 plaintext는 Hub 경계 안에 남습니다.
+
+## Queue 계약
+
+### Ingress queue
+
+- admission 단계에서 인증, 크기/schema 제한, 멱등성을 검증합니다.
+- 암호화 raw capsule, 신뢰 귀속정보, queue row를 PostgreSQL transaction 하나로
+  commit합니다.
+- `202 Accepted`는 durable owner가 event를 인수했다는 뜻이며 분류나 Cloud sync 완료를
+  뜻하지 않습니다.
+- 중복 전송은 성공 no-op이며 기존 opaque receipt를 반환합니다.
+- 대기 작업은 Hub 재시작 후 복구되고, 인수한 event를 조용히 버리지 않습니다.
+
+### Classification queue
+
+- worker는 lease, 전체 제한 concurrency, Workspace별 제한 concurrency를 사용합니다.
+- provider timeout, retry, exponential backoff가 ingress 요청을 붙잡지 않습니다.
+- 재시도 소진 작업은 metadata-only dead-letter 상태로 이동합니다. replay는 명시적이고
+  감사 가능하며 멱등적이고 현재 정책을 다시 통과합니다.
+- provider 실패나 불확실성을 safe projection으로 하향하지 않습니다.
+
+### Safe-projection outbox
+
+- 승인된 version 지정 safe projection 또는 body-free revoke만 queue에 넣습니다.
+- origin, local record, revision, operation, Workspace가 순서·멱등 경계입니다.
+- acknowledgement가 durable checkpoint를 전진시킵니다.
+- 재연결과 복구에서는 지연 revision보다 revoke tombstone을 먼저 적용해 삭제 기억의
+  부활을 막습니다.
+
+## Backpressure와 공정성
+
+모든 구성원이 Cloud relay IP 하나를 통해 들어올 수 있으므로 현재 remote-IP limiter는
+팀 경계로 충분하지 않습니다. 팀 모드는 Organization, Workspace, Membership,
+AgentConnection별 요청·byte budget과 outstanding queue limit, 전체/Workspace별 worker
+concurrency가 필요합니다.
+
+hard limit에 도달하면 retry 가능한 명시적 상태, 안정된 error code와 `Retry-After`를
+반환합니다. 먼저 승인하고 나중에 event를 버리면 안 됩니다. 한 Workspace의 과부하가
+다른 Workspace를 굶기지 않아야 합니다.
+
+## 관측성
+
+내용을 포함하지 않는 metric과 상태에는 최소한 다음이 필요합니다.
+
+- ingress accepted, duplicate, rejected, backpressured count
+- ingress queue depth, byte, oldest pending age
+- classification active work, provider latency, retry/exhausted count,
+  dead-letter depth
+- safe-projection outbox depth, oldest pending age, acknowledgement rate,
+  Cloud sync lag
+- relay heartbeat와 connected, stale, disconnected, revoked 상태
+- prompt, transcript, summary, credential, local path, 민감 값을 제외한
+  Workspace별 saturation
+
+## 현재 구현 기준선
+
+현재 runtime은 개인/셀프호스트 기준선으로는 동작하지만 다중 구성원 Hub 용량을 증명한
+상태는 아닙니다. 이 계획 승인 시점의 제약은 다음과 같습니다.
+
+- connector의 turn capsule은 약 3,900자로 제한됩니다.
+- turn intake가 최종 저장 완료 전에 분류 provider를 호출합니다.
+- 분류 provider 기본값은 30초 timeout과 2회 시도입니다.
+- connector HTTP timeout은 약 4초이고 fail-open합니다.
+- Host API rate limit 기본값은 remote IP당 분당 600회이며 limiter queue가 없습니다.
+- safe-projection outbox는 기본 20개 row를 5초 worker loop에서 순차 처리합니다.
+- 다중 구성원 Hub의 표준 동시 부하 suite가 없습니다.
+
+이 값은 교체하거나 검증할 구현 기준선이며 제품 용량 약속이 아닙니다.
+
+## 구현 로드맵
+
+1. Cloud identity, Hub relay, 암호화 envelope, receipt, error 계약을 Apache-2.0
+   SDK 또는 안정된 HTTP 명세로 versioning합니다.
+2. server-stamped AgentConnection/session 귀속을 가진 비동기 durable ingress를
+   추가합니다.
+3. 분류를 lease 기반 bounded worker 뒤로 옮기고 retry, dead-letter, replay, 공정성
+   제어를 추가합니다.
+4. 암호화 민감 저장과 safe projection 생성을 현재 정책·outbox 경계에 연결합니다.
+5. 개인 self-host의 disabled-by-default를 유지하면서 Hub enrollment와 outbound Cloud
+   relay transport를 추가합니다.
+6. Codex와 Claude 팀 연결에 remote MCP/OAuth 및 lifecycle capture 설정 계약을
+   추가합니다.
+7. 운영 상태, alert, backup/restore와 용량 시험을 추가합니다.
+
+## 용량·복구 출시 게이트
+
+다음 자동화 evidence가 필요합니다.
+
+| 시나리오 | 필수 결과 |
+| --- | --- |
+| 일반 사용자 10명 | 유실 없는 안정된 ingress와 분류 |
+| 사용자 50명, 분당 turn 1개 | 지속 처리량과 Workspace 공정성 |
+| 동시 완료 50건 | 명시적 admission/backpressure와 제한된 drain 시간 |
+| provider 5초·30초 지연 | ingress 응답 유지와 queue age 관측 |
+| provider 오류/rate limit | 제한 retry, dead-letter, 감사 replay |
+| Cloud 장애·복구 | 순서 보장 outbox replay와 revoke-first |
+| 중복·순서 역전 event | 성공 no-op과 결정적 최종 상태 |
+| 대기 작업 중 Hub 재시작 | queue, lease, checkpoint 복구 |
+| noisy Workspace | 다른 Workspace의 목표 유지 |
+
+초기 디자인 파트너 목표는 Hub 접속 가능 시 ingress p95 500ms 미만, 승인 데이터 유실
+0건, 멱등 retry에 의한 중복 기억 0건, 정상 classification queue age 1분 미만입니다.
+최종 용량은 hardware, PostgreSQL 설정, concurrency, provider, throughput, p50/p95/p99,
+CPU/memory, 실패, retry, queue/sync lag를 기록해 결정합니다.
+
+## 첫 구현 slice의 명시적 비범위
+
+- 현재 개인 셀프호스트 흐름의 변경 또는 제거
+- 모든 구성원 PC에 전체 runtime, Docker 또는 네이티브 Luthn client 설치
+- OSS Hub를 Organization membership 또는 billing의 source of truth로 만들기
+- caller가 tenant, Workspace, member, Agent, session scope를 선택하게 하기
+- raw 또는 민감 plaintext를 safe-projection 계약으로 보내기
+- durable owner가 복구를 보장할 수 없는데도 조용히 성공 처리하기
+- multi-Hub HA, multi-region data plane, SAML, SCIM, custom enterprise role
+
