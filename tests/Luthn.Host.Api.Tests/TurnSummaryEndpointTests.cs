@@ -207,6 +207,60 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
+    public async Task MonetaryContextWithoutNumericAmountCreatesSafeEventProjection()
+    {
+        const string originalSummary = "홍길동 사원이 연봉 협상을 완료했다.";
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-finance-context-1",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = originalSummary,
+            coreTags = new[] { "people", "negotiation" },
+            title = "홍길동 연봉 기록",
+            idempotencyKey = "summary-finance-context-1"
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.True(body.RootElement.GetProperty("allowsAgentContext").GetBoolean());
+        Assert.Equal("Public", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+
+        using var contextResponse = await client.PostAsJsonAsync("/api/agent/context-packs", new
+        {
+            query = "홍길동",
+            coreTags = new[] { "people" },
+            maxItems = 10
+        });
+        using var contextBody = await JsonDocument.ParseAsync(await contextResponse.Content.ReadAsStreamAsync());
+        var item = Assert.Single(contextBody.RootElement.GetProperty("items").EnumerateArray());
+        var safeSummary = item.GetProperty("safeSummary").GetString()!;
+
+        Assert.Equal(HttpStatusCode.OK, contextResponse.StatusCode);
+        Assert.Contains("홍길동 사원", safeSummary, StringComparison.Ordinal);
+        Assert.Contains("협상을 완료했다", safeSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("연봉", safeSummary, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, safeSummary, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var source = await db.SourceEvents.SingleAsync();
+        var memory = await db.SharedMemoryItems.SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.SingleAsync();
+
+        Assert.True(source.ContainsSensitiveMaterial);
+        Assert.True(memory.AllowsAgentContext);
+        Assert.DoesNotContain("연봉", memory.Title, StringComparison.Ordinal);
+        Assert.DoesNotContain("연봉", memory.SafeSummary, StringComparison.Ordinal);
+        var protector = factory.Services.GetRequiredService<ISensitiveMemoryPayloadProtector>();
+        var plaintext = protector.Unprotect(memory.Id, encrypted.ProtectedPayload);
+        Assert.Equal(originalSummary, plaintext.SafeSummary);
+    }
+
+    [Fact]
     public async Task RawProjectPathAndFreeFormSourceMetadataAreRejected()
     {
         using var factory = CreateFactory();
