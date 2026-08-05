@@ -106,6 +106,22 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.Contains("finance", result.Categories);
     }
 
+    [Fact]
+    public void RedactorRemovesMonetaryContextWithoutNumericAmount()
+    {
+        const string content = "홍길동 사원이 연봉 협상을 완료했다.";
+
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.Contains("홍길동 사원", result.Text, StringComparison.Ordinal);
+        Assert.Contains("협상을 완료했다", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("연봉", result.Text, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+        Assert.Contains("finance", result.Categories);
+    }
+
     [Theory]
     [InlineData("ghp_short")]
     [InlineData("010-123-456")]

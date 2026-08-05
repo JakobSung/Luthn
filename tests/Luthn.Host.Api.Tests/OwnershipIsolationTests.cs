@@ -149,6 +149,7 @@ public sealed class OwnershipIsolationTests
         using var factory = CreateFactory(sharedWorkspace: true);
         using var alice = Client(factory, AliceBearer);
         using var bob = Client(factory, BobBearer);
+        using var operatorClient = Client(factory, OperatorBearer);
 
         using var created = await alice.PostAsJsonAsync("/api/memory/items", new
         {
@@ -171,6 +172,8 @@ public sealed class OwnershipIsolationTests
         }
 
         using var bobRead = await bob.GetAsync($"/api/memory/items/{memoryId}");
+        using var bobProvenance = await bob.GetAsync($"/api/provenance/memory-items/{memoryId}");
+        using var operatorProvenance = await operatorClient.GetAsync($"/api/provenance/memory-items/{memoryId}");
         using var bobSearch = await bob.PostAsJsonAsync("/api/agent/search", new
         {
             query = "public-safe deployment memory",
@@ -180,6 +183,8 @@ public sealed class OwnershipIsolationTests
         using var bobSearchBody = await JsonDocument.ParseAsync(await bobSearch.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.OK, bobRead.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, bobProvenance.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, operatorProvenance.StatusCode);
         Assert.Equal(HttpStatusCode.OK, bobSearch.StatusCode);
         Assert.Contains(
             bobSearchBody.RootElement.GetProperty("results").EnumerateArray(),
@@ -188,6 +193,63 @@ public sealed class OwnershipIsolationTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
         Assert.Equal("team-alpha", (await db.SharedMemoryItems.SingleAsync()).WorkspaceId);
+    }
+
+    [Fact]
+    public async Task SharedWorkspaceKeepsSensitiveAccessRequestsOwnerScoped()
+    {
+        using var factory = CreateFactory(sharedWorkspace: true);
+        using var alice = Client(factory, AliceBearer);
+        using var bob = Client(factory, BobBearer);
+        using var operatorClient = Client(factory, OperatorBearer);
+
+        using var source = await alice.PostAsJsonAsync("/api/sources", new
+        {
+            sourceSystem = "local",
+            sourceType = "note",
+            content = "Internal recovery note contains a private key.",
+            title = "Sensitive recovery note",
+            safeSummary = "Recovery procedure metadata.",
+            coreTags = new[] { "recovery" }
+        });
+        Assert.Equal(HttpStatusCode.Created, source.StatusCode);
+        using var sourceBody = await JsonDocument.ParseAsync(await source.Content.ReadAsStreamAsync());
+        var sensitiveReferenceId = sourceBody.RootElement.GetProperty("sensitiveReferenceId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(sensitiveReferenceId));
+
+        var requestBody = new
+        {
+            sensitiveReferenceId,
+            reason = "Need a redacted recovery summary.",
+            sessionId = "shared-workspace-sensitive-session",
+            expiresInSeconds = 600
+        };
+        using var bobCreate = await bob.PostAsJsonAsync("/api/access-requests", requestBody);
+        using var aliceCreate = await alice.PostAsJsonAsync("/api/access-requests", requestBody);
+
+        Assert.Equal(HttpStatusCode.NotFound, bobCreate.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, aliceCreate.StatusCode);
+        using var aliceCreateBody = await JsonDocument.ParseAsync(await aliceCreate.Content.ReadAsStreamAsync());
+        var accessRequestId = aliceCreateBody.RootElement.GetProperty("id").GetString();
+
+        using var approved = await operatorClient.PostAsJsonAsync(
+            $"/api/access-requests/{accessRequestId}/approve",
+            new
+            {
+                reason = "Approved bounded output.",
+                redactedSummary = "Recovery procedure review completed."
+            });
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+
+        using var bobRead = await bob.GetAsync($"/api/access-requests/{accessRequestId}");
+        using var bobResult = await bob.GetAsync($"/api/access-requests/{accessRequestId}/result");
+        using var aliceRead = await alice.GetAsync($"/api/access-requests/{accessRequestId}");
+        using var aliceResult = await alice.GetAsync($"/api/access-requests/{accessRequestId}/result");
+
+        Assert.Equal(HttpStatusCode.NotFound, bobRead.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, bobResult.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, aliceRead.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, aliceResult.StatusCode);
     }
 
     [Fact]

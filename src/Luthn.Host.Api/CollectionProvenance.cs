@@ -176,7 +176,9 @@ public static class CollectionProvenanceEndpoints
         LuthnRequestPrincipal principal,
         CancellationToken cancellationToken)
     {
-        query = query.Where(record => record.WorkspaceId == principal.WorkspaceId);
+        query = query.Where(record =>
+            record.WorkspaceId == principal.WorkspaceId &&
+            (principal.IsOperator || record.AuthenticatedUserId == principal.UserId));
         var record = await query.AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         return record is null
             ? TypedResults.NotFound()
