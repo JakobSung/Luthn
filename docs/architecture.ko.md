@@ -38,6 +38,17 @@ VaultRecord -> KnowledgeItem로 요약 -> WikiDocument로 투영
 
 공개 상태·감사 메타데이터·durable outbox row는 함께 커밋됩니다. Worker는 lease로 준비된 row를 가져와 backoff 재시도하고, 전송되지 않은 이전 revision을 `Superseded`로 만들며, acknowledgement/checkpoint와 취소 tombstone을 관리합니다. 이 저장소의 유일한 transport는 `disabled`이고 네트워크 요청을 하지 않습니다. 실제 cloud adapter와 tenant/auth, billing, 팀 data plane은 별도 상용 저장소 범위입니다.
 
+### 계획된 중앙 팀 Hub 확장
+
+승인된 팀 구조는 현재 safe-projection outbox를 유지하면서 Agent 수집을 Organization의
+중앙 OSS Hub 하나로 모읍니다. 구성원 PC는 전체 runtime을 실행하지 않습니다. Hub는 분류
+전에 ingress를 내구 저장하고 제한된 lease worker로 처리하며, 민감 payload는 로컬에서
+암호화하고 safe projection만 outbox로 보냅니다. Cloud가 발급한 connection identity는
+현재 서버 신뢰 Workspace 경계로 해석합니다.
+
+이는 현재 동작이 아니라 로드맵 경계입니다. queue, identity, backpressure, 장애와 용량
+계약은 [중앙 팀 Hub data plane 계획](cloud-hub-data-plane.ko.md)에 정의합니다.
+
 ## Plugin 수집 계약
 
 Plugin 수집은 새 저장 경로가 아닌 메타데이터 계약입니다. source, 동의 근거, digest, payload 분류, 재시도 상태, 수신 시각, Core tag를 식별한 뒤 source intake로 넘깁니다. 지원 source는 email, messenger, document, local file, agent chat입니다.

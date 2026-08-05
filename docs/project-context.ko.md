@@ -20,6 +20,10 @@ Luthn은 AI 에이전트용 직접 호스팅 공유 기억 계층입니다. 민�
 - 위키 Markdown은 Core가 관리하는 지식의 투영이며 원본 사실 저장소가 아닙니다.
 - 로컬/PostgreSQL이 기본 직접 호스팅 기억 경로이고 외부 기억 서비스는 Luthn 정책 뒤의 선택적 adapter입니다.
 - 로컬 전용 동작은 불변 조건입니다. 외부 공개에는 운영자 동작이 필요하며, 버전이 지정된 공개 안전 투영만 로컬 durable outbox를 거칩니다. 공개 저장소에는 활성 cloud client가 없습니다.
+- 승인된 미래 팀 구조는 구성원 PC마다 전체 설치를 두지 않고 Organization당 중앙 OSS
+  Hub 하나를 사용합니다. Hub는 raw/민감 수집과 durable 처리를, Cloud는 identity,
+  relay와 안전 공유 기억을 맡습니다. 이는 현재 runtime 구현을 뜻하지 않는 계획입니다.
+  자세한 내용은 [중앙 팀 Hub data plane 계획](cloud-hub-data-plane.ko.md)에 있습니다.
 - 로컬 직접 호스팅 확인 흐름은 provider 자격 증명 없이 실행할 수 있어야 합니다.
 - 저장소에는 자격 증명, 비공개 원본, 고객 원문, 로컬 에이전트 자료, 계획 상태, 실행 증거를 두지 않습니다.
 
@@ -42,6 +46,10 @@ Luthn은 AI 에이전트용 직접 호스팅 공유 기억 계층입니다. 민�
   -> 비활성 전송 경계
   -> 이 저장소 밖의 미래 상용 cloud adapter
 ```
+
+팀 Hub 확장은 현재 공개 outbox 앞에 비동기 ingress·classification 경계를 추가합니다.
+구성원 Agent는 각 PC에 전체 runtime을 설치하는 대신 Cloud가 발급한 remote MCP/OAuth와
+Agent-native lifecycle 연동을 사용합니다.
 
 runtime 프로젝트는 `Luthn.Core`, `Luthn.Core.Persistence`, `Luthn.Host.Api`, `Luthn.Host.Worker`, `Luthn.Tools`, `Luthn.Sdk`, `Luthn.AgentConnector.Http`, `Luthn.McpServer`입니다.
 
@@ -79,6 +87,7 @@ git diff --check
 - [Codex 연결](agent-quickstart.ko.md)
 - [라이선스](licensing.ko.md)
 - [구조](architecture.ko.md)
+- [중앙 팀 Hub data plane 계획](cloud-hub-data-plane.ko.md)
 - [프로젝트 구조](project-structure.ko.md)
 - [데이터 경계](data-boundaries.ko.md)
 - [원본 참조](source-references.ko.md)
