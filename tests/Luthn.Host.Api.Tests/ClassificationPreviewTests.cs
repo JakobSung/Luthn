@@ -59,6 +59,8 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("Mock — local default", index, StringComparison.Ordinal);
         Assert.Contains("Self-hosted / external HTTP", index, StringComparison.Ordinal);
         Assert.Contains("Access requests", index, StringComparison.Ordinal);
+        Assert.Contains("Request review", index, StringComparison.Ordinal);
+        Assert.Contains("Protected content and credentials are never loaded", index, StringComparison.Ordinal);
         Assert.Contains("Agent connections", index, StringComparison.Ordinal);
         Assert.Contains("Read-only agent connection status", index, StringComparison.Ordinal);
         Assert.Contains("<th scope=\"col\">Owner</th>", index, StringComparison.Ordinal);
@@ -73,6 +75,14 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("/api/external-publication/status", script, StringComparison.Ordinal);
         Assert.Contains("mockOption.disabled = !settings.mockAllowed", script, StringComparison.Ordinal);
         Assert.Contains("settings.statusDetail", script, StringComparison.Ordinal);
+        Assert.Contains("/operator-detail", script, StringComparison.Ordinal);
+        Assert.Contains("sanitizeAccessDetail", script, StringComparison.Ordinal);
+        Assert.Contains("useDecisionToken: true", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("request.requestedBy", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("request.workspaceId", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("detail?.requestedBy", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("detail?.workspaceId", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("detail?.sessionId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/observations", script, StringComparison.Ordinal);
     }
 

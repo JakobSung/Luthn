@@ -1,7 +1,11 @@
 const state = {
   token: sessionStorage.getItem("luthn.serviceToken") || "",
   decisionToken: sessionStorage.getItem("luthn.decisionToken") || "",
-  operatorIdentity: sessionStorage.getItem("luthn.operatorIdentity") || ""
+  operatorIdentity: sessionStorage.getItem("luthn.operatorIdentity") || "",
+  selectedAccessRequestId: "",
+  selectedAccessDetail: null,
+  accessDetailRequestSequence: 0,
+  accessDecisionPending: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -507,13 +511,24 @@ const refreshAccessRequests = async (event) => {
     setAction("access refreshed", `${result.requests?.length || 0} requests`);
   } catch (error) {
     renderAccessRows([]);
+    clearAccessDetail("Access requests could not be loaded.");
     setAction("access failed", error.message);
   }
 };
 
 const decideAccessRequest = async (id, decision) => {
-  const form = new FormData($("#accessForm"));
-  const reason = form.get("reason")?.toString().trim() || "Reviewed in operator console.";
+  if (state.accessDecisionPending || !state.selectedAccessDetail || state.selectedAccessRequestId !== id || state.selectedAccessDetail.status !== "Pending") {
+    return;
+  }
+
+  const formElement = $("#accessDecisionForm");
+  const form = new FormData(formElement);
+  const reason = form.get("reason")?.toString().trim() || "";
+  if (!reason) {
+    formElement.reportValidity();
+    updateAccessDecisionState();
+    return;
+  }
   const redactedSummary = form.get("redactedSummary")?.toString().trim();
   const body = decision === "approve"
     ? {
@@ -522,36 +537,137 @@ const decideAccessRequest = async (id, decision) => {
       }
     : { reason };
 
+  state.accessDecisionPending = true;
+  updateAccessDecisionState();
   try {
-    const result = await requestJson(`/api/access-requests/${id}/${decision}`, {
+    const result = await requestJson(`/api/access-requests/${encodeURIComponent(id)}/${decision}`, {
       method: "POST",
       body: JSON.stringify(body),
       useDecisionToken: true
     });
     setAction(`access ${decision}`, result.id);
     await refreshAccessRequests();
+    await loadAccessRequestDetail(id);
     await refreshAudit();
   } catch (error) {
     setAction(`access ${decision} failed`, error.message);
+  } finally {
+    state.accessDecisionPending = false;
+    updateAccessDecisionState();
+  }
+};
+
+const accessDetailDefaults = {
+  id: "Not selected",
+  status: "—",
+  createdAt: "—",
+  expiresAt: "—",
+  requestReason: "—",
+  decisionReason: "—",
+  decidedAt: "—",
+  outputPolicy: "—",
+  referenceLabel: "—",
+  referenceSource: "—",
+  redactedSummary: "—"
+};
+
+const setAccessDetailFields = (values = accessDetailDefaults) => {
+  Object.entries(accessDetailDefaults).forEach(([field, fallback]) => {
+    const target = document.querySelector(`[data-access-field="${field}"]`);
+    target.textContent = values[field] || fallback;
+  });
+};
+
+const updateAccessDecisionState = () => {
+  const reason = $("#accessDecisionForm").reason.value.trim();
+  const canDecide = !state.accessDecisionPending && state.selectedAccessDetail?.status === "Pending" && Boolean(reason);
+  $("#approveAccess").disabled = !canDecide;
+  $("#denyAccess").disabled = !canDecide;
+};
+
+const clearAccessDetail = (message = "Select a request to review.") => {
+  state.accessDetailRequestSequence += 1;
+  state.selectedAccessRequestId = "";
+  state.selectedAccessDetail = null;
+  setAccessDetailFields();
+  $("#accessDetailStatus").textContent = message;
+  $("#accessDecisionForm").reset();
+  updateAccessDecisionState();
+  document.querySelectorAll("#accessRows tr").forEach((row) => row.removeAttribute("aria-selected"));
+};
+
+const sanitizeAccessDetail = (detail) => ({
+  id: boundedText(detail?.id, 128, "Unknown request"),
+  status: boundedText(detail?.status, 32),
+  createdAt: formatTimestamp(detail?.createdAt),
+  expiresAt: formatTimestamp(detail?.expiresAt),
+  requestReason: boundedText(detail?.requestReason, 1000, "Not provided"),
+  decisionReason: boundedText(detail?.decisionReason, 1000, "Not decided"),
+  decidedAt: detail?.decidedAt ? formatTimestamp(detail.decidedAt) : "Not decided",
+  outputPolicy: boundedText(detail?.outputPolicy, 128),
+  referenceLabel: boundedText(detail?.reference?.referenceLabel, 256),
+  referenceSource: [
+    boundedText(detail?.reference?.sourceSystem, 128, ""),
+    boundedText(detail?.reference?.sourceType, 128, "")
+  ].filter(Boolean).join(" / ") || "Unknown",
+  redactedSummary: boundedText(detail?.reference?.redactedSummary, 4000, "Not available")
+});
+
+const loadAccessRequestDetail = async (id) => {
+  const sequence = state.accessDetailRequestSequence + 1;
+  clearAccessDetail("Loading request metadata...");
+  state.accessDetailRequestSequence = sequence;
+
+  try {
+    const detail = await requestJson(`/api/access-requests/${encodeURIComponent(id)}/operator-detail`, {
+      useDecisionToken: true,
+      cache: "no-store"
+    });
+    if (state.accessDetailRequestSequence !== sequence) {
+      return;
+    }
+
+    const safeDetail = sanitizeAccessDetail(detail);
+    state.selectedAccessRequestId = id;
+    state.selectedAccessDetail = safeDetail;
+    setAccessDetailFields(safeDetail);
+    $("#accessDetailStatus").textContent = safeDetail.status === "Pending"
+      ? "Review metadata and enter a decision reason."
+      : `Decision complete: ${safeDetail.status}`;
+    document.querySelectorAll("#accessRows tr").forEach((row) => {
+      row.setAttribute("aria-selected", row.dataset.requestId === id ? "true" : "false");
+    });
+    updateAccessDecisionState();
+    setAction("access detail loaded", safeDetail.id);
+  } catch (error) {
+    if (state.accessDetailRequestSequence === sequence) {
+      clearAccessDetail("Request metadata is unavailable.");
+      setAction("access detail failed", error.message);
+    }
   }
 };
 
 const renderAccessRows = (requests) => {
   const rows = $("#accessRows");
   if (requests.length === 0) {
-    rows.innerHTML = '<tr><td colspan="7">No access requests available.</td></tr>';
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    cell.textContent = "No access requests available.";
+    row.appendChild(cell);
+    rows.replaceChildren(row);
     return;
   }
 
   rows.replaceChildren(...requests.map((request) => {
     const tr = document.createElement("tr");
+    tr.dataset.requestId = request.id;
     [
       new Date(request.createdAt).toLocaleString(),
       request.id,
       request.sensitiveReferenceId,
       request.status,
-      request.outputPolicy || (request.redactedOutputAvailable ? "available" : "unavailable"),
-      request.requestedBy
+      request.outputPolicy || (request.redactedOutputAvailable ? "available" : "unavailable")
     ].forEach((value) => {
       const td = document.createElement("td");
       td.textContent = value || "";
@@ -559,23 +675,12 @@ const renderAccessRows = (requests) => {
     });
 
     const actionCell = document.createElement("td");
-    if (request.status === "Pending") {
-      const actions = document.createElement("div");
-      actions.className = "row-actions";
-      const approve = document.createElement("button");
-      approve.type = "button";
-      approve.textContent = "Approve";
-      approve.addEventListener("click", () => decideAccessRequest(request.id, "approve"));
-      const deny = document.createElement("button");
-      deny.type = "button";
-      deny.className = "secondary";
-      deny.textContent = "Deny";
-      deny.addEventListener("click", () => decideAccessRequest(request.id, "deny"));
-      actions.append(approve, deny);
-      actionCell.appendChild(actions);
-    } else {
-      actionCell.textContent = request.decidedBy || "decided";
-    }
+    const review = document.createElement("button");
+    review.type = "button";
+    review.className = "secondary";
+    review.textContent = request.status === "Pending" ? "Review" : "View";
+    review.addEventListener("click", () => loadAccessRequestDetail(request.id));
+    actionCell.appendChild(review);
     tr.appendChild(actionCell);
 
     return tr;
@@ -680,6 +785,7 @@ $("#saveToken").addEventListener("click", () => {
   state.token = $("#serviceToken").value.trim();
   state.decisionToken = $("#decisionToken").value.trim();
   state.operatorIdentity = $("#operatorIdentity").value.trim();
+  clearAccessDetail("Credentials changed. Select a request again.");
   if (state.token) {
     sessionStorage.setItem("luthn.serviceToken", state.token);
   } else {
@@ -709,6 +815,7 @@ $("#clearToken").addEventListener("click", () => {
   sessionStorage.removeItem("luthn.serviceToken");
   sessionStorage.removeItem("luthn.decisionToken");
   sessionStorage.removeItem("luthn.operatorIdentity");
+  clearAccessDetail("Credentials cleared. Select a request after signing in.");
   setAction("token cleared", "Bearer header disabled");
   refreshAgentConnections();
   refreshSyncStatus();
@@ -719,6 +826,9 @@ $("#providerForm").addEventListener("submit", saveProviderSettings);
 $("#providerForm").provider.addEventListener("change", applyProviderDefaults);
 $("#testProvider").addEventListener("click", testProviderSettings);
 $("#accessForm").addEventListener("submit", refreshAccessRequests);
+$("#accessDecisionForm").reason.addEventListener("input", updateAccessDecisionState);
+$("#approveAccess").addEventListener("click", () => decideAccessRequest(state.selectedAccessRequestId, "approve"));
+$("#denyAccess").addEventListener("click", () => decideAccessRequest(state.selectedAccessRequestId, "deny"));
 $("#auditForm").addEventListener("submit", refreshAudit);
 $("#previewExample").addEventListener("click", fillPreviewExample);
 $("#intakeExample").addEventListener("click", fillIntakeExample);

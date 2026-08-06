@@ -251,7 +251,7 @@
             <p class="eyebrow">Sensitive access</p>
             <h2>Access requests</h2>
           </div>
-          <form id="accessForm" class="audit-filter">
+          <form id="accessForm" class="access-filter">
             <label>
               Status
               <select name="status">
@@ -265,14 +265,6 @@
               Limit
               <input name="limit" type="number" min="1" max="100" value="25">
             </label>
-            <label>
-              Decision reason
-              <input name="reason" value="Reviewed in operator console.">
-            </label>
-            <label class="decision-output">
-              Reviewed output
-              <textarea name="redactedSummary" rows="2" maxlength="4000" placeholder="Optional public-safe output for approvals only"></textarea>
-            </label>
             <button type="submit">Refresh</button>
           </form>
         </div>
@@ -285,14 +277,52 @@
                 <th>Reference</th>
                 <th>Status</th>
                 <th>Result</th>
-                <th>Actor</th>
-                <th>Decision</th>
+                <th>Review</th>
               </tr>
             </thead>
             <tbody id="accessRows">
-              <tr><td colspan="7">No access requests loaded.</td></tr>
+              <tr><td colspan="6">No access requests loaded.</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="access-workbench" aria-labelledby="accessDetailHeading">
+          <div class="access-detail">
+            <div class="workbench-heading">
+              <div>
+                <p class="eyebrow">Allowlisted metadata only</p>
+                <h3 id="accessDetailHeading">Request review</h3>
+              </div>
+              <span id="accessDetailStatus" class="inline-status" aria-live="polite">Select a request to review.</span>
+            </div>
+            <dl id="accessDetailFields" class="access-detail-fields">
+              <div><dt>Request</dt><dd data-access-field="id">Not selected</dd></div>
+              <div><dt>Status</dt><dd data-access-field="status">—</dd></div>
+              <div><dt>Requested</dt><dd data-access-field="createdAt">—</dd></div>
+              <div><dt>Expires</dt><dd data-access-field="expiresAt">—</dd></div>
+              <div><dt>Request reason</dt><dd data-access-field="requestReason">—</dd></div>
+              <div><dt>Decision reason</dt><dd data-access-field="decisionReason">—</dd></div>
+              <div><dt>Decision time</dt><dd data-access-field="decidedAt">—</dd></div>
+              <div><dt>Output policy</dt><dd data-access-field="outputPolicy">—</dd></div>
+              <div><dt>Reference</dt><dd data-access-field="referenceLabel">—</dd></div>
+              <div><dt>Reference source</dt><dd data-access-field="referenceSource">—</dd></div>
+              <div class="detail-summary"><dt>Redacted summary</dt><dd data-access-field="redactedSummary">—</dd></div>
+            </dl>
+          </div>
+          <form id="accessDecisionForm" class="access-decision-form">
+            <p class="security-note">Protected content and credentials are never loaded into this console.</p>
+            <label>
+              Decision reason
+              <textarea name="reason" rows="3" maxlength="1000" required placeholder="Required for approve or deny"></textarea>
+            </label>
+            <label>
+              Reviewed output
+              <textarea name="redactedSummary" rows="3" maxlength="4000" placeholder="Optional public-safe output for approvals only"></textarea>
+            </label>
+            <div class="row-actions">
+              <button id="approveAccess" type="button" disabled>Approve</button>
+              <button id="denyAccess" type="button" class="secondary" disabled>Deny</button>
+            </div>
+          </form>
         </div>
       </section>
 
