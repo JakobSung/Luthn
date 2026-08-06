@@ -389,6 +389,21 @@ protected payload, credential, workspace id, owner id는 응답하지 않습니�
 
 새 호출자는 `sessionId`와 60–3600초 범위의 `expiresInSeconds`를 보내야 합니다. 만료 필드 도입 전의 버전 없는 계약과 호환하기 위해 두 값을 생략한 기존 호출에는 서버가 `legacy-...` session id와 600초 만료를 부여합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한, 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은 메타데이터 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며 `pending-approval`, `expired-no-output`, `denied-no-output`, `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를 사용하고 원문은 반환하지 않습니다. 만료는 `sensitive_access.expired` 메타데이터 감사 사건으로 기록되며 결과 조회는 `sensitive_access.result_read` 감사 사건을 만듭니다.
 
+## Cloud-neutral 동기화 계약
+
+`Luthn.Sdk`는 installation enrollment, capability negotiation, 안전 투영 batch,
+receipt, checkpoint, 제한된 오류, metadata-only 감사 page를 위한 additive v2 DTO를
+제공합니다. 이는 transport-neutral 계약일 뿐입니다. OSS runtime은 계속 기본적으로
+비활성 sync transport를 등록하며 이 DTO만으로 Cloud endpoint나 credential 저장소가
+활성화되지 않습니다.
+
+v2 투영 payload에는 Organization, Workspace, Installation identity를 넣지 않습니다.
+수신자는 caller가 선택한 tenancy 필드가 아니라 인증된 Installation authority에서
+tenant 범위를 결정합니다. 엄격한 입력 계약은 알 수 없는 필드와 raw/Vault content,
+encrypted payload, credential, prompt, transcript, working directory, local path를
+거절합니다. 기존 `SafeProjectionSyncEnvelopeDto` v1 JSON 형식은 하위 호환을 위해
+그대로 유지합니다.
+
 ## 감사 사건
 
 ```http

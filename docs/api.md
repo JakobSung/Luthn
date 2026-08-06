@@ -767,6 +767,22 @@ Result response:
 
 `GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Explicit request lifetime is bounded to 60–3600 seconds; expiry records a metadata-only `sensitive_access.expired` audit event. Result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy.
 
+## Cloud-neutral synchronization contracts
+
+`Luthn.Sdk` exposes additive version-two DTOs for installation enrollment,
+capability negotiation, safe-projection batches, receipts, checkpoints,
+bounded errors, and metadata-only audit pages. These are transport-neutral
+contracts only: the OSS runtime still registers the disabled sync transport by
+default and no Cloud endpoint or credential store is enabled by these types.
+
+Version-two projection payloads deliberately omit Organization, Workspace, and
+Installation identity. A receiver derives tenant scope from the authenticated
+Installation authority instead of accepting caller-selected tenancy fields.
+The strict input contract rejects unknown fields, including raw/Vault content,
+encrypted payloads, credentials, prompts, transcripts, working directories,
+and local paths. The existing `SafeProjectionSyncEnvelopeDto` version-one JSON
+shape remains available for compatibility.
+
 ## Audit events
 
 ```http
