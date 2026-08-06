@@ -68,6 +68,36 @@ public sealed class PostgresIntegrationSmokeTests
             Assert.Equal(1, remaining.DeletedCount);
         }
 
+        await using (var auditSeed = new LuthnDbContext(options))
+        {
+            auditSeed.AuditEvents.AddRange(
+                AuditCursorContractTests.Audit(
+                    "audit-access-newer", "sensitive_access.requested", now.AddDays(-11)),
+                AuditCursorContractTests.Audit(
+                    "audit-configuration-oldest",
+                    "operator.classification_provider.updated",
+                    now.AddDays(-30)));
+            await auditSeed.SaveChangesAsync();
+        }
+
+        await using (var auditCleanupDb = new LuthnDbContext(options))
+        {
+            var auditRetention = new AuditRetentionOptions
+            {
+                AccessDays = 10,
+                SecurityDays = 10,
+                ConfigurationDays = 10,
+                PublicationDays = 10,
+                IngestionDays = 10,
+                RetentionDays = 10
+            };
+            var result = await new AuditRetentionCleanupProcessor(
+                    auditCleanupDb,
+                    Options.Create(auditRetention))
+                .ProcessBatchAsync(now, 1);
+            Assert.Equal(1, result.DeletedCount);
+        }
+
         await using var verify = new LuthnDbContext(options);
         Assert.False(await verify.SharedMemoryItems.AnyAsync(record => record.Id == "memory-cleanup-oldest"));
         Assert.False(await verify.SharedMemoryItems.AnyAsync(record => record.Id == "memory-cleanup-next"));
@@ -84,6 +114,14 @@ public sealed class PostgresIntegrationSmokeTests
             record.Id == "cleanup-next"));
         Assert.True(await verify.SharedMemoryItems.AnyAsync(record =>
             record.Id == "memory-cleanup-durable"));
+        Assert.False(await verify.AuditEvents.AnyAsync(record =>
+            record.Id == "audit-configuration-oldest"));
+        Assert.True(await verify.AuditEvents.AnyAsync(record =>
+            record.Id == "audit-access-newer"));
+        Assert.Equal(
+            1,
+            await verify.AuditEvents.CountAsync(record =>
+                record.Action == "audit.retention.pruned"));
         Assert.Equal(
             2,
             await verify.AuditEvents.CountAsync(record =>

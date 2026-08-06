@@ -51,6 +51,7 @@ public sealed record AuthenticatedInstallationAuthorityDto(
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record SafeProjectionSyncEnvelopeV2Dto(
+    [property: JsonPropertyName("operationId")] string OperationId,
     [property: JsonPropertyName("localRecordId")] string LocalRecordId,
     [property: JsonPropertyName("revision")] long Revision,
     [property: JsonPropertyName("operation")] string Operation,

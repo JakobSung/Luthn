@@ -257,7 +257,10 @@ public static class AuditEndpoints
             Category = normalizedCategory,
             Cursor = null
         };
-        var filterHash = ComputeFilterHash(normalizedFilters);
+        var authorizationScope = scopeKind == AuditEventScopeKind.Workspace
+            ? $"workspace:{principal.WorkspaceId}"
+            : "installation";
+        var filterHash = ComputeFilterHash(normalizedFilters, authorizationScope);
         var cursorError = DecodeCursor(
             filters.Cursor,
             filterHash,
@@ -426,9 +429,12 @@ public static class AuditEndpoints
         return null;
     }
 
-    private static string ComputeFilterHash(AuditFilterArguments filters)
+    private static string ComputeFilterHash(
+        AuditFilterArguments filters,
+        string authorizationScope)
     {
         var canonical = string.Join('\n',
+            authorizationScope,
             filters.Scope,
             filters.Action,
             filters.ActionPrefix,

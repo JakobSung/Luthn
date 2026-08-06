@@ -778,6 +778,9 @@ default and no Cloud endpoint or credential store is enabled by these types.
 Version-two projection payloads deliberately omit Organization, Workspace, and
 Installation identity. A receiver derives tenant scope from the authenticated
 Installation authority instead of accepting caller-selected tenancy fields.
+Each batch item carries an opaque `operationId` that the receiver returns in its
+receipt, so acknowledgement and checkpoint advancement never depend on tenant
+identity or content fields.
 The strict input contract rejects unknown fields, including raw/Vault content,
 encrypted payloads, credentials, prompts, transcripts, working directories,
 and local paths. The existing `SafeProjectionSyncEnvelopeDto` version-one JSON

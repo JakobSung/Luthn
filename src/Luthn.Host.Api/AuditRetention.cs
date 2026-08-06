@@ -183,30 +183,31 @@ public sealed class AuditRetentionCleanupProcessor(
             batchSize,
             AuditRetentionOptions.MaximumCleanupBatchSize);
 
-        var candidateIds = new List<string>(batchSize);
+        var candidates = new List<AuditRetentionCandidate>(batchSize * AuditEventCategories.All.Count);
         foreach (var category in AuditEventCategories.All)
         {
-            var remaining = batchSize - candidateIds.Count;
-            if (remaining == 0)
-            {
-                break;
-            }
-
             var cutoff = now.AddDays(-options.Value.DaysFor(category));
-            var categoryIds = await AuditEventCategories
+            var categoryCandidates = await AuditEventCategories
                 .Apply(db.AuditEvents.AsNoTracking().Where(record => record.OccurredAt <= cutoff), category)
                 .OrderBy(record => record.OccurredAt)
                 .ThenBy(record => record.Id)
-                .Select(record => record.Id)
-                .Take(remaining)
+                .Select(record => new AuditRetentionCandidate(record.Id, record.OccurredAt))
+                .Take(batchSize)
                 .ToArrayAsync(cancellationToken);
-            candidateIds.AddRange(categoryIds);
+            candidates.AddRange(categoryCandidates);
         }
 
-        if (candidateIds.Count == 0)
+        if (candidates.Count == 0)
         {
             return new AuditRetentionCleanupResult(0);
         }
+
+        var candidateIds = candidates
+            .OrderBy(candidate => candidate.OccurredAt)
+            .ThenBy(candidate => candidate.Id, StringComparer.Ordinal)
+            .Take(batchSize)
+            .Select(candidate => candidate.Id)
+            .ToArray();
 
         var deletedCount = await db.DeleteAuditEventsForRetentionAsync(
             candidateIds,
@@ -223,6 +224,8 @@ public sealed class AuditRetentionCleanupProcessor(
 
         return new AuditRetentionCleanupResult(deletedCount);
     }
+
+    private sealed record AuditRetentionCandidate(string Id, DateTimeOffset OccurredAt);
 }
 
 internal sealed class AuditRetentionCleanupHostedService(

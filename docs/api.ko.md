@@ -399,7 +399,9 @@ receipt, checkpoint, 제한된 오류, metadata-only 감사 page를 위한 addit
 
 v2 투영 payload에는 Organization, Workspace, Installation identity를 넣지 않습니다.
 수신자는 caller가 선택한 tenancy 필드가 아니라 인증된 Installation authority에서
-tenant 범위를 결정합니다. 엄격한 입력 계약은 알 수 없는 필드와 raw/Vault content,
+tenant 범위를 결정합니다. 각 batch item은 opaque `operationId`를 포함하고 수신자는
+이를 receipt에 그대로 반환하므로 승인과 checkpoint 갱신이 tenant identity나 content
+필드에 의존하지 않습니다. 엄격한 입력 계약은 알 수 없는 필드와 raw/Vault content,
 encrypted payload, credential, prompt, transcript, working directory, local path를
 거절합니다. 기존 `SafeProjectionSyncEnvelopeDto` v1 JSON 형식은 하위 호환을 위해
 그대로 유지합니다.

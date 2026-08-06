@@ -59,6 +59,7 @@ public sealed class CloudContractTests
             ["safe-projection.v2"],
             [
                 new SafeProjectionSyncEnvelopeV2Dto(
+                    "operation-1",
                     "memory-1",
                     2,
                     "Upsert",
@@ -109,6 +110,7 @@ public sealed class SafeProjectionAuthorityTests
         Assert.DoesNotContain("organizationId", authorityJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("workspaceId", authorityJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("installationId", batchJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"operationId\":\"operation-1\"", batchJson, StringComparison.Ordinal);
         CloudContractTests.AssertForbiddenTokensAbsent(batchJson);
     }
 }
