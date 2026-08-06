@@ -911,7 +911,54 @@ Supported scopes:
 - `access.decide`
 - `audit.read`
 - `metrics.read`
+- `hub.ingress.write`
+- `hub.ingress.operate`
 - `*`
+
+## Central OSS Hub ingress (opt-in)
+
+The public runtime includes an opt-in Hub data-plane foundation. It is disabled
+by default and does not implement a Cloud HTTP transport. A Hub ingress token
+must bind `HubOrganizationId`, `WorkspaceId`, `UserId`,
+`HubAgentConnectionId`, `HubAgentId`, and `HubSessionId` in server
+configuration. The request body cannot select or override those identities.
+
+```http
+POST /api/hub/ingress/capsules
+Authorization: Bearer <hub-ingress-token>
+```
+
+```json
+{
+  "idempotencyKey": "turn-event-42",
+  "contentDigest": "sha256:<64-lowercase-hex>",
+  "capsule": "bounded agent lifecycle capsule"
+}
+```
+
+The server verifies the digest and configured byte limit, protects the capsule
+with the OSS Data Protection key ring, atomically persists the queue item and
+metadata-only audit event, then returns `202 Accepted`. The receipt contains
+only `receiptId`, state, duplicate status, acceptance time, and
+`payloadClass=metadata-only`. An identical retry returns the same receipt;
+reuse with a different digest returns `409`. Scope capacity or rate saturation
+returns `429`, a stable `code`, `retryAfterSeconds`, and `Retry-After` without
+acknowledging or dropping the capsule.
+
+The local worker uses bounded Workspace-fair batches, leases, retry/backoff,
+dead-letter state, and current-policy replay. Only a workspace-bound operator
+with `hub.ingress.operate` can replay a dead letter:
+
+```http
+POST /api/hub/ingress/dead-letter/{receiptId}/replay
+GET /api/hub/status
+```
+
+Hub status is aggregate and metadata-only: admission outcomes, protected queue
+bytes/depth/oldest age, processing/retry/dead-letter counts, safe-projection
+outbox age/checkpoints, bounded worker durations, and relay state. It omits
+workspace, member, Agent, and session identities as well as capsule content,
+credentials, prompts, transcripts, and local paths.
 
 ## Vault boundary
 

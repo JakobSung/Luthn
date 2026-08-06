@@ -187,6 +187,72 @@ public sealed class HubIngressTests : IClassFixture<WebApplicationFactory<Progra
             audit.Action == "hub.ingress.replayed" && audit.PayloadClass == "metadata-only");
     }
 
+    [Fact]
+    public async Task FiftySimultaneousCompletionsAreDurableOrExplicitlyBackpressured()
+    {
+        using var factory = CreateFactory(agentPendingLimit: 10);
+        using var client = CreateClient(factory, AliceBearer);
+        var requests = Enumerable.Range(1, 50)
+            .Select(index => PostAsync(client, $"burst-{index}", $"burst capsule {index}"))
+            .ToArray();
+
+        var responses = await Task.WhenAll(requests);
+        try
+        {
+            var accepted = responses.Count(response => response.StatusCode == HttpStatusCode.Accepted);
+            var backpressured = responses.Count(response => response.StatusCode == HttpStatusCode.TooManyRequests);
+            Assert.Equal(50, accepted + backpressured);
+            Assert.Equal(10, accepted);
+            Assert.Equal(40, backpressured);
+            Assert.All(
+                responses.Where(response => response.StatusCode == HttpStatusCode.TooManyRequests),
+                response => Assert.True(response.Headers.Contains("Retry-After")));
+
+            using var scope = factory.Services.CreateScope();
+            Assert.Equal(
+                accepted,
+                await scope.ServiceProvider.GetRequiredService<LuthnDbContext>()
+                    .HubIngressQueue.CountAsync());
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task HubOperationalStatusIsAggregateAndContentFree()
+    {
+        using var factory = CreateFactory(agentPendingLimit: 1);
+        using var writer = CreateClient(factory, AliceBearer);
+        using var operatorClient = CreateClient(factory, OperatorBearer);
+        using var accepted = await PostAsync(writer, "status-1", "private prompt /Users/member/path");
+        using var backpressured = await PostAsync(writer, "status-2", "another private prompt");
+
+        using var response = await operatorClient.GetAsync("/api/hub/status");
+        var text = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(text);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("metadata-only", body.RootElement.GetProperty("payloadClass").GetString());
+        Assert.Equal("disabled", body.RootElement.GetProperty("relayState").GetString());
+        Assert.Equal(1, body.RootElement.GetProperty("ingressQueue").GetProperty("pending").GetInt32());
+        Assert.True(body.RootElement.GetProperty("ingressQueue").GetProperty("protectedBytes").GetInt64() > 0);
+        var outcomes = body.RootElement.GetProperty("metrics").GetProperty("admissions")
+            .EnumerateArray().ToDictionary(
+                item => item.GetProperty("outcome").GetString()!,
+                item => item.GetProperty("count").GetInt64());
+        Assert.Equal(1, outcomes["accepted"]);
+        Assert.Equal(1, outcomes["backpressured"]);
+        Assert.DoesNotContain("workspace-alice", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("connection-alice", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("private prompt", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Users/member", text, StringComparison.Ordinal);
+    }
+
     private WebApplicationFactory<Program> CreateFactory(int agentPendingLimit = 250) =>
         _factory.WithWebHostBuilder(builder =>
         {

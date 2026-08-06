@@ -134,6 +134,9 @@ builder.Services.AddOptions<HubIngressOptions>()
     .ValidateOnStart();
 builder.Services.AddScoped<HubIngressQueueService>();
 builder.Services.AddScoped<HubIngressQueueProcessor>();
+builder.Services.AddSingleton<IHubIngressAdmissionCoordinator, HubIngressAdmissionCoordinator>();
+builder.Services.AddSingleton<IHubOperationalMetrics, HubOperationalMetrics>();
+builder.Services.AddScoped<HubOperationalStatusService>();
 builder.Services.AddHostedService<HubIngressWorkerHostedService>();
 if (builder.Environment.IsEnvironment("Testing"))
 {
@@ -197,6 +200,7 @@ app.MapOperatorConfiguration();
 app.MapOperationalMetrics();
 app.MapSearchTelemetry();
 app.MapHubIngress();
+app.MapHubOperationalStatus();
 
 app.Run();
 

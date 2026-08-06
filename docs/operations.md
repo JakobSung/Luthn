@@ -313,6 +313,43 @@ it contains no identity or protected data. Dynamic API values must continue to
 use text-only DOM rendering. Keep sensitive-access decisions separate from
 external-publication decisions so one approval cannot imply the other.
 
+## Central OSS Hub runtime foundation
+
+Personal self-host remains the default: Hub ingress, its classification worker,
+and the outbound relay are all disabled unless the operator explicitly enables
+them. The public build contains no real Cloud transport. To run the initial Hub
+data plane, configure multi-user service-token identity bindings and set:
+
+```dotenv
+Luthn__Hub__Ingress__Enabled=true
+Luthn__Hub__Ingress__WorkerEnabled=true
+Luthn__Hub__Ingress__MaxCapsuleBytes=16384
+Luthn__Hub__Ingress__OrganizationPendingLimit=5000
+Luthn__Hub__Ingress__WorkspacePendingLimit=1000
+Luthn__Hub__Ingress__MemberPendingLimit=500
+Luthn__Hub__Ingress__AgentPendingLimit=250
+Luthn__Hub__Ingress__WorkerBatchSize=20
+Luthn__Hub__Ingress__WorkerPerWorkspaceBatchLimit=5
+Luthn__Hub__Ingress__WorkerLeaseSeconds=120
+Luthn__Hub__Ingress__WorkerMaxAttempts=5
+```
+
+Keep the persisted Data Protection key ring and PostgreSQL backup as one
+recovery set. A missing or incompatible key ring moves affected work to a
+metadata-only dead letter; it must never cause a public/safe downgrade. Use
+`GET /api/hub/status` for aggregate queue, retry, dead-letter, outbox, relay,
+and bounded duration evidence. Use the operator-only replay route after fixing
+the provider or protection problem; replay runs the current classifier and
+policy again.
+
+The deterministic harness covers 10 normal users, 50 users with one item each,
+a 50-request burst with explicit admission/backpressure accounting, a
+controlled provider delay, expired-lease restart recovery, and relay
+outage/reconnect with revoke-first ordering. These are correctness and recovery
+baselines, not production throughput or latency SLOs. Record actual hardware,
+PostgreSQL configuration, provider, throughput, p50/p95/p99, CPU/memory,
+failures, retries, and queue/sync lag before setting capacity.
+
 ## External Memory Service Adapter Boundary
 
 External memory services are optional adapters. They are not a second raw

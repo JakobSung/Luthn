@@ -127,20 +127,20 @@ public sealed class HubRelayOutboxTests
     private static SafeProjectionSyncOutboxRecord CreateRecord(
         SafeProjectionSyncEnvelope envelope,
         DateTimeOffset createdAt) => new()
-    {
-        Id = $"sync-{envelope.Revision}",
-        IdempotencyKey = SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope),
-        OriginInstanceId = envelope.OriginInstanceId,
-        LocalRecordId = envelope.LocalRecordId,
-        WorkspaceId = envelope.WorkspaceId,
-        OwnerUserId = "member-1",
-        Revision = envelope.Revision,
-        Operation = envelope.Operation,
-        ContractVersion = envelope.ContractVersion,
-        SafeEnvelopeJson = JsonSerializer.Serialize(envelope, SerializerOptions),
-        State = SafeProjectionSyncOutboxState.Pending,
-        CreatedAt = createdAt
-    };
+        {
+            Id = $"sync-{envelope.Revision}",
+            IdempotencyKey = SafeProjectionSyncPolicy.CreateIdempotencyKey(envelope),
+            OriginInstanceId = envelope.OriginInstanceId,
+            LocalRecordId = envelope.LocalRecordId,
+            WorkspaceId = envelope.WorkspaceId,
+            OwnerUserId = "member-1",
+            Revision = envelope.Revision,
+            Operation = envelope.Operation,
+            ContractVersion = envelope.ContractVersion,
+            SafeEnvelopeJson = JsonSerializer.Serialize(envelope, SerializerOptions),
+            State = SafeProjectionSyncOutboxState.Pending,
+            CreatedAt = createdAt
+        };
 
     private static JsonSerializerOptions CreateSerializerOptions()
     {

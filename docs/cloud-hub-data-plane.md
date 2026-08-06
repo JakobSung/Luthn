@@ -2,8 +2,10 @@
 
 [한국어](cloud-hub-data-plane.ko.md)
 
-Status: approved product direction; not implemented by the current public
-runtime.
+Status: the public runtime implements the initial opt-in encrypted durable
+ingress, bounded local worker, disabled/fake relay boundary, and deterministic
+recovery harness. Cloud enrollment, identity control plane, and real outbound
+transport remain unimplemented.
 
 ## Deployment boundary
 
@@ -202,4 +204,3 @@ p50/p95/p99, CPU/memory, failures, retries, and queue/sync lag.
 - silently accepting data when no durable owner can guarantee recovery;
 - multi-Hub high availability, multi-region data planes, SAML, SCIM, or custom
   enterprise roles.
-

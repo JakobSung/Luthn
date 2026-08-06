@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
 using Luthn.Core.Persistence;
@@ -21,9 +22,12 @@ public sealed class HubIngressQueueProcessor(
     IContentClassifier classifier,
     IPolicyEngine policy,
     IOptions<HubIngressOptions> options,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IHubOperationalMetrics? operationalMetrics = null)
 {
     private readonly HubIngressOptions _options = options.Value;
+    private readonly IHubOperationalMetrics _metrics =
+        operationalMetrics ?? NullHubOperationalMetrics.Instance;
 
     public async Task<HubIngressProcessResult> ProcessBatchAsync(
         CancellationToken cancellationToken = default)
@@ -54,6 +58,7 @@ public sealed class HubIngressQueueProcessor(
             record.NextAttemptAt = null;
             await db.SaveChangesAsync(cancellationToken);
             claimed++;
+            var processingStarted = Stopwatch.GetTimestamp();
 
             try
             {
@@ -78,6 +83,7 @@ public sealed class HubIngressQueueProcessor(
                 record.ContainsSensitiveMaterial = classification.ContainsSensitiveMaterial;
                 db.AuditEvents.Add(CreateAudit(record, "hub.ingress.classified", "completed", record.CompletedAt.Value));
                 await db.SaveChangesAsync(cancellationToken);
+                _metrics.RecordWorker("completed", Stopwatch.GetElapsedTime(processingStarted));
                 completed++;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -108,10 +114,12 @@ public sealed class HubIngressQueueProcessor(
                 await db.SaveChangesAsync(cancellationToken);
                 if (exhausted)
                 {
+                    _metrics.RecordWorker("dead_letter", Stopwatch.GetElapsedTime(processingStarted));
                     deadLetter++;
                 }
                 else
                 {
+                    _metrics.RecordWorker("retry", Stopwatch.GetElapsedTime(processingStarted));
                     retryScheduled++;
                 }
             }
@@ -204,6 +212,10 @@ public sealed class HubIngressQueueProcessor(
         if (expired.Length > 0)
         {
             await db.SaveChangesAsync(cancellationToken);
+            for (var index = 0; index < expired.Length; index++)
+            {
+                _metrics.RecordWorker("recovered", TimeSpan.Zero);
+            }
         }
         return new HubIngressLeaseRecovery(expired.Length, deadLetters);
     }

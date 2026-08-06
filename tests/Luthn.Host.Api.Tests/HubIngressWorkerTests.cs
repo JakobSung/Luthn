@@ -1,16 +1,133 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
+using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
 using Luthn.Core.Policy;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api.Tests;
 
 public sealed class HubIngressWorkerTests
 {
+    [Fact]
+    public async Task DelayedProviderDoesNotBlockIngressAndQueueAgeRemainsVisible()
+    {
+        var root = new InMemoryDatabaseRoot();
+        var databaseName = Guid.NewGuid().ToString("N");
+        var dbOptions = new DbContextOptionsBuilder<LuthnDbContext>()
+            .UseInMemoryDatabase(databaseName, root)
+            .Options;
+        await using var workerDb = new LuthnDbContext(dbOptions);
+        await using var ingressDb = new LuthnDbContext(dbOptions);
+        await using var statusDb = new LuthnDbContext(dbOptions);
+        var protector = CreateProtector();
+        var delayedRecord = CreateRecord(protector, "delayed-1", "workspace-a", "delayed decision");
+        delayedRecord.AcceptedAt = DateTimeOffset.UtcNow.AddSeconds(-30);
+        workerDb.HubIngressQueue.Add(delayedRecord);
+        await workerDb.SaveChangesAsync();
+        var classifier = new ControlledClassifier();
+        var metrics = new HubOperationalMetrics();
+        var options = new HubIngressOptions();
+        var processor = new HubIngressQueueProcessor(
+            workerDb,
+            protector,
+            classifier,
+            new PolicyEngine(),
+            Options.Create(options),
+            TimeProvider.System,
+            metrics);
+
+        var processing = processor.ProcessBatchAsync();
+        await classifier.Started.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(processing.IsCompleted);
+
+        var queue = new HubIngressQueueService(
+            ingressDb,
+            protector,
+            Options.Create(options),
+            TimeProvider.System,
+            new HubIngressAdmissionCoordinator(),
+            metrics);
+        const string capsule = "ingress while provider waits";
+        var principal = new LuthnRequestPrincipal(
+            "member-2",
+            "workspace-b",
+            LuthnActorKind.Agent,
+            "agent",
+            false,
+            "organization-1",
+            "connection-b",
+            "codex",
+            "session-b");
+        var admission = await queue.EnqueueAsync(
+            new HubIngressRequest("event-during-delay", Digest(capsule), capsule),
+            principal,
+            "agent",
+            default);
+        var status = await new HubOperationalStatusService(
+            statusDb,
+            new DisabledHubOutboundRelayTransport(),
+            metrics,
+            TimeProvider.System).ReadAsync(default);
+
+        Assert.Equal(HubIngressAdmissionKind.Accepted, admission.Kind);
+        Assert.Equal(1, status.IngressQueue.Pending);
+        Assert.Equal(1, status.IngressQueue.Processing);
+        Assert.True(status.IngressQueue.OldestPendingAgeSeconds >= 29);
+        classifier.Release();
+        var completed = await processing;
+        Assert.Equal(1, completed.CompletedCount);
+    }
+
+    [Fact]
+    public async Task TenAndFiftyUserLoadDrainsWithoutLossOrDuplicate()
+    {
+        await using var db = CreateDb();
+        var protector = CreateProtector();
+        var tenNormalUsers = Enumerable.Range(1, 10)
+            .Select(index => CreateRecord(
+                protector,
+                $"normal-{index}",
+                $"workspace-normal-{index}",
+                $"normal decision {index}"));
+        var fiftyUsers = Enumerable.Range(1, 50)
+            .Select(index => CreateRecord(
+                protector,
+                $"sustained-{index}",
+                $"workspace-sustained-{index}",
+                $"sustained decision {index}"));
+        db.HubIngressQueue.AddRange(tenNormalUsers.Concat(fiftyUsers));
+        await db.SaveChangesAsync();
+        var processor = CreateProcessor(db, protector, new MockContentClassifier(), new HubIngressOptions
+        {
+            WorkerBatchSize = 20,
+            WorkerPerWorkspaceBatchLimit = 1
+        });
+
+        var processed = 0;
+        while (true)
+        {
+            var batch = await processor.ProcessBatchAsync();
+            processed += batch.CompletedCount;
+            if (batch.ClaimedCount == 0)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(60, processed);
+        Assert.Equal(60, await db.HubIngressQueue.CountAsync());
+        Assert.Equal(60, await db.HubIngressQueue.CountAsync(record =>
+            record.State == HubIngressQueueState.Completed));
+        Assert.Equal(60, await db.HubIngressQueue.Select(record => record.ReceiptId).Distinct().CountAsync());
+    }
+
     [Fact]
     public async Task HubWorkerFairnessClaimsAtMostOneItemPerWorkspacePerBatch()
     {
@@ -186,4 +303,33 @@ public sealed class HubIngressWorkerTests
             ValueTask.FromException<ClassificationResult>(
                 new ClassificationProviderException("provider unavailable with no content echo"));
     }
+
+    private sealed class ControlledClassifier : IContentClassifier
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Started => _started.Task;
+        public ClassificationProviderBoundary Boundary { get; } =
+            new("controlled-delay", "local-classification-input", "local-only");
+
+        public void Release() => _released.TrySetResult();
+
+        public async ValueTask<ClassificationResult> ClassifyAsync(
+            PublicRecordId sourceId,
+            string content,
+            string? sourceType,
+            CancellationToken cancellationToken = default)
+        {
+            _started.TrySetResult();
+            await _released.Task.WaitAsync(cancellationToken);
+            return await new MockContentClassifier().ClassifyAsync(
+                sourceId,
+                content,
+                sourceType,
+                cancellationToken);
+        }
+    }
+
+    private static string Digest(string value) =>
+        $"sha256:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant()}";
 }

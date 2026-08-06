@@ -103,7 +103,9 @@ public sealed class HubIngressQueueService(
     LuthnDbContext db,
     IHubIngressCapsuleProtector protector,
     IOptions<HubIngressOptions> options,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IHubIngressAdmissionCoordinator coordinator,
+    IHubOperationalMetrics metrics)
 {
     private readonly HubIngressOptions _options = options.Value;
 
@@ -120,20 +122,33 @@ public sealed class HubIngressQueueService(
             throw new InvalidOperationException("A trusted Hub identity binding is required.");
         }
 
+        await using var admissionLock = await coordinator.EnterAsync(
+            principal.HubOrganizationId!,
+            cancellationToken);
+
         var idempotencyKey = request.IdempotencyKey!.Trim().ToLowerInvariant();
         var contentDigest = NormalizeDigest(request.ContentDigest!);
         var existing = await FindExistingAsync(principal, idempotencyKey, cancellationToken);
         if (existing is not null)
         {
-            return string.Equals(existing.ContentDigest, contentDigest, StringComparison.Ordinal)
-                ? new HubIngressAdmission(HubIngressAdmissionKind.Duplicate, ToReceipt(existing, duplicate: true))
-                : new HubIngressAdmission(HubIngressAdmissionKind.Conflict, ErrorCode: "hub.ingress.idempotency_conflict");
+            if (string.Equals(existing.ContentDigest, contentDigest, StringComparison.Ordinal))
+            {
+                metrics.RecordAdmission("duplicate");
+                return new HubIngressAdmission(
+                    HubIngressAdmissionKind.Duplicate,
+                    ToReceipt(existing, duplicate: true));
+            }
+            metrics.RecordAdmission("rejected");
+            return new HubIngressAdmission(
+                HubIngressAdmissionKind.Conflict,
+                ErrorCode: "hub.ingress.idempotency_conflict");
         }
 
         var now = timeProvider.GetUtcNow();
         var backpressureCode = await ResolveBackpressureAsync(principal, now, cancellationToken);
         if (backpressureCode is not null)
         {
+            metrics.RecordAdmission("backpressured");
             return new HubIngressAdmission(
                 HubIngressAdmissionKind.Backpressured,
                 ErrorCode: backpressureCode,
@@ -164,7 +179,7 @@ public sealed class HubIngressQueueService(
         var strategy = db.Database.CreateExecutionStrategy();
         try
         {
-            return await strategy.ExecuteAsync(async () =>
+            var result = await strategy.ExecuteAsync(async () =>
             {
                 await using var transaction = db.Database.IsRelational()
                     ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
@@ -190,6 +205,8 @@ public sealed class HubIngressQueueService(
                     HubIngressAdmissionKind.Accepted,
                     ToReceipt(record, duplicate: false));
             });
+            metrics.RecordAdmission("accepted");
+            return result;
         }
         catch (DbUpdateException)
         {
@@ -199,9 +216,17 @@ public sealed class HubIngressQueueService(
             {
                 throw;
             }
-            return string.Equals(existing.ContentDigest, contentDigest, StringComparison.Ordinal)
-                ? new HubIngressAdmission(HubIngressAdmissionKind.Duplicate, ToReceipt(existing, duplicate: true))
-                : new HubIngressAdmission(HubIngressAdmissionKind.Conflict, ErrorCode: "hub.ingress.idempotency_conflict");
+            if (string.Equals(existing.ContentDigest, contentDigest, StringComparison.Ordinal))
+            {
+                metrics.RecordAdmission("duplicate");
+                return new HubIngressAdmission(
+                    HubIngressAdmissionKind.Duplicate,
+                    ToReceipt(existing, duplicate: true));
+            }
+            metrics.RecordAdmission("rejected");
+            return new HubIngressAdmission(
+                HubIngressAdmissionKind.Conflict,
+                ErrorCode: "hub.ingress.idempotency_conflict");
         }
     }
 

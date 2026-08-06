@@ -501,7 +501,51 @@ transcript, credential, 원본 source, Vault payload, 보호 memory를 감사 �
 dotnet run --project src/Luthn.Tools -- token-digest --stdin
 ```
 
-지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, `*`.
+지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, `hub.ingress.write`, `hub.ingress.operate`, `*`.
+
+## 중앙 OSS Hub ingress (선택 활성화)
+
+공개 runtime에는 선택적으로 켜는 Hub data-plane 기반이 있습니다. 기본값은
+비활성이며 Cloud HTTP transport는 구현하지 않습니다. Hub ingress token은 server
+설정에서 `HubOrganizationId`, `WorkspaceId`, `UserId`,
+`HubAgentConnectionId`, `HubAgentId`, `HubSessionId`를 바인딩해야 합니다.
+요청 body는 이 identity를 선택하거나 덮어쓸 수 없습니다.
+
+```http
+POST /api/hub/ingress/capsules
+Authorization: Bearer <hub-ingress-token>
+```
+
+```json
+{
+  "idempotencyKey": "turn-event-42",
+  "contentDigest": "sha256:<64-lowercase-hex>",
+  "capsule": "bounded agent lifecycle capsule"
+}
+```
+
+server는 digest와 byte 제한을 확인하고 OSS Data Protection key ring으로 capsule을
+보호한 뒤 queue row와 metadata-only audit를 원자적으로 저장하고 `202 Accepted`를
+반환합니다. receipt에는 `receiptId`, state, duplicate 여부, 수신 시각,
+`payloadClass=metadata-only`만 있습니다. 같은 digest 재전송은 같은 receipt를
+반환하고 다른 digest의 key 재사용은 `409`입니다. scope 용량·rate 포화는
+acknowledge하거나 버리지 않고 안정된 `code`, `retryAfterSeconds`, `Retry-After`가
+있는 `429`를 반환합니다.
+
+로컬 worker는 Workspace 공정성이 있는 제한 batch, lease, retry/backoff,
+dead-letter, 현재 정책 재적용 replay를 사용합니다. `hub.ingress.operate` scope와
+같은 Workspace의 운영자만 다음 API를 사용할 수 있습니다.
+
+```http
+POST /api/hub/ingress/dead-letter/{receiptId}/replay
+GET /api/hub/status
+```
+
+Hub status는 aggregate metadata-only입니다. admission outcome, 보호 queue
+byte/depth/oldest age, processing/retry/dead-letter, safe-projection outbox
+age/checkpoint, 제한된 worker duration과 relay state만 반환합니다. Workspace,
+구성원, Agent, session identity와 capsule 내용, credential, prompt, transcript,
+local path는 반환하지 않습니다.
 
 ## Vault 경계
 
