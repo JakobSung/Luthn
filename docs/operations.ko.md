@@ -140,6 +140,19 @@ metadata만 삭제하고 installation 범위의 metadata-only `audit.retention.p
 복사하지 않습니다. 정책 또는 조사에 필요할 때만 삭제 전에 감사 metadata를
 export하며, 이 export를 backup이나 내용 복구 수단으로 사용하지 않습니다.
 
+## OSS console mode와 언어
+
+운영 console은 개인 Local mode와 중앙 OSS Hub mode 모두에서 승인 권한의 정본입니다.
+banner는 `/api/operator/console-profile`에서 server identity 설정으로 결정한 mode를
+받으며 공개 OSS build는 항상 외부 전송 없음으로 표시합니다. browser에서 tenant
+identity를 바꾸거나 Cloud transport를 켜거나 Host API authorization을 우회하는
+control을 추가하지 않습니다.
+
+영어·한국어 정적 label은 allowlist된 browser preference를 사용합니다. token은
+session에만 두고, identity나 보호 데이터를 포함하지 않는 언어 preference만 local에
+보존할 수 있습니다. 동적 API 값은 계속 text-only DOM rendering을 사용합니다. 민감
+접근 결정과 외부 공개 결정을 분리해 한쪽 승인이 다른 쪽 승인을 뜻하지 않게 합니다.
+
 ## 외부 기억 서비스 Adapter 경계
 
 외부 기억 서비스는 선택적 adapter이며 두 번째 원본 저장 경로가 아닙니다. `metadata-only`, `safe-projection-only`인 `public-agent-allowed-safe-projections`만 내보냅니다. 항목은 공개이고 `PublicSafe` 또는 `SharedAcrossAgents`로 보이며 만료되지 않아야 합니다. 별도 안전 분류 경로가 생길 때까지 `title`과 Core tag는 비워 둡니다.

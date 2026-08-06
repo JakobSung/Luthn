@@ -404,6 +404,23 @@ encrypted payload, credential, prompt, transcript, working directory, local path
 거절합니다. 기존 `SafeProjectionSyncEnvelopeDto` v1 JSON 형식은 하위 호환을 위해
 그대로 유지합니다.
 
+## 운영 콘솔 profile
+
+```http
+GET /api/operator/console-profile
+```
+
+read-only profile은 같은 OSS console에 server의 `SingleOwner`를 `Local`,
+`MultiUser`를 `Hub` mode로 알려 줍니다. 또한 `cloudTransport: disabled`,
+`sensitiveAuthority: oss-console`, `tenancySource: authenticated-request` 경계를
+고정해 반환합니다. 요청 body나 호출자가 선택한 tenant/mode identity를 받지 않으며
+workspace, organization, installation, owner, credential 필드를 반환하지 않습니다.
+
+browser는 정적 label에 allowlist된 `en`, `ko` 언어 preference만 사용합니다. 언어
+선택은 authorization, identity, audit, transport 상태를 바꾸지 않습니다. 민감 접근
+승인과 외부 공개 승인은 별도 API·console section으로 유지되며 DB가 아니라 Host API만
+사용합니다.
+
 ## 감사 사건
 
 ```http

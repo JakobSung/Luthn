@@ -299,6 +299,20 @@ the retention event. Export audit metadata before cleanup only when policy or
 an investigation requires it; the audit export is not a backup or content
 recovery mechanism.
 
+## OSS console modes and language
+
+The operator console is the approval authority in both personal Local mode and
+central OSS Hub mode. Its banner comes from `/api/operator/console-profile`,
+which derives mode from server identity configuration and always reports the
+public OSS build as zero-outbound. Do not add a browser control that changes
+tenant identity, enables Cloud transport, or bypasses Host API authorization.
+
+English and Korean static labels use an allowlisted browser preference. Tokens
+remain session-only, while the language preference may persist locally because
+it contains no identity or protected data. Dynamic API values must continue to
+use text-only DOM rendering. Keep sensitive-access decisions separate from
+external-publication decisions so one approval cannot imply the other.
+
 ## External Memory Service Adapter Boundary
 
 External memory services are optional adapters. They are not a second raw

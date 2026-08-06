@@ -783,6 +783,25 @@ encrypted payloads, credentials, prompts, transcripts, working directories,
 and local paths. The existing `SafeProjectionSyncEnvelopeDto` version-one JSON
 shape remains available for compatibility.
 
+## Operator console profile
+
+```http
+GET /api/operator/console-profile
+```
+
+The read-only profile tells the shared OSS console whether the server is in
+`Local` (`SingleOwner`) or `Hub` (`MultiUser`) mode. It also returns the fixed
+`cloudTransport: disabled`, `sensitiveAuthority: oss-console`, and
+`tenancySource: authenticated-request` boundaries. The endpoint accepts no
+request body or caller-selected tenant/mode identity and returns no workspace,
+organization, installation, owner, or credential fields.
+
+The browser uses only the allowlisted `en` and `ko` language preference for
+static labels. Language choice does not change authorization, identity, audit,
+or transport state. Sensitive-access approval and external-publication approval
+remain separate API and console sections; both continue to use Host APIs rather
+than direct database access.
+
 ## Audit events
 
 ```http
