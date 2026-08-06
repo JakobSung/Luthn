@@ -393,7 +393,16 @@ protected payload, credential, workspace id, owner id는 응답하지 않습니�
 
 ```http
 GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
+GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
 ```
+
+`subjectId`, `action`, `outcome`, `subjectType`, `actorKind`, `correlationId`는
+정확히 일치하는 메타데이터 필터입니다. `from`, `to`는 양 끝을 포함하는 UTC
+시각입니다. `actionPrefix`는 알려진 사건 계열인 `sensitive_access.`,
+`operator.classification_provider.`, `classification.provider.`, `source.intake.`,
+`turn_summary.`, `memory.`, `retrieval.`, `processing.`, `transport.`만 허용합니다.
+필터는 인증된 workspace 또는 installation 범위를 넓히지 않습니다. 잘못된 UTC,
+과도한 길이, 허용되지 않은 접두사는 database 조회 전에 `400`으로 거절합니다.
 
 ```json
 {
@@ -417,6 +426,21 @@ GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
 ```
 
 현재 `payloadVersion`은 `1`입니다. 미래의 알 수 없는 version도 메타데이터로 보존해야 하며 원본을 포함한다고 가정하면 안 됩니다.
+
+감사 메타데이터는 다음과 같이 목적을 정한 뒤 사용합니다.
+
+- 민감 접근 승인·반려 전후에는 요청 `subjectId` 또는 `sensitive_access.` 계열로
+  요청, 검토, 결정, 결과 조회 순서를 확인합니다.
+- 분류 실패 조사에는 `outcome=failed`로 시작한 뒤 `correlationId`와 UTC 시각
+  범위로 좁힙니다. Provider 실패 감사 사건은 metadata-only이며 분류 대상 내용이나
+  provider 오류 본문을 포함하지 않습니다.
+- 분류 동작 변경 조사에는 installation 범위와
+  `operator.classification_provider.` 계열로 provider 설정 변경·시험을 확인합니다.
+  installation 범위는 계속 명시적 운영자만 조회할 수 있습니다.
+
+감사 기록은 책임 추적과 운영 조사 수단이며 내용 복구 수단이 아닙니다. prompt,
+transcript, credential, 원본 source, Vault payload, 보호 memory를 감사 기록에 넣거나
+감사 API로 조회하지 않습니다.
 
 ## 운영 인증 경계
 

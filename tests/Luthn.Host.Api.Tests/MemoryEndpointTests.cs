@@ -496,7 +496,11 @@ public sealed class MemoryEndpointTests
         var problem = Assert.IsType<ProblemHttpResult>(result.Result);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, problem.StatusCode);
         Assert.Empty(await db.SharedMemoryItems.ToArrayAsync());
-        Assert.Empty(await db.AuditEvents.ToArrayAsync());
+        var audit = Assert.Single(await db.AuditEvents.ToArrayAsync());
+        Assert.Equal("memory.item.classification_failed", audit.Action);
+        Assert.Equal("failed", audit.Outcome);
+        Assert.Equal("memory_item", audit.SubjectType);
+        Assert.Equal("metadata-only", audit.PayloadClass);
     }
 
     [Fact]

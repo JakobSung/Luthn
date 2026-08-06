@@ -611,7 +611,12 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
 
         var problem = Assert.IsType<ProblemHttpResult>(result.Result);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, problem.StatusCode);
-        Assert.Single(await db.AuditEvents.ToArrayAsync());
+        var audits = await db.AuditEvents.ToArrayAsync();
+        Assert.Equal(2, audits.Length);
+        Assert.Single(audits, audit => audit.Action == "classification.provider.invoked");
+        var failedAudit = Assert.Single(audits, audit => audit.Action == "classification.provider.failed");
+        Assert.Equal("failed", failedAudit.Outcome);
+        Assert.Equal("metadata-only", failedAudit.PayloadClass);
         Assert.Empty(await db.SourceEvents.ToArrayAsync());
         Assert.Empty(await db.ClassificationResults.ToArrayAsync());
     }

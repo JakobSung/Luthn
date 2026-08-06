@@ -81,6 +81,14 @@ button:hover {
   background: #278255;
 }
 
+button:disabled,
+button:disabled:hover {
+  border-color: var(--border);
+  background: #171a1f;
+  color: #69717c;
+  cursor: not-allowed;
+}
+
 button.secondary {
   border-color: var(--border);
   background: var(--surface-2);
@@ -256,6 +264,144 @@ label {
 .audit-filter {
   grid-template-columns: repeat(4, minmax(120px, 1fr));
   align-items: end;
+}
+
+.access-filter {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.access-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.85fr);
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.access-detail,
+.access-decision-form {
+  min-width: 0;
+}
+
+.workbench-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.workbench-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.access-detail-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--border);
+}
+
+.access-detail-fields > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 11px;
+  background: #0f1216;
+}
+
+.access-detail-fields .detail-summary {
+  grid-column: 1 / -1;
+}
+
+.access-detail-fields dt,
+.access-detail-fields dd {
+  margin: 0;
+}
+
+.access-detail-fields dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.access-detail-fields dd {
+  overflow-wrap: anywhere;
+  color: #d8dde4;
+  font-size: 12px;
+}
+
+.access-decision-form {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.security-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.audit-guidance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--border);
+}
+
+.audit-guidance > div {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  background: #0f1216;
+}
+
+.audit-guidance strong {
+  font-size: 12px;
+}
+
+.audit-guidance span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.audit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.audit-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audit-filter-expanded {
+  grid-template-columns: repeat(6, minmax(110px, 1fr));
+  margin-bottom: 14px;
 }
 
 .checkbox-row {
@@ -438,8 +584,21 @@ tbody tr:last-child td {
   .token-control,
   .provider-grid,
   .audit-filter,
+  .access-filter,
   .check-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .access-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-guidance {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-filter-expanded {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -460,7 +619,24 @@ tbody tr:last-child td {
   .form-grid,
   .provider-grid,
   .audit-filter,
+  .access-filter,
+  .access-detail-fields,
   .check-list {
+    grid-template-columns: 1fr;
+  }
+
+  .access-detail-fields .detail-summary {
+    grid-column: auto;
+  }
+
+  .audit-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .audit-presets,
+  .audit-filter-expanded {
+    display: grid;
     grid-template-columns: 1fr;
   }
 

@@ -78,7 +78,11 @@ mode and can attach an operator-supplied bearer service token for protected
 self-host routes. Current operator workflows cover health/readiness, read-only
 agent connection status, classification preview, controlled source intake,
 sensitive-access request review, approved-result state, approve/deny decisions,
-and metadata-only audit viewing. Agent installation, reconfiguration, and
+and purpose-oriented metadata-only audit investigation. Select a sensitive
+request before deciding it; the console loads only the operator-detail
+allowlist and requires an explicit decision reason. The audit center provides
+sensitive-access, classification-failure, and configuration-change presets plus
+bounded custom metadata filters. It is not a raw-content viewer. Agent installation, reconfiguration, and
 disconnect remain host CLI operations.
 
 ## Run Docker self-host stack

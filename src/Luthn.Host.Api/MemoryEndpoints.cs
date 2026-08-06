@@ -97,6 +97,17 @@ public static class MemoryEndpoints
         }
         catch (ClassificationProviderException error)
         {
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "memory.item.classification_failed",
+                memoryId,
+                "metadata-only",
+                projectionSelector.Boundary.RedactionState,
+                DateTimeOffset.UtcNow,
+                subjectType: "memory_item",
+                outcome: "failed"));
+            await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
         var visibility = projection.Decision.AllowsAgentContext

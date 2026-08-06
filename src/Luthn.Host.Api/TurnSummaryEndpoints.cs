@@ -122,6 +122,17 @@ public static class TurnSummaryEndpoints
         }
         catch (ClassificationProviderException error)
         {
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "turn_summary.classification_provider.failed",
+                sourceEventId,
+                "metadata-only",
+                projectionSelector.Boundary.RedactionState,
+                DateTimeOffset.UtcNow,
+                subjectType: "source_event",
+                outcome: "failed"));
+            await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
 

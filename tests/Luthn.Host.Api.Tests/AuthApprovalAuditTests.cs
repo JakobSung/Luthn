@@ -947,6 +947,69 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task AuditEventsEndpointAppliesBoundedMetadataFilters()
+    {
+        using var factory = CreateAuthFactory();
+        var occurredAt = new DateTimeOffset(2026, 8, 6, 8, 30, 0, TimeSpan.Zero);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            db.AuditEvents.AddRange(
+                AuditEventFactory.ForWorkspace(
+                    "default", "operator-1", "service", "decider", "sensitive_access.approved",
+                    "request-filtered", "metadata-only", "approved-no-content", occurredAt,
+                    subjectType: "sensitive_access_request", outcome: "approved", correlationId: "corr-filtered"),
+                AuditEventFactory.ForWorkspace(
+                    "default", "operator-1", "service", "decider", "sensitive_access.denied",
+                    "request-other", "metadata-only", "denied-no-content", occurredAt.AddMinutes(1),
+                    subjectType: "sensitive_access_request", outcome: "denied", correlationId: "corr-other"),
+                AuditEventFactory.ForWorkspace(
+                    "other-workspace", "operator-2", "service", "other", "sensitive_access.approved",
+                    "request-other-workspace", "metadata-only", "approved-no-content", occurredAt,
+                    subjectType: "sensitive_access_request", outcome: "approved", correlationId: "corr-filtered"));
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        client.SetBearer(AuditBearer);
+        var from = Uri.EscapeDataString(occurredAt.AddMinutes(-1).ToString("O"));
+        var to = Uri.EscapeDataString(occurredAt.AddMinutes(1).ToString("O"));
+        using var response = await client.GetAsync(
+            $"/api/audit-events?action=sensitive_access.approved&actionPrefix=sensitive_access." +
+            $"&outcome=approved&subjectType=sensitive_access_request&actorKind=service" +
+            $"&correlationId=corr-filtered&from={from}&to={to}");
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var auditEvent = Assert.Single(body.RootElement.GetProperty("events").EnumerateArray());
+        Assert.Equal("request-filtered", auditEvent.GetProperty("subjectId").GetString());
+        Assert.Equal("corr-filtered", auditEvent.GetProperty("correlationId").GetString());
+        Assert.DoesNotContain("request-other-workspace", body.RootElement.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AuditEventsEndpointRejectsUnsafeOrUnboundedFilters()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        client.SetBearer(AuditBearer);
+
+        using var prefixResponse = await client.GetAsync("/api/audit-events?actionPrefix=unbounded.");
+        using var oversizedResponse = await client.GetAsync($"/api/audit-events?subjectId={new string('a', 129)}");
+        using var controlResponse = await client.GetAsync("/api/audit-events?subjectId=%0Arequest-filtered");
+        using var offsetResponse = await client.GetAsync(
+            $"/api/audit-events?from={Uri.EscapeDataString("2026-08-06T09:00:00+09:00")}");
+        using var rangeResponse = await client.GetAsync(
+            "/api/audit-events?from=2026-08-06T10%3A00%3A00Z&to=2026-08-06T09%3A00%3A00Z");
+
+        Assert.Equal(HttpStatusCode.BadRequest, prefixResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, oversizedResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, controlResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, offsetResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, rangeResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task AuditEventsEndpointPreservesFuturePayloadVersion()
     {
         using var factory = CreateAuthFactory();
