@@ -133,6 +133,8 @@ builder.Services.AddOptions<HubIngressOptions>()
     .Validate(options => options.IsValid, "Luthn Hub ingress limits are invalid.")
     .ValidateOnStart();
 builder.Services.AddScoped<HubIngressQueueService>();
+builder.Services.AddScoped<HubIngressQueueProcessor>();
+builder.Services.AddHostedService<HubIngressWorkerHostedService>();
 if (builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddDbContext<LuthnDbContext>(options =>

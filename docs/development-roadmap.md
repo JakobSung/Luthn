@@ -22,7 +22,7 @@ Next action: create the next slice plan on the current delivery branch, or autom
 | --- | --- | --- | --- | --- | --- |
 | PLUGIN-001 | gated | P2 | Dynamic plugin loading and marketplace | `none` | - |
 | WORK-021 | blocked | P2 | OSS cloud readiness contracts and central Hub runtime | `docs/01-plan/oss-cloud-readiness-contracts-and-central-hub-runtime/001-idea.md` | - |
-| WORK-022 | evidence-pending | P2 | Central OSS Hub durable data plane and reliability | `docs/01-plan/central-oss-hub-durable-data-plane-and-reliability/001-idea.md` | - |
+| WORK-022 | evidence-pending | P2 | Bounded Hub classification worker lease retry dead-letter and replay | `docs/01-plan/central-oss-hub-durable-data-plane-and-reliability/001-idea.md` | - |
 | none | backlog | - | No additional planned quality slice | `none` | - |
 
 ## Planned

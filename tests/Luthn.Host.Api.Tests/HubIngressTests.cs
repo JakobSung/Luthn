@@ -16,6 +16,7 @@ public sealed class HubIngressTests : IClassFixture<WebApplicationFactory<Progra
 {
     private const string AliceBearer = "hub-alice-token";
     private const string BobBearer = "hub-bob-token";
+    private const string OperatorBearer = "hub-operator-token";
     private readonly WebApplicationFactory<Program> _factory;
 
     public HubIngressTests(WebApplicationFactory<Program> factory) => _factory = factory;
@@ -139,6 +140,53 @@ public sealed class HubIngressTests : IClassFixture<WebApplicationFactory<Progra
             .HubIngressQueue.ToArrayAsync());
     }
 
+    [Fact]
+    public async Task HubIngressDeadLetterReplayRequiresWorkspaceOperatorScope()
+    {
+        using var factory = CreateFactory();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            db.HubIngressQueue.Add(new HubIngressQueueRecord
+            {
+                Id = "hub-ingress-replay",
+                ReceiptId = "hub-receipt-replay",
+                OrganizationId = "organization-1",
+                WorkspaceId = "workspace-alice",
+                MemberUserId = "alice",
+                AgentConnectionId = "connection-alice",
+                AgentId = "codex",
+                SessionId = "session-alice",
+                TurnId = "turn-replay",
+                IdempotencyKey = "event-replay",
+                ContentDigest = $"sha256:{new string('a', 64)}",
+                CapsuleSizeBytes = 10,
+                ProtectionScheme = "test:v1",
+                ProtectedCapsule = "ciphertext",
+                State = HubIngressQueueState.DeadLetter,
+                AttemptCount = 5,
+                AcceptedAt = DateTimeOffset.UtcNow,
+                LastErrorCode = "hub.ingress.classification_exhausted"
+            });
+            await db.SaveChangesAsync();
+        }
+        using var writer = CreateClient(factory, AliceBearer);
+        using var operatorClient = CreateClient(factory, OperatorBearer);
+
+        using var forbidden = await writer.PostAsync(
+            "/api/hub/ingress/dead-letter/hub-receipt-replay/replay", null);
+        using var replayed = await operatorClient.PostAsync(
+            "/api/hub/ingress/dead-letter/hub-receipt-replay/replay", null);
+
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, replayed.StatusCode);
+        using var verifyScope = factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(HubIngressQueueState.Pending, (await verifyDb.HubIngressQueue.SingleAsync()).State);
+        Assert.Contains(await verifyDb.AuditEvents.ToArrayAsync(), audit =>
+            audit.Action == "hub.ingress.replayed" && audit.PayloadClass == "metadata-only");
+    }
+
     private WebApplicationFactory<Program> CreateFactory(int agentPendingLimit = 250) =>
         _factory.WithWebHostBuilder(builder =>
         {
@@ -150,7 +198,20 @@ public sealed class HubIngressTests : IClassFixture<WebApplicationFactory<Progra
             builder.UseSetting("Luthn:Hub:Ingress:AgentPendingLimit", agentPendingLimit.ToString());
             ConfigureToken(builder, 0, AliceBearer, "alice", "workspace-alice", "connection-alice", "session-alice");
             ConfigureToken(builder, 1, BobBearer, "bob", "workspace-bob", "connection-bob", "session-bob");
+            ConfigureOperatorToken(builder, 2);
         });
+
+    private static void ConfigureOperatorToken(IWebHostBuilder builder, int index)
+    {
+        var prefix = $"Luthn:Auth:Tokens:{index}";
+        builder.UseSetting($"{prefix}:Name", "hub-operator");
+        builder.UseSetting($"{prefix}:Sha256Digest", Digest(OperatorBearer));
+        builder.UseSetting($"{prefix}:Scopes:0", ServiceScopes.HubIngressOperate);
+        builder.UseSetting($"{prefix}:UserId", "alice");
+        builder.UseSetting($"{prefix}:WorkspaceId", "workspace-alice");
+        builder.UseSetting($"{prefix}:ActorKind", "User");
+        builder.UseSetting($"{prefix}:IsOperator", "true");
+    }
 
     private static void ConfigureToken(
         IWebHostBuilder builder,

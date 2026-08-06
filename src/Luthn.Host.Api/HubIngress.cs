@@ -21,6 +21,13 @@ public sealed class HubIngressOptions
     public int MemberPerMinuteLimit { get; init; } = 600;
     public int AgentPerMinuteLimit { get; init; } = 300;
     public int RetryAfterSeconds { get; init; } = 5;
+    public bool WorkerEnabled { get; init; }
+    public int WorkerBatchSize { get; init; } = 20;
+    public int WorkerPerWorkspaceBatchLimit { get; init; } = 5;
+    public int WorkerPollSeconds { get; init; } = 5;
+    public int WorkerLeaseSeconds { get; init; } = 120;
+    public int WorkerMaxAttempts { get; init; } = 5;
+    public int WorkerBaseRetrySeconds { get; init; } = 2;
 
     public bool IsValid =>
         MaxCapsuleBytes is >= 256 and <= 256 * 1024 &&
@@ -32,7 +39,13 @@ public sealed class HubIngressOptions
         WorkspacePerMinuteLimit >= 1 && WorkspacePerMinuteLimit <= OrganizationPerMinuteLimit &&
         MemberPerMinuteLimit >= 1 && MemberPerMinuteLimit <= WorkspacePerMinuteLimit &&
         AgentPerMinuteLimit >= 1 && AgentPerMinuteLimit <= MemberPerMinuteLimit &&
-        RetryAfterSeconds is >= 1 and <= 300;
+        RetryAfterSeconds is >= 1 and <= 300 &&
+        WorkerBatchSize is >= 1 and <= 100 &&
+        WorkerPerWorkspaceBatchLimit >= 1 && WorkerPerWorkspaceBatchLimit <= WorkerBatchSize &&
+        WorkerPollSeconds is >= 1 and <= 300 &&
+        WorkerLeaseSeconds is >= 5 and <= 3600 &&
+        WorkerMaxAttempts is >= 1 and <= 20 &&
+        WorkerBaseRetrySeconds is >= 1 and <= 300;
 }
 
 public interface IHubIngressCapsuleProtector
@@ -282,7 +295,41 @@ public static class HubIngressEndpoints
         app.MapPost("/api/hub/ingress/capsules", Enqueue)
             .RequireServiceScope(ServiceScopes.HubIngressWrite)
             .WithName("EnqueueHubIngressCapsule");
+        app.MapPost("/api/hub/ingress/dead-letter/{receiptId}/replay", Replay)
+            .RequireServiceScope(ServiceScopes.HubIngressOperate)
+            .WithName("ReplayHubIngressDeadLetter");
         return app;
+    }
+
+    public static async Task<IResult> Replay(
+        string receiptId,
+        HubIngressQueueProcessor processor,
+        IOptions<HubIngressOptions> options,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (!options.Value.Enabled)
+        {
+            return Error(StatusCodes.Status404NotFound, "hub.ingress.disabled", "Hub ingress is disabled.");
+        }
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        if (!principal.IsOperator)
+        {
+            return Error(StatusCodes.Status403Forbidden, "hub.ingress.operator_required", "Operator authorization is required.");
+        }
+        if (string.IsNullOrWhiteSpace(receiptId) || receiptId.Length > 128)
+        {
+            return Error(StatusCodes.Status400BadRequest, "hub.ingress.invalid_receipt", "receiptId is invalid.");
+        }
+
+        var receipt = await processor.ReplayDeadLetterAsync(
+            receiptId,
+            principal,
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        return receipt is null
+            ? Error(StatusCodes.Status404NotFound, "hub.ingress.dead_letter_not_found", "A replayable dead-letter item was not found.")
+            : TypedResults.Ok(receipt);
     }
 
     public static async Task<IResult> Enqueue(
