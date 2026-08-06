@@ -154,6 +154,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         Assert.False(agentStatusBody.RootElement.TryGetProperty("reference", out _));
 
         Assert.Equal(HttpStatusCode.OK, pending.StatusCode);
+        Assert.True(pending.Headers.CacheControl?.NoStore == true);
         Assert.Equal(
             "Need approval for a redacted operational summary.",
             pendingBody.RootElement.GetProperty("requestReason").GetString());
@@ -168,6 +169,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
 
         Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
         Assert.Equal(HttpStatusCode.OK, decided.StatusCode);
+        Assert.True(decided.Headers.CacheControl?.NoStore == true);
         Assert.Equal("Approved", decidedBody.RootElement.GetProperty("decision").GetString());
         Assert.Equal(
             "Approved after reviewing the local redacted context.",

@@ -201,6 +201,7 @@ public static class SensitiveAccessEndpoints
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        httpContext.Response.Headers.CacheControl = "no-store";
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
         await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
         var request = await db.SensitiveAccessRequests
