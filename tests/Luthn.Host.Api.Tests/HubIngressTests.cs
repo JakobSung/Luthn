@@ -245,8 +245,12 @@ public sealed class HubIngressTests : IClassFixture<WebApplicationFactory<Progra
             .EnumerateArray().ToDictionary(
                 item => item.GetProperty("outcome").GetString()!,
                 item => item.GetProperty("count").GetInt64());
+        var providerLatency = body.RootElement.GetProperty("metrics").GetProperty("providerLatency");
         Assert.Equal(1, outcomes["accepted"]);
         Assert.Equal(1, outcomes["backpressured"]);
+        Assert.Equal(0, providerLatency.GetProperty("count").GetInt64());
+        Assert.Equal(0, providerLatency.GetProperty("totalDurationMilliseconds").GetInt64());
+        Assert.Equal(0, providerLatency.GetProperty("maxDurationMilliseconds").GetInt64());
         Assert.DoesNotContain("workspace-alice", text, StringComparison.Ordinal);
         Assert.DoesNotContain("connection-alice", text, StringComparison.Ordinal);
         Assert.DoesNotContain("private prompt", text, StringComparison.Ordinal);

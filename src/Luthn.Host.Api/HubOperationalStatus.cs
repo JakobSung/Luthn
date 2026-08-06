@@ -36,6 +36,7 @@ public sealed class HubIngressAdmissionCoordinator : IHubIngressAdmissionCoordin
 public interface IHubOperationalMetrics
 {
     void RecordAdmission(string outcome);
+    void RecordProviderLatency(TimeSpan duration);
     void RecordWorker(string outcome, TimeSpan duration);
     HubOperationalMetricsSnapshot Snapshot();
 }
@@ -44,9 +45,12 @@ public sealed class HubOperationalMetrics : IHubOperationalMetrics
 {
     private readonly ConcurrentDictionary<string, long> _admissions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, HubWorkerMetricAggregate> _worker = new(StringComparer.Ordinal);
+    private readonly HubDurationMetricAggregate _providerLatency = new();
 
     public void RecordAdmission(string outcome) =>
         _admissions.AddOrUpdate(BoundAdmission(outcome), 1, static (_, current) => current + 1);
+
+    public void RecordProviderLatency(TimeSpan duration) => _providerLatency.Record(duration);
 
     public void RecordWorker(string outcome, TimeSpan duration) =>
         _worker.GetOrAdd(BoundWorker(outcome), static key => new HubWorkerMetricAggregate(key))
@@ -58,7 +62,8 @@ public sealed class HubOperationalMetrics : IHubOperationalMetrics
             .ToArray(),
         _worker.Values.OrderBy(item => item.Outcome, StringComparer.Ordinal)
             .Select(item => item.Snapshot())
-            .ToArray());
+            .ToArray(),
+        _providerLatency.Snapshot());
 
     private static string BoundAdmission(string outcome) => outcome switch
     {
@@ -97,6 +102,30 @@ public sealed class HubOperationalMetrics : IHubOperationalMetrics
             Interlocked.Read(ref _totalMilliseconds),
             Interlocked.Read(ref _maxMilliseconds));
     }
+
+    private sealed class HubDurationMetricAggregate
+    {
+        private long _count;
+        private long _totalMilliseconds;
+        private long _maxMilliseconds;
+
+        public void Record(TimeSpan duration)
+        {
+            var milliseconds = Math.Clamp((long)Math.Ceiling(duration.TotalMilliseconds), 0, 3_600_000);
+            Interlocked.Increment(ref _count);
+            Interlocked.Add(ref _totalMilliseconds, milliseconds);
+            long current;
+            while ((current = Interlocked.Read(ref _maxMilliseconds)) < milliseconds &&
+                Interlocked.CompareExchange(ref _maxMilliseconds, milliseconds, current) != current)
+            {
+            }
+        }
+
+        public HubDurationMetric Snapshot() => new(
+            Interlocked.Read(ref _count),
+            Interlocked.Read(ref _totalMilliseconds),
+            Interlocked.Read(ref _maxMilliseconds));
+    }
 }
 
 public sealed class NullHubOperationalMetrics : IHubOperationalMetrics
@@ -104,17 +133,24 @@ public sealed class NullHubOperationalMetrics : IHubOperationalMetrics
     public static readonly NullHubOperationalMetrics Instance = new();
     private NullHubOperationalMetrics() { }
     public void RecordAdmission(string outcome) { }
+    public void RecordProviderLatency(TimeSpan duration) { }
     public void RecordWorker(string outcome, TimeSpan duration) { }
-    public HubOperationalMetricsSnapshot Snapshot() => new([], []);
+    public HubOperationalMetricsSnapshot Snapshot() => new([], [], new(0, 0, 0));
 }
 
 public sealed record HubOperationalMetricsSnapshot(
     IReadOnlyList<HubOutcomeCount> Admissions,
-    IReadOnlyList<HubWorkerMetric> Worker);
+    IReadOnlyList<HubWorkerMetric> Worker,
+    HubDurationMetric ProviderLatency);
 
 public sealed record HubOutcomeCount(string Outcome, long Count);
 public sealed record HubWorkerMetric(
     string Outcome,
+    long Count,
+    long TotalDurationMilliseconds,
+    long MaxDurationMilliseconds);
+
+public sealed record HubDurationMetric(
     long Count,
     long TotalDurationMilliseconds,
     long MaxDurationMilliseconds);

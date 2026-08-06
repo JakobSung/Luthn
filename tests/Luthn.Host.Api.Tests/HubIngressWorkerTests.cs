@@ -86,6 +86,36 @@ public sealed class HubIngressWorkerTests
     }
 
     [Fact]
+    public async Task FiveAndThirtySecondEquivalentProviderLatencyIsReportedContentFree()
+    {
+        await using var db = CreateDb();
+        var protector = CreateProtector();
+        db.HubIngressQueue.AddRange(
+            CreateRecord(protector, "latency-5", "workspace-a", "first private decision"),
+            CreateRecord(protector, "latency-30", "workspace-b", "second private decision"));
+        await db.SaveChangesAsync();
+        var timeProvider = new ManualTimeProvider();
+        var metrics = new HubOperationalMetrics();
+        var processor = new HubIngressQueueProcessor(
+            db,
+            protector,
+            new AdvancingClassifier(timeProvider, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30)),
+            new PolicyEngine(),
+            Options.Create(new HubIngressOptions()),
+            timeProvider,
+            metrics);
+
+        var result = await processor.ProcessBatchAsync();
+        var providerLatency = metrics.Snapshot().ProviderLatency;
+
+        Assert.Equal(2, result.CompletedCount);
+        Assert.Equal(2, providerLatency.Count);
+        Assert.Equal(35_000, providerLatency.TotalDurationMilliseconds);
+        Assert.Equal(30_000, providerLatency.MaxDurationMilliseconds);
+        Assert.DoesNotContain("private", JsonSerializer.Serialize(providerLatency), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TenAndFiftyUserLoadDrainsWithoutLossOrDuplicate()
     {
         await using var db = CreateDb();
@@ -328,6 +358,39 @@ public sealed class HubIngressWorkerTests
                 sourceType,
                 cancellationToken);
         }
+    }
+
+    private sealed class AdvancingClassifier(
+        ManualTimeProvider timeProvider,
+        params TimeSpan[] durations) : IContentClassifier
+    {
+        private int _index;
+        public ClassificationProviderBoundary Boundary { get; } =
+            new("controlled-latency", "local-classification-input", "local-only");
+
+        public async ValueTask<ClassificationResult> ClassifyAsync(
+            PublicRecordId sourceId,
+            string content,
+            string? sourceType,
+            CancellationToken cancellationToken = default)
+        {
+            var index = Interlocked.Increment(ref _index) - 1;
+            timeProvider.Advance(durations[index]);
+            return await new MockContentClassifier().ClassifyAsync(
+                sourceId,
+                content,
+                sourceType,
+                cancellationToken);
+        }
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => 1_000;
+        public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+        public void Advance(TimeSpan duration) =>
+            Interlocked.Add(ref _timestamp, (long)duration.TotalMilliseconds);
     }
 
     private static string Digest(string value) =>

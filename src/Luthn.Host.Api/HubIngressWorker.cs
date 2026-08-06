@@ -67,11 +67,20 @@ public sealed class HubIngressQueueProcessor(
                     throw new HubIngressProtectionException();
                 }
                 var capsule = protector.Unprotect(record.Id, record.ProtectedCapsule);
-                var classification = await classifier.ClassifyAsync(
-                    new PublicRecordId(record.Id),
-                    capsule,
-                    "hub-turn-capsule",
-                    cancellationToken);
+                var providerStarted = timeProvider.GetTimestamp();
+                ClassificationResult classification;
+                try
+                {
+                    classification = await classifier.ClassifyAsync(
+                        new PublicRecordId(record.Id),
+                        capsule,
+                        "hub-turn-capsule",
+                        cancellationToken);
+                }
+                finally
+                {
+                    _metrics.RecordProviderLatency(timeProvider.GetElapsedTime(providerStarted));
+                }
                 var decision = policy.Decide(classification);
 
                 record.State = HubIngressQueueState.Completed;

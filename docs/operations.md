@@ -338,13 +338,13 @@ Keep the persisted Data Protection key ring and PostgreSQL backup as one
 recovery set. A missing or incompatible key ring moves affected work to a
 metadata-only dead letter; it must never cause a public/safe downgrade. Use
 `GET /api/hub/status` for aggregate queue, retry, dead-letter, outbox, relay,
-and bounded duration evidence. Use the operator-only replay route after fixing
+bounded worker duration, and content-free provider-latency count/total/max evidence. Use the operator-only replay route after fixing
 the provider or protection problem; replay runs the current classifier and
 policy again.
 
 The deterministic harness covers 10 normal users, 50 users with one item each,
-a 50-request burst with explicit admission/backpressure accounting, a
-controlled provider delay, expired-lease restart recovery, and relay
+a 50-request burst with explicit admission/backpressure accounting, controlled
+5-second and 30-second-equivalent provider delays, expired-lease restart recovery, and relay
 outage/reconnect with revoke-first ordering. These are correctness and recovery
 baselines, not production throughput or latency SLOs. Record actual hardware,
 PostgreSQL configuration, provider, throughput, p50/p95/p99, CPU/memory,

@@ -177,12 +177,13 @@ Luthn__Hub__Ingress__WorkerMaxAttempts=5
 Data Protection key ring과 PostgreSQL backup을 하나의 복구 세트로 보존합니다.
 key ring이 없거나 호환되지 않으면 해당 작업은 metadata-only dead letter가 되며
 공개·안전 데이터로 낮춰 처리하면 안 됩니다. `GET /api/hub/status`로 aggregate
-queue, retry, dead-letter, outbox, relay와 제한된 duration을 확인합니다. provider나
+queue, retry, dead-letter, outbox, relay, 제한된 worker duration과 content-free
+provider latency count/total/max를 확인합니다. provider나
 보호 문제를 해결한 뒤 운영자 전용 replay를 사용하면 현재 classifier와 policy를
 다시 적용합니다.
 
 결정적 harness는 정상 사용자 10명, 사용자 50명의 각 1개 작업, 명시적
-admission/backpressure 합계를 확인하는 50개 burst, 제어된 provider 지연,
+admission/backpressure 합계를 확인하는 50개 burst, 제어된 5초·30초 상당 provider 지연,
 만료 lease restart 회복, relay 장애·재연결과 revoke-first 순서를 검증합니다. 이는
 정확성·복구 baseline이지 production 처리량·지연 SLO가 아닙니다. capacity를 정하기
 전에 실제 hardware, PostgreSQL 설정, provider, 처리량, p50/p95/p99, CPU/memory,
