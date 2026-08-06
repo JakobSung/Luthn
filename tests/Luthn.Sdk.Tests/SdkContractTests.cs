@@ -207,6 +207,63 @@ public sealed class SdkContractTests
     }
 
     [Fact]
+    public void SensitiveAccessOperatorDetailSerializesOnlyAllowlistedLocalFields()
+    {
+        var detail = new SensitiveAccessOperatorDetailDto(
+            "access-1",
+            "sensitive-ref-1",
+            "Denied",
+            "requester",
+            "session-1",
+            "Need a local operator decision.",
+            DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch.AddMinutes(10),
+            "Denied",
+            "operator",
+            DateTimeOffset.UnixEpoch.AddMinutes(1),
+            "The request was not justified.",
+            false,
+            "denied-no-output",
+            new SensitiveAccessOperatorReferenceDto(
+                "local",
+                "note",
+                "sensitive-record:source-1",
+                "Redacted local context.",
+                DateTimeOffset.UnixEpoch),
+            "operator-sensitive-metadata",
+            "local-operator-only");
+
+        var json = JsonSerializer.Serialize(detail);
+        using var document = JsonDocument.Parse(json);
+        var actualProperties = document.RootElement
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        var expectedProperties = new[]
+        {
+            "id", "sensitiveReferenceId", "status", "requestedBy", "sessionId",
+            "requestReason", "createdAt", "expiresAt", "decision", "decidedBy",
+            "decidedAt", "decisionReason", "redactedOutputAvailable", "outputPolicy",
+            "reference", "payloadClass", "redactionState"
+        }.OrderBy(name => name, StringComparer.Ordinal).ToArray();
+
+        Assert.Equal(expectedProperties, actualProperties);
+        Assert.Equal(
+            ["receivedAt", "redactedSummary", "referenceLabel", "sourceSystem", "sourceType"],
+            document.RootElement.GetProperty("reference")
+                .EnumerateObject()
+                .Select(property => property.Name)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray());
+        Assert.DoesNotContain("workspaceId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ownerUserId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("protectedPayload", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("vault", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void SensitiveAccessResultDeserializesApprovedRedactedOutputContract()
     {
         var result = JsonSerializer.Deserialize<SensitiveAccessResultDto>("""

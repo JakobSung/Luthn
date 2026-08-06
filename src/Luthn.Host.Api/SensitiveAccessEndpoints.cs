@@ -34,6 +34,10 @@ public static class SensitiveAccessEndpoints
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("ReadSensitiveAccessRequest");
 
+        requests.MapGet("/{id}/operator-detail", ReadOperatorDetail)
+            .RequireServiceScope(ServiceScopes.AccessDecide)
+            .WithName("ReadSensitiveAccessOperatorDetail");
+
         requests.MapGet("/{id}/result", ReadRequestResult)
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("ReadSensitiveAccessRequestResult");
@@ -189,6 +193,95 @@ public static class SensitiveAccessEndpoints
             db,
             cancellationToken);
         return TypedResults.Ok(ToResponse(request, redactedOutputAvailable));
+    }
+
+    public static async Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, NotFound>> ReadOperatorDetail(
+        string id,
+        LuthnDbContext db,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
+        var request = await db.SensitiveAccessRequests
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                record => record.Id == id &&
+                    record.WorkspaceId == principal.WorkspaceId &&
+                    (principal.IsOperator || record.OwnerUserId == principal.UserId),
+                cancellationToken);
+        if (request is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        var reference = await db.SensitiveRecordReferences
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                record => record.Id == request.SensitiveRecordReferenceId &&
+                    record.WorkspaceId == request.WorkspaceId &&
+                    record.OwnerUserId == request.OwnerUserId,
+                cancellationToken);
+        if (reference is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        var decision = await db.SensitiveAccessDecisions
+            .AsNoTracking()
+            .Where(record => record.SensitiveAccessRequestId == request.Id)
+            .OrderByDescending(record => record.DecidedAt)
+            .ThenByDescending(record => record.Id)
+            .Select(record => new SensitiveAccessOperatorDecision(
+                record.Decision,
+                record.DecidedBy,
+                record.DecidedAt,
+                record.DecisionReason))
+            .FirstOrDefaultAsync(cancellationToken);
+        var redactedOutputAvailable = await HasRedactedOutputAsync(
+            request.Id,
+            db,
+            cancellationToken);
+
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            ServiceTokenAuthorization.GetActor(httpContext),
+            "sensitive_access.operator_detail_read",
+            request.Id,
+            "metadata-only",
+            "operator-detail-read-no-content",
+            DateTimeOffset.UtcNow,
+            subjectType: "sensitive_access_request",
+            outcome: "read"));
+        await db.SaveChangesAsync(cancellationToken);
+
+        return TypedResults.Ok(new SensitiveAccessOperatorDetailResponse(
+            request.Id,
+            request.SensitiveRecordReferenceId,
+            request.Status.ToString(),
+            request.RequestedBy,
+            request.SessionId,
+            request.RequestReason,
+            request.CreatedAt,
+            request.ExpiresAt,
+            decision?.Decision.ToString(),
+            decision?.DecidedBy ?? request.DecidedBy,
+            decision?.DecidedAt ?? request.DecidedAt,
+            decision?.DecisionReason,
+            RedactedOutputAvailable: request.Status == SensitiveAccessRequestStatus.Approved &&
+                redactedOutputAvailable,
+            OutputPolicy: ToOutputPolicy(
+                request.Status,
+                request.Status == SensitiveAccessRequestStatus.Approved && redactedOutputAvailable),
+            Reference: new SensitiveAccessOperatorReferenceResponse(
+                reference.SourceSystem,
+                reference.SourceType,
+                reference.ReferenceLabel,
+                reference.RedactedSummary,
+                reference.ReceivedAt),
+            PayloadClass: "operator-sensitive-metadata",
+            RedactionState: "local-operator-only"));
     }
 
     public static async Task<Results<Ok<SensitiveAccessResultResponse>, NotFound>> ReadRequestResult(
@@ -815,6 +908,12 @@ public static class SensitiveAccessEndpoints
         SensitiveAccessRequestRecord Request,
         bool RedactedOutputAvailable);
 
+    private sealed record SensitiveAccessOperatorDecision(
+        SensitiveAccessDecisionKind Decision,
+        string DecidedBy,
+        DateTimeOffset DecidedAt,
+        string DecisionReason);
+
     private sealed record ValidatedRedactedSummary(
         string? Value,
         ProblemDetails? Error);
@@ -849,6 +948,32 @@ public sealed record SensitiveAccessRequestResponse(
     DateTimeOffset? DecidedAt,
     bool RedactedOutputAvailable,
     string OutputPolicy);
+
+public sealed record SensitiveAccessOperatorReferenceResponse(
+    string SourceSystem,
+    string SourceType,
+    string ReferenceLabel,
+    string RedactedSummary,
+    DateTimeOffset ReceivedAt);
+
+public sealed record SensitiveAccessOperatorDetailResponse(
+    string Id,
+    string SensitiveReferenceId,
+    string Status,
+    string RequestedBy,
+    string SessionId,
+    string RequestReason,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    string? Decision,
+    string? DecidedBy,
+    DateTimeOffset? DecidedAt,
+    string? DecisionReason,
+    bool RedactedOutputAvailable,
+    string OutputPolicy,
+    SensitiveAccessOperatorReferenceResponse Reference,
+    string PayloadClass,
+    string RedactionState);
 
 public sealed record SensitiveAccessResultResponse(
     string Id,

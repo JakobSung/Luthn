@@ -126,6 +126,82 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task OperatorDetailRequiresDecideScopeAndAuditsWithoutContent()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        client.SetBearer(RequestBearer);
+        using var forbidden = await client.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+        using var agentStatus = await client.GetAsync($"/api/access-requests/{requestId}");
+        using var agentStatusBody = await JsonDocument.ParseAsync(await agentStatus.Content.ReadAsStreamAsync());
+
+        client.SetBearer(DeciderBearer);
+        using var pending = await client.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+        using var pendingBody = await JsonDocument.ParseAsync(await pending.Content.ReadAsStreamAsync());
+        using var approval = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Approved after reviewing the local redacted context."
+        });
+        using var decided = await client.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+        using var decidedBody = await JsonDocument.ParseAsync(await decided.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, agentStatus.StatusCode);
+        Assert.False(agentStatusBody.RootElement.TryGetProperty("requestReason", out _));
+        Assert.False(agentStatusBody.RootElement.TryGetProperty("decisionReason", out _));
+        Assert.False(agentStatusBody.RootElement.TryGetProperty("reference", out _));
+
+        Assert.Equal(HttpStatusCode.OK, pending.StatusCode);
+        Assert.True(pending.Headers.CacheControl?.NoStore == true);
+        Assert.Equal(
+            "Need approval for a redacted operational summary.",
+            pendingBody.RootElement.GetProperty("requestReason").GetString());
+        Assert.Equal(JsonValueKind.Null, pendingBody.RootElement.GetProperty("decisionReason").ValueKind);
+        Assert.Equal("local", pendingBody.RootElement.GetProperty("reference").GetProperty("sourceSystem").GetString());
+        Assert.Equal("note", pendingBody.RootElement.GetProperty("reference").GetProperty("sourceType").GetString());
+        Assert.Equal(
+            "Redacted reference context.",
+            pendingBody.RootElement.GetProperty("reference").GetProperty("redactedSummary").GetString());
+        Assert.Equal("operator-sensitive-metadata", pendingBody.RootElement.GetProperty("payloadClass").GetString());
+        Assert.Equal("local-operator-only", pendingBody.RootElement.GetProperty("redactionState").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, decided.StatusCode);
+        Assert.True(decided.Headers.CacheControl?.NoStore == true);
+        Assert.Equal("Approved", decidedBody.RootElement.GetProperty("decision").GetString());
+        Assert.Equal(
+            "Approved after reviewing the local redacted context.",
+            decidedBody.RootElement.GetProperty("decisionReason").GetString());
+        Assert.False(decidedBody.RootElement.GetProperty("redactedOutputAvailable").GetBoolean());
+        Assert.False(decidedBody.RootElement.TryGetProperty("redactedOutput", out _));
+        Assert.False(decidedBody.RootElement.TryGetProperty("workspaceId", out _));
+        Assert.False(decidedBody.RootElement.TryGetProperty("ownerUserId", out _));
+        Assert.DoesNotContain("private customer", decidedBody.RootElement.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("raw vault", decidedBody.RootElement.GetRawText(), StringComparison.OrdinalIgnoreCase);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var detailAudits = await db.AuditEvents
+            .Where(record => record.Action == "sensitive_access.operator_detail_read")
+            .ToArrayAsync();
+        Assert.Equal(2, detailAudits.Length);
+        Assert.All(detailAudits, audit =>
+        {
+            Assert.Equal(requestId, audit.SubjectId);
+            Assert.Equal("metadata-only", audit.PayloadClass);
+            Assert.Equal("operator-detail-read-no-content", audit.RedactionState);
+            Assert.DoesNotContain("approval", audit.Actor, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("redacted context", audit.Actor, StringComparison.OrdinalIgnoreCase);
+        });
+        var auditJson = JsonSerializer.Serialize(detailAudits);
+        Assert.DoesNotContain("Need approval for a redacted operational summary.", auditJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Approved after reviewing the local redacted context.", auditJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Redacted reference context.", auditJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AgentSummaryWriteScopeAuthorizesTurnSummaryIntake()
     {
         using var factory = CreateAuthFactory();
@@ -1013,7 +1089,8 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
             SourceType = "note",
             ReceivedAt = DateTimeOffset.UtcNow,
             ContainsSensitiveMaterial = true,
-            ReferenceLabel = "sensitive-record:source-sensitive-1"
+            ReferenceLabel = "sensitive-record:source-sensitive-1",
+            RedactedSummary = "Redacted reference context."
         });
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {

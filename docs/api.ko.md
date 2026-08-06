@@ -363,6 +363,7 @@ GET /api/wiki/proposals/{id}
 GET  /api/access-requests?status=Pending&limit=25
 POST /api/access-requests
 GET  /api/access-requests/{id}
+GET  /api/access-requests/{id}/operator-detail
 GET  /api/access-requests/{id}/result
 POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
@@ -374,6 +375,17 @@ payload는 반환하지 않습니다. 요청자는 server가 정한 자기 owner
 metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관리할 수 있습니다.
 생성·조회에는 `access.request` scope가 필요합니다. MCP는 생성·상태·결과만 제공하며
 승인·거절 도구를 노출하지 않습니다.
+
+`GET /api/access-requests/{id}/operator-detail`은 로컬 또는 self-hosted Hub
+콘솔을 위한 별도 `access.decide` 계약입니다. 요청·결정 사유와 민감 참조에 이미
+저장된 label, source metadata, redacted summary만 반환합니다. 응답은
+`operator-sensitive-metadata`, `local-operator-only`로 표시되며 Agent-safe 데이터가
+아니므로 Cloud safe-projection sync, 로그, metric, 일반 감사 payload에 넣으면 안 됩니다.
+항상 인증된 workspace를 강제하고, 비운영자 decider는 server가 정한 자기 owner로도
+제한합니다. 명시적 operator도 같은 workspace 안에서만 다른 owner를 검토할 수
+있습니다. 성공한 조회는 내용 없는 metadata-only
+`sensitive_access.operator_detail_read` 감사 사건을 남깁니다. 원본 source/Vault,
+protected payload, credential, workspace id, owner id는 응답하지 않습니다.
 
 새 호출자는 `sessionId`와 60–3600초 범위의 `expiresInSeconds`를 보내야 합니다. 만료 필드 도입 전의 버전 없는 계약과 호환하기 위해 두 값을 생략한 기존 호출에는 서버가 `legacy-...` session id와 600초 만료를 부여합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한, 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은 메타데이터 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며 `pending-approval`, `expired-no-output`, `denied-no-output`, `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를 사용하고 원문은 반환하지 않습니다. 만료는 `sensitive_access.expired` 메타데이터 감사 사건으로 기록되며 결과 조회는 `sensitive_access.result_read` 감사 사건을 만듭니다.
 
