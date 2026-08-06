@@ -52,6 +52,20 @@ builder.Services.AddScoped<
     IAutomaticTurnRetentionCleanupProcessor,
     AutomaticTurnRetentionCleanupProcessor>();
 builder.Services.AddHostedService<AutomaticTurnRetentionCleanupHostedService>();
+builder.Services.AddOptions<AuditRetentionOptions>()
+    .Bind(builder.Configuration.GetSection("Luthn:Audit:Retention"))
+    .Validate(
+        options => options.HasValidCleanupInterval,
+        "Audit cleanup interval must be between 1 and 1440 minutes.")
+    .Validate(
+        options => options.HasValidCleanupBatch,
+        "Audit cleanup batch size must be between 1 and 1000.")
+    .Validate(
+        options => options.HasValidRetentionDays,
+        "Audit retention days must be between 1 and 3650 for every category.")
+    .ValidateOnStart();
+builder.Services.AddScoped<IAuditRetentionCleanupProcessor, AuditRetentionCleanupProcessor>();
+builder.Services.AddHostedService<AuditRetentionCleanupHostedService>();
 builder.Services.Configure<ClassificationProviderRuntimeOptions>(builder.Configuration.GetSection("Luthn:Classification:Runtime"));
 builder.Services.AddHttpClient(nameof(ConfiguredContentClassifier), client =>
 {

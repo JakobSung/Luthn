@@ -13,6 +13,9 @@ public static class OperatorConfigurationEndpoints
 {
     public static IEndpointRouteBuilder MapOperatorConfiguration(this IEndpointRouteBuilder app)
     {
+        app.MapGet("/api/operator/console-profile", ReadConsoleProfile)
+            .WithName("ReadOperatorConsoleProfile");
+
         var group = app.MapGroup("/api/operator")
             .RequireServiceScope(ServiceScopes.ConfigWrite);
 
@@ -26,6 +29,20 @@ public static class OperatorConfigurationEndpoints
             .WithName("TestClassificationProviderConfiguration");
 
         return app;
+    }
+
+    public static Ok<OperatorConsoleProfileResponse> ReadConsoleProfile(
+        IOptions<LuthnIdentityOptions> identityOptions)
+    {
+        var consoleMode = identityOptions.Value.Mode == LuthnIdentityMode.MultiUser
+            ? "Hub"
+            : "Local";
+        return TypedResults.Ok(new OperatorConsoleProfileResponse(
+            consoleMode,
+            "disabled",
+            "oss-console",
+            "authenticated-request",
+            true));
     }
 
     public static async Task<Ok<ClassificationProviderConfigurationResponse>> ReadClassificationProvider(
@@ -217,3 +234,10 @@ public static class OperatorConfigurationEndpoints
         return null;
     }
 }
+
+public sealed record OperatorConsoleProfileResponse(
+    string ConsoleMode,
+    string CloudTransport,
+    string SensitiveAuthority,
+    string TenancySource,
+    bool ServerDerived);

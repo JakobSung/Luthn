@@ -115,6 +115,44 @@ API를 종료하지 않은 채 다음 interval에 다시 시도합니다. 외부
 outbox 연결, 직접 생성, turn이 아닌 source, 미만료, Session, Durable memory는
 자동 정리 후보가 아닙니다.
 
+## 감사 보존 정리
+
+감사 보존은 운영 metric과 분리해 분류합니다. 기본 보존 기간은 Access, Security,
+Publication 365일, Configuration, Retention 730일, Ingestion 90일입니다. 삭제는
+운영자가 명시적으로 결정해야 하므로 cleanup 기본값은 비활성입니다.
+
+```dotenv
+Luthn__Audit__Retention__CleanupEnabled=false
+Luthn__Audit__Retention__CleanupIntervalMinutes=60
+Luthn__Audit__Retention__CleanupBatchSize=100
+Luthn__Audit__Retention__AccessDays=365
+Luthn__Audit__Retention__SecurityDays=365
+Luthn__Audit__Retention__ConfigurationDays=730
+Luthn__Audit__Retention__PublicationDays=365
+Luthn__Audit__Retention__IngestionDays=90
+Luthn__Audit__Retention__RetentionDays=730
+```
+
+보존 기간은 1~3650일, interval은 1~1440분, batch는 1~1000개이며 범위를 벗어나면
+startup validation이 실패합니다. 활성화된 정리는 전체 batch 한도 안에서 만료된
+metadata만 삭제하고 installation 범위의 metadata-only `audit.retention.pruned`
+사건 하나를 남깁니다. 삭제한 식별자나 내용을 log, metric, retention 사건으로
+복사하지 않습니다. 정책 또는 조사에 필요할 때만 삭제 전에 감사 metadata를
+export하며, 이 export를 backup이나 내용 복구 수단으로 사용하지 않습니다.
+
+## OSS console mode와 언어
+
+운영 console은 개인 Local mode와 중앙 OSS Hub mode 모두에서 승인 권한의 정본입니다.
+banner는 `/api/operator/console-profile`에서 server identity 설정으로 결정한 mode를
+받으며 공개 OSS build는 항상 외부 전송 없음으로 표시합니다. browser에서 tenant
+identity를 바꾸거나 Cloud transport를 켜거나 Host API authorization을 우회하는
+control을 추가하지 않습니다.
+
+영어·한국어 정적 label은 allowlist된 browser preference를 사용합니다. token은
+session에만 두고, identity나 보호 데이터를 포함하지 않는 언어 preference만 local에
+보존할 수 있습니다. 동적 API 값은 계속 text-only DOM rendering을 사용합니다. 민감
+접근 결정과 외부 공개 결정을 분리해 한쪽 승인이 다른 쪽 승인을 뜻하지 않게 합니다.
+
 ## 외부 기억 서비스 Adapter 경계
 
 외부 기억 서비스는 선택적 adapter이며 두 번째 원본 저장 경로가 아닙니다. `metadata-only`, `safe-projection-only`인 `public-agent-allowed-safe-projections`만 내보냅니다. 항목은 공개이고 `PublicSafe` 또는 `SharedAcrossAgents`로 보이며 만료되지 않아야 합니다. 별도 안전 분류 경로가 생길 때까지 `title`과 Core tag는 비워 둡니다.

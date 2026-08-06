@@ -767,11 +767,50 @@ Result response:
 
 `GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Explicit request lifetime is bounded to 60–3600 seconds; expiry records a metadata-only `sensitive_access.expired` audit event. Result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy.
 
+## Cloud-neutral synchronization contracts
+
+`Luthn.Sdk` exposes additive version-two DTOs for installation enrollment,
+capability negotiation, safe-projection batches, receipts, checkpoints,
+bounded errors, and metadata-only audit pages. These are transport-neutral
+contracts only: the OSS runtime still registers the disabled sync transport by
+default and no Cloud endpoint or credential store is enabled by these types.
+
+Version-two projection payloads deliberately omit Organization, Workspace, and
+Installation identity. A receiver derives tenant scope from the authenticated
+Installation authority instead of accepting caller-selected tenancy fields.
+Each batch item carries an opaque `operationId` that the receiver returns in its
+receipt, so acknowledgement and checkpoint advancement never depend on tenant
+identity or content fields.
+The strict input contract rejects unknown fields, including raw/Vault content,
+encrypted payloads, credentials, prompts, transcripts, working directories,
+and local paths. The existing `SafeProjectionSyncEnvelopeDto` version-one JSON
+shape remains available for compatibility.
+
+## Operator console profile
+
+```http
+GET /api/operator/console-profile
+```
+
+The read-only profile tells the shared OSS console whether the server is in
+`Local` (`SingleOwner`) or `Hub` (`MultiUser`) mode. It also returns the fixed
+`cloudTransport: disabled`, `sensitiveAuthority: oss-console`, and
+`tenancySource: authenticated-request` boundaries. The endpoint accepts no
+request body or caller-selected tenant/mode identity and returns no workspace,
+organization, installation, owner, or credential fields.
+
+The browser uses only the allowlisted `en` and `ko` language preference for
+static labels. Language choice does not change authorization, identity, audit,
+or transport state. Sensitive-access approval and external-publication approval
+remain separate API and console sections; both continue to use Host APIs rather
+than direct database access.
+
 ## Audit events
 
 ```http
 GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
-GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events?category=Access&actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events/export?category=Access&subjectId=access-...
 ```
 
 The endpoint supports exact metadata filters for `subjectId`, `action`,
@@ -779,9 +818,16 @@ The endpoint supports exact metadata filters for `subjectId`, `action`,
 inclusive UTC timestamps. `actionPrefix` is limited to known event families:
 `sensitive_access.`, `operator.classification_provider.`,
 `classification.provider.`, `source.intake.`, `turn_summary.`, `memory.`,
-`retrieval.`, `processing.`, and `transport.`. Filters never widen the
+`retrieval.`, `processing.`, `transport.`, and `audit.`. `category` accepts
+`Access`, `Security`, `Configuration`, `Publication`, `Ingestion`, or
+`Retention`. Filters never widen the
 authenticated workspace or installation scope. Invalid, non-UTC, oversized,
 or unrecognized filters return `400` before the database query runs.
+
+Pages are ordered by descending `occurredAt` and ascending `id`. When
+`nextCursor` is non-null, pass it back with the exact same filters. The opaque
+cursor contains no content or credentials; malformed cursors and cursors reused
+with different filters return `400`.
 
 Returns metadata-only audit entries:
 
@@ -802,11 +848,21 @@ Returns metadata-only audit entries:
       "correlationId": null,
       "payloadVersion": 1,
       "payloadClass": "metadata-only",
-      "redactionState": "sensitive-boundary-only"
+      "redactionState": "sensitive-boundary-only",
+      "category": "Access",
+      "retentionClass": "access-365d",
+      "retainedUntil": "2027-08-06T08:30:00Z"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
+
+`GET /api/audit-events/export` reuses the same authorization and bounded
+filters and returns at most 1000 events as a JSON attachment. The export omits
+workspace, actor-user, and owner identifiers and declares the
+`metadata-only-no-protected-content` boundary. It never exports raw source,
+Vault or encrypted payloads, credentials, prompts, transcripts, or local paths.
 
 `payloadVersion` identifies the metadata-only audit/control event payload
 shape. Version `1` is the current shape; readers should preserve unknown future

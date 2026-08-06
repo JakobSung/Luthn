@@ -389,11 +389,46 @@ protected payload, credential, workspace id, owner id는 응답하지 않습니�
 
 새 호출자는 `sessionId`와 60–3600초 범위의 `expiresInSeconds`를 보내야 합니다. 만료 필드 도입 전의 버전 없는 계약과 호환하기 위해 두 값을 생략한 기존 호출에는 서버가 `legacy-...` session id와 600초 만료를 부여합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한, 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은 메타데이터 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며 `pending-approval`, `expired-no-output`, `denied-no-output`, `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를 사용하고 원문은 반환하지 않습니다. 만료는 `sensitive_access.expired` 메타데이터 감사 사건으로 기록되며 결과 조회는 `sensitive_access.result_read` 감사 사건을 만듭니다.
 
+## Cloud-neutral 동기화 계약
+
+`Luthn.Sdk`는 installation enrollment, capability negotiation, 안전 투영 batch,
+receipt, checkpoint, 제한된 오류, metadata-only 감사 page를 위한 additive v2 DTO를
+제공합니다. 이는 transport-neutral 계약일 뿐입니다. OSS runtime은 계속 기본적으로
+비활성 sync transport를 등록하며 이 DTO만으로 Cloud endpoint나 credential 저장소가
+활성화되지 않습니다.
+
+v2 투영 payload에는 Organization, Workspace, Installation identity를 넣지 않습니다.
+수신자는 caller가 선택한 tenancy 필드가 아니라 인증된 Installation authority에서
+tenant 범위를 결정합니다. 각 batch item은 opaque `operationId`를 포함하고 수신자는
+이를 receipt에 그대로 반환하므로 승인과 checkpoint 갱신이 tenant identity나 content
+필드에 의존하지 않습니다. 엄격한 입력 계약은 알 수 없는 필드와 raw/Vault content,
+encrypted payload, credential, prompt, transcript, working directory, local path를
+거절합니다. 기존 `SafeProjectionSyncEnvelopeDto` v1 JSON 형식은 하위 호환을 위해
+그대로 유지합니다.
+
+## 운영 콘솔 profile
+
+```http
+GET /api/operator/console-profile
+```
+
+read-only profile은 같은 OSS console에 server의 `SingleOwner`를 `Local`,
+`MultiUser`를 `Hub` mode로 알려 줍니다. 또한 `cloudTransport: disabled`,
+`sensitiveAuthority: oss-console`, `tenancySource: authenticated-request` 경계를
+고정해 반환합니다. 요청 body나 호출자가 선택한 tenant/mode identity를 받지 않으며
+workspace, organization, installation, owner, credential 필드를 반환하지 않습니다.
+
+browser는 정적 label에 allowlist된 `en`, `ko` 언어 preference만 사용합니다. 언어
+선택은 authorization, identity, audit, transport 상태를 바꾸지 않습니다. 민감 접근
+승인과 외부 공개 승인은 별도 API·console section으로 유지되며 DB가 아니라 Host API만
+사용합니다.
+
 ## 감사 사건
 
 ```http
 GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
-GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events?category=Access&actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events/export?category=Access&subjectId=access-...
 ```
 
 `subjectId`, `action`, `outcome`, `subjectType`, `actorKind`, `correlationId`는
@@ -401,8 +436,14 @@ GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-
 시각입니다. `actionPrefix`는 알려진 사건 계열인 `sensitive_access.`,
 `operator.classification_provider.`, `classification.provider.`, `source.intake.`,
 `turn_summary.`, `memory.`, `retrieval.`, `processing.`, `transport.`만 허용합니다.
+`audit.`도 retention 사건 조회에 허용됩니다. `category`는 `Access`, `Security`,
+`Configuration`, `Publication`, `Ingestion`, `Retention` 중 하나입니다.
 필터는 인증된 workspace 또는 installation 범위를 넓히지 않습니다. 잘못된 UTC,
 과도한 길이, 허용되지 않은 접두사는 database 조회 전에 `400`으로 거절합니다.
+
+page는 `occurredAt` 내림차순, `id` 오름차순입니다. `nextCursor`가 null이 아니면
+같은 filter와 함께 다음 요청에 전달합니다. opaque cursor에는 내용이나 credential이
+없으며 변조된 cursor나 다른 filter에 재사용한 cursor는 `400`으로 거절합니다.
 
 ```json
 {
@@ -420,10 +461,20 @@ GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-
     "correlationId": null,
     "payloadVersion": 1,
     "payloadClass": "metadata-only",
-    "redactionState": "sensitive-boundary-only"
-  }]
+    "redactionState": "sensitive-boundary-only",
+    "category": "Access",
+    "retentionClass": "access-365d",
+    "retainedUntil": "2027-08-06T08:30:00Z"
+  }],
+  "nextCursor": null
 }
 ```
+
+`GET /api/audit-events/export`는 같은 authorization과 제한된 filter를 재사용해
+최대 1000개의 사건을 JSON attachment로 반환합니다. export에는 workspace,
+actor user, owner 식별자가 없고 `metadata-only-no-protected-content` 경계를 명시합니다.
+원본 source, Vault·암호화 payload, credential, prompt, transcript, local path는
+내보내지 않습니다.
 
 현재 `payloadVersion`은 `1`입니다. 미래의 알 수 없는 version도 메타데이터로 보존해야 하며 원본을 포함한다고 가정하면 안 됩니다.
 

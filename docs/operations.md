@@ -270,6 +270,49 @@ terminating API availability. Externally approved, revoked, outbox-linked,
 manually created, non-turn, unexpired, Session, and Durable memory are never
 automatic cleanup candidates.
 
+## Audit retention cleanup
+
+Audit retention is classified independently from operational metrics. The
+defaults retain Access, Security, and Publication events for 365 days,
+Configuration and Retention events for 730 days, and Ingestion events for 90
+days. Cleanup is disabled by default so an operator must make deletion an
+explicit deployment decision:
+
+```dotenv
+Luthn__Audit__Retention__CleanupEnabled=false
+Luthn__Audit__Retention__CleanupIntervalMinutes=60
+Luthn__Audit__Retention__CleanupBatchSize=100
+Luthn__Audit__Retention__AccessDays=365
+Luthn__Audit__Retention__SecurityDays=365
+Luthn__Audit__Retention__ConfigurationDays=730
+Luthn__Audit__Retention__PublicationDays=365
+Luthn__Audit__Retention__IngestionDays=90
+Luthn__Audit__Retention__RetentionDays=730
+```
+
+Retention days must be 1 through 3650, the interval 1 through 1440 minutes,
+and the batch size 1 through 1000. Invalid settings fail startup validation.
+When enabled, each pass deletes only expired metadata within the global batch
+limit and writes one installation-scoped `audit.retention.pruned` metadata-only
+event. It does not copy deleted identifiers or content into logs, metrics, or
+the retention event. Export audit metadata before cleanup only when policy or
+an investigation requires it; the audit export is not a backup or content
+recovery mechanism.
+
+## OSS console modes and language
+
+The operator console is the approval authority in both personal Local mode and
+central OSS Hub mode. Its banner comes from `/api/operator/console-profile`,
+which derives mode from server identity configuration and always reports the
+public OSS build as zero-outbound. Do not add a browser control that changes
+tenant identity, enables Cloud transport, or bypasses Host API authorization.
+
+English and Korean static labels use an allowlisted browser preference. Tokens
+remain session-only, while the language preference may persist locally because
+it contains no identity or protected data. Dynamic API values must continue to
+use text-only DOM rendering. Keep sensitive-access decisions separate from
+external-publication decisions so one approval cannot imply the other.
+
 ## External Memory Service Adapter Boundary
 
 External memory services are optional adapters. They are not a second raw

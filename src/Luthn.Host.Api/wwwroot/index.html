@@ -13,10 +13,17 @@
     <header class="topbar" aria-label="Luthn operator console header">
       <div class="brand">
         <div>
-          <p class="eyebrow">Local control plane</p>
-          <h1>Luthn Operator Console</h1>
+          <p class="eyebrow" data-i18n="console.eyebrow">OSS control plane</p>
+          <h1 data-i18n="console.title">Luthn Operator Console</h1>
         </div>
       </div>
+      <label class="language-control" for="consoleLanguage">
+        <span data-i18n="console.language">Language</span>
+        <select id="consoleLanguage" name="consoleLanguage">
+          <option value="en">English</option>
+          <option value="ko">한국어</option>
+        </select>
+      </label>
       <div class="token-control">
         <label for="serviceToken">Service token</label>
         <div class="token-row">
@@ -32,6 +39,24 @@
     </header>
 
     <main id="main" class="workspace">
+      <section class="mode-banner" aria-labelledby="consoleModeLabel">
+        <div class="mode-primary">
+          <span id="consoleModeLabel" data-i18n="mode.label">Deployment mode</span>
+          <strong id="consoleMode" data-i18n="mode.checking">Checking</strong>
+        </div>
+        <p id="consoleModeDetail">Loading the server-derived console profile.</p>
+        <dl class="mode-boundaries">
+          <div>
+            <dt data-i18n="mode.transport">Cloud transport</dt>
+            <dd id="consoleTransport" data-i18n="mode.transportDisabled">Disabled — zero outbound</dd>
+          </div>
+          <div>
+            <dt data-i18n="mode.authority">Sensitive authority</dt>
+            <dd id="consoleAuthority" data-i18n="mode.authorityOss">OSS console</dd>
+          </div>
+        </dl>
+      </section>
+
       <section class="status-strip" aria-label="Runtime status">
         <article class="metric">
           <span class="metric-label">Liveness</span>
@@ -97,8 +122,8 @@
       <section class="panel wide" aria-labelledby="externalPublicationTitle">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Cloud-ready local foundation</p>
-            <h2 id="externalPublicationTitle">External publication</h2>
+            <p class="eyebrow" data-i18n="publication.eyebrow">Separate publication boundary</p>
+            <h2 id="externalPublicationTitle" data-i18n="publication.title">External publication</h2>
           </div>
           <div class="panel-heading-actions">
             <span id="syncStatus" class="inline-status" role="status" aria-live="polite">Checking local outbox.</span>
@@ -249,8 +274,8 @@
       <section class="panel wide">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Sensitive access</p>
-            <h2>Access requests</h2>
+            <p class="eyebrow" data-i18n="access.eyebrow">Sensitive access authority</p>
+            <h2 data-i18n="access.title">Access requests</h2>
           </div>
           <form id="accessForm" class="access-filter">
             <label>
@@ -291,7 +316,7 @@
             <div class="workbench-heading">
               <div>
                 <p class="eyebrow">Allowlisted metadata only</p>
-                <h3 id="accessDetailHeading">Request review</h3>
+                <h3 id="accessDetailHeading" data-i18n="access.review">Request review</h3>
               </div>
               <span id="accessDetailStatus" class="inline-status" aria-live="polite">Select a request to review.</span>
             </div>
@@ -331,8 +356,8 @@
       <section class="panel wide">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Metadata-only trail</p>
-            <h2>Audit center</h2>
+            <p class="eyebrow" data-i18n="audit.eyebrow">Metadata-only trail</p>
+            <h2 data-i18n="audit.title">Audit center</h2>
           </div>
           <span id="auditStatus" class="inline-status" aria-live="polite">Choose an investigation purpose or custom filters.</span>
         </div>
@@ -368,6 +393,18 @@
               </select>
             </label>
             <label>
+              <span data-i18n="audit.category">Category</span>
+              <select name="category">
+                <option value="">Any</option>
+                <option value="Access">Access</option>
+                <option value="Security">Security</option>
+                <option value="Configuration">Configuration</option>
+                <option value="Publication">Publication</option>
+                <option value="Ingestion">Ingestion</option>
+                <option value="Retention">Retention</option>
+              </select>
+            </label>
+            <label>
               Subject id
               <input name="subjectId" placeholder="optional">
             </label>
@@ -388,6 +425,7 @@
                 <option value="retrieval.">Retrieval</option>
                 <option value="processing.">Processing</option>
                 <option value="transport.">Transport</option>
+                <option value="audit.">Audit retention</option>
               </select>
             </label>
             <label>
@@ -420,29 +458,36 @@
             </label>
             <button type="submit">Refresh</button>
         </form>
+        <div class="audit-page-actions">
+          <button id="nextAuditPage" type="button" class="secondary" disabled data-i18n="audit.next">Next page</button>
+          <button id="exportAudit" type="button" class="secondary" data-i18n="audit.export">Export metadata</button>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Occurred</th>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Subject</th>
-                <th>Type</th>
-                <th>Outcome</th>
-                <th>Correlation</th>
-                <th>Payload</th>
-                <th>Redaction</th>
+                <th data-i18n="audit.occurred">Occurred</th>
+                <th data-i18n="audit.category">Category</th>
+                <th data-i18n="audit.actor">Actor</th>
+                <th data-i18n="audit.action">Action</th>
+                <th data-i18n="audit.subject">Subject</th>
+                <th data-i18n="audit.type">Type</th>
+                <th data-i18n="audit.outcome">Outcome</th>
+                <th data-i18n="audit.correlation">Correlation</th>
+                <th data-i18n="audit.payload">Payload</th>
+                <th data-i18n="audit.redaction">Redaction</th>
+                <th data-i18n="audit.retention">Retention</th>
               </tr>
             </thead>
             <tbody id="auditRows">
-              <tr><td colspan="9">No audit events loaded.</td></tr>
+              <tr><td colspan="11">No audit events loaded.</td></tr>
             </tbody>
           </table>
         </div>
       </section>
     </main>
   </div>
+  <script src="/assets/operator-i18n.js" defer></script>
   <script src="/assets/operator.js" defer></script>
 </body>
 </html>

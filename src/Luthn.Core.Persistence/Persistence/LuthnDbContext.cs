@@ -7,6 +7,8 @@ namespace Luthn.Core.Persistence;
 
 public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : DbContext(options)
 {
+    private bool _allowAuditRetentionDelete;
+
     public DbSet<SourceEventRecord> SourceEvents => Set<SourceEventRecord>();
     public DbSet<ClassificationResultRecord> ClassificationResults => Set<ClassificationResultRecord>();
     public DbSet<WikiProposalRecord> WikiProposals => Set<WikiProposalRecord>();
@@ -21,6 +23,51 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public DbSet<SafeProjectionSyncCheckpointRecord> SafeProjectionSyncCheckpoints => Set<SafeProjectionSyncCheckpointRecord>();
     public DbSet<AgentConnectionChannelRecord> AgentConnectionChannels => Set<AgentConnectionChannelRecord>();
     public DbSet<AuditEventRecord> AuditEvents => Set<AuditEventRecord>();
+
+    public async Task<int> DeleteAuditEventsForRetentionAsync(
+        IReadOnlyCollection<string> auditEventIds,
+        AuditEventRecord retentionAudit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(auditEventIds);
+        ArgumentNullException.ThrowIfNull(retentionAudit);
+        if (auditEventIds.Count is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(auditEventIds),
+                "Audit retention deletion requires between 1 and 1000 event ids.");
+        }
+        if (retentionAudit.ScopeKind != AuditEventScopeKind.Installation ||
+            !string.Equals(retentionAudit.Action, "audit.retention.pruned", StringComparison.Ordinal) ||
+            !string.Equals(retentionAudit.PayloadClass, "metadata-only", StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "Audit retention deletion requires an installation-scoped metadata-only retention audit.",
+                nameof(retentionAudit));
+        }
+
+        var candidates = await AuditEvents
+            .Where(record => auditEventIds.Contains(record.Id))
+            .ToArrayAsync(cancellationToken);
+        if (candidates.Length == 0)
+        {
+            return 0;
+        }
+
+        AuditEvents.RemoveRange(candidates);
+        AuditEvents.Add(retentionAudit);
+        _allowAuditRetentionDelete = true;
+        try
+        {
+            await SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            _allowAuditRetentionDelete = false;
+        }
+
+        return candidates.Length;
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -433,7 +480,9 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         }
 
         var mutatedEntry = ChangeTracker.Entries<AuditEventRecord>()
-            .FirstOrDefault(entry => entry.State is EntityState.Modified or EntityState.Deleted);
+            .FirstOrDefault(entry =>
+                entry.State == EntityState.Modified ||
+                (entry.State == EntityState.Deleted && !_allowAuditRetentionDelete));
         if (mutatedEntry is not null)
         {
             throw new InvalidOperationException("Audit event records are immutable.");
