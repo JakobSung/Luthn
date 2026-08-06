@@ -22,6 +22,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public DbSet<SafeProjectionSyncOutboxRecord> SafeProjectionSyncOutbox => Set<SafeProjectionSyncOutboxRecord>();
     public DbSet<SafeProjectionSyncCheckpointRecord> SafeProjectionSyncCheckpoints => Set<SafeProjectionSyncCheckpointRecord>();
     public DbSet<AgentConnectionChannelRecord> AgentConnectionChannels => Set<AgentConnectionChannelRecord>();
+    public DbSet<HubIngressQueueRecord> HubIngressQueue => Set<HubIngressQueueRecord>();
     public DbSet<AuditEventRecord> AuditEvents => Set<AuditEventRecord>();
 
     public async Task<int> DeleteAuditEventsForRetentionAsync(
@@ -383,6 +384,47 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.FailureCode).HasMaxLength(64);
             entity.HasIndex(record => new { record.WorkspaceId, record.AgentId, record.Channel }).IsUnique();
             entity.HasIndex(record => new { record.WorkspaceId, record.UpdatedAt });
+        });
+
+        modelBuilder.Entity<HubIngressQueueRecord>(entity =>
+        {
+            entity.ToTable("hub_ingress_queue", table =>
+            {
+                table.HasCheckConstraint("CK_hub_ingress_queue_workspace_id", "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint("CK_hub_ingress_queue_organization_id", "\"OrganizationId\" <> ''");
+                table.HasCheckConstraint("CK_hub_ingress_queue_member_user_id", "\"MemberUserId\" <> ''");
+                table.HasCheckConstraint("CK_hub_ingress_queue_capsule_size", "\"CapsuleSizeBytes\" > 0");
+            });
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.ReceiptId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.OrganizationId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
+            entity.Property(record => record.MemberUserId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.AgentConnectionId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.AgentId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SessionId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.TurnId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.IdempotencyKey).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.ContentDigest).HasMaxLength(71).IsRequired();
+            entity.Property(record => record.ProtectionScheme).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.ProtectedCapsule).HasColumnType("text").IsRequired();
+            entity.Property(record => record.State).HasConversion<string>().HasMaxLength(32);
+            entity.Property(record => record.LastErrorCode).HasMaxLength(64);
+            entity.Property(record => record.Sensitivity).HasMaxLength(32);
+            entity.Property(record => record.StorageDecision).HasMaxLength(32);
+            entity.HasIndex(record => record.ReceiptId).IsUnique();
+            entity.HasIndex(record => new
+            {
+                record.WorkspaceId,
+                record.AgentConnectionId,
+                record.IdempotencyKey
+            }).IsUnique();
+            entity.HasIndex(record => new { record.State, record.NextAttemptAt, record.AcceptedAt });
+            entity.HasIndex(record => new { record.OrganizationId, record.State, record.AcceptedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.State, record.AcceptedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.MemberUserId, record.AcceptedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.AgentId, record.AcceptedAt });
         });
 
         modelBuilder.Entity<AuditEventRecord>(entity =>

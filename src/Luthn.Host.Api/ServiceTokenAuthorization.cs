@@ -24,6 +24,8 @@ public static class ServiceScopes
     public const string ConfigWrite = "config.write";
     public const string MetricsRead = "metrics.read";
     public const string MetricsWrite = "metrics.write";
+    public const string HubIngressWrite = "hub.ingress.write";
+    public const string HubIngressOperate = "hub.ingress.operate";
     public const string All = "*";
 }
 
@@ -41,6 +43,10 @@ public sealed class LuthnServiceTokenOptions
     public DateTimeOffset? ExpiresAt { get; set; }
     public string? UserId { get; set; }
     public string? WorkspaceId { get; set; }
+    public string? HubOrganizationId { get; set; }
+    public string? HubAgentConnectionId { get; set; }
+    public string? HubAgentId { get; set; }
+    public string? HubSessionId { get; set; }
     public LuthnActorKind ActorKind { get; set; } = LuthnActorKind.Service;
     public bool IsOperator { get; set; }
 }
@@ -72,13 +78,21 @@ public sealed record LuthnRequestPrincipal(
     string WorkspaceId,
     LuthnActorKind ActorKind,
     string ActorId,
-    bool IsOperator)
+    bool IsOperator,
+    string? HubOrganizationId = null,
+    string? HubAgentConnectionId = null,
+    string? HubAgentId = null,
+    string? HubSessionId = null)
 {
     public bool CanAccessWorkspace(string workspaceId) =>
         string.Equals(WorkspaceId, workspaceId, StringComparison.Ordinal);
 
     public bool CanAccessPrivateUserData(string ownerUserId) =>
         string.Equals(UserId, ownerUserId, StringComparison.Ordinal);
+
+    public bool HasTrustedHubBinding =>
+        HubOrganizationId is not null && HubAgentConnectionId is not null &&
+        HubAgentId is not null && HubSessionId is not null;
 }
 
 public static class ServiceTokenAuthorization
@@ -173,6 +187,26 @@ public static class ServiceTokenAuthorization
 
         var normalized = value.Trim().ToLowerInvariant();
         if (normalized.Length > WorkspaceIds.MaxLength ||
+            !IsAsciiLetterOrDigit(normalized[0]) ||
+            normalized.Any(character =>
+                !IsAsciiLetterOrDigit(character) &&
+                character is not '.' and not '_' and not ':' and not '@' and not '-'))
+        {
+            return null;
+        }
+
+        return normalized;
+    }
+
+    public static string? NormalizeHubIdentity(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        if (normalized.Length > 128 ||
             !IsAsciiLetterOrDigit(normalized[0]) ||
             normalized.Any(character =>
                 !IsAsciiLetterOrDigit(character) &&
@@ -292,7 +326,11 @@ public static class ServiceTokenAuthorization
             configuredWorkspaceId ?? WorkspaceIds.ForLegacyUser(resolvedUserId),
             matchedToken.ActorKind,
             actor,
-            matchedToken.IsOperator);
+            matchedToken.IsOperator,
+            NormalizeHubIdentity(matchedToken.HubOrganizationId),
+            NormalizeHubIdentity(matchedToken.HubAgentConnectionId),
+            NormalizeHubIdentity(matchedToken.HubAgentId),
+            NormalizeHubIdentity(matchedToken.HubSessionId));
         httpContext.Items[ActorItemKey] = actor;
         return await ContinueWhenSensitiveMemoryProtectionIsReady(context, next);
     }
@@ -369,6 +407,17 @@ public static class ServiceTokenAuthorization
                 NormalizeWorkspaceId(token.WorkspaceId) is null))
         {
             return "Every configured service token workspaceId must be valid.";
+        }
+
+        if (activeTokens.Any(token =>
+                token.Scopes.Any(scope =>
+                    string.Equals(scope, ServiceScopes.HubIngressWrite, StringComparison.OrdinalIgnoreCase)) &&
+                (NormalizeHubIdentity(token.HubOrganizationId) is null ||
+                    NormalizeHubIdentity(token.HubAgentConnectionId) is null ||
+                    NormalizeHubIdentity(token.HubAgentId) is null ||
+                    NormalizeHubIdentity(token.HubSessionId) is null)))
+        {
+            return "Every Hub ingress token requires valid server-configured organization, agent connection, agent, and session bindings.";
         }
 
 

@@ -31,6 +31,7 @@ var hostOptions = builder.Configuration
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(operatorConfigDirectory, "keys")));
 builder.Services.AddSingleton<ISensitiveMemoryPayloadProtector, DataProtectionSensitiveMemoryPayloadProtector>();
+builder.Services.AddSingleton<IHubIngressCapsuleProtector, DataProtectionHubIngressCapsuleProtector>();
 builder.Services.AddSingleton<SensitiveMemoryProtectionState>();
 builder.Services.AddScoped<SensitiveMemoryPayloadMigrator>();
 builder.Services.Configure<OperatorConfigOptions>(builder.Configuration.GetSection("Luthn:OperatorConfig"));
@@ -127,6 +128,11 @@ if (hostOptions.EnableForwardedHeaders)
 }
 builder.Services.Configure<LuthnAuthOptions>(builder.Configuration.GetSection("Luthn:Auth"));
 builder.Services.Configure<LuthnIdentityOptions>(builder.Configuration.GetSection("Luthn:Identity"));
+builder.Services.AddOptions<HubIngressOptions>()
+    .Bind(builder.Configuration.GetSection("Luthn:Hub:Ingress"))
+    .Validate(options => options.IsValid, "Luthn Hub ingress limits are invalid.")
+    .ValidateOnStart();
+builder.Services.AddScoped<HubIngressQueueService>();
 if (builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddDbContext<LuthnDbContext>(options =>
@@ -188,6 +194,7 @@ app.MapLuthnApi();
 app.MapOperatorConfiguration();
 app.MapOperationalMetrics();
 app.MapSearchTelemetry();
+app.MapHubIngress();
 
 app.Run();
 

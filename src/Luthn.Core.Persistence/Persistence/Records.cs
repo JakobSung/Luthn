@@ -258,6 +258,44 @@ public sealed class AgentConnectionChannelRecord : IWorkspaceScopedRecord
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
+public enum HubIngressQueueState
+{
+    Pending,
+    Processing,
+    Completed,
+    Failed,
+    DeadLetter
+}
+
+public sealed class HubIngressQueueRecord : IWorkspaceScopedRecord
+{
+    public string Id { get; set; } = "";
+    public string ReceiptId { get; set; } = "";
+    public string OrganizationId { get; set; } = "";
+    public string WorkspaceId { get; set; } = "";
+    public string MemberUserId { get; set; } = "";
+    public string AgentConnectionId { get; set; } = "";
+    public string AgentId { get; set; } = "";
+    public string SessionId { get; set; } = "";
+    public string TurnId { get; set; } = "";
+    public string IdempotencyKey { get; set; } = "";
+    public string ContentDigest { get; set; } = "";
+    public int CapsuleSizeBytes { get; set; }
+    public string ProtectionScheme { get; set; } = "";
+    public string ProtectedCapsule { get; set; } = "";
+    public HubIngressQueueState State { get; set; } = HubIngressQueueState.Pending;
+    public int AttemptCount { get; set; }
+    public DateTimeOffset AcceptedAt { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public DateTimeOffset? LeaseExpiresAt { get; set; }
+    public DateTimeOffset? ProcessingStartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public string? LastErrorCode { get; set; }
+    public string? Sensitivity { get; set; }
+    public string? StorageDecision { get; set; }
+    public bool? ContainsSensitiveMaterial { get; set; }
+}
+
 public static class AuditEventPayloadVersions
 {
     public const int Current = 1;
