@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luthn Operator Console</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/assets/operator.css?v=dark-3">
 </head>
 <body>
@@ -321,6 +322,7 @@
             <div class="row-actions">
               <button id="approveAccess" type="button" disabled>Approve</button>
               <button id="denyAccess" type="button" class="secondary" disabled>Deny</button>
+              <button id="viewAccessAudit" type="button" class="secondary" disabled>View audit trail</button>
             </div>
           </form>
         </div>
@@ -330,20 +332,94 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Metadata-only trail</p>
-            <h2>Audit events</h2>
+            <h2>Audit center</h2>
           </div>
-          <form id="auditForm" class="audit-filter">
+          <span id="auditStatus" class="inline-status" aria-live="polite">Choose an investigation purpose or custom filters.</span>
+        </div>
+        <div class="audit-guidance">
+          <div>
+            <strong>Investigate access decisions</strong>
+            <span>Trace request, review, decision, and result-read metadata around sensitive access.</span>
+          </div>
+          <div>
+            <strong>Diagnose failures</strong>
+            <span>Find failed operations, then narrow the timeline with a correlation id.</span>
+          </div>
+          <div>
+            <strong>Review configuration changes</strong>
+            <span>Use installation scope to review provider updates and tests by authorized operators.</span>
+          </div>
+        </div>
+        <div class="audit-toolbar">
+          <div class="audit-presets" aria-label="Audit investigation presets">
+            <button type="button" class="secondary" data-audit-preset="sensitive">Sensitive access</button>
+            <button type="button" class="secondary" data-audit-preset="failures">Failures</button>
+            <button type="button" class="secondary" data-audit-preset="configuration">Configuration changes</button>
+            <button type="button" class="secondary" data-audit-preset="clear">Clear filters</button>
+          </div>
+          <p class="security-note">Audit records support investigation and accountability. They never provide protected content.</p>
+        </div>
+        <form id="auditForm" class="audit-filter audit-filter-expanded">
+            <label>
+              Scope
+              <select name="scope">
+                <option value="workspace">Workspace</option>
+                <option value="installation">Installation (operator)</option>
+              </select>
+            </label>
             <label>
               Subject id
               <input name="subjectId" placeholder="optional">
+            </label>
+            <label>
+              Action
+              <input name="action" maxlength="128" placeholder="exact action">
+            </label>
+            <label>
+              Action family
+              <select name="actionPrefix">
+                <option value="">Any</option>
+                <option value="sensitive_access.">Sensitive access</option>
+                <option value="operator.classification_provider.">Provider configuration</option>
+                <option value="classification.provider.">Provider invocation</option>
+                <option value="source.intake.">Source intake</option>
+                <option value="turn_summary.">Turn summary</option>
+                <option value="memory.">Memory</option>
+                <option value="retrieval.">Retrieval</option>
+                <option value="processing.">Processing</option>
+                <option value="transport.">Transport</option>
+              </select>
+            </label>
+            <label>
+              Outcome
+              <input name="outcome" maxlength="32" placeholder="for example failed">
+            </label>
+            <label>
+              Subject type
+              <input name="subjectType" maxlength="64" placeholder="optional">
+            </label>
+            <label>
+              Actor kind
+              <input name="actorKind" maxlength="32" placeholder="optional">
+            </label>
+            <label>
+              Correlation id
+              <input name="correlationId" maxlength="128" placeholder="optional">
+            </label>
+            <label>
+              From
+              <input name="from" type="datetime-local">
+            </label>
+            <label>
+              To
+              <input name="to" type="datetime-local">
             </label>
             <label>
               Limit
               <input name="limit" type="number" min="1" max="100" value="25">
             </label>
             <button type="submit">Refresh</button>
-          </form>
-        </div>
+        </form>
         <div class="table-wrap">
           <table>
             <thead>
@@ -352,12 +428,15 @@
                 <th>Actor</th>
                 <th>Action</th>
                 <th>Subject</th>
+                <th>Type</th>
+                <th>Outcome</th>
+                <th>Correlation</th>
                 <th>Payload</th>
                 <th>Redaction</th>
               </tr>
             </thead>
             <tbody id="auditRows">
-              <tr><td colspan="6">No audit events loaded.</td></tr>
+              <tr><td colspan="9">No audit events loaded.</td></tr>
             </tbody>
           </table>
         </div>

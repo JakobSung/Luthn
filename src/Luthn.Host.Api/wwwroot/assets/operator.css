@@ -358,6 +358,52 @@ label {
   font-size: 12px;
 }
 
+.audit-guidance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--border);
+}
+
+.audit-guidance > div {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  background: #0f1216;
+}
+
+.audit-guidance strong {
+  font-size: 12px;
+}
+
+.audit-guidance span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.audit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.audit-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audit-filter-expanded {
+  grid-template-columns: repeat(6, minmax(110px, 1fr));
+  margin-bottom: 14px;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;
@@ -546,6 +592,14 @@ tbody tr:last-child td {
   .access-workbench {
     grid-template-columns: 1fr;
   }
+
+  .audit-guidance {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-filter-expanded {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -573,6 +627,17 @@ tbody tr:last-child td {
 
   .access-detail-fields .detail-summary {
     grid-column: auto;
+  }
+
+  .audit-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .audit-presets,
+  .audit-filter-expanded {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .token-control > label:nth-of-type(2),

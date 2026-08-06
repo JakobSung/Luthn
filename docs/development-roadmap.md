@@ -21,7 +21,7 @@ Next action: create the next slice plan on the current delivery branch, or autom
 | ID | Status | Priority | Title | Idea Artifact | First Slice Candidate |
 | --- | --- | --- | --- | --- | --- |
 | PLUGIN-001 | gated | P2 | Dynamic plugin loading and marketplace | `none` | - |
-| WORK-020 | evidence-pending | P2 | OSS operator approval workbench and audit center | `docs/01-plan/oss-operator-approval-workbench-and-audit-center/001-idea.md` | - |
+| WORK-020 | evidence-pending | P2 | Purpose-oriented metadata-only audit center | `docs/01-plan/oss-operator-approval-workbench-and-audit-center/001-idea.md` | - |
 | none | backlog | - | No additional planned quality slice | `none` | - |
 
 ## Planned

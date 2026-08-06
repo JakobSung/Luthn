@@ -771,7 +771,17 @@ Result response:
 
 ```http
 GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
+GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
 ```
+
+The endpoint supports exact metadata filters for `subjectId`, `action`,
+`outcome`, `subjectType`, `actorKind`, and `correlationId`. `from` and `to` are
+inclusive UTC timestamps. `actionPrefix` is limited to known event families:
+`sensitive_access.`, `operator.classification_provider.`,
+`classification.provider.`, `source.intake.`, `turn_summary.`, `memory.`,
+`retrieval.`, `processing.`, and `transport.`. Filters never widen the
+authenticated workspace or installation scope. Invalid, non-UTC, oversized,
+or unrecognized filters return `400` before the database query runs.
 
 Returns metadata-only audit entries:
 
@@ -804,6 +814,20 @@ versions as metadata and must not assume they include raw source or private
 Vault content.
 
 Audit responses must not contain raw source or private Vault content.
+
+Use audit metadata for a specific operational purpose:
+
+- Before and after a sensitive-access decision, filter by the request
+  `subjectId` or the `sensitive_access.` family to verify the review sequence.
+- When an operation fails, start with `outcome=failed`, then narrow by
+  `correlationId` and a UTC time range.
+- When classification behavior changes, use installation scope with the
+  `operator.classification_provider.` family to review provider updates and
+  tests. Installation scope remains operator-only.
+
+Audit metadata is an accountability and investigation trail, not a content
+recovery surface. Do not use it to store or retrieve prompts, transcripts,
+credentials, raw source, Vault payloads, or protected memory.
 
 ## Production auth boundary
 

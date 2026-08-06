@@ -61,6 +61,10 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("Access requests", index, StringComparison.Ordinal);
         Assert.Contains("Request review", index, StringComparison.Ordinal);
         Assert.Contains("Protected content and credentials are never loaded", index, StringComparison.Ordinal);
+        Assert.Contains("Audit center", index, StringComparison.Ordinal);
+        Assert.Contains("Sensitive access", index, StringComparison.Ordinal);
+        Assert.Contains("Configuration changes", index, StringComparison.Ordinal);
+        Assert.Contains("They never provide protected content", index, StringComparison.Ordinal);
         Assert.Contains("Agent connections", index, StringComparison.Ordinal);
         Assert.Contains("Read-only agent connection status", index, StringComparison.Ordinal);
         Assert.Contains("<th scope=\"col\">Owner</th>", index, StringComparison.Ordinal);
@@ -77,12 +81,16 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("settings.statusDetail", script, StringComparison.Ordinal);
         Assert.Contains("/operator-detail", script, StringComparison.Ordinal);
         Assert.Contains("sanitizeAccessDetail", script, StringComparison.Ordinal);
+        Assert.Contains("viewSelectedAccessAudit", script, StringComparison.Ordinal);
+        Assert.Contains("applyAuditPreset", script, StringComparison.Ordinal);
         Assert.Contains("useDecisionToken: true", script, StringComparison.Ordinal);
         Assert.DoesNotContain("request.requestedBy", script, StringComparison.Ordinal);
         Assert.DoesNotContain("request.workspaceId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("detail?.requestedBy", script, StringComparison.Ordinal);
         Assert.DoesNotContain("detail?.workspaceId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("detail?.sessionId", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("event.workspaceId", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("event.actorUserId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/observations", script, StringComparison.Ordinal);
     }
 

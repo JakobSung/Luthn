@@ -475,21 +475,69 @@ const refreshAudit = async (event) => {
   event?.preventDefault();
   const form = new FormData($("#auditForm"));
   const params = new URLSearchParams();
-  const subjectId = form.get("subjectId")?.toString().trim();
+  ["scope", "subjectId", "action", "actionPrefix", "outcome", "subjectType", "actorKind", "correlationId"]
+    .forEach((field) => {
+      const value = form.get(field)?.toString().trim();
+      if (value) {
+        params.set(field, value);
+      }
+    });
+  ["from", "to"].forEach((field) => {
+    const value = form.get(field)?.toString().trim();
+    if (value) {
+      const timestamp = new Date(value);
+      if (!Number.isNaN(timestamp.getTime())) {
+        params.set(field, timestamp.toISOString());
+      }
+    }
+  });
   const limit = form.get("limit")?.toString().trim() || "25";
-  if (subjectId) {
-    params.set("subjectId", subjectId);
-  }
   params.set("limit", limit);
 
   try {
     const result = await requestJson(`/api/audit-events?${params}`);
     renderAuditRows(result.events || []);
+    $("#auditStatus").textContent = `${result.events?.length || 0} metadata events loaded.`;
     setAction("audit refreshed", `${result.events?.length || 0} events`);
   } catch (error) {
     renderAuditRows([]);
+    $("#auditStatus").textContent = "Audit metadata is unavailable for these filters.";
     setAction("audit failed", error.message);
   }
+};
+
+const applyAuditPreset = (preset) => {
+  const form = $("#auditForm");
+  form.reset();
+  form.limit.value = "25";
+  if (preset === "sensitive") {
+    form.scope.value = "workspace";
+    form.actionPrefix.value = "sensitive_access.";
+    form.subjectType.value = "sensitive_access_request";
+  } else if (preset === "failures") {
+    form.scope.value = "workspace";
+    form.outcome.value = "failed";
+  } else if (preset === "configuration") {
+    form.scope.value = "installation";
+    form.actionPrefix.value = "operator.classification_provider.";
+    form.subjectType.value = "classification_provider";
+  }
+  refreshAudit();
+};
+
+const viewSelectedAccessAudit = () => {
+  if (!state.selectedAccessRequestId) {
+    return;
+  }
+
+  const form = $("#auditForm");
+  form.reset();
+  form.scope.value = "workspace";
+  form.subjectId.value = state.selectedAccessRequestId;
+  form.actionPrefix.value = "sensitive_access.";
+  form.limit.value = "25";
+  refreshAudit();
+  $("#auditForm").scrollIntoView({ behavior: "smooth", block: "center" });
 };
 
 const refreshAccessRequests = async (event) => {
@@ -583,6 +631,7 @@ const updateAccessDecisionState = () => {
   const canDecide = !state.accessDecisionPending && state.selectedAccessDetail?.status === "Pending" && Boolean(reason);
   $("#approveAccess").disabled = !canDecide;
   $("#denyAccess").disabled = !canDecide;
+  $("#viewAccessAudit").disabled = !state.selectedAccessRequestId;
 };
 
 const clearAccessDetail = (message = "Select a request to review.") => {
@@ -690,7 +739,12 @@ const renderAccessRows = (requests) => {
 const renderAuditRows = (events) => {
   const rows = $("#auditRows");
   if (events.length === 0) {
-    rows.innerHTML = '<tr><td colspan="6">No audit events available.</td></tr>';
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 9;
+    cell.textContent = "No audit events available.";
+    row.appendChild(cell);
+    rows.replaceChildren(row);
     return;
   }
 
@@ -701,6 +755,9 @@ const renderAuditRows = (events) => {
       event.actor,
       event.action,
       event.subjectId,
+      event.subjectType,
+      event.outcome,
+      event.correlationId,
       event.payloadClass,
       event.redactionState
     ].forEach((value) => {
@@ -829,7 +886,11 @@ $("#accessForm").addEventListener("submit", refreshAccessRequests);
 $("#accessDecisionForm").reason.addEventListener("input", updateAccessDecisionState);
 $("#approveAccess").addEventListener("click", () => decideAccessRequest(state.selectedAccessRequestId, "approve"));
 $("#denyAccess").addEventListener("click", () => decideAccessRequest(state.selectedAccessRequestId, "deny"));
+$("#viewAccessAudit").addEventListener("click", viewSelectedAccessAudit);
 $("#auditForm").addEventListener("submit", refreshAudit);
+document.querySelectorAll("[data-audit-preset]").forEach((button) => {
+  button.addEventListener("click", () => applyAuditPreset(button.dataset.auditPreset));
+});
 $("#previewExample").addEventListener("click", fillPreviewExample);
 $("#intakeExample").addEventListener("click", fillIntakeExample);
 $("#refreshConnections").addEventListener("click", refreshAgentConnections);
