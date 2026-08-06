@@ -12,7 +12,10 @@ public static class SafeProjectionSyncServiceCollectionExtensions
 {
     public static IServiceCollection AddSafeProjectionSyncFoundation(this IServiceCollection services)
     {
-        services.TryAddSingleton<ISafeProjectionSyncTransport, DisabledSafeProjectionSyncTransport>();
+        services.TryAddSingleton<IHubOutboundRelayTransport, DisabledHubOutboundRelayTransport>();
+        services.TryAddSingleton<ISafeProjectionSyncTransport>(provider =>
+            new HubRelaySafeProjectionSyncTransport(
+                provider.GetRequiredService<IHubOutboundRelayTransport>()));
         services.AddScoped<LocalInstallationIdentityService>();
         services.AddScoped<SafeProjectionPublicationService>();
         services.AddScoped<SafeProjectionOutboxProcessor>();

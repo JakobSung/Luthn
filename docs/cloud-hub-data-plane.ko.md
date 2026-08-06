@@ -2,7 +2,9 @@
 
 [English](cloud-hub-data-plane.md)
 
-상태: 제품 방향 승인, 현재 공개 runtime에는 아직 구현되지 않음
+상태: 공개 runtime은 선택 활성화 방식의 암호화 durable ingress, 제한된 로컬 worker,
+disabled/fake relay 경계와 결정적 복구 harness를 구현했습니다. Cloud enrollment,
+identity control plane과 실제 outbound transport는 아직 구현하지 않았습니다.
 
 ## 배포 경계
 
@@ -184,4 +186,3 @@ CPU/memory, 실패, retry, queue/sync lag를 기록해 결정합니다.
 - raw 또는 민감 plaintext를 safe-projection 계약으로 보내기
 - durable owner가 복구를 보장할 수 없는데도 조용히 성공 처리하기
 - multi-Hub HA, multi-region data plane, SAML, SCIM, custom enterprise role
-

@@ -153,6 +153,42 @@ session에만 두고, identity나 보호 데이터를 포함하지 않는 언어
 보존할 수 있습니다. 동적 API 값은 계속 text-only DOM rendering을 사용합니다. 민감
 접근 결정과 외부 공개 결정을 분리해 한쪽 승인이 다른 쪽 승인을 뜻하지 않게 합니다.
 
+## 중앙 OSS Hub runtime 기반
+
+개인 self-host가 기본입니다. 운영자가 명시적으로 켜기 전에는 Hub ingress, 분류
+worker, outbound relay가 모두 비활성이며 공개 build에는 실제 Cloud transport가
+없습니다. 초기 Hub data plane을 실행하려면 multi-user service-token identity를
+server 설정에 바인딩하고 다음 값을 설정합니다.
+
+```dotenv
+Luthn__Hub__Ingress__Enabled=true
+Luthn__Hub__Ingress__WorkerEnabled=true
+Luthn__Hub__Ingress__MaxCapsuleBytes=16384
+Luthn__Hub__Ingress__OrganizationPendingLimit=5000
+Luthn__Hub__Ingress__WorkspacePendingLimit=1000
+Luthn__Hub__Ingress__MemberPendingLimit=500
+Luthn__Hub__Ingress__AgentPendingLimit=250
+Luthn__Hub__Ingress__WorkerBatchSize=20
+Luthn__Hub__Ingress__WorkerPerWorkspaceBatchLimit=5
+Luthn__Hub__Ingress__WorkerLeaseSeconds=120
+Luthn__Hub__Ingress__WorkerMaxAttempts=5
+```
+
+Data Protection key ring과 PostgreSQL backup을 하나의 복구 세트로 보존합니다.
+key ring이 없거나 호환되지 않으면 해당 작업은 metadata-only dead letter가 되며
+공개·안전 데이터로 낮춰 처리하면 안 됩니다. `GET /api/hub/status`로 aggregate
+queue, retry, dead-letter, outbox, relay, 제한된 worker duration과 content-free
+provider latency count/total/max를 확인합니다. provider나
+보호 문제를 해결한 뒤 운영자 전용 replay를 사용하면 현재 classifier와 policy를
+다시 적용합니다.
+
+결정적 harness는 정상 사용자 10명, 사용자 50명의 각 1개 작업, 명시적
+admission/backpressure 합계를 확인하는 50개 burst, 제어된 5초·30초 상당 provider 지연,
+만료 lease restart 회복, relay 장애·재연결과 revoke-first 순서를 검증합니다. 이는
+정확성·복구 baseline이지 production 처리량·지연 SLO가 아닙니다. capacity를 정하기
+전에 실제 hardware, PostgreSQL 설정, provider, 처리량, p50/p95/p99, CPU/memory,
+실패, retry, queue/sync lag를 기록해야 합니다.
+
 ## 외부 기억 서비스 Adapter 경계
 
 외부 기억 서비스는 선택적 adapter이며 두 번째 원본 저장 경로가 아닙니다. `metadata-only`, `safe-projection-only`인 `public-agent-allowed-safe-projections`만 내보냅니다. 항목은 공개이고 `PublicSafe` 또는 `SharedAcrossAgents`로 보이며 만료되지 않아야 합니다. 별도 안전 분류 경로가 생길 때까지 `title`과 Core tag는 비워 둡니다.
