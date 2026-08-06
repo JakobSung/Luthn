@@ -926,6 +926,48 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task AuditEventsEndpointConnectsSensitiveAccessLifecycleTimeline()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        client.SetBearer(DeciderBearer);
+        using var detailResponse = await client.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+        using var approvalResponse = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Approved for a bounded metadata timeline."
+        });
+
+        client.SetBearer(RequestBearer);
+        using var resultResponse = await client.GetAsync($"/api/access-requests/{requestId}/result");
+
+        client.SetBearer(AuditBearer);
+        using var auditResponse = await client.GetAsync(
+            $"/api/audit-events?subjectId={requestId}&category=access&limit=20");
+        using var auditBody = await JsonDocument.ParseAsync(await auditResponse.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, detailResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, approvalResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, auditResponse.StatusCode);
+        var events = auditBody.RootElement.GetProperty("events").EnumerateArray().ToArray();
+        var actions = events.Select(item => item.GetProperty("action").GetString()).ToArray();
+        Assert.Contains("sensitive_access.requested", actions);
+        Assert.Contains("sensitive_access.operator_detail_read", actions);
+        Assert.Contains("sensitive_access.approved", actions);
+        Assert.Contains("sensitive_access.result_read", actions);
+        Assert.All(events, item => Assert.Equal("Access", item.GetProperty("category").GetString()));
+        Assert.True(events.Zip(events.Skip(1)).All(pair =>
+            pair.First.GetProperty("occurredAt").GetDateTimeOffset() >=
+            pair.Second.GetProperty("occurredAt").GetDateTimeOffset()));
+        Assert.DoesNotContain(
+            "Approved for a bounded metadata timeline.",
+            auditBody.RootElement.GetRawText(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AuditEventsEndpointReturnsMetadataOnly()
     {
         using var factory = CreateAuthFactory();

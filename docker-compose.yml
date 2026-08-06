@@ -12,6 +12,15 @@ services:
       Luthn__Memory__AutomaticTurnCleanupEnabled: ${Luthn__Memory__AutomaticTurnCleanupEnabled:-true}
       Luthn__Memory__AutomaticTurnCleanupIntervalMinutes: ${Luthn__Memory__AutomaticTurnCleanupIntervalMinutes:-60}
       Luthn__Memory__AutomaticTurnCleanupBatchSize: ${Luthn__Memory__AutomaticTurnCleanupBatchSize:-100}
+      Luthn__Audit__Retention__CleanupEnabled: ${Luthn__Audit__Retention__CleanupEnabled:-false}
+      Luthn__Audit__Retention__CleanupIntervalMinutes: ${Luthn__Audit__Retention__CleanupIntervalMinutes:-60}
+      Luthn__Audit__Retention__CleanupBatchSize: ${Luthn__Audit__Retention__CleanupBatchSize:-100}
+      Luthn__Audit__Retention__AccessDays: ${Luthn__Audit__Retention__AccessDays:-365}
+      Luthn__Audit__Retention__SecurityDays: ${Luthn__Audit__Retention__SecurityDays:-365}
+      Luthn__Audit__Retention__ConfigurationDays: ${Luthn__Audit__Retention__ConfigurationDays:-730}
+      Luthn__Audit__Retention__PublicationDays: ${Luthn__Audit__Retention__PublicationDays:-365}
+      Luthn__Audit__Retention__IngestionDays: ${Luthn__Audit__Retention__IngestionDays:-90}
+      Luthn__Audit__Retention__RetentionDays: ${Luthn__Audit__Retention__RetentionDays:-730}
       Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
       Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
       Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}

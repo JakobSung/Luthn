@@ -208,3 +208,61 @@ public sealed class SerializationCompatibilityTests
         Assert.DoesNotContain("decisionReason", accessJson, StringComparison.OrdinalIgnoreCase);
     }
 }
+
+public sealed class AuditContractTests
+{
+    [Fact]
+    public void AuditQueryAndPageRoundTripCategoryCursorAndRetentionMetadata()
+    {
+        var occurredAt = DateTimeOffset.Parse("2026-08-06T08:30:00Z");
+        var query = new AuditEventQueryDto(
+            "workspace",
+            null,
+            "sensitive_access.",
+            null,
+            "request-1",
+            "sensitive_access_request",
+            "service",
+            "correlation-1",
+            occurredAt.AddHours(-1),
+            occurredAt,
+            "opaque-cursor",
+            25)
+        {
+            Category = AuditEventCategory.Access
+        };
+        var metadata = new AuditEventMetadataDto(
+            "audit-1",
+            occurredAt,
+            AuditEventCategory.Access,
+            "Workspace",
+            "auditor",
+            "service",
+            "sensitive_access.approved",
+            "request-1",
+            "sensitive_access_request",
+            "approved",
+            "correlation-1",
+            1,
+            "metadata-only",
+            "content-excluded")
+        {
+            RetentionClass = "access-365d",
+            RetainedUntil = occurredAt.AddDays(365)
+        };
+        var page = new AuditEventPageDto([metadata], "next-opaque-cursor");
+
+        var json = JsonSerializer.Serialize(new { query, page });
+        var roundTrip = JsonSerializer.Deserialize<AuditEventPageDto>(
+            JsonSerializer.Serialize(page));
+
+        Assert.Contains("\"category\":\"Access\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"cursor\":\"opaque-cursor\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"nextCursor\":\"next-opaque-cursor\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"retentionClass\":\"access-365d\"", json, StringComparison.Ordinal);
+        Assert.Equal(AuditEventCategory.Access, Assert.Single(roundTrip!.Events).Category);
+        CloudContractTests.AssertForbiddenTokensAbsent(json);
+        Assert.DoesNotContain("ownerUserId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("actorUserId", json, StringComparison.OrdinalIgnoreCase);
+    }
+}

@@ -408,7 +408,8 @@ encrypted payload, credential, prompt, transcript, working directory, local path
 
 ```http
 GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
-GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events?category=Access&actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events/export?category=Access&subjectId=access-...
 ```
 
 `subjectId`, `action`, `outcome`, `subjectType`, `actorKind`, `correlationId`는
@@ -416,8 +417,14 @@ GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-
 시각입니다. `actionPrefix`는 알려진 사건 계열인 `sensitive_access.`,
 `operator.classification_provider.`, `classification.provider.`, `source.intake.`,
 `turn_summary.`, `memory.`, `retrieval.`, `processing.`, `transport.`만 허용합니다.
+`audit.`도 retention 사건 조회에 허용됩니다. `category`는 `Access`, `Security`,
+`Configuration`, `Publication`, `Ingestion`, `Retention` 중 하나입니다.
 필터는 인증된 workspace 또는 installation 범위를 넓히지 않습니다. 잘못된 UTC,
 과도한 길이, 허용되지 않은 접두사는 database 조회 전에 `400`으로 거절합니다.
+
+page는 `occurredAt` 내림차순, `id` 오름차순입니다. `nextCursor`가 null이 아니면
+같은 filter와 함께 다음 요청에 전달합니다. opaque cursor에는 내용이나 credential이
+없으며 변조된 cursor나 다른 filter에 재사용한 cursor는 `400`으로 거절합니다.
 
 ```json
 {
@@ -435,10 +442,20 @@ GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-
     "correlationId": null,
     "payloadVersion": 1,
     "payloadClass": "metadata-only",
-    "redactionState": "sensitive-boundary-only"
-  }]
+    "redactionState": "sensitive-boundary-only",
+    "category": "Access",
+    "retentionClass": "access-365d",
+    "retainedUntil": "2027-08-06T08:30:00Z"
+  }],
+  "nextCursor": null
 }
 ```
+
+`GET /api/audit-events/export`는 같은 authorization과 제한된 filter를 재사용해
+최대 1000개의 사건을 JSON attachment로 반환합니다. export에는 workspace,
+actor user, owner 식별자가 없고 `metadata-only-no-protected-content` 경계를 명시합니다.
+원본 source, Vault·암호화 payload, credential, prompt, transcript, local path는
+내보내지 않습니다.
 
 현재 `payloadVersion`은 `1`입니다. 미래의 알 수 없는 version도 메타데이터로 보존해야 하며 원본을 포함한다고 가정하면 안 됩니다.
 

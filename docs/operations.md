@@ -270,6 +270,35 @@ terminating API availability. Externally approved, revoked, outbox-linked,
 manually created, non-turn, unexpired, Session, and Durable memory are never
 automatic cleanup candidates.
 
+## Audit retention cleanup
+
+Audit retention is classified independently from operational metrics. The
+defaults retain Access, Security, and Publication events for 365 days,
+Configuration and Retention events for 730 days, and Ingestion events for 90
+days. Cleanup is disabled by default so an operator must make deletion an
+explicit deployment decision:
+
+```dotenv
+Luthn__Audit__Retention__CleanupEnabled=false
+Luthn__Audit__Retention__CleanupIntervalMinutes=60
+Luthn__Audit__Retention__CleanupBatchSize=100
+Luthn__Audit__Retention__AccessDays=365
+Luthn__Audit__Retention__SecurityDays=365
+Luthn__Audit__Retention__ConfigurationDays=730
+Luthn__Audit__Retention__PublicationDays=365
+Luthn__Audit__Retention__IngestionDays=90
+Luthn__Audit__Retention__RetentionDays=730
+```
+
+Retention days must be 1 through 3650, the interval 1 through 1440 minutes,
+and the batch size 1 through 1000. Invalid settings fail startup validation.
+When enabled, each pass deletes only expired metadata within the global batch
+limit and writes one installation-scoped `audit.retention.pruned` metadata-only
+event. It does not copy deleted identifiers or content into logs, metrics, or
+the retention event. Export audit metadata before cleanup only when policy or
+an investigation requires it; the audit export is not a backup or content
+recovery mechanism.
+
 ## External Memory Service Adapter Boundary
 
 External memory services are optional adapters. They are not a second raw

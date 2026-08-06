@@ -28,7 +28,14 @@ public sealed record AuditEventMetadataDto(
     [property: JsonPropertyName("correlationId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CorrelationId,
     [property: JsonPropertyName("payloadVersion")] int PayloadVersion,
     [property: JsonPropertyName("payloadClass")] string PayloadClass,
-    [property: JsonPropertyName("redactionState")] string RedactionState);
+    [property: JsonPropertyName("redactionState")] string RedactionState)
+{
+    [JsonPropertyName("retentionClass")]
+    public string RetentionClass { get; init; } = "security-365d";
+
+    [JsonPropertyName("retainedUntil")]
+    public DateTimeOffset RetainedUntil { get; init; }
+}
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record AuditEventQueryDto(
@@ -43,7 +50,12 @@ public sealed record AuditEventQueryDto(
     [property: JsonPropertyName("from"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? From,
     [property: JsonPropertyName("to"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? To,
     [property: JsonPropertyName("cursor"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Cursor,
-    [property: JsonPropertyName("limit")] int Limit = 50);
+    [property: JsonPropertyName("limit")] int Limit = 50)
+{
+    [JsonPropertyName("category")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AuditEventCategory? Category { get; init; }
+}
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record AuditEventPageDto(

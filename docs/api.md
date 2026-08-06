@@ -787,7 +787,8 @@ shape remains available for compatibility.
 
 ```http
 GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
-GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events?category=Access&actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events/export?category=Access&subjectId=access-...
 ```
 
 The endpoint supports exact metadata filters for `subjectId`, `action`,
@@ -795,9 +796,16 @@ The endpoint supports exact metadata filters for `subjectId`, `action`,
 inclusive UTC timestamps. `actionPrefix` is limited to known event families:
 `sensitive_access.`, `operator.classification_provider.`,
 `classification.provider.`, `source.intake.`, `turn_summary.`, `memory.`,
-`retrieval.`, `processing.`, and `transport.`. Filters never widen the
+`retrieval.`, `processing.`, `transport.`, and `audit.`. `category` accepts
+`Access`, `Security`, `Configuration`, `Publication`, `Ingestion`, or
+`Retention`. Filters never widen the
 authenticated workspace or installation scope. Invalid, non-UTC, oversized,
 or unrecognized filters return `400` before the database query runs.
+
+Pages are ordered by descending `occurredAt` and ascending `id`. When
+`nextCursor` is non-null, pass it back with the exact same filters. The opaque
+cursor contains no content or credentials; malformed cursors and cursors reused
+with different filters return `400`.
 
 Returns metadata-only audit entries:
 
@@ -818,11 +826,21 @@ Returns metadata-only audit entries:
       "correlationId": null,
       "payloadVersion": 1,
       "payloadClass": "metadata-only",
-      "redactionState": "sensitive-boundary-only"
+      "redactionState": "sensitive-boundary-only",
+      "category": "Access",
+      "retentionClass": "access-365d",
+      "retainedUntil": "2027-08-06T08:30:00Z"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
+
+`GET /api/audit-events/export` reuses the same authorization and bounded
+filters and returns at most 1000 events as a JSON attachment. The export omits
+workspace, actor-user, and owner identifiers and declares the
+`metadata-only-no-protected-content` boundary. It never exports raw source,
+Vault or encrypted payloads, credentials, prompts, transcripts, or local paths.
 
 `payloadVersion` identifies the metadata-only audit/control event payload
 shape. Version `1` is the current shape; readers should preserve unknown future
