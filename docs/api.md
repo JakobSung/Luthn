@@ -667,12 +667,25 @@ Returns Markdown rendered from safe summaries and redacted source references onl
 GET /api/access-requests?status=Pending&limit=25
 POST /api/access-requests
 GET /api/access-requests/{id}
+GET /api/access-requests/{id}/operator-detail
 GET /api/access-requests/{id}/result
 POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
 These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and decision operations require the separate trusted `access.decide` scope; an explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
+
+`GET /api/access-requests/{id}/operator-detail` is a separate `access.decide`
+contract for local or self-hosted Hub consoles. It returns the request and decision
+reasons plus the sensitive reference's existing label, source metadata, and redacted
+summary. The response is marked `operator-sensitive-metadata` and
+`local-operator-only`; it is not agent-safe and must not enter Cloud safe-projection
+sync, logs, metrics, or general audit payloads. Authorization always enforces the
+authenticated workspace. A non-operator decider is additionally restricted to its
+server-derived owner, while an explicitly configured operator may review other owners
+only inside that workspace. Successful reads emit a content-free, metadata-only
+`sensitive_access.operator_detail_read` audit event. The response never includes raw
+source/Vault data, protected payloads, credentials, workspace ids, or owner ids.
 
 List response:
 
