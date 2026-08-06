@@ -542,6 +542,8 @@ const viewSelectedAccessAudit = () => {
 
 const refreshAccessRequests = async (event) => {
   event?.preventDefault();
+  const previousSelectedId = state.selectedAccessRequestId;
+  clearAccessDetail("Refreshing access requests...");
   const form = new FormData($("#accessForm"));
   const params = new URLSearchParams();
   const status = form.get("status")?.toString().trim();
@@ -555,8 +557,14 @@ const refreshAccessRequests = async (event) => {
     const result = await requestJson(`/api/access-requests?${params}`, {
       useDecisionToken: true
     });
-    renderAccessRows(result.requests || []);
-    setAction("access refreshed", `${result.requests?.length || 0} requests`);
+    const requests = Array.isArray(result.requests) ? result.requests : [];
+    renderAccessRows(requests);
+    if (previousSelectedId && requests.some((request) => request.id === previousSelectedId)) {
+      await loadAccessRequestDetail(previousSelectedId);
+    } else if (previousSelectedId) {
+      $("#accessDetailStatus").textContent = "The selected request is no longer in the current list.";
+    }
+    setAction("access refreshed", `${requests.length} requests`);
   } catch (error) {
     renderAccessRows([]);
     clearAccessDetail("Access requests could not be loaded.");

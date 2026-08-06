@@ -431,8 +431,9 @@ GET /api/audit-events?actionPrefix=sensitive_access.&outcome=approved&from=2026-
 
 - 민감 접근 승인·반려 전후에는 요청 `subjectId` 또는 `sensitive_access.` 계열로
   요청, 검토, 결정, 결과 조회 순서를 확인합니다.
-- 운영 실패 조사에는 `outcome=failed`로 시작한 뒤 `correlationId`와 UTC 시각
-  범위로 좁힙니다.
+- 분류 실패 조사에는 `outcome=failed`로 시작한 뒤 `correlationId`와 UTC 시각
+  범위로 좁힙니다. Provider 실패 감사 사건은 metadata-only이며 분류 대상 내용이나
+  provider 오류 본문을 포함하지 않습니다.
 - 분류 동작 변경 조사에는 installation 범위와
   `operator.classification_provider.` 계열로 provider 설정 변경·시험을 확인합니다.
   installation 범위는 계속 명시적 운영자만 조회할 수 있습니다.

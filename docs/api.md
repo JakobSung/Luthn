@@ -819,8 +819,9 @@ Use audit metadata for a specific operational purpose:
 
 - Before and after a sensitive-access decision, filter by the request
   `subjectId` or the `sensitive_access.` family to verify the review sequence.
-- When an operation fails, start with `outcome=failed`, then narrow by
-  `correlationId` and a UTC time range.
+- When classification fails, start with `outcome=failed`, then narrow by
+  `correlationId` and a UTC time range. Provider-failure audit events remain
+  metadata-only and never include the classified content or provider error body.
 - When classification behavior changes, use installation scope with the
   `operator.classification_provider.` family to review provider updates and
   tests. Installation scope remains operator-only.

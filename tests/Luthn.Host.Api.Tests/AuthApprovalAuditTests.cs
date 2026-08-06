@@ -996,6 +996,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
 
         using var prefixResponse = await client.GetAsync("/api/audit-events?actionPrefix=unbounded.");
         using var oversizedResponse = await client.GetAsync($"/api/audit-events?subjectId={new string('a', 129)}");
+        using var controlResponse = await client.GetAsync("/api/audit-events?subjectId=%0Arequest-filtered");
         using var offsetResponse = await client.GetAsync(
             $"/api/audit-events?from={Uri.EscapeDataString("2026-08-06T09:00:00+09:00")}");
         using var rangeResponse = await client.GetAsync(
@@ -1003,6 +1004,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
 
         Assert.Equal(HttpStatusCode.BadRequest, prefixResponse.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, oversizedResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, controlResponse.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, offsetResponse.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, rangeResponse.StatusCode);
     }

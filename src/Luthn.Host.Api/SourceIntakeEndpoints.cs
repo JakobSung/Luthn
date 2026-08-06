@@ -101,6 +101,17 @@ public static class SourceIntakeEndpoints
         }
         catch (ClassificationProviderException error)
         {
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "classification.provider.failed",
+                sourceEventId,
+                "metadata-only",
+                classifier.Boundary.RedactionState,
+                DateTimeOffset.UtcNow,
+                subjectType: "source_event",
+                outcome: "failed"));
+            await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
         var decision = policyEngine.Decide(classification);

@@ -103,6 +103,17 @@ public static class ClassificationEndpoints
         }
         catch (ClassificationProviderException error)
         {
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                ServiceTokenAuthorization.GetActor(httpContext),
+                "classification.provider.failed",
+                sourceId.Value,
+                "metadata-only",
+                service.ProviderBoundary.RedactionState,
+                DateTimeOffset.UtcNow,
+                subjectType: "source_event",
+                outcome: "failed"));
+            await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
     }

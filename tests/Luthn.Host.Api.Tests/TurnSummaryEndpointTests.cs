@@ -9,8 +9,10 @@ using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api.Tests;
@@ -22,6 +24,41 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     public TurnSummaryEndpointTests(WebApplicationFactory<Program> factory)
     {
         _factory = factory;
+    }
+
+    [Fact]
+    public async Task ClassificationProviderFailureCreatesMetadataOnlyFailureAudit()
+    {
+        using var factory = CreateFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IContentClassifier>();
+                services.AddSingleton<IContentClassifier, UnavailableContentClassifier>();
+            }));
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-provider-failure",
+            turnId = "turn-provider-failure",
+            sourceAgent = "codex",
+            summary = "Public release summary.",
+            coreTags = new[] { "release" },
+            idempotencyKey = "summary-provider-failure"
+        });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var audits = await db.AuditEvents.ToArrayAsync();
+        Assert.Equal(2, audits.Length);
+        var failedAudit = Assert.Single(
+            audits,
+            audit => audit.Action == "turn_summary.classification_provider.failed");
+        Assert.Equal("failed", failedAudit.Outcome);
+        Assert.Equal("metadata-only", failedAudit.PayloadClass);
+        Assert.Empty(await db.SourceEvents.ToArrayAsync());
+        Assert.Empty(await db.SharedMemoryItems.ToArrayAsync());
     }
 
     [Fact]
@@ -586,5 +623,19 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                 ContainsSensitiveMaterial: false));
         }
+    }
+
+    private sealed class UnavailableContentClassifier : IContentClassifier
+    {
+        public ClassificationProviderBoundary Boundary { get; } =
+            new("unavailable", "metadata-only", "provider-unavailable");
+
+        public ValueTask<ClassificationResult> ClassifyAsync(
+            PublicRecordId sourceId,
+            string content,
+            string? sourceType,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<ClassificationResult>(
+                new ClassificationProviderException("Classification provider request failed."));
     }
 }

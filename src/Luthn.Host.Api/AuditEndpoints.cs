@@ -195,6 +195,11 @@ public static class AuditEndpoints
         string fieldName,
         int maxLength = AuditFilterMaxLength)
     {
+        if (value?.Any(char.IsControl) == true)
+        {
+            return $"{fieldName} cannot contain control characters.";
+        }
+
         var normalized = Normalize(value);
         if (normalized is null)
         {
@@ -206,9 +211,7 @@ public static class AuditEndpoints
             return $"{fieldName} must be {maxLength} characters or fewer.";
         }
 
-        return normalized.Any(char.IsControl)
-            ? $"{fieldName} cannot contain control characters."
-            : null;
+        return null;
     }
 
     private static ProblemHttpResult BadRequest(string detail) =>
