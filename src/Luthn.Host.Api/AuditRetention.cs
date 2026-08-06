@@ -123,38 +123,38 @@ public static class AuditEventCategories
     public static IQueryable<AuditEventRecord> Apply(
         IQueryable<AuditEventRecord> query,
         string category) => category switch
-    {
-        Retention => query.Where(record =>
-            record.Action.Contains(".retention.") ||
-            record.Action.StartsWith("audit.retention.")),
-        Configuration => query.Where(record =>
-            record.Action.StartsWith("operator.classification_provider.")),
-        Publication => query.Where(record =>
-            record.Action.StartsWith("transport.") ||
-            record.Action.StartsWith("processing.") ||
-            record.Action.StartsWith("memory.external_publication.")),
-        Access => query.Where(record =>
-            record.Action.StartsWith("sensitive_access.") ||
-            record.Action.StartsWith("retrieval.")),
-        Ingestion => query.Where(record =>
-            !record.Action.Contains(".retention.") &&
-            !record.Action.StartsWith("memory.external_publication.") &&
-            (record.Action.StartsWith("source.intake.") ||
-                record.Action.StartsWith("turn_summary.") ||
-                record.Action.StartsWith("memory."))),
-        _ => query.Where(record =>
-            !record.Action.Contains(".retention.") &&
-            !record.Action.StartsWith("audit.retention.") &&
-            !record.Action.StartsWith("operator.classification_provider.") &&
-            !record.Action.StartsWith("transport.") &&
-            !record.Action.StartsWith("processing.") &&
-            !record.Action.StartsWith("memory.external_publication.") &&
-            !record.Action.StartsWith("sensitive_access.") &&
-            !record.Action.StartsWith("retrieval.") &&
-            !record.Action.StartsWith("source.intake.") &&
-            !record.Action.StartsWith("turn_summary.") &&
-            !record.Action.StartsWith("memory."))
-    };
+        {
+            Retention => query.Where(record =>
+                record.Action.Contains(".retention.") ||
+                record.Action.StartsWith("audit.retention.")),
+            Configuration => query.Where(record =>
+                record.Action.StartsWith("operator.classification_provider.")),
+            Publication => query.Where(record =>
+                record.Action.StartsWith("transport.") ||
+                record.Action.StartsWith("processing.") ||
+                record.Action.StartsWith("memory.external_publication.")),
+            Access => query.Where(record =>
+                record.Action.StartsWith("sensitive_access.") ||
+                record.Action.StartsWith("retrieval.")),
+            Ingestion => query.Where(record =>
+                !record.Action.Contains(".retention.") &&
+                !record.Action.StartsWith("memory.external_publication.") &&
+                (record.Action.StartsWith("source.intake.") ||
+                    record.Action.StartsWith("turn_summary.") ||
+                    record.Action.StartsWith("memory."))),
+            _ => query.Where(record =>
+                !record.Action.Contains(".retention.") &&
+                !record.Action.StartsWith("audit.retention.") &&
+                !record.Action.StartsWith("operator.classification_provider.") &&
+                !record.Action.StartsWith("transport.") &&
+                !record.Action.StartsWith("processing.") &&
+                !record.Action.StartsWith("memory.external_publication.") &&
+                !record.Action.StartsWith("sensitive_access.") &&
+                !record.Action.StartsWith("retrieval.") &&
+                !record.Action.StartsWith("source.intake.") &&
+                !record.Action.StartsWith("turn_summary.") &&
+                !record.Action.StartsWith("memory."))
+        };
 }
 
 public sealed record AuditRetentionCleanupResult(int DeletedCount);
