@@ -33,6 +33,7 @@ AGENTS.md
 # BEGIN DRIG GENERATED ARTIFACTS
 .drig/
 docs/.drig-status.json
+docs/development-roadmap.md
 docs/roadmap.md
 docs/01-plan/
 docs/02-architecture/
