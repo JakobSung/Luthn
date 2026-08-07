@@ -673,7 +673,7 @@ POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and decision operations require the separate trusted `access.decide` scope; an explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
+These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references, with an optional bounded redacted output after server reclassification. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and decision operations require the separate trusted `access.decide` scope; an explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
 
 `GET /api/access-requests/{id}/operator-detail` is a separate `access.decide`
 contract for local or self-hosted Hub consoles. It returns the request and decision
@@ -824,6 +824,10 @@ inclusive UTC timestamps. `actionPrefix` is limited to known event families:
 authenticated workspace or installation scope. Invalid, non-UTC, oversized,
 or unrecognized filters return `400` before the database query runs.
 
+Current `hub.ingress.*` events use the bounded `Security` category and are
+queried with `category=Security` plus subject, correlation, and UTC filters;
+the action-prefix allowlist does not yet expose a separate Hub family.
+
 Pages are ordered by descending `occurredAt` and ascending `id`. When
 `nextCursor` is non-null, pass it back with the exact same filters. The opaque
 cursor contains no content or credentials; malformed cursors and cursors reused
@@ -962,4 +966,7 @@ credentials, prompts, transcripts, and local paths.
 
 ## Vault boundary
 
-Raw Vault reads are intentionally not exposed by default. Future restricted access should require approval and audit logging before returning limited redacted output.
+Raw Vault reads are intentionally not exposed. The implemented restricted-access
+workflow requires operator approval and audit logging before returning the
+limited, server-validated redacted output described above; an approval never
+returns the protected Vault payload itself.

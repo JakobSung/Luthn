@@ -299,6 +299,25 @@ the retention event. Export audit metadata before cleanup only when policy or
 an investigation requires it; the audit export is not a backup or content
 recovery mechanism.
 
+### Audit operating use
+
+Use the audit center for a bounded operational question, not as a general data
+viewer:
+
+- trace one sensitive-access request from creation through detail review,
+  approve/deny, expiry, and result read by filtering its `subjectId`;
+- investigate classification, provider, or Hub worker failures with the
+  outcome, correlation, and UTC time filters;
+- review operator classification-provider changes in installation scope;
+- confirm publication, ingress/backpressure, dead-letter/replay, and retention
+  outcomes without opening protected content.
+
+The API returns cursor-paginated metadata and the export is limited to
+metadata-only event fields. It never contains raw source, Vault data, encrypted
+payloads, credentials, prompts, transcripts, or local paths. Preserve an export
+only when an investigation or policy requires it; it is not a backup or a
+recovery source.
+
 ## OSS console modes and language
 
 The operator console is the approval authority in both personal Local mode and

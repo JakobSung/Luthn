@@ -303,6 +303,13 @@ same fields for agents and automation without secret values.
 
 Open the operator console at <http://127.0.0.1:8080/>. PostgreSQL is kept on the
 internal Compose network and the console/API port is loopback-bound by default.
+The console is the local approval authority for sensitive-access requests and
+external-publication decisions. It loads bounded operator detail through the
+Host API, requires an explicit decision reason, and can return only a
+server-validated redacted summary; it never displays raw Vault/source content.
+The audit center provides metadata-only decision, failure, configuration,
+ingress, publication, and retention investigation with bounded filters and
+export. It is not a raw-content viewer or a database administration surface.
 
 ### Classification defaults
 
@@ -591,9 +598,11 @@ tools work after a new install or update. Approval and denial remain outside MCP
   MemoryProvider interface, with MCP only where that provider does not cover an
   active operation.
 
-Neither integration is installed by the current Codex command. The operator
-console is a read-only status surface; it cannot install, reconfigure, or
-disconnect host agents.
+Neither integration is installed by the current Codex command. For agent
+configuration the operator console remains an observation surface: it cannot
+install, reconfigure, trust, or disconnect host agents. Its separate approval
+and audit sections still operate through the Host API and do not access the
+database directly.
 
 ## Secrets
 

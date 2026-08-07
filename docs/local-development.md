@@ -81,9 +81,20 @@ sensitive-access request review, approved-result state, approve/deny decisions,
 and purpose-oriented metadata-only audit investigation. Select a sensitive
 request before deciding it; the console loads only the operator-detail
 allowlist and requires an explicit decision reason. The audit center provides
-sensitive-access, classification-failure, and configuration-change presets plus
-bounded custom metadata filters. It is not a raw-content viewer. Agent installation, reconfiguration, and
-disconnect remain host CLI operations.
+sensitive-access, classification-failure, configuration-change, publication,
+ingress, worker, and retention presets plus bounded custom metadata filters. It
+is not a raw-content viewer.
+
+The opt-in Hub baseline is disabled by default. To exercise it locally, use
+`MultiUser` identity with server-bound Hub scopes, then enable
+`Luthn__Hub__Ingress__Enabled=true` and optionally
+`Luthn__Hub__Ingress__WorkerEnabled=true`. Ingress encrypts the bounded capsule,
+derives organization/workspace/member/agent/session identity from the trusted
+token, and returns only a metadata receipt. The disabled/fake relay makes no
+Cloud request; see [Central team Hub data plane](cloud-hub-data-plane.md) for
+the limits and Cloud boundary.
+
+Agent installation, reconfiguration, and disconnect remain host CLI operations.
 
 ## Run Docker self-host stack
 

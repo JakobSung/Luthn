@@ -1,4 +1,4 @@
-# Planned Central Team Hub Data Plane
+# Central Team Hub Data Plane
 
 [한국어](cloud-hub-data-plane.ko.md)
 
@@ -20,9 +20,10 @@ will provide recall and tools. Reliable turn capture will also require an
 Agent-native Stop hook, plugin, or managed configuration; MCP registration alone
 does not observe every Agent lifecycle event.
 
-The public repository owns the Hub data plane. Private Luthn Cloud owns the
-Organization control plane, member identity, Agent connection enrollment,
-relay, safe shared-memory plane, audit, subscription, and managed operations.
+The public repository owns the Hub data plane and its local metadata-only audit
+trail. Private Luthn Cloud owns the Organization control plane, member identity,
+Agent connection enrollment, relay, managed shared-memory plane, Cloud-side
+audit aggregation, subscription, and managed operations.
 
 ## Trusted identity hierarchy
 
@@ -113,10 +114,11 @@ boundary.
 
 ## Backpressure and fairness
 
-The current remote-IP limiter is not a sufficient team boundary because all
-members can arrive through one Cloud relay address. Team mode must apply
-Organization, Workspace, Membership, and AgentConnection request and byte
-budgets. It also needs outstanding-queue limits and global/per-Workspace worker
+The remote-IP limiter alone is not a sufficient team boundary because all
+members can arrive through one Cloud relay address. The OSS Hub baseline already
+applies Organization, Workspace, Membership, and AgentConnection request and
+byte budgets. Future Cloud relay admission must preserve those scope limits and
+also enforce outstanding-queue limits and global/per-Workspace worker
 concurrency.
 
 When a hard limit is reached, ingress returns an explicit retryable status,
@@ -137,41 +139,45 @@ Content-free metrics and status must include:
 - per-Workspace saturation without prompts, transcripts, summaries,
   credentials, local paths, or sensitive values.
 
-## Current implementation baseline
+## Implemented OSS baseline
 
-The current runtime is a sound personal/self-host baseline, not a proven
-multi-member Hub. At the time this plan was approved:
+The public runtime now contains the first Hub data-plane baseline. It remains
+disabled by default and does not make a Cloud request. The shipped defaults are:
 
-- the connector bounds a turn capsule to approximately 3,900 characters;
-- turn ingestion invokes classification before the final persistence completes;
-- the classification provider default is a 30-second timeout with two attempts;
-- the connector has an approximately four-second HTTP timeout and fails open;
-- Host API rate limiting defaults to 600 requests per minute per remote IP with
-  no limiter queue;
-- safe-projection outbox processing defaults to 20 sequential rows on a
-  five-second worker loop;
-- there is no canonical concurrent Hub load suite.
+- maximum capsule size: `16384` bytes;
+- pending limits: Organization `5000`, Workspace `1000`, Member `500`, Agent
+  `250`;
+- per-minute admission limits: Organization `6000`, Workspace `1200`, Member
+  `600`, Agent `300`;
+- worker batch `20`, per-Workspace batch `5`, poll interval `5` seconds, lease
+  `120` seconds, maximum attempts `5`, and base retry delay `2` seconds.
 
-These values are implementation baselines to replace or validate, not product
-capacity promises.
+Ingress derives Hub organization, Workspace, member, Agent, and session identity
+from the trusted server token binding. It protects the capsule with the local
+Data Protection key ring, commits the queue row and metadata-only audit event
+atomically, returns a content-free `202` receipt, and never accepts caller
+identity overrides. The worker recovers expired leases, retries bounded
+provider failures, creates metadata-only dead letters, and permits explicit
+same-Workspace operator replay. `/api/hub/status` exposes aggregate admission,
+queue, worker, outbox, relay, and provider-latency status without identities,
+capsules, prompts, transcripts, credentials, or local paths.
 
-## Implementation roadmap
+The deterministic test harness covers 10 normal users, 50 one-item users, a
+50-request burst with explicit backpressure accounting, delayed providers,
+lease recovery, dead-letter replay, zero-outbound behavior, and relay
+reconnect/revoke-first ordering. These are correctness and recovery baselines,
+not production capacity or latency SLOs.
 
-1. Version the Cloud identity, Hub relay, encrypted envelope, receipt, and error
-   contracts through an Apache-2.0 SDK or stable HTTP specification.
-2. Add asynchronous durable ingress with server-stamped AgentConnection and
-   session attribution.
-3. Move classification behind bounded lease-based workers with retry,
-   dead-letter, replay, and fairness controls.
-4. Integrate encrypted sensitive persistence and safe-projection creation with
-   the existing policy and outbox boundaries.
-5. Add Hub enrollment and an outbound Cloud relay transport while preserving
-   disabled-by-default personal self-host behavior.
-6. Add Codex and Claude team connection lifecycle contracts for remote MCP/OAuth
-   and lifecycle capture configuration.
-7. Add operational status, alerts, backup/restore, and capacity tests.
+## Remaining Cloud boundary
 
-## Capacity and recovery gate
+The next boundary is outside the current OSS runtime: versioned enrollment and
+capability exchange, Cloud-issued connection authority, an authenticated relay
+transport, remote MCP/OAuth lifecycle capture, and managed Organization
+operations. Any future adapter must preserve the authenticated-installation
+tenant derivation, metadata-only audit contract, safe-projection-only payload,
+revoke-first ordering, and disabled-by-default personal self-host path.
+
+## Future capacity and recovery evidence
 
 Focused and automated evidence must cover:
 
@@ -187,13 +193,13 @@ Focused and automated evidence must cover:
 | Hub restart with pending work | Queue, lease, and checkpoint recovery |
 | Noisy Workspace | Other Workspace stays within its objective |
 
-The first design-partner targets are ingress p95 below 500 ms while the Hub is
-reachable, zero acknowledged loss, zero duplicate memory from idempotent retry,
-and normal classification queue age below one minute. Final capacity requires
-recorded hardware, PostgreSQL settings, concurrency, provider, throughput,
-p50/p95/p99, CPU/memory, failures, retries, and queue/sync lag.
+Do not treat an ingress p95, queue-age, or design-partner target as a product
+SLO yet. Before setting capacity targets, record hardware, PostgreSQL settings,
+concurrency, provider, throughput, p50/p95/p99, CPU/memory, failures, retries,
+and queue/sync lag while preserving zero acknowledged loss and idempotent
+no-duplicate behavior.
 
-## Explicit non-goals for the first implementation slices
+## Current non-goals
 
 - changing or removing the existing personal self-host workflow;
 - installing the complete runtime, Docker, or a native Luthn client on every

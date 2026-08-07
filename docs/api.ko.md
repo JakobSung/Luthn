@@ -369,7 +369,7 @@ POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-기존 민감 참조에 대한 메타데이터 전용 요청을 만들고 결정합니다. 원본 Vault/source
+기존 민감 참조에 대한 metadata-only 요청을 만들고 결정하며, server 재분류를 통과한 제한된 redacted output을 선택적으로 반환합니다. 원본 Vault/source
 payload는 반환하지 않습니다. 요청자는 server가 정한 자기 owner의 요청만 생성·조회할
 수 있습니다. 목록·결정에는 별도의 신뢰된 `access.decide`가 필요하며, 명시적 운영자는
 metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관리할 수 있습니다.
@@ -440,6 +440,10 @@ GET /api/audit-events/export?category=Access&subjectId=access-...
 `Configuration`, `Publication`, `Ingestion`, `Retention` 중 하나입니다.
 필터는 인증된 workspace 또는 installation 범위를 넓히지 않습니다. 잘못된 UTC,
 과도한 길이, 허용되지 않은 접두사는 database 조회 전에 `400`으로 거절합니다.
+
+현재 `hub.ingress.*` 사건은 제한된 `Security` category를 사용합니다. 별도 Hub
+action-prefix는 아직 허용하지 않으므로 `category=Security`와 subject, correlation,
+UTC filter를 함께 사용해 조회합니다.
 
 page는 `occurredAt` 내림차순, `id` 오름차순입니다. `nextCursor`가 null이 아니면
 같은 filter와 함께 다음 요청에 전달합니다. opaque cursor에는 내용이나 credential이
@@ -549,4 +553,6 @@ local path는 반환하지 않습니다.
 
 ## Vault 경계
 
-원본 Vault 조회는 기본적으로 제공하지 않습니다. 미래의 제한 접근도 제한된 가림 출력을 반환하기 전에 승인과 감사 기록을 거쳐야 합니다.
+원본 Vault 조회는 제공하지 않습니다. 구현된 제한 접근 흐름은 위에서 설명한 제한된
+server 검증 redacted output을 반환하기 전에 운영자 승인과 감사 기록을 요구하며,
+승인도 보호된 Vault payload 자체를 반환하지 않습니다.

@@ -94,6 +94,23 @@ topic metadata is persisted on wiki and shared-memory safe projections. Recall
 filters project scope before ranking, preselects bounded candidates newest-first,
 and uses `CreatedAt` or `UpdatedAt` for deterministic bounded recency scoring.
 
+## Operator approval and audit model
+
+Sensitive access is a controlled operator workflow, not an agent capability. A
+request carries a bounded purpose, session, and expiry. The Local/Hub operator
+console reads a separate detail projection containing only existing safe
+reference metadata and a redacted summary, then records an explicit approve or
+deny reason. An approved result can contain only a server-validated redacted
+summary; raw Vault/source content and protected payloads never receive a read
+route.
+
+External-publication approval is a separate decision from sensitive-access
+approval. Audit events record the request, decision, result read, classification
+or provider outcome, configuration change, ingestion, processing, and
+retention action as metadata-only events. Cursor queries and metadata-only
+exports support investigation, but audit is not a content store or recovery
+backup.
+
 ## Cloud-Ready Local-First Foundation
 
 Every shared-memory record starts as `LocalOnly`. Agent visibility and external
@@ -121,17 +138,17 @@ network request and leaves queued records untouched. A real Luthn Ontology
 transport, tenant/auth service, billing, and shared team data plane belong to a
 separate commercial repository.
 
-### Planned central team Hub extension
+### Central OSS Hub runtime
 
 The approved team topology keeps this safe-projection outbox but moves Agent
 capture into one Organization-level OSS Hub. Member PCs do not run the full
-runtime. The Hub will persist ingress before classification, process it through
-bounded lease-based workers, keep sensitive payloads encrypted locally, and
-publish only safe projections through the outbox. Cloud-issued connection
-identity is mapped into the existing server-derived Workspace boundary.
-
-This is a roadmap boundary rather than current behavior. The queue, identity,
-backpressure, failure, and capacity contracts are defined in
+runtime. The public runtime now implements the opt-in baseline: Hub ingress
+persists an encrypted capsule and metadata-only audit event before returning
+`202`, a bounded Workspace-fair worker handles leases/retries/dead letters and
+explicit replay, and `/api/hub/status` exposes aggregate content-free status.
+The relay boundary remains disabled or fake, so no Cloud request is made by the
+OSS build. Cloud-issued connection identity, enrollment, and real outbound
+transport remain future boundaries defined in
 [`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
 
 ## Plugin Ingestion Contract

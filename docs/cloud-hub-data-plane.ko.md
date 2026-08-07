@@ -1,4 +1,4 @@
-# 중앙 팀 Hub Data Plane 계획
+# 중앙 팀 Hub Data Plane
 
 [English](cloud-hub-data-plane.md)
 
@@ -18,9 +18,9 @@ Codex 또는 Claude Code를 연결합니다. OAuth를 사용하는 remote MCP는
 제공합니다. 안정적인 turn 자동 수집에는 Agent의 Stop hook, plugin 또는 관리형 설정도
 필요합니다. MCP 등록만으로 모든 Agent lifecycle event 수집이 보장되지는 않습니다.
 
-공개 저장소는 Hub data plane을 소유합니다. 비공개 Luthn Cloud는 Organization control
-plane, 구성원 identity, Agent 연결 enrollment, relay, 안전 공유 기억, 감사, 구독과 관리형
-운영을 소유합니다.
+공개 저장소는 Hub data plane과 로컬 metadata-only 감사 trail을 소유합니다. 비공개 Luthn
+Cloud는 Organization control plane, 구성원 identity, Agent 연결 enrollment, relay,
+관리형 공유 기억, Cloud 측 감사 집계, 구독과 관리형 운영을 소유합니다.
 
 ## 신뢰 identity 계층
 
@@ -103,10 +103,10 @@ envelope만 임시 보관할 수 있고 plaintext는 Hub 경계 안에 남습니
 
 ## Backpressure와 공정성
 
-모든 구성원이 Cloud relay IP 하나를 통해 들어올 수 있으므로 현재 remote-IP limiter는
-팀 경계로 충분하지 않습니다. 팀 모드는 Organization, Workspace, Membership,
-AgentConnection별 요청·byte budget과 outstanding queue limit, 전체/Workspace별 worker
-concurrency가 필요합니다.
+모든 구성원이 Cloud relay IP 하나를 통해 들어올 수 있으므로 remote-IP limiter만으로는
+팀 경계가 충분하지 않습니다. OSS Hub 기준선은 이미 Organization, Workspace, Membership,
+AgentConnection별 요청·byte budget을 적용합니다. 미래 Cloud relay admission도 이 scope
+limit와 outstanding queue limit, 전체/Workspace별 worker concurrency를 유지해야 합니다.
 
 hard limit에 도달하면 retry 가능한 명시적 상태, 안정된 error code와 `Retry-After`를
 반환합니다. 먼저 승인하고 나중에 event를 버리면 안 됩니다. 한 Workspace의 과부하가
@@ -126,37 +126,40 @@ hard limit에 도달하면 retry 가능한 명시적 상태, 안정된 error cod
 - prompt, transcript, summary, credential, local path, 민감 값을 제외한
   Workspace별 saturation
 
-## 현재 구현 기준선
+## 구현된 OSS 기준선
 
-현재 runtime은 개인/셀프호스트 기준선으로는 동작하지만 다중 구성원 Hub 용량을 증명한
-상태는 아닙니다. 이 계획 승인 시점의 제약은 다음과 같습니다.
+공개 runtime에는 첫 Hub data-plane 기반이 구현되어 있습니다. 기본값은 비활성이며
+Cloud 요청을 보내지 않습니다. 현재 기본값은 다음과 같습니다.
 
-- connector의 turn capsule은 약 3,900자로 제한됩니다.
-- turn intake가 최종 저장 완료 전에 분류 provider를 호출합니다.
-- 분류 provider 기본값은 30초 timeout과 2회 시도입니다.
-- connector HTTP timeout은 약 4초이고 fail-open합니다.
-- Host API rate limit 기본값은 remote IP당 분당 600회이며 limiter queue가 없습니다.
-- safe-projection outbox는 기본 20개 row를 5초 worker loop에서 순차 처리합니다.
-- 다중 구성원 Hub의 표준 동시 부하 suite가 없습니다.
+- capsule 최대 크기 `16384` bytes
+- pending limit: Organization `5000`, Workspace `1000`, Member `500`, Agent `250`
+- 분당 admission limit: Organization `6000`, Workspace `1200`, Member `600`, Agent `300`
+- worker batch `20`, Workspace별 batch `5`, poll `5`초, lease `120`초, 최대 시도 `5`,
+  기본 retry 지연 `2`초
 
-이 값은 교체하거나 검증할 구현 기준선이며 제품 용량 약속이 아닙니다.
+Ingress는 신뢰된 server token binding에서 Hub organization, Workspace, member, Agent,
+session identity를 정합니다. 로컬 Data Protection key ring으로 capsule을 보호하고
+queue row와 metadata-only 감사 사건을 원자적으로 저장한 뒤 내용 없는 `202` receipt를
+반환하며 caller identity override를 받지 않습니다. Worker는 만료 lease를 복구하고
+provider 실패를 제한적으로 재시도하며 metadata-only dead-letter를 만들고 같은
+Workspace의 운영자만 명시적 replay를 실행할 수 있습니다. `/api/hub/status`는 identity,
+capsule, prompt, transcript, credential, local path 없이 admission·queue·worker·outbox·
+relay·provider latency의 aggregate 상태만 반환합니다.
 
-## 구현 로드맵
+결정적 시험 harness는 정상 사용자 10명, 각 1개 작업의 사용자 50명, 명시적 backpressure
+합계를 확인하는 50개 burst, provider 지연, lease 복구, dead-letter replay, zero-outbound,
+relay 재연결·revoke-first를 검증합니다. 이는 정확성·복구 baseline이며 production 용량·
+지연 SLO가 아닙니다.
 
-1. Cloud identity, Hub relay, 암호화 envelope, receipt, error 계약을 Apache-2.0
-   SDK 또는 안정된 HTTP 명세로 versioning합니다.
-2. server-stamped AgentConnection/session 귀속을 가진 비동기 durable ingress를
-   추가합니다.
-3. 분류를 lease 기반 bounded worker 뒤로 옮기고 retry, dead-letter, replay, 공정성
-   제어를 추가합니다.
-4. 암호화 민감 저장과 safe projection 생성을 현재 정책·outbox 경계에 연결합니다.
-5. 개인 self-host의 disabled-by-default를 유지하면서 Hub enrollment와 outbound Cloud
-   relay transport를 추가합니다.
-6. Codex와 Claude 팀 연결에 remote MCP/OAuth 및 lifecycle capture 설정 계약을
-   추가합니다.
-7. 운영 상태, alert, backup/restore와 용량 시험을 추가합니다.
+## 남아 있는 Cloud 경계
 
-## 용량·복구 출시 게이트
+다음 경계는 현재 OSS runtime 밖에 있습니다. versioned enrollment·capability 교환,
+Cloud가 발급하는 connection authority, 인증 relay transport, remote MCP/OAuth lifecycle
+capture와 Organization 운영입니다. 미래 adapter도 인증된 installation에서 tenant 범위를
+정하고 metadata-only 감사, safe-projection-only payload, revoke-first 순서와 개인
+self-host disabled-by-default를 유지해야 합니다.
+
+## 미래 용량·복구 evidence
 
 다음 자동화 evidence가 필요합니다.
 
@@ -172,12 +175,12 @@ hard limit에 도달하면 retry 가능한 명시적 상태, 안정된 error cod
 | 대기 작업 중 Hub 재시작 | queue, lease, checkpoint 복구 |
 | noisy Workspace | 다른 Workspace의 목표 유지 |
 
-초기 디자인 파트너 목표는 Hub 접속 가능 시 ingress p95 500ms 미만, 승인 데이터 유실
-0건, 멱등 retry에 의한 중복 기억 0건, 정상 classification queue age 1분 미만입니다.
-최종 용량은 hardware, PostgreSQL 설정, concurrency, provider, throughput, p50/p95/p99,
-CPU/memory, 실패, retry, queue/sync lag를 기록해 결정합니다.
+ingress p95, queue age나 디자인 파트너 수치를 아직 제품 SLO로 취급하지 않습니다. 용량
+목표를 정하기 전에 hardware, PostgreSQL 설정, concurrency, provider, throughput,
+p50/p95/p99, CPU/memory, 실패, retry, queue/sync lag를 기록하고 승인 데이터 유실 0건과
+멱등 retry 중복 0건을 유지해야 합니다.
 
-## 첫 구현 slice의 명시적 비범위
+## 현재 비범위
 
 - 현재 개인 셀프호스트 흐름의 변경 또는 제거
 - 모든 구성원 PC에 전체 runtime, Docker 또는 네이티브 Luthn client 설치

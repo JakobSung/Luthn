@@ -17,13 +17,20 @@ Luthn은 AI 에이전트용 직접 호스팅 공유 기억 계층입니다. 민�
 
 - 에이전트는 기본적으로 Core로 걸러진 공유 기억, context pack, 위키 안전 Markdown을 읽습니다.
 - 원본·비공개 기록은 Vault, 정책, 통제된 접근, 감사 경계 뒤에 둡니다.
+- 로컬 운영자 화면은 Local과 Hub mode의 민감 접근 검토 권한 정본입니다. 운영자 상세에는
+  제한된 안전 참조 metadata와 redacted summary만 표시하며, 승인·반려에는 명시적 사유가
+  필요하고 원본 Vault/source는 노출하지 않습니다.
+- 민감 접근 승인과 외부 공개 승인은 서로 다른 결정입니다. 감사는 metadata-only 조사
+  trail이며 내용 복구나 backup 경로가 아닙니다.
 - 위키 Markdown은 Core가 관리하는 지식의 투영이며 원본 사실 저장소가 아닙니다.
 - 로컬/PostgreSQL이 기본 직접 호스팅 기억 경로이고 외부 기억 서비스는 Luthn 정책 뒤의 선택적 adapter입니다.
 - 로컬 전용 동작은 불변 조건입니다. 외부 공개에는 운영자 동작이 필요하며, 버전이 지정된 공개 안전 투영만 로컬 durable outbox를 거칩니다. 공개 저장소에는 활성 cloud client가 없습니다.
-- 승인된 미래 팀 구조는 구성원 PC마다 전체 설치를 두지 않고 Organization당 중앙 OSS
-  Hub 하나를 사용합니다. Hub는 raw/민감 수집과 durable 처리를, Cloud는 identity,
-  relay와 안전 공유 기억을 맡습니다. 이는 현재 runtime 구현을 뜻하지 않는 계획입니다.
-  자세한 내용은 [중앙 팀 Hub data plane 계획](cloud-hub-data-plane.ko.md)에 있습니다.
+- 승인된 팀 구조는 구성원 PC마다 전체 설치를 두지 않고 Organization당 중앙 OSS Hub
+  하나를 사용합니다. 공개 runtime에는 선택 활성화 방식의 암호화 durable ingress,
+  server가 정하는 Workspace identity, 제한된 처리, dead-letter/replay, aggregate
+  status와 disabled/fake relay 경계가 구현되어 있습니다. Cloud enrollment, Cloud
+  identity control과 실제 outbound transport는 이 저장소 밖에 있습니다. 자세한 내용은
+  [중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)에 있습니다.
 - 로컬 직접 호스팅 확인 흐름은 provider 자격 증명 없이 실행할 수 있어야 합니다.
 - 저장소에는 자격 증명, 비공개 원본, 고객 원문, 로컬 에이전트 자료, 계획 상태, 실행 증거를 두지 않습니다.
 
@@ -57,7 +64,8 @@ runtime 프로젝트는 `Luthn.Core`, `Luthn.Core.Persistence`, `Luthn.Host.Api`
 
 - 구현된 지식 모형에는 `Core`, 맥락 선택에는 `coreTags`를 사용합니다.
 - 원본 Vault/source 조회 route, connector method, MCP tool을 기본으로 추가하지 않습니다.
-- 미래의 명시적 계획이 제한된 가림 출력을 구현하기 전까지 민감 접근·감사 응답은 메타데이터만 반환합니다.
+- 민감 접근·감사 응답은 기본적으로 metadata-only로 유지합니다. 유일한 제한적 출력
+  예외는 민감 접근 결과 계약에서 운영자가 승인하고 server가 재검증한 redacted summary입니다.
 - 민감하거나 agent에 보이지 않는 shared-memory 사용자 필드는 인증된 보호 payload 저장소에 두고 key ring은 PostgreSQL 밖에 둡니다. 암호문을 agent, sync, publication, audit, log, metric 계약으로 노출하지 않습니다.
 - 모든 새 source event 또는 shared-memory item과 함께 버전이 지정된 불변 수집 출처 레코드 하나를 원자적으로 저장합니다. 호출자 주장은 서버가 확인한 actor·owner identity와 구분하고, 출처정보는 권한 있는 same-owner reader 또는 명시적 운영자에게만 제공합니다.
 - owner identity는 server가 정하는 인가 상태입니다. 모든 agent-safe 영속 query, ranking, idempotency key, publication, 민감 접근, retrieval cache는 반환하거나 재사용하기 전에 owner로 분리합니다.
@@ -87,7 +95,7 @@ git diff --check
 - [Codex 연결](agent-quickstart.ko.md)
 - [라이선스](licensing.ko.md)
 - [구조](architecture.ko.md)
-- [중앙 팀 Hub data plane 계획](cloud-hub-data-plane.ko.md)
+- [중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)
 - [프로젝트 구조](project-structure.ko.md)
 - [데이터 경계](data-boundaries.ko.md)
 - [원본 참조](source-references.ko.md)

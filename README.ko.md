@@ -21,7 +21,9 @@ Luthn은 비공개 원본 데이터를 모델의 기본 맥락으로 넘기지 �
 
 - Docker와 PostgreSQL을 사용해 직접 관리하는 인프라에서 실행합니다.
 - 수집한 정보를 분류하고 가린 뒤 에이전트에 안전한 요약과 맥락만 제공합니다.
-- 어떤 정보가 저장·공유·조회됐는지 확인할 수 있습니다.
+- 로컬 운영자 화면에서 민감 접근 요청과 외부 공개 승인을 검토합니다.
+- 저장·공유·조회·결정·실패에 대한 감사 메타데이터를 확인하며 감사 기록을
+  원문 저장소로 사용하지 않습니다.
 
 ## 기억이 이어지는 방식
 
@@ -90,6 +92,33 @@ https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installat
 분류 예시, 외부 provider 전송 범위, 에이전트 가시성, 외부 공개 규칙은
 [데이터 경계](docs/data-boundaries.ko.md)를 참고하세요.
 
+## 운영자 승인과 감사
+
+개인 Local mode와 선택 활성화된 중앙 OSS Hub mode 모두에서 로컬 운영자 화면이
+민감 데이터 결정의 정본입니다. 요청의 목적·session·만료·안전한 참조 정보를 확인한
+뒤 명시적인 사유를 입력해 승인 또는 반려합니다. 승인이 반환할 수 있는 것은 server가
+재검증한 제한된 redacted summary뿐이며, 원본 Vault/source 조회 경로를 열지 않습니다.
+
+민감 접근 승인과 외부 공개 승인은 서로 다른 결정입니다. 화면은 직접 database에
+접근하지 않고 Host API 계약만 사용하며, 공개 runtime의 Cloud transport는 기본적으로
+비활성입니다.
+
+감사 데이터는 metadata-only입니다. 요청의 결정 timeline, 분류·provider 실패,
+설정 변경, ingress·처리 결과와 보존 정리를 조사할 때 사용합니다. cursor pagination,
+제한된 filter, metadata-only export를 제공하지만 감사 기록은 backup·prompt/transcript
+저장소·원문 복구 수단이 아닙니다. 자세한 내용은
+[API 승인·감사 계약](docs/api.ko.md)과 [운영 보존 모델](docs/operations.ko.md)을
+참고하세요.
+
+## 중앙 OSS Hub 경계
+
+공개 runtime에는 선택 활성화 방식의 중앙 Hub data-plane 기반이 구현되어 있습니다.
+암호화 durable ingress, server가 정하는 Workspace identity, 제한된 worker
+lease/retry/dead-letter, 내용 없는 운영 상태와 disabled/fake relay 경계를 제공합니다.
+개인 self-host가 기본이며 Cloud enrollment, Cloud identity control, 실제 outbound
+transport는 이 저장소 범위 밖에 있습니다. 자세한 내용은
+[중앙 팀 Hub data plane](docs/cloud-hub-data-plane.ko.md)을 참고하세요.
+
 ## 문서
 
 - [설치, 복구와 수명주기](docs/installation.ko.md)
@@ -99,6 +128,7 @@ https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installat
 - [운영과 복구](docs/operations.ko.md)
 - [컨테이너 릴리즈](docs/releases.ko.md)
 - [API](docs/api.ko.md)
+- [중앙 팀 Hub data plane](docs/cloud-hub-data-plane.ko.md)
 - [구조](docs/architecture.ko.md)
 - [로컬 개발](docs/local-development.ko.md)
 - [프로젝트 맥락](docs/project-context.ko.md)

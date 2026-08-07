@@ -140,6 +140,22 @@ metadata만 삭제하고 installation 범위의 metadata-only `audit.retention.p
 복사하지 않습니다. 정책 또는 조사에 필요할 때만 삭제 전에 감사 metadata를
 export하며, 이 export를 backup이나 내용 복구 수단으로 사용하지 않습니다.
 
+### 감사 운영 사용
+
+감사 센터는 일반 데이터 화면이 아니라 제한된 운영 질문에 사용합니다.
+
+- 민감 접근 요청의 `subjectId`로 생성, 상세 검토, 승인·반려, 만료와 결과 조회 순서를
+  추적합니다.
+- outcome, correlation과 UTC 시간 filter로 분류·provider·Hub worker 실패를 조사합니다.
+- installation 범위에서 운영자 classification-provider 설정 변경을 확인합니다.
+- 보호된 내용을 열지 않고 publication, ingress/backpressure, dead-letter/replay와
+  retention 결과를 확인합니다.
+
+API는 cursor pagination metadata를 반환하고 export도 metadata-only 사건 필드로
+제한합니다. 원본 source, Vault, 암호화 payload, credential, prompt, transcript, local
+path는 포함하지 않습니다. 조사나 정책상 필요할 때만 export를 보존하며 backup이나
+복구 원본으로 사용하지 않습니다.
+
 ## OSS console mode와 언어
 
 운영 console은 개인 Local mode와 중앙 OSS Hub mode 모두에서 승인 권한의 정본입니다.

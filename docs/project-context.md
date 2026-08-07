@@ -27,6 +27,13 @@ context.
 - Agents read Core-filtered shared memory, context packs, and wiki-safe Markdown
   by default.
 - Raw/private records stay behind Vault, policy, controlled access, and audit.
+- The local operator console is the authority for sensitive-access review in
+  Local and Hub modes. Operator detail may show only bounded safe reference
+  metadata and redacted summaries; approve/deny decisions require an explicit
+  reason and never expose raw Vault/source content.
+- Sensitive-access approval and external-publication approval are independent
+  decisions. Audit is a metadata-only investigation trail, not a content
+  recovery or backup surface.
 - Wiki Markdown is a projection over Core-managed knowledge, not the source of
   truth.
 - Local/PostgreSQL storage is the default self-host memory path; external memory
@@ -34,10 +41,12 @@ context.
 - Local-only operation is the invariant. External publication requires an
   operator action and exports only a versioned public-safe projection through a
   durable local outbox. The public repository contains no active cloud client.
-- The approved future team topology uses one central OSS Hub per Organization,
-  not one full installation per member PC. The Hub owns raw/sensitive intake and
-  durable processing; Cloud owns identity, relay, and safe shared memory. This
-  is planned behavior, not a claim about the current runtime. See
+- The approved team topology uses one central OSS Hub per Organization, not one
+  full installation per member PC. The public runtime now implements the
+  opt-in Hub data-plane baseline: encrypted durable ingress, server-derived
+  Workspace identity, bounded processing, dead-letter/replay, aggregate status,
+  and disabled/fake relay boundaries. Cloud enrollment, Cloud identity control,
+  and real outbound transport remain outside this repository. See
   [`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
 - Local self-host smoke flows should run without provider credentials.
 - The repository must remain safe to expose: no credentials, private source
@@ -86,8 +95,9 @@ Runtime projects:
 - Use `coreTags` for Core-filtered context selection.
 - Do not add raw Vault/source read routes, connector methods, or MCP tools by
   default.
-- Keep sensitive-access and audit responses metadata-only unless a future
-  generated plan explicitly implements limited redacted output.
+- Keep sensitive-access and audit responses metadata-only by default. The only
+  limited output exception is the explicit operator-approved, server-validated
+  redacted summary returned by the sensitive-access result contract.
 - Keep sensitive or non-agent-visible shared-memory user fields in the
   authenticated protected payload store. Keep its key ring outside PostgreSQL,
   and never expose ciphertext through agent, sync, publication, audit, log, or
@@ -140,8 +150,8 @@ git diff --check
 - `docs/agent-quickstart.md`: agent and MCP connection path.
 - `docs/licensing.md`: package license boundary.
 - `docs/architecture.md`: Core model reference.
-- `docs/cloud-hub-data-plane.md`: planned central team Hub, queue, identity,
-  capacity, and Cloud connection contract.
+- `docs/cloud-hub-data-plane.md`: implemented opt-in central Hub data-plane
+  baseline, queue/identity/capacity evidence, and the remaining Cloud boundary.
 - `docs/project-structure.md`: structure and historical mapping reference.
 - `docs/data-boundaries.md`: concrete data classification examples.
 - `docs/source-references.md`: source reference shape.
