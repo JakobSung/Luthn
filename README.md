@@ -21,7 +21,10 @@ raw private data part of the model's default context.
 
 - Run it in infrastructure you manage with Docker and PostgreSQL.
 - Classify and redact intake before exposing agent-safe summaries and context.
-- Audit what was stored, shared, and retrieved.
+- Review sensitive-access requests and external-publication approvals in the
+  local operator console.
+- Audit metadata about storage, sharing, retrieval, decisions, and failures
+  without turning the audit trail into a content store.
 
 ## How The Memory Loop Works
 
@@ -94,6 +97,36 @@ project context. External publication is a separate, explicit approval path.
 Read [Data boundaries](docs/data-boundaries.md) for classification examples,
 provider-transfer implications, agent visibility, and publication rules.
 
+## Operator Approval And Audit
+
+The local operator console is the authority for sensitive-data decisions in
+both personal Local mode and the opt-in central OSS Hub mode. A request is
+reviewed with bounded purpose, session, expiry, and safe reference metadata;
+the operator must inspect the detail and provide an explicit reason before
+approving or denying it. Approval can return only a server-validated,
+redacted summary. It never opens a raw Vault/source read path.
+
+Sensitive-access approval and external-publication approval are separate
+decisions. The console uses Host API contracts, never direct database access,
+and the public runtime keeps Cloud transport disabled by default.
+
+Audit data is metadata-only. Use it to reconstruct a decision timeline, trace
+classification or provider failures, review configuration changes, investigate
+ingress/processing outcomes, and verify retention cleanup. Cursor pagination,
+bounded filters, and metadata-only export support operations; audit records are
+not a backup, a prompt/transcript store, or a raw-data recovery path. See the
+[API audit and approval contracts](docs/api.md) and the
+[operations retention model](docs/operations.md).
+
+## Central OSS Hub Boundary
+
+The public runtime now includes an opt-in central Hub data-plane foundation:
+encrypted durable ingress, server-derived Workspace identity, bounded worker
+leases/retries/dead letters, content-free operational status, and a disabled or
+fake relay boundary. Personal self-host remains the default. Cloud enrollment,
+Cloud identity control, and real outbound transport are still outside this
+repository. See [Central team Hub data plane](docs/cloud-hub-data-plane.md).
+
 ## Documentation
 
 - [Installation, recovery, and lifecycle](docs/installation.md)
@@ -103,6 +136,7 @@ provider-transfer implications, agent visibility, and publication rules.
 - [Operations and recovery](docs/operations.md)
 - [Container releases](docs/releases.md)
 - [API](docs/api.md)
+- [Central team Hub data plane](docs/cloud-hub-data-plane.md)
 - [Architecture](docs/architecture.md)
 - [Local development](docs/local-development.md)
 - [Licensing](docs/licensing.md)

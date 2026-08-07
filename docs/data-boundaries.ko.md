@@ -212,6 +212,35 @@ provenance 식별자는 길이와 문자가 제한되고 정규화됩니다. 원
 payload, log, metric에는 포함하지 않습니다. audit는 행위·결정의 사건 이력이고,
 provenance는 불변 수집 기원 기록입니다.
 
+## 민감 접근 검토 경계
+
+민감 접근은 구조화된 목적, session correlation과 60~3600초 만료를 가진 제한된
+요청으로 시작합니다. 요청 생성·상태·결과 조회는 server가 정한 owner로 제한하고,
+목록과 결정에는 별도 `access.decide` scope가 필요합니다. 운영자 상세 투영은 agent
+화면이 아닙니다. 기존의 안전한 label, source metadata와 redacted summary만 포함할 수
+있으며 원본 Vault/source, protected payload, credential, workspace·owner identity는
+포함하지 않습니다.
+
+운영자는 상세를 확인한 뒤 명시적 승인·반려 사유를 기록해야 합니다. 승인은 server가
+다시 분류해 공개·agent-safe라고 확인한 제한된 `redactedSummary`만 보존할 수 있습니다.
+결과 계약은 검토된 summary 또는 pending·expired·denied·unavailable에 대한 명시적
+무출력 정책을 반환합니다. 만료, 상세 조회, 결정과 결과 조회는 metadata-only 감사 사건을
+남깁니다. 민감 접근 승인이 외부 공개 승인을 의미하지는 않습니다.
+
+## 감사 사용과 보존 경계
+
+감사 사건은 `Access`, `Security`, `Configuration`, `Publication`, `Ingestion`,
+`Retention`으로 분류합니다. 요청 결정 timeline, 분류·provider 실패 조사, 설정 변경
+검토, Hub ingress·worker·publication 결과, 보존 정리 확인에 사용합니다. subject,
+action 계열, outcome, correlation과 UTC 시간 범위로 필터하고 opaque cursor로 다음
+page를 조회하며 정책상 별도 검토 기록이 필요할 때만 metadata-only export를 사용합니다.
+
+감사 응답·export에는 원본 source, Vault, 암호화 payload, credential, prompt, transcript,
+local path가 없습니다. 감사는 책임 추적·조사 trail이지 backup이나 원문 복구 수단이
+아닙니다. 보존 기간은 Access/Security/Publication 365일, Configuration/Retention
+730일, Ingestion 90일이며 물리 정리는 기본 비활성입니다. 활성화하면 정리 pass마다
+metadata-only retention 사건 하나를 남깁니다.
+
 ## Provider 경계
 
 - 새 배포 설치는 로컬 `mock` 분류기를 사용하므로 별도 provider 설정 없이 분류가 동작합니다.

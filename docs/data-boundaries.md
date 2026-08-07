@@ -269,6 +269,42 @@ recall, search indexes, encrypted user payloads, safe sync, publication, audit
 payloads, logs, and metrics. Audit remains the event history of actions and
 decisions; provenance remains the immutable origin statement.
 
+## Sensitive-access review boundary
+
+Sensitive access starts as a bounded request with a structured purpose, session
+correlation, and 60–3600 second expiry. Request creation, status, and result
+reads are scoped to the server-derived owner; listing and decisions require the
+separate `access.decide` scope. The operator-detail projection is a local
+operator surface, not an agent surface: it may contain an existing safe label,
+source metadata, and a redacted summary, but never raw Vault/source content,
+protected payloads, credentials, workspace identity, or owner identity.
+
+An operator must inspect that detail and record an explicit approve or deny
+reason. Approval can retain a bounded `redactedSummary` only after the server
+reclassifies it as public and agent-safe. The result contract returns that
+reviewed summary or an explicit no-output policy for pending, expired, denied,
+or unavailable decisions. Expiry, detail reads, decisions, and result reads
+emit metadata-only audit events. Sensitive-access approval never implies
+external-publication approval.
+
+## Audit use and retention boundary
+
+Audit events are grouped into `Access`, `Security`, `Configuration`,
+`Publication`, `Ingestion`, and `Retention`. Use them for a request decision
+timeline, classification/provider failure investigation, configuration-change
+review, Hub ingress/worker and publication outcomes, and retention-cleanup
+verification. Filter by subject, action family, outcome, correlation, and UTC
+time range; use the opaque cursor for subsequent pages and metadata-only export
+when policy requires an external review record.
+
+Audit responses and exports intentionally exclude raw source, Vault data,
+encrypted payloads, credentials, prompts, transcripts, and local paths. Audit is
+an accountability and investigation trail, not a backup or content-recovery
+surface. Retention is category-specific (Access/Security/Publication 365 days,
+Configuration/Retention 730 days, Ingestion 90 days) and physical cleanup is
+disabled by default; enabling it writes one metadata-only retention event per
+cleanup pass.
+
 ## Provider Boundary
 
 - Fresh packaged installs use the local `mock` classifier, so classification

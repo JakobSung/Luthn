@@ -30,6 +30,19 @@ VaultRecord -> KnowledgeItem로 요약 -> WikiDocument로 투영
 
 제한된 기억은 기본적으로 owner에게만 보입니다. 더 넓은 공유는 명시적 정책 절차여야 합니다. 안전 기억 API는 메타데이터 기록만 로컬 또는 PostgreSQL에 저장하고, 공개·미만료·에이전트 허용 투영만 반환합니다. 선택적인 정규화 프로젝트·작업·주제 메타데이터는 wiki와 공유 기억 안전 투영에 저장합니다. 회상은 순위 계산 전에 프로젝트 범위를 제한하고 최신 기록부터 후보 수를 제한하며 `CreatedAt` 또는 `UpdatedAt`으로 결정적이고 제한된 최신성 점수를 계산합니다.
 
+## 운영자 승인과 감사 모형
+
+민감 접근은 에이전트 기능이 아니라 통제된 운영자 흐름입니다. 요청에는 제한된 목적,
+session과 만료가 들어갑니다. Local/Hub 운영자 화면은 기존 안전 참조 metadata와
+redacted summary만 가진 별도 상세 투영을 읽고, 명시적 승인·반려 사유를 기록합니다.
+승인 결과도 server가 재검증한 redacted summary만 포함할 수 있으며 원본 Vault/source와
+protected payload에는 조회 route를 만들지 않습니다.
+
+외부 공개 승인은 민감 접근 승인과 별도입니다. 감사 사건은 요청·결정·결과 조회,
+분류·provider 결과, 설정 변경, 수집·처리와 보존 정리를 metadata-only로 기록합니다.
+cursor 조회와 metadata-only export는 조사를 위한 것이며 감사는 원문 저장소나 복구
+backup이 아닙니다.
+
 ## Cloud 준비형 Local-First 기반
 
 모든 공유 기억은 `LocalOnly`로 시작합니다. 에이전트 가시성과 외부 공개는 별도 결정입니다. 운영자가 `ApprovedForExternal`로 바꾸기 전에는 외부 공개 대기열에 넣지 않습니다. `Revoked`는 새 revision과 본문 없는 tombstone을 만들어 미래 remote adapter가 이전 투영을 삭제할 수 있게 합니다.
@@ -38,16 +51,16 @@ VaultRecord -> KnowledgeItem로 요약 -> WikiDocument로 투영
 
 공개 상태·감사 메타데이터·durable outbox row는 함께 커밋됩니다. Worker는 lease로 준비된 row를 가져와 backoff 재시도하고, 전송되지 않은 이전 revision을 `Superseded`로 만들며, acknowledgement/checkpoint와 취소 tombstone을 관리합니다. 이 저장소의 유일한 transport는 `disabled`이고 네트워크 요청을 하지 않습니다. 실제 cloud adapter와 tenant/auth, billing, 팀 data plane은 별도 상용 저장소 범위입니다.
 
-### 계획된 중앙 팀 Hub 확장
+### 중앙 OSS Hub runtime
 
 승인된 팀 구조는 현재 safe-projection outbox를 유지하면서 Agent 수집을 Organization의
-중앙 OSS Hub 하나로 모읍니다. 구성원 PC는 전체 runtime을 실행하지 않습니다. Hub는 분류
-전에 ingress를 내구 저장하고 제한된 lease worker로 처리하며, 민감 payload는 로컬에서
-암호화하고 safe projection만 outbox로 보냅니다. Cloud가 발급한 connection identity는
-현재 서버 신뢰 Workspace 경계로 해석합니다.
-
-이는 현재 동작이 아니라 로드맵 경계입니다. queue, identity, backpressure, 장애와 용량
-계약은 [중앙 팀 Hub data plane 계획](cloud-hub-data-plane.ko.md)에 정의합니다.
+중앙 OSS Hub 하나로 모읍니다. 구성원 PC는 전체 runtime을 실행하지 않습니다. 공개
+runtime에는 선택 활성화 방식의 기반이 구현되어 있습니다. Hub ingress는 암호화 capsule과
+metadata-only 감사 사건을 저장한 뒤 `202`를 반환하고, 제한된 Workspace 공정 worker가
+lease/retry/dead-letter와 명시적 replay를 처리하며 `/api/hub/status`는 내용 없는
+aggregate 상태를 반환합니다. relay 경계는 disabled/fake이므로 OSS build가 Cloud 요청을
+보내지 않습니다. Cloud connection identity, enrollment와 실제 outbound transport는
+[중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)에 정의된 미래 경계입니다.
 
 ## Plugin 수집 계약
 
