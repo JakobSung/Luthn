@@ -1,5 +1,13 @@
 <p align="center">
-  <img src="docs/assets/luthn-brand.png" alt="Luthn - Safe context for AI agents." width="920">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/luthn-wordmark-white.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/luthn-wordmark-black.svg">
+    <img src="docs/assets/luthn-wordmark-black.svg" alt="Luthn" width="360">
+  </picture>
+</p>
+
+<p align="center">
+  <img src="docs/assets/luthn-hero.png" alt="Luthn object in a quiet, dark memory chamber." width="920">
 </p>
 
 <p align="center">
