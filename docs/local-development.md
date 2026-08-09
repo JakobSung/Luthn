@@ -96,6 +96,42 @@ the limits and Cloud boundary.
 
 Agent installation, reconfiguration, and disconnect remain host CLI operations.
 
+## Use the operator console
+
+Open `Console access` before choosing a workflow. The console keeps the values
+in the current browser session and sends them only as bearer headers to the
+local Host API; it never generates, displays, or exports a credential.
+
+- **Service token** is the installation's routine API credential. Its configured
+  scopes decide which read, intake, publication, provider, or audit tabs are
+  available. It is not an approval credential by itself.
+- **Decision token** is a separate trusted token with `access.decide`. The
+  access-approval list, operator detail, approve, and deny actions use this
+  token so read-only operators cannot decide.
+- **Operator label** is optional `X-Luthn-Operator` audit metadata. It does not
+  grant a role, scope, or identity.
+
+The source self-host installer creates `LUTHN_SERVICE_VALUE` and
+`LUTHN_OPERATOR_VALUE` in the ignored, permission-restricted `.env` file. The
+source install's operator token is decision-only by default. Packaged installs
+keep the equivalent secrets at `~/.config/luthn/service-token` and
+`~/.config/luthn/operator-token` (Windows: `%LOCALAPPDATA%\\Luthn\\config\\service-token`
+and `operator-token`). Do not print or commit these files.
+
+Use the menu by task:
+
+- **Overview**: deployment boundary, health/readiness, and connector status.
+- **Access approvals**: inspect bounded operator detail, then approve or deny
+  with an explicit reason. No raw Vault/source payload is shown.
+- **Publication**: handle the separate external-publication decision path.
+- **Classify & intake**: preview classification or submit a safe source intake.
+- **Audit center**: investigate metadata-only events with presets, filters,
+  cursor pagination, and export.
+
+If a tab returns `403`, keep the credential value unchanged and add the scope
+required by that tab to the server-configured token. Never solve a permission
+error by putting a broader token into an agent connector.
+
 ## Run Docker self-host stack
 
 ```bash

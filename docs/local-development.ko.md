@@ -44,6 +44,42 @@ DOTNET_ENVIRONMENT=Testing dotnet run --project src/Luthn.Host.Api/Luthn.Host.Ap
 
 에이전트 설치·재설정·연결 해제는 host CLI에서 수행합니다.
 
+## 운영자 콘솔 사용법
+
+먼저 `콘솔 접근` 탭을 열고 자격 증명을 설정한 뒤 작업 메뉴를 선택합니다. 입력값은
+현재 브라우저 session에만 보관되고 로컬 Host API에 bearer header로만 전송됩니다. 콘솔이
+token을 생성하거나 다시 표시하거나 export하지 않으며 원본 Vault/source도 보여주지
+않습니다.
+
+- **Service token**은 설치된 Luthn의 일반 API 자격 증명입니다. 서버에 설정된 scope에
+  따라 상태·수집·공개·provider·감사 메뉴의 사용 범위가 결정됩니다. 이것만으로 민감
+  접근을 승인할 수는 없습니다.
+- **Decision token**은 `access.decide`가 있는 별도의 신뢰된 token입니다. 민감 접근
+  목록·operator detail·승인·반려가 이 token을 사용하므로 읽기 전용 운영자는 결정을
+  내릴 수 없습니다.
+- **Operator label**은 선택적인 `X-Luthn-Operator` 감사 metadata입니다. 역할·scope·
+  identity 권한을 만들지 않습니다.
+
+원본 기반 self-host 설치는 Git에서 무시되며 권한이 제한된 `.env`에
+`LUTHN_SERVICE_VALUE`와 `LUTHN_OPERATOR_VALUE`를 만듭니다. source 설치의 operator
+token은 기본적으로 결정 전용입니다. 패키지 설치는 같은 secret을
+`~/.config/luthn/service-token`, `~/.config/luthn/operator-token`에 보관합니다(Windows는
+`%LOCALAPPDATA%\\Luthn\\config\\service-token`, `operator-token`). 이 파일을 출력하거나
+커밋하지 않습니다.
+
+메뉴는 작업별로 사용합니다.
+
+- **개요**: 배포 경계, health/readiness, connector 상태를 확인합니다.
+- **민감 접근 승인**: 제한된 operator detail을 확인한 뒤 명시적인 사유로 승인·반려합니다.
+  Vault/source 원문은 표시하지 않습니다.
+- **외부 공개**: 민감 접근과 분리된 외부 공개 결정 경로입니다.
+- **분류·수집**: 분류 미리 보기와 안전한 source intake를 수행합니다.
+- **감사 센터**: preset·filter·cursor pagination·metadata-only export로 이벤트를 조사합니다.
+
+메뉴에서 `403`이 나오면 화면에 token을 다시 붙여 넣기보다 서버 설정의 해당 token에
+필요한 scope를 추가하세요. 권한 오류를 해결하려고 agent connector에 더 넓은 token을
+넣지 않습니다.
+
 ## Docker 직접 호스팅 stack
 
 ```bash
