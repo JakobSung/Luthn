@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luthn Operator Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/operator.css?v=dark-3">
+  <link rel="stylesheet" href="/assets/operator.css?v=console-nav-2">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to console</a>
@@ -24,22 +24,113 @@
           <option value="ko">한국어</option>
         </select>
       </label>
-      <div class="token-control">
-        <label for="serviceToken">Service token</label>
-        <div class="token-row">
-          <input id="serviceToken" name="serviceToken" type="password" autocomplete="off" placeholder="Optional in Testing mode">
-          <button id="saveToken" type="button">Save</button>
-          <button id="clearToken" type="button" class="secondary">Clear</button>
+      <div class="topbar-actions">
+        <div class="auth-summary" aria-live="polite">
+          <span class="eyebrow" data-i18n="auth.summaryLabel">Console access</span>
+          <strong id="authStatus" data-i18n="auth.notConfigured">Not configured</strong>
         </div>
-        <label for="decisionToken">Decision token</label>
-        <input id="decisionToken" name="decisionToken" type="password" autocomplete="off" placeholder="Local operator token for approve or deny">
-        <label for="operatorIdentity">Operator identity</label>
-        <input id="operatorIdentity" name="operatorIdentity" maxlength="64" autocomplete="off" placeholder="Optional audit label">
+        <button id="openSettings" type="button" class="secondary" data-console-nav="settings" data-i18n="auth.openSettings">Set up access</button>
       </div>
     </header>
 
     <main id="main" class="workspace">
-      <section class="mode-banner" aria-labelledby="consoleModeLabel">
+      <nav class="console-nav" aria-label="Console sections">
+        <div class="console-nav-intro">
+          <p class="eyebrow" data-i18n="nav.eyebrow">Operator workspace</p>
+          <strong data-i18n="nav.prompt">Choose a task</strong>
+        </div>
+        <div class="console-nav-tabs" role="list">
+          <button type="button" class="nav-tab active" data-console-nav="overview" aria-current="page" data-i18n="nav.overview">Overview</button>
+          <button type="button" class="nav-tab" data-console-nav="access" data-i18n="nav.access">Access approvals</button>
+          <button type="button" class="nav-tab" data-console-nav="publication" data-i18n="nav.publication">Publication</button>
+          <button type="button" class="nav-tab" data-console-nav="intake" data-i18n="nav.intake">Classify &amp; intake</button>
+          <button type="button" class="nav-tab" data-console-nav="audit" data-i18n="nav.audit">Audit center</button>
+          <button type="button" class="nav-tab" data-console-nav="settings" data-i18n="nav.settings">Console access</button>
+        </div>
+      </nav>
+
+      <section class="panel wide orientation-panel" data-console-view="overview" aria-labelledby="orientationTitle">
+        <div class="orientation-copy">
+          <p class="eyebrow" data-i18n="orientation.eyebrow">Start here</p>
+          <h2 id="orientationTitle" data-i18n="orientation.title">Use the console by task</h2>
+          <p data-i18n="orientation.description">This console is for operators. Start with access setup, then choose one workflow. Agents never receive approval or raw protected content.</p>
+        </div>
+        <ol class="orientation-steps">
+          <li>
+            <span>01</span>
+            <strong data-i18n="orientation.stepAccessTitle">Set up access</strong>
+            <p data-i18n="orientation.stepAccessBody">Add the API token for reading the local runtime. Add a separate decision token only when you approve or deny.</p>
+            <button type="button" class="text-button" data-console-nav="settings" data-i18n="orientation.stepAccessAction">Open access settings</button>
+          </li>
+          <li>
+            <span>02</span>
+            <strong data-i18n="orientation.stepReviewTitle">Review a decision</strong>
+            <p data-i18n="orientation.stepReviewBody">Select a pending sensitive-access request. Only allowlisted metadata and a redacted summary are shown.</p>
+            <button type="button" class="text-button" data-console-nav="access" data-i18n="orientation.stepReviewAction">Open approvals</button>
+          </li>
+          <li>
+            <span>03</span>
+            <strong data-i18n="orientation.stepAuditTitle">Investigate the trail</strong>
+            <p data-i18n="orientation.stepAuditBody">Use a preset to trace access, failures, configuration, publication, or retention metadata.</p>
+            <button type="button" class="text-button" data-console-nav="audit" data-i18n="orientation.stepAuditAction">Open audit center</button>
+          </li>
+        </ol>
+      </section>
+
+      <section class="panel wide auth-panel" data-console-view="settings" aria-labelledby="authPanelTitle" hidden>
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow" data-i18n="auth.eyebrow">Access setup</p>
+            <h2 id="authPanelTitle" data-i18n="auth.title">How this console authenticates</h2>
+          </div>
+          <span id="authPanelStatus" class="inline-status" aria-live="polite" data-i18n="auth.notConfigured">Not configured</span>
+        </div>
+        <p class="auth-intro" data-i18n="auth.description">Tokens are local session credentials. They are kept in this browser session only and are sent as bearer headers to the local Host API.</p>
+        <p class="auth-scope-note" data-i18n="auth.scopeNote">Common service scopes: agent.connection.read, classification.preview, source.write, external-publication.read/write, audit.read. Configure only what this operator needs.</p>
+        <div class="auth-explainer">
+          <article>
+            <span class="auth-step">01</span>
+            <strong data-i18n="auth.serviceTitle">Service token = read and operator API access</strong>
+            <p data-i18n="auth.serviceBody">Use the token configured for this Luthn installation. In Testing mode it can be blank. It does not grant sensitive approval by itself.</p>
+          </article>
+          <article>
+            <span class="auth-step">02</span>
+            <strong data-i18n="auth.decisionTitle">Decision token = approve or deny</strong>
+            <p data-i18n="auth.decisionBody">Use a trusted operator token with the decision scope for access requests. Keep it separate when read-only operators should not decide.</p>
+          </article>
+          <article>
+            <span class="auth-step">03</span>
+            <strong data-i18n="auth.identityTitle">Operator label = audit context only</strong>
+            <p data-i18n="auth.identityBody">This optional label appears in audit metadata. It never creates permission or changes the authenticated identity.</p>
+          </article>
+        </div>
+        <form id="authForm" class="stack">
+          <div class="token-control">
+            <label for="serviceToken">
+              <span data-i18n="auth.serviceLabel">Service token</span>
+              <small data-i18n="auth.serviceHint">Used for non-decision API calls; the required scope depends on the selected menu.</small>
+              <input id="serviceToken" name="serviceToken" type="password" autocomplete="off" placeholder="Optional in Testing mode" data-i18n-placeholder="auth.servicePlaceholder">
+            </label>
+            <label for="decisionToken">
+              <span data-i18n="auth.decisionLabel">Decision token</span>
+              <small data-i18n="auth.decisionHint">Required for sensitive-access list, detail, approve, and deny.</small>
+              <input id="decisionToken" name="decisionToken" type="password" autocomplete="off" placeholder="Operator token with access.decide" data-i18n-placeholder="auth.decisionPlaceholder">
+            </label>
+            <label for="operatorIdentity">
+              <span data-i18n="auth.identityLabel">Operator label</span>
+              <small data-i18n="auth.identityHint">Optional audit label; not an authorization control.</small>
+              <input id="operatorIdentity" name="operatorIdentity" maxlength="64" autocomplete="off" placeholder="for example local-operator" data-i18n-placeholder="auth.identityPlaceholder">
+            </label>
+          </div>
+          <div class="row-actions auth-actions">
+            <button id="saveToken" type="button" data-i18n="auth.save">Save for this session</button>
+            <button id="clearToken" type="button" class="secondary" data-i18n="auth.clear">Clear session credentials</button>
+          </div>
+          <p class="security-note" data-i18n="auth.securityNote">Never paste a credential into a ticket, screenshot, prompt, or audit export. The console does not display raw Vault/source content.</p>
+        </form>
+      </section>
+
+      <section class="mode-banner" data-console-view="overview" aria-labelledby="consoleModeLabel">
         <div class="mode-primary">
           <span id="consoleModeLabel" data-i18n="mode.label">Deployment mode</span>
           <strong id="consoleMode" data-i18n="mode.checking">Checking</strong>
@@ -57,7 +148,7 @@
         </dl>
       </section>
 
-      <section class="status-strip" aria-label="Runtime status">
+      <section class="status-strip" data-console-view="overview" aria-label="Runtime status">
         <article class="metric">
           <span class="metric-label">Liveness</span>
           <strong id="healthStatus">checking</strong>
@@ -75,7 +166,7 @@
         </article>
       </section>
 
-      <section class="panel wide readiness-panel">
+      <section class="panel wide readiness-panel" data-console-view="overview">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">First-run gate</p>
@@ -87,7 +178,7 @@
         </div>
       </section>
 
-      <section class="panel wide connections-panel" aria-labelledby="agentConnectionsTitle">
+      <section class="panel wide connections-panel" data-console-view="overview" aria-labelledby="agentConnectionsTitle">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Connector status</p>
@@ -119,7 +210,7 @@
         </div>
       </section>
 
-      <section class="panel wide" aria-labelledby="externalPublicationTitle">
+      <section class="panel wide" data-console-view="publication" aria-labelledby="externalPublicationTitle" hidden>
         <div class="panel-heading">
           <div>
             <p class="eyebrow" data-i18n="publication.eyebrow">Separate publication boundary</p>
@@ -150,7 +241,7 @@
         <pre id="publicationOutput" class="result compact" aria-live="polite">Cloud transport is disabled by default. Approved envelopes remain in the local durable outbox.</pre>
       </section>
 
-      <section class="panel wide">
+      <section class="panel wide" data-console-view="intake" hidden>
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Runtime settings</p>
@@ -203,7 +294,7 @@
         <pre id="providerOutput" class="result compact" aria-live="polite">Waiting for provider settings.</pre>
       </section>
 
-      <section class="grid-two">
+      <section class="grid-two" data-console-view="intake" hidden>
         <article class="panel">
           <div class="panel-heading">
             <div>
@@ -271,7 +362,7 @@
         </article>
       </section>
 
-      <section class="panel wide">
+      <section class="panel wide" data-console-view="access" hidden>
         <div class="panel-heading">
           <div>
             <p class="eyebrow" data-i18n="access.eyebrow">Sensitive access authority</p>
@@ -353,7 +444,7 @@
         </div>
       </section>
 
-      <section class="panel wide">
+      <section class="panel wide" data-console-view="audit" hidden>
         <div class="panel-heading">
           <div>
             <p class="eyebrow" data-i18n="audit.eyebrow">Metadata-only trail</p>
@@ -487,7 +578,7 @@
       </section>
     </main>
   </div>
-  <script src="/assets/operator-i18n.js" defer></script>
-  <script src="/assets/operator.js" defer></script>
+  <script src="/assets/operator-i18n.js?v=console-nav-2" defer></script>
+  <script src="/assets/operator.js?v=console-nav-2" defer></script>
 </body>
 </html>

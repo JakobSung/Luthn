@@ -311,6 +311,26 @@ The audit center provides metadata-only decision, failure, configuration,
 ingress, publication, and retention investigation with bounded filters and
 export. It is not a raw-content viewer or a database administration surface.
 
+### Console access and menus
+
+Open `Console access` before using a workflow. The **service token** is the
+installation's routine API credential; its server-configured scopes control
+which tabs can read or write. It does not approve sensitive access by itself.
+The separate **decision token** must have `access.decide` and is used only for
+the access-approval list, operator detail, approve, and deny actions. The
+optional **operator label** is audit metadata only and never grants permission.
+
+The browser keeps these values in the current session and sends them to the
+local Host API as bearer headers. It never generates or displays credentials.
+On packaged installs, use the private files
+`~/.config/luthn/service-token` and `~/.config/luthn/operator-token` (Windows:
+`%LOCALAPPDATA%\\Luthn\\config\\service-token` and `operator-token`) without
+printing or committing them. The menu is divided into Overview, Access
+approvals, Publication, Classify & intake, Audit center, and Console access so
+each workflow has one bounded surface. A `403` means the server token is
+missing that workflow's scope; change server configuration rather than
+placing a broader credential into an agent connector.
+
 ### Classification defaults
 
 New installations use the local `mock` classifier, so classification-dependent

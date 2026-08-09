@@ -41,6 +41,42 @@ append_env_if_missing() {
   fi
 }
 
+validate_local_connector_scope_capacity() {
+  local read_present=false
+  local write_present=false
+  local access_request_present=false
+  local wildcard_present=false
+  local scope_value
+  local scope_index
+  local empty_slots=0
+
+  for scope_index in {0..15}; do
+    scope_value="$(awk -F= -v key="Luthn__Auth__Tokens__0__Scopes__${scope_index}" \
+      '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$env_file")"
+    case "$scope_value" in
+      '*') wildcard_present=true ;;
+      agent.connection.read) read_present=true ;;
+      agent.connection.write) write_present=true ;;
+      access.request) access_request_present=true ;;
+      '') empty_slots=$((empty_slots + 1)) ;;
+    esac
+  done
+
+  if [[ "$wildcard_present" == "true" \
+    || ( "$read_present" == "true" && "$write_present" == "true" && "$access_request_present" == "true" ) ]]; then
+    return 0
+  fi
+
+  local required_slots=0
+  [[ "$read_present" == "true" ]] || required_slots=$((required_slots + 1))
+  [[ "$write_present" == "true" ]] || required_slots=$((required_slots + 1))
+  [[ "$access_request_present" == "true" ]] || required_slots=$((required_slots + 1))
+  if (( empty_slots < required_slots )); then
+    echo "not enough free service-token scope slots are available for agent connector scopes" >&2
+    return 1
+  fi
+}
+
 ensure_local_connector_scopes() {
   local read_present=false
   local write_present=false
@@ -148,18 +184,41 @@ generate_local_token() {
 
 ensure_local_service_token() {
   local token="${LUTHN_SERVICE_VALUE:-}"
+  local operator_token="${LUTHN_OPERATOR_VALUE:-}"
+  local operator_digest="${Luthn__Auth__Tokens__1__Sha256Digest:-}"
 
   if [[ -z "$token" ]]; then
     token="$(generate_local_token)"
-    append_env_if_missing "LUTHN_SERVICE_VALUE" "$token"
   fi
 
   local digest="${Luthn__Auth__Tokens__0__Sha256Digest:-}"
   if [[ -z "$digest" ]]; then
     digest="$(printf '%s' "$token" | dotnet run --no-build --project src/Luthn.Tools -- token-digest --stdin)"
-    append_env_if_missing "Luthn__Auth__Tokens__0__Sha256Digest" "$digest"
   fi
 
+  if [[ -z "$operator_token" && -n "$operator_digest" ]]; then
+    echo "Luthn__Auth__Tokens__1__Sha256Digest is configured, but LUTHN_OPERATOR_VALUE is missing; set both local operator credentials before reinstalling." >&2
+    return 1
+  fi
+
+  if [[ -z "$operator_token" ]]; then
+    operator_token="$(generate_local_token)"
+  fi
+
+  if [[ -z "$operator_digest" ]]; then
+    operator_digest="$(printf '%s' "$operator_token" | dotnet run --no-build --project src/Luthn.Tools -- token-digest --stdin)"
+  fi
+
+  # Resolve connector scope capacity before writing any other local credentials.
+  # This keeps a failed install from leaving a partially updated .env file.
+  if ! validate_local_connector_scope_capacity; then
+    return 1
+  fi
+
+  append_env_if_missing "LUTHN_SERVICE_VALUE" "$token"
+  append_env_if_missing "Luthn__Auth__Tokens__0__Sha256Digest" "$digest"
+  append_env_if_missing "LUTHN_OPERATOR_VALUE" "$operator_token"
+  append_env_if_missing "Luthn__Auth__Tokens__1__Sha256Digest" "$operator_digest"
   append_env_if_missing "Luthn__Auth__RequireServiceToken" "true"
   append_env_if_missing "Luthn__Identity__Mode" "SingleOwner"
   append_env_if_missing "Luthn__Identity__SingleOwnerUserId" "local-owner"
@@ -173,7 +232,14 @@ ensure_local_service_token() {
   append_env_if_missing "Luthn__Auth__Tokens__0__Scopes__2" "memory.write"
   append_env_if_missing "Luthn__Auth__Tokens__0__Scopes__3" "memory.read"
   append_env_if_missing "Luthn__Auth__Tokens__0__Scopes__4" "classification.preview"
-  ensure_local_connector_scopes
+  append_env_if_missing "Luthn__Auth__Tokens__1__Name" "local-operator"
+  append_env_if_missing "Luthn__Auth__Tokens__1__WorkspaceId" "default"
+  append_env_if_missing "Luthn__Auth__Tokens__1__ActorKind" "Service"
+  append_env_if_missing "Luthn__Auth__Tokens__1__IsOperator" "true"
+  append_env_if_missing "Luthn__Auth__Tokens__1__Scopes__0" "access.decide"
+  if ! ensure_local_connector_scopes; then
+    return 1
+  fi
 }
 
 print_usage() {
@@ -229,6 +295,8 @@ if [[ ! -f "$env_file" ]]; then
   cp "$env_example" "$env_file"
   echo "Created .env from .env.example"
 fi
+
+chmod 0600 "$env_file"
 
 set -a
 # shellcheck disable=SC1090

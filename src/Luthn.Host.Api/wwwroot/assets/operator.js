@@ -16,6 +16,67 @@ const $ = (selector) => document.querySelector(selector);
 const i18n = window.LuthnOperatorI18n;
 const t = (key) => i18n?.translate(key) || key;
 
+const setConsoleView = (view) => {
+  document.querySelectorAll("[data-console-view]").forEach((section) => {
+    section.hidden = section.dataset.consoleView !== view;
+  });
+
+  document.querySelectorAll("[data-console-nav]").forEach((control) => {
+    const active = control.dataset.consoleNav === view;
+    if (control.classList.contains("nav-tab")) {
+      control.classList.toggle("active", active);
+      if (active) {
+        control.setAttribute("aria-current", "page");
+      } else {
+        control.removeAttribute("aria-current");
+      }
+    }
+  });
+
+  const activePanel = document.querySelector('[data-console-view="' + view + '"]');
+  activePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+const renderAuthStatus = () => {
+  const statusKey = state.token && state.decisionToken
+    ? "auth.configured"
+    : state.token
+      ? "auth.partial"
+      : state.decisionToken
+        ? "auth.decisionOnly"
+        : "auth.notConfigured";
+  const status = t(statusKey);
+  ["#authStatus", "#authPanelStatus"].forEach((selector) => {
+    const target = $(selector);
+    if (target) {
+      target.textContent = status;
+      target.classList.toggle("configured", statusKey === "auth.configured");
+      target.classList.toggle("partial", statusKey !== "auth.notConfigured" && statusKey !== "auth.configured");
+    }
+  });
+};
+
+const renderCredentialGuidance = () => {
+  renderConnectionMessage("Open Console access and add a service token to view agent connections.");
+  $("#connectionsStatus").textContent = "Configure access";
+  $("#syncStatus").textContent = "Configure access";
+  writeResult($("#publicationOutput"), "Open Console access and add a service token to view publication state.");
+  $("#providerStatus").textContent = "Configure a service token in Console access";
+  writeResult($("#providerOutput"), "Open Console access and add a service token to view provider settings.");
+  const providerForm = $("#providerForm");
+  if (providerForm) {
+    providerForm.apiKey.value = "";
+    providerForm.clearApiKey.checked = false;
+  }
+  renderAccessRows([]);
+  clearAccessDetail("Open Console access and add a decision token with access.decide.");
+  state.auditEvents = [];
+  state.auditNextCursor = "";
+  state.auditBaseQuery = "";
+  renderAuditRows([]);
+  $("#auditStatus").textContent = "Configure a service token in Console access to load audit metadata.";
+};
+
 const writeResult = (target, value) => {
   target.textContent = typeof value === "string"
     ? value
@@ -342,8 +403,14 @@ const refreshAgentConnections = async () => {
     setAction("connections refreshed", label);
   } catch {
     renderConnectionMessage("Agent connection status is unavailable.");
-    $("#connectionsStatus").textContent = "Unavailable";
-    setAction("connections failed", "Status unavailable");
+    if (!state.token) {
+      renderConnectionMessage("Open Console access and add a service token to view agent connections.");
+      $("#connectionsStatus").textContent = "Configure access";
+      setAction("connections waiting", "Add a service token in Console access");
+    } else {
+      $("#connectionsStatus").textContent = "Unavailable";
+      setAction("connections failed", "Status unavailable");
+    }
   } finally {
     refreshButton.disabled = false;
   }
@@ -357,8 +424,13 @@ const refreshSyncStatus = async () => {
     $("#syncStatus").textContent = `${result.connectionState} / ${result.outboxState}`;
     writeResult($("#publicationOutput"), result);
   } catch (error) {
-    $("#syncStatus").textContent = "Unavailable";
-    writeResult($("#publicationOutput"), error.message);
+    if (!state.token) {
+      $("#syncStatus").textContent = "Configure access";
+      writeResult($("#publicationOutput"), "Open Console access and add a service token to view publication state.");
+    } else {
+      $("#syncStatus").textContent = "Unavailable";
+      writeResult($("#publicationOutput"), error.message);
+    }
   } finally {
     refreshButton.disabled = false;
   }
@@ -456,8 +528,12 @@ const refreshProviderSettings = async () => {
     const settings = await requestJson("/api/operator/classification-provider");
     renderProviderSettings(settings);
   } catch (error) {
-    writeResult($("#providerOutput"), error.message);
-    $("#providerStatus").textContent = "Provider settings unavailable";
+    writeResult($("#providerOutput"), state.token
+      ? error.message
+      : "Open Console access and add a service token to view provider settings.");
+    $("#providerStatus").textContent = state.token
+      ? "Provider settings unavailable"
+      : "Configure a service token in Console access";
   }
 };
 
@@ -558,8 +634,10 @@ const refreshAudit = async (event) => {
     state.auditBaseQuery = "";
     renderAuditRows([]);
     $("#nextAuditPage").disabled = true;
-    $("#auditStatus").textContent = "Audit metadata is unavailable for these filters.";
-    setAction("audit failed", error.message);
+    $("#auditStatus").textContent = state.token
+      ? "Audit metadata is unavailable for these filters."
+      : "Configure a service token in Console access to load audit metadata.";
+    setAction(state.token ? "audit failed" : "audit waiting", state.token ? error.message : "Add a service token in Console access");
   }
 };
 
@@ -679,8 +757,10 @@ const refreshAccessRequests = async (event) => {
     setAction("access refreshed", `${requests.length} requests`);
   } catch (error) {
     renderAccessRows([]);
-    clearAccessDetail("Access requests could not be loaded.");
-    setAction("access failed", error.message);
+    clearAccessDetail(state.decisionToken
+      ? "Access requests could not be loaded."
+      : "Open Console access and add a decision token with access.decide.");
+    setAction(state.decisionToken ? "access failed" : "access waiting", state.decisionToken ? error.message : "Add a decision token in Console access");
   }
 };
 
@@ -960,6 +1040,11 @@ const fillIntakeExample = () => {
 $("#serviceToken").value = state.token;
 $("#decisionToken").value = state.decisionToken;
 $("#operatorIdentity").value = state.operatorIdentity;
+renderAuthStatus();
+setConsoleView("overview");
+document.querySelectorAll("[data-console-nav]").forEach((control) => {
+  control.addEventListener("click", () => setConsoleView(control.dataset.consoleNav));
+});
 $("#saveToken").addEventListener("click", () => {
   state.token = $("#serviceToken").value.trim();
   state.decisionToken = $("#decisionToken").value.trim();
@@ -980,9 +1065,17 @@ $("#saveToken").addEventListener("click", () => {
   } else {
     sessionStorage.removeItem("luthn.operatorIdentity");
   }
-  setAction("token saved", state.token ? "Bearer header enabled" : "No token set");
-  refreshAgentConnections();
-  refreshSyncStatus();
+  renderAuthStatus();
+  setAction("token saved", state.token || state.decisionToken ? "Session credentials updated" : "No token set");
+  if (state.token || state.decisionToken) {
+    refreshAgentConnections();
+    refreshSyncStatus();
+    refreshProviderSettings();
+    refreshAccessRequests();
+    refreshAudit();
+  } else {
+    renderCredentialGuidance();
+  }
 });
 $("#clearToken").addEventListener("click", () => {
   state.token = "";
@@ -994,10 +1087,9 @@ $("#clearToken").addEventListener("click", () => {
   sessionStorage.removeItem("luthn.serviceToken");
   sessionStorage.removeItem("luthn.decisionToken");
   sessionStorage.removeItem("luthn.operatorIdentity");
-  clearAccessDetail("Credentials cleared. Select a request after signing in.");
+  renderAuthStatus();
   setAction("token cleared", "Bearer header disabled");
-  refreshAgentConnections();
-  refreshSyncStatus();
+  renderCredentialGuidance();
 });
 $("#previewForm").addEventListener("submit", previewContent);
 $("#intakeForm").addEventListener("submit", submitSource);
@@ -1029,8 +1121,12 @@ $("#revokePublication").addEventListener("click", () => changePublication("revok
 
 refreshConsoleProfile();
 refreshStatus();
-refreshAgentConnections();
-refreshSyncStatus();
-refreshProviderSettings();
-refreshAccessRequests();
-refreshAudit();
+if (state.token || state.decisionToken) {
+  refreshAgentConnections();
+  refreshSyncStatus();
+  refreshProviderSettings();
+  refreshAccessRequests();
+  refreshAudit();
+} else {
+  renderCredentialGuidance();
+}

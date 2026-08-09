@@ -139,6 +139,22 @@ luthn doctor --json
 
 Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를 보고합니다. 운영자 화면은 <http://127.0.0.1:8080/>이며 API port는 기본적으로 loopback에만 연결됩니다. 화면은 민감 접근 요청과 외부 공개 결정을 처리하는 로컬 승인 정본입니다. Host API를 통해 제한된 운영자 상세를 읽고 명시적 결정 사유를 요구하며 server가 재검증한 redacted summary만 반환할 수 있습니다. 원본 Vault/source는 표시하지 않습니다. 감사 센터는 제한된 filter와 export로 결정·실패·설정·ingress·publication·보존을 metadata-only로 조사하며 원문 조회나 database 관리 화면이 아닙니다.
 
+### 콘솔 접근과 메뉴
+
+작업 전에 `콘솔 접근` 탭을 엽니다. **Service token**은 설치된 Luthn의 일반 API 자격
+증명이며 서버에 설정된 scope가 각 메뉴의 조회·쓰기 범위를 결정합니다. 이 token만으로
+민감 접근을 승인할 수 없습니다. 별도의 **Decision token**에는 `access.decide`가 있어야
+하며 민감 접근 목록·operator detail·승인·반려에만 사용합니다. 선택적인 **Operator
+label**은 감사 metadata일 뿐 권한을 주지 않습니다.
+
+입력값은 현재 브라우저 session에만 보관하고 로컬 Host API에 bearer header로 전송합니다.
+콘솔은 token을 생성하거나 표시하지 않습니다. 패키지 설치에서는
+`~/.config/luthn/service-token`, `~/.config/luthn/operator-token`을 사용합니다(Windows는
+`%LOCALAPPDATA%\\Luthn\\config\\service-token`, `operator-token`). 값을 출력하거나
+커밋하지 않습니다. 메뉴는 개요, 민감 접근 승인, 외부 공개, 분류·수집, 감사 센터,
+콘솔 접근으로 나뉘며, `403`은 해당 token에 메뉴 scope가 없다는 뜻이므로 agent connector에
+더 넓은 자격 증명을 넣지 말고 서버 설정을 수정해야 합니다.
+
 ### 분류 기본값
 
 새 설치는 로컬 `mock` 분류기를 사용하므로 별도 provider 설정 없이 분류가 필요한 쓰기와 `/readyz`가 바로 동작합니다. mock은 결정론적 로컬 분류기이므로 provider 기반 분류가 필요하면 운영자 화면에서 원하는 provider로 교체하세요. `luthn install`과 `luthn update`는 이전 기본값 조합인 `unconfigured`/`false`만 `mock`/`true`로 바꾸며, 그 밖의 설정 값은 유지합니다.
