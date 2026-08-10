@@ -9,7 +9,8 @@ const state = {
   auditNextCursor: "",
   auditBaseQuery: "",
   consoleProfile: null,
-  enrollment: null
+  enrollment: null,
+  cloudLogin: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -208,11 +209,56 @@ const changeEnrollment = async (action) => {
     renderEnrollment();
     if (state.enrollment?.state === "Approved") {
       await refreshConsoleSession();
+      await refreshCloudLogin();
       renderSessionGuidance();
     }
   } catch (error) {
     $("#enrollmentDetail").textContent = error.message;
     setAction("enrollment failed", error.message);
+  }
+};
+
+const renderCloudLogin = () => {
+  const login = state.cloudLogin;
+  const button = $("#cloudLogin");
+  if (!login) {
+    button.disabled = true;
+    $("#cloudLoginDetail").textContent = "Cloud login status is unavailable.";
+    return;
+  }
+
+  button.disabled = !login.available || login.sessionState === "Active";
+  $("#cloudLoginDetail").textContent = login.sessionState === "Active"
+    ? "Cloud login is active. Authority and capabilities came from the server-verified provider result."
+    : login.available
+      ? "Cloud login is required. Organization and workspace identity are never accepted from this page."
+      : "Cloud login is not configured in this OSS build. No outbound request was made.";
+};
+
+const refreshCloudLogin = async () => {
+  try {
+    state.cloudLogin = await requestJson("/api/operator/cloud-login", { cache: "no-store" });
+  } catch {
+    state.cloudLogin = null;
+  }
+  renderCloudLogin();
+};
+
+const loginToCloud = async () => {
+  try {
+    state.consoleSession = await requestJson("/api/operator/cloud-login", { method: "POST" });
+    renderAuthStatus();
+    await refreshCloudLogin();
+    await refreshEnrollment();
+    setAction("cloud login", "Server-derived console authority is active");
+    refreshAgentConnections();
+    refreshSyncStatus();
+    refreshProviderSettings();
+    refreshAccessRequests();
+    refreshAudit();
+  } catch (error) {
+    $("#cloudLoginDetail").textContent = error.message;
+    setAction("cloud login failed", error.message);
   }
 };
 
@@ -1117,6 +1163,7 @@ $("#logoutSession").addEventListener("click", async () => {
 });
 $("#startEnrollment").addEventListener("click", () => changeEnrollment("start"));
 $("#verifyEnrollment").addEventListener("click", () => changeEnrollment("verify"));
+$("#cloudLogin").addEventListener("click", loginToCloud);
 $("#previewForm").addEventListener("submit", previewContent);
 $("#intakeForm").addEventListener("submit", submitSource);
 $("#providerForm").addEventListener("submit", saveProviderSettings);
@@ -1150,6 +1197,7 @@ const initializeConsole = async () => {
   refreshStatus();
   try {
     await refreshConsoleSession();
+    await refreshCloudLogin();
   } catch (error) {
     state.consoleSession = null;
     setAction("session unavailable", error.message);

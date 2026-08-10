@@ -385,7 +385,8 @@ public static class ServiceTokenAuthorization
             session.WorkspaceId,
             LuthnActorKind.User,
             session.ActorId,
-            IsOperator: true);
+            IsOperator: true,
+            HubOrganizationId: session.OrganizationId);
         httpContext.Items[ActorItemKey] = session.ActorId;
         return (true, await ContinueWhenSensitiveMemoryProtectionIsReady(context, next));
     }

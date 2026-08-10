@@ -99,3 +99,33 @@ public sealed class ConsoleEnrollmentContractTests
         Assert.DoesNotContain("localPath", json, StringComparison.OrdinalIgnoreCase);
     }
 }
+
+public sealed class ConsoleCloudLoginContractTests
+{
+    [Fact]
+    public void LoginStatusExposesNoCallerSelectableAuthorityFields()
+    {
+        var response = new ConsoleCloudLoginDto(
+            ConsoleCloudLoginProvider.Fake,
+            true,
+            ConsoleSessionState.LoginRequired,
+            ConsoleMembershipState.Active,
+            ConsoleEntitlementState.Active,
+            [ConsoleCapability.AuditRead],
+            "cloud-login",
+            true);
+
+        var json = JsonSerializer.Serialize(response);
+
+        Assert.Contains("\"provider\":\"Fake\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"serverDerived\":true", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("organization", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tenant", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("userId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("transcript", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("localPath", json, StringComparison.OrdinalIgnoreCase);
+    }
+}

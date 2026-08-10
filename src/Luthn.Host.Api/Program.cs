@@ -131,6 +131,7 @@ builder.Services.Configure<LuthnAuthOptions>(builder.Configuration.GetSection("L
 builder.Services.Configure<LuthnIdentityOptions>(builder.Configuration.GetSection("Luthn:Identity"));
 builder.Services.Configure<ConsoleAccessOptions>(builder.Configuration.GetSection(ConsoleAccessOptions.SectionName));
 builder.Services.Configure<ConsoleEnrollmentOptions>(builder.Configuration.GetSection(ConsoleEnrollmentOptions.SectionName));
+builder.Services.Configure<ConsoleCloudLoginOptions>(builder.Configuration.GetSection(ConsoleCloudLoginOptions.SectionName));
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = ConsoleAccessOptions.AntiforgeryHeaderName;
@@ -154,6 +155,15 @@ builder.Services.AddSingleton<IInstallationEnrollmentAdapter>(provider =>
         _ => provider.GetRequiredService<DisabledInstallationEnrollmentAdapter>()
     });
 builder.Services.AddSingleton<IConsoleSessionStore, InMemoryConsoleSessionStore>();
+builder.Services.AddSingleton<DisabledConsoleCloudLoginProvider>();
+builder.Services.AddSingleton<FakeConsoleCloudLoginProvider>();
+builder.Services.AddSingleton<IConsoleCloudLoginProvider>(provider =>
+    provider.GetRequiredService<IOptions<ConsoleCloudLoginOptions>>().Value.Provider switch
+    {
+        Luthn.Sdk.Console.ConsoleCloudLoginProvider.Fake =>
+            provider.GetRequiredService<FakeConsoleCloudLoginProvider>(),
+        _ => provider.GetRequiredService<DisabledConsoleCloudLoginProvider>()
+    });
 builder.Services.AddOptions<HubIngressOptions>()
     .Bind(builder.Configuration.GetSection("Luthn:Hub:Ingress"))
     .Validate(options => options.IsValid, "Luthn Hub ingress limits are invalid.")
@@ -224,6 +234,7 @@ await using (var scope = app.Services.CreateAsyncScope())
 app.MapLuthnApi();
 app.MapConsoleSessions();
 app.MapConsoleEnrollment();
+app.MapConsoleCloudLogin();
 app.MapOperatorConfiguration();
 app.MapOperationalMetrics();
 app.MapSearchTelemetry();

@@ -38,7 +38,11 @@ public sealed record ConsoleSessionIdentity(
     DateTimeOffset IdleExpiresAt,
     IReadOnlySet<string> Scopes,
     IReadOnlyList<ConsoleCapability> Capabilities,
-    bool Restricted);
+    bool Restricted,
+    string? CloudSubjectKey = null,
+    string? OrganizationId = null,
+    ConsoleMembershipState? Membership = null,
+    ConsoleEntitlementState? Entitlement = null);
 
 internal sealed class ConsoleSessionRecord
 {
@@ -54,6 +58,10 @@ internal sealed class ConsoleSessionRecord
     public required IReadOnlyList<ConsoleCapability> Capabilities { get; init; }
     public bool Restricted { get; set; }
     public bool Revoked { get; set; }
+    public string? CloudSubjectKey { get; init; }
+    public string? OrganizationId { get; init; }
+    public ConsoleMembershipState? Membership { get; init; }
+    public ConsoleEntitlementState? Entitlement { get; set; }
 }
 
 public interface IConsoleInstallationState
@@ -70,6 +78,7 @@ public interface IConsoleSessionStore
 {
     ConsoleSessionIdentity? Authenticate(HttpContext context);
     ConsoleSessionIdentity CreateLocal(HttpContext context);
+    ConsoleSessionIdentity CreateCloud(HttpContext context, AuthenticatedConsoleAuthority authority);
     void Revoke(HttpContext context);
     void RevokeAll(Func<ConsoleSessionIdentity, bool>? predicate = null);
 }
@@ -172,6 +181,41 @@ public sealed class InMemoryConsoleSessionStore(
         return ToIdentity(session, now + options.Value.EffectiveIdleLifetime);
     }
 
+    public ConsoleSessionIdentity CreateCloud(
+        HttpContext context,
+        AuthenticatedConsoleAuthority authority)
+    {
+        if (!installationState.IsEnrolled ||
+            authority.Membership != ConsoleMembershipState.Active)
+        {
+            throw new InvalidOperationException("An enrolled installation and active membership are required.");
+        }
+
+        var now = timeProvider.GetUtcNow();
+        var sessionId = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        var session = new ConsoleSessionRecord
+        {
+            SessionId = sessionId,
+            Mode = ConsoleAccessMode.CloudAuthenticated,
+            UserId = authority.UserId,
+            WorkspaceId = authority.WorkspaceId,
+            ActorId = "console:cloud-user",
+            CreatedAt = now,
+            LastSeenAt = now,
+            ExpiresAt = now + options.Value.EffectiveAbsoluteLifetime,
+            Scopes = new HashSet<string>(authority.Scopes, StringComparer.OrdinalIgnoreCase),
+            Capabilities = authority.Capabilities,
+            Restricted = authority.Entitlement == ConsoleEntitlementState.Restricted,
+            CloudSubjectKey = authority.SubjectKey,
+            OrganizationId = authority.OrganizationId,
+            Membership = authority.Membership,
+            Entitlement = authority.Entitlement
+        };
+        _sessions[sessionId] = session;
+        AppendCookie(context, sessionId, session.ExpiresAt, secure: true);
+        return ToIdentity(session, now + options.Value.EffectiveIdleLifetime);
+    }
+
     public void Revoke(HttpContext context)
     {
         if (context.Request.Cookies.TryGetValue(ConsoleAccessOptions.CookieName, out var sessionId))
@@ -257,7 +301,11 @@ public sealed class InMemoryConsoleSessionStore(
             idleExpiresAt < session.ExpiresAt ? idleExpiresAt : session.ExpiresAt,
             session.Scopes,
             session.Capabilities,
-            session.Restricted);
+            session.Restricted,
+            session.CloudSubjectKey,
+            session.OrganizationId,
+            session.Membership,
+            session.Entitlement);
 }
 
 public static class ConsoleSessionEndpoints

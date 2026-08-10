@@ -32,9 +32,11 @@ public static class OperatorConfigurationEndpoints
     }
 
     public static Ok<OperatorConsoleProfileResponse> ReadConsoleProfile(
-        IOptions<LuthnIdentityOptions> identityOptions)
+        IOptions<LuthnIdentityOptions> identityOptions,
+        IConsoleInstallationState installationState)
     {
-        var consoleMode = identityOptions.Value.Mode == LuthnIdentityMode.MultiUser
+        var consoleMode = installationState.IsEnrolled ||
+            identityOptions.Value.Mode == LuthnIdentityMode.MultiUser
             ? "Hub"
             : "Local";
         return TypedResults.Ok(new OperatorConsoleProfileResponse(
