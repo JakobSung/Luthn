@@ -314,14 +314,20 @@ export. It is not a raw-content viewer or a database administration surface.
 ### Console access and menus
 
 Open `Console access` to inspect the current session. A packaged personal
-`SingleOwner` install is loopback-bound and starts a bounded `LocalAuto` session
-without key entry. The browser receives only an opaque HttpOnly, host-only,
+`SingleOwner` install is loopback-bound. Run `luthn console` to authorize one
+bounded `LocalAuto` session without key entry. The installed CLI reads the
+OS-protected local operator credential, opens the browser, and approves its single
+unprivileged HttpOnly candidate. Multiple or missing candidates fail closed. The
+CLI never places the credential or a bootstrap token in the browser, URL, API body,
+or command arguments. The
+browser receives only an opaque HttpOnly, host-only,
 SameSite session cookie; mutation requests also require same-origin antiforgery
 proof. Service and decision credentials stay in protected server configuration
 for agents and non-console API clients and are never copied into the page, URL,
 browser storage, logs, or exports.
 
-LocalAuto fails closed when the installation is multi-user, enrolled, forwarded,
+Opening the URL directly does not authorize a new session. LocalAuto fails closed
+when the installation is multi-user, enrolled, forwarded,
 or not explicitly local-only. Cloud enrollment is disabled by default. The
 public fake adapter can exercise the two-phase fingerprint-bound flow without
 network access: Local remains active until the grant is durably verified, then
@@ -330,6 +336,13 @@ login. The disabled/fake login and recovery providers are contract/test
 boundaries, not live Cloud. Membership loss never restores Local automatically;
 Organization restriction provides offboarding actions, and Local reclaim is an
 explicit revoke-first owner/recovery transition.
+
+The packaged loopback bridge may begin Cloud login over its direct local HTTP
+origin while keeping the Cloud session cookie `Secure`. Any non-loopback,
+forwarded, or remotely exposed console must terminate HTTPS before Cloud login;
+plain HTTP is rejected outside the explicit local-only boundary. Packaged Compose
+sets `Luthn__Console__TrustedLocalBridge=true`; the Host accepts that bridge only
+with a loopback Host header, private container endpoints, and forwarded headers disabled.
 
 The menu remains divided into Overview, Access approvals, Publication,
 Classify & intake, Audit center, and Console access. Existing bearer clients and

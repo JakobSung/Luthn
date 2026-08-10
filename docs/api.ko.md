@@ -376,13 +376,15 @@ POST /api/access-requests/{id}/deny
 
 기존 민감 참조에 대한 metadata-only 요청을 만들고 결정하며, server 재분류를 통과한 제한된 redacted output을 선택적으로 반환합니다. 원본 Vault/source
 payload는 반환하지 않습니다. 요청자는 server가 정한 자기 owner의 요청만 생성·조회할
-수 있습니다. 목록·결정에는 별도의 신뢰된 `access.decide`가 필요하며, 명시적 운영자는
+수 있습니다. 목록·운영자 상세에는 `access.review`, 승인·반려에는 별도의 신뢰된
+`access.decide`가 필요합니다. 기존 client의 하위 호환을 위해 `access.decide`는 조회도
+포함합니다. 명시적 운영자는
 metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관리할 수 있습니다.
 생성·조회에는 `access.request` scope가 필요합니다. MCP는 생성·상태·결과만 제공하며
 승인·거절 도구를 노출하지 않습니다.
 
 `GET /api/access-requests/{id}/operator-detail`은 로컬 또는 self-hosted Hub
-콘솔을 위한 별도 `access.decide` 계약입니다. 요청·결정 사유와 민감 참조에 이미
+콘솔을 위한 별도 `access.review` 계약입니다. 요청·결정 사유와 민감 참조에 이미
 저장된 label, source metadata, redacted summary만 반환합니다. 응답은
 `operator-sensitive-metadata`, `local-operator-only`로 표시되며 Agent-safe 데이터가
 아니므로 Cloud safe-projection sync, 로그, metric, 일반 감사 payload에 넣으면 안 됩니다.
@@ -432,6 +434,7 @@ browser는 정적 label에 allowlist된 `en`, `ko` 언어 preference만 사용�
 
 ```http
 GET  /api/operator/session
+POST /api/operator/session/local/arm
 POST /api/operator/session/local
 POST /api/operator/session/logout
 GET  /api/operator/enrollment
@@ -444,12 +447,20 @@ POST /api/operator/lifecycle/reconnect
 POST /api/operator/lifecycle/reclaim
 ```
 
+브라우저는 먼저 권한 없는 HttpOnly 후보 cookie를 받습니다. 설치된 CLI는 운영체제에서
+보호하는 운영자 bearer로 `/local/arm`을 호출해 활성 후보가 정확히 하나일 때만 승인합니다.
+후보가 없거나 둘 이상이면 차단하며 bearer나 raw bootstrap 값은 브라우저·URL·API 본문에
+전달하지 않습니다.
 세션 cookie는 불투명한 서버측 식별자이며 유휴·절대 만료, HttpOnly, host-only,
 SameSite를 적용합니다. Cookie 인증 변경 요청에는 same-origin `X-Luthn-CSRF` proof가
 필요합니다. LocalAuto는 명시적 local-only·loopback·미등록 `SingleOwner`로 제한하며,
 enrollment 활성화와 Local 회수는 기존 권한을 먼저 철회합니다. Enrollment, login,
 lifecycle, recovery provider의 기본값은 disabled입니다. Fake provider는 outbound가 없는
 결정적 시험 adapter일 뿐 production Cloud endpoint가 아닙니다.
+
+Cloud 로그인은 forwarded header가 비활성인 직접 local-only loopback 요청에 한해서만
+일반 HTTP를 허용합니다. 원격 또는 forwarded 배포는 반드시 HTTPS를 사용해야 하며 Cloud
+세션 cookie는 두 경우 모두 `Secure`를 유지합니다.
 
 JSON 계약은 제한된 상태·capability·만료·작업·server-derived label만 노출합니다.
 Service credential, recovery proof 값, caller-selected tenant identity, raw/Vault content,
@@ -538,7 +549,7 @@ transcript, credential, 원본 source, Vault payload, 보호 memory를 감사 �
 dotnet run --project src/Luthn.Tools -- token-digest --stdin
 ```
 
-지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, `hub.ingress.write`, `hub.ingress.operate`, `*`.
+지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.review`, `access.decide`, `audit.read`, `metrics.read`, `hub.ingress.write`, `hub.ingress.operate`, `*`.
 
 ## 중앙 OSS Hub ingress (선택 활성화)
 

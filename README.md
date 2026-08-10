@@ -112,8 +112,8 @@ redacted summary. It never opens a raw Vault/source read path.
 Sensitive-access approval and external-publication approval are separate
 decisions. The console uses Host API contracts, never direct database access,
 and the public runtime keeps Cloud transport disabled by default. Personal
-`SingleOwner` installs use an automatic, bounded server-side console session on
-the loopback-bound console; browser JavaScript never receives the service or
+`SingleOwner` installs use `luthn console` to authorize one bounded server-side
+session on the loopback-bound console; browser JavaScript never receives the service or
 decision credential.
 
 Audit data is metadata-only. Use it to reconstruct a decision timeline, trace

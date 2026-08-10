@@ -129,7 +129,7 @@ public sealed class FakeConsoleCloudLoginProvider(
             switch (capability)
             {
                 case ConsoleCapability.AccessReview:
-                    scopes.Add(ServiceScopes.AccessDecide);
+                    scopes.Add(ServiceScopes.AccessReview);
                     break;
                 case ConsoleCapability.AccessDecision:
                     scopes.Add(ServiceScopes.AccessDecide);
@@ -189,6 +189,8 @@ public static class ConsoleCloudLoginEndpoints
         LuthnDbContext db,
         TimeProvider timeProvider,
         IHostEnvironment environment,
+        IOptions<ConsoleAccessOptions> consoleOptions,
+        IOptions<LuthnHostOperationalOptions> hostOptions,
         CancellationToken cancellationToken)
     {
         if (!ConsoleRequestSecurity.IsSameOriginOrNonBrowser(context.Request))
@@ -201,7 +203,12 @@ public static class ConsoleCloudLoginEndpoints
             return LoginProblem("This installation is not enrolled.", StatusCodes.Status409Conflict);
         }
 
-        if (!context.Request.IsHttps && !environment.IsEnvironment("Testing"))
+        if (!context.Request.IsHttps &&
+            !ConsoleRequestSecurity.IsTrustedLocalRequest(
+                context,
+                consoleOptions.Value,
+                hostOptions.Value,
+                environment))
         {
             return LoginProblem("Cloud console sessions require HTTPS.", StatusCodes.Status400BadRequest);
         }
@@ -230,7 +237,8 @@ public static class ConsoleCloudLoginEndpoints
                 timeProvider.GetUtcNow(),
                 actorKind: "user",
                 subjectType: "console_session",
-                outcome: "authenticated"));
+                outcome: "authenticated",
+                actorUserId: authority.UserId));
             await db.SaveChangesAsync(cancellationToken);
             ConsoleSessionEndpoints.WriteAntiforgeryHeader(context, antiforgery);
             return TypedResults.Ok(ConsoleSessionEndpoints.ToDto(session));

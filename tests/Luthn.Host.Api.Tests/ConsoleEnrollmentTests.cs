@@ -85,18 +85,20 @@ public sealed class ConsoleEnrollmentTests
 
         using var restartedFactory = CreateFactory("Fake", directory);
         using var restartedClient = restartedFactory.CreateClient();
+        using var arm = await ConsoleSessionSecurityTests.ArmLocalConsoleAsync(restartedClient);
         using var localAttempt = await restartedClient.PostAsync("/api/operator/session/local", null);
         using var status = await restartedClient.GetAsync("/api/operator/session");
         using var body = await JsonDocument.ParseAsync(await status.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.Forbidden, localAttempt.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, arm.StatusCode);
         Assert.Equal("CloudLoginRequired", body.RootElement.GetProperty("mode").GetString());
         Assert.Equal("LoginRequired", body.RootElement.GetProperty("state").GetString());
     }
 
     private static async Task<string> CreateLocalSessionAsync(HttpClient client)
     {
-        using var response = await client.PostAsync("/api/operator/session/local", null);
+        using var response = await ConsoleSessionSecurityTests.CreateArmedLocalSessionAsync(client);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return Assert.Single(response.Headers.GetValues(ConsoleAccessOptions.AntiforgeryHeaderName));
     }
@@ -122,6 +124,7 @@ public sealed class ConsoleEnrollmentTests
             builder.UseEnvironment("Testing");
             builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
             builder.UseSetting("Luthn:Auth:RequireServiceToken", "true");
+            ConsoleSessionSecurityTests.ConfigureOperatorCredential(builder);
             builder.UseSetting("Luthn:Identity:Mode", "SingleOwner");
             builder.UseSetting("Luthn:Console:LocalOnly", "true");
             builder.UseSetting("Luthn:Console:Enrollment:Adapter", adapter);

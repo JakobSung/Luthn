@@ -101,8 +101,9 @@ Agent installation, reconfiguration, and disconnect remain host CLI operations.
 Open `Console access` before choosing a workflow. Development and packaged
 personal installs explicitly set `Luthn__Console__LocalOnly=true` and bind the
 published port to `127.0.0.1`. An un-enrolled `SingleOwner` then receives a
-bounded server-side LocalAuto session. The browser does not read, store, or send
-a service/decision bearer value. Cookie-authenticated mutations require the
+bounded server-side LocalAuto session after `luthn console` approves exactly one
+unprivileged HttpOnly browser candidate. The browser does not read, store, or send
+a service/decision bearer or bootstrap value. Cookie-authenticated mutations require the
 same-origin antiforgery header returned by the Host.
 
 The source self-host installer creates `LUTHN_SERVICE_VALUE` and
@@ -225,7 +226,7 @@ Supported scopes include `agent.read`, `agent.write.summary`,
 `config.write`,
 `external-publication.read`, `external-publication.write`, `source.write`,
 `memory.read`, `memory.write`, `access.request`,
-`access.decide`, `audit.read`, `metrics.read`, `metrics.write`, and `*` for operator-controlled admin use. Local
+`access.review`, `access.decide`, `audit.read`, `metrics.read`, `metrics.write`, and `*` for operator-controlled admin use. Local
 `Testing` mode remains credential-free unless token options are configured.
 `ExpiresAt` is optional. Expired tokens are ignored by the authorization filter
 and make `/readyz` fail when no other active token is available.

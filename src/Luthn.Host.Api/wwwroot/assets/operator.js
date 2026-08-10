@@ -146,6 +146,12 @@ const hasConsoleSession = () => ["Active", "Restricted"].includes(state.consoleS
 
 const refreshConsoleSession = async () => {
   let session = await requestJson("/api/operator/session", { cache: "no-store" });
+  for (let attempt = 0;
+    attempt < 40 && session?.state === "Anonymous" && session?.nextAction === "arm-local-session";
+    attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    session = await requestJson("/api/operator/session", { cache: "no-store" });
+  }
   if (session?.state === "Anonymous" && session?.nextAction === "create-local-session") {
     session = await requestJson("/api/operator/session/local", { method: "POST" });
   }

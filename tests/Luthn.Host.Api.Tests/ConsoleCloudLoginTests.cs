@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -104,15 +105,67 @@ public sealed class ConsoleCloudLoginTests
         };
         request.Headers.Add(ConsoleAccessOptions.AntiforgeryHeaderName, csrf);
 
+        using var review = await client.GetAsync("/api/access-requests");
+        using var decisionRequest = new HttpRequestMessage(HttpMethod.Post, "/api/access-requests/missing/approve")
+        {
+            Content = new StringContent("{\"reason\":\"member must not decide\"}", Encoding.UTF8, "application/json")
+        };
+        decisionRequest.Headers.Add(ConsoleAccessOptions.AntiforgeryHeaderName, csrf);
+        using var decision = await client.SendAsync(decisionRequest);
         using var forbidden = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, review.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, decision.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+    }
+
+    [Fact]
+    public void PlainHttpCloudBridgeIsLimitedToDirectLocalOnlyLoopback()
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.LocalIpAddress = IPAddress.Loopback;
+        context.Connection.RemoteIpAddress = IPAddress.Loopback;
+        var environment = new TestHostEnvironment { EnvironmentName = Environments.Production };
+
+        Assert.True(ConsoleRequestSecurity.IsTrustedLocalRequest(
+            context,
+            new ConsoleAccessOptions { LocalOnly = true },
+            new LuthnHostOperationalOptions { EnableForwardedHeaders = false },
+            environment));
+        Assert.False(ConsoleRequestSecurity.IsTrustedLocalRequest(
+            context,
+            new ConsoleAccessOptions { LocalOnly = true },
+            new LuthnHostOperationalOptions { EnableForwardedHeaders = true },
+            environment));
+
+        context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.10");
+        Assert.False(ConsoleRequestSecurity.IsTrustedLocalRequest(
+            context,
+            new ConsoleAccessOptions { LocalOnly = true },
+            new LuthnHostOperationalOptions(),
+            environment));
+
+        context.Connection.LocalIpAddress = IPAddress.Parse("172.20.0.2");
+        context.Connection.RemoteIpAddress = IPAddress.Parse("172.20.0.1");
+        context.Request.Host = new HostString("127.0.0.1", 8080);
+        Assert.True(ConsoleRequestSecurity.IsTrustedLocalRequest(
+            context,
+            new ConsoleAccessOptions { LocalOnly = true, TrustedLocalBridge = true },
+            new LuthnHostOperationalOptions(),
+            environment));
+
+        context.Request.Host = new HostString("console.example.test");
+        Assert.False(ConsoleRequestSecurity.IsTrustedLocalRequest(
+            context,
+            new ConsoleAccessOptions { LocalOnly = true, TrustedLocalBridge = true },
+            new LuthnHostOperationalOptions(),
+            environment));
     }
 
     private static async Task EnrollAsync(HttpClient client)
     {
-        using var local = await client.PostAsync("/api/operator/session/local", null);
+        using var local = await ConsoleSessionSecurityTests.CreateArmedLocalSessionAsync(client);
         var csrf = Assert.Single(local.Headers.GetValues(ConsoleAccessOptions.AntiforgeryHeaderName));
         using var start = await SendMutationAsync(client, "/api/operator/enrollment/start", csrf);
         using var session = await client.GetAsync("/api/operator/session");
@@ -147,6 +200,7 @@ public sealed class ConsoleCloudLoginTests
             builder.UseEnvironment("Testing");
             builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
             builder.UseSetting("Luthn:Auth:RequireServiceToken", "true");
+            ConsoleSessionSecurityTests.ConfigureOperatorCredential(builder);
             builder.UseSetting("Luthn:Identity:Mode", "SingleOwner");
             builder.UseSetting("Luthn:Console:LocalOnly", "true");
             builder.UseSetting("Luthn:Console:Enrollment:Adapter", "Fake");

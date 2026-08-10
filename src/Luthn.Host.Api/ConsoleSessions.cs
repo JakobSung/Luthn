@@ -15,17 +15,23 @@ public sealed class ConsoleAccessOptions
 {
     public const string SectionName = "Luthn:Console";
     public const string CookieName = "LuthnConsoleSid";
+    public const string LocalCandidateCookieName = "LuthnConsoleCandidate";
     public const string AntiforgeryHeaderName = "X-Luthn-CSRF";
 
     public bool LocalOnly { get; set; }
+    public bool TrustedLocalBridge { get; set; }
     public int IdleMinutes { get; set; } = 15;
     public int AbsoluteMinutes { get; set; } = 120;
+    public int LocalArmSeconds { get; set; } = 30;
 
     public TimeSpan EffectiveIdleLifetime =>
         TimeSpan.FromMinutes(Math.Clamp(IdleMinutes, 1, 60));
 
     public TimeSpan EffectiveAbsoluteLifetime =>
         TimeSpan.FromMinutes(Math.Clamp(AbsoluteMinutes, 5, 480));
+
+    public TimeSpan EffectiveLocalArmLifetime =>
+        TimeSpan.FromSeconds(Math.Clamp(LocalArmSeconds, 5, 60));
 }
 
 public sealed record ConsoleSessionIdentity(
@@ -76,9 +82,120 @@ public sealed class UnenrolledConsoleInstallationState : IConsoleInstallationSta
     public bool IsEnrolled => false;
 }
 
+public interface IConsoleLocalAccessArmStore
+{
+    void EnsureCandidate(HttpContext context);
+    bool ArmSingleCandidate();
+    bool IsCandidateApproved(HttpContext context);
+    bool TryConsumeCandidate(HttpContext context);
+}
+
+public sealed class InMemoryConsoleLocalAccessArmStore(
+    TimeProvider timeProvider,
+    IOptions<ConsoleAccessOptions> options) : IConsoleLocalAccessArmStore
+{
+    private static readonly TimeSpan CandidateLifetime = TimeSpan.FromMinutes(2);
+    private readonly ConcurrentDictionary<string, LocalConsoleCandidate> _candidates =
+        new(StringComparer.Ordinal);
+
+    public void EnsureCandidate(HttpContext context)
+    {
+        var now = timeProvider.GetUtcNow();
+        Prune(now);
+        if (TryReadCandidate(context, out var existingId) &&
+            _candidates.TryGetValue(existingId, out var existing) &&
+            now < existing.ExpiresAt)
+        {
+            return;
+        }
+
+        var candidateId = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        _candidates[candidateId] = new LocalConsoleCandidate(now + CandidateLifetime);
+        context.Response.Cookies.Append(
+            ConsoleAccessOptions.LocalCandidateCookieName,
+            candidateId,
+            CandidateCookieOptions(context.Request.IsHttps, now + CandidateLifetime));
+    }
+
+    public bool ArmSingleCandidate()
+    {
+        var now = timeProvider.GetUtcNow();
+        Prune(now);
+        var candidates = _candidates
+            .Where(pair => now < pair.Value.ExpiresAt)
+            .Take(2)
+            .ToArray();
+        if (candidates.Length != 1)
+        {
+            return false;
+        }
+
+        candidates[0].Value.ApprovedUntil = now + options.Value.EffectiveLocalArmLifetime;
+        return true;
+    }
+
+    public bool IsCandidateApproved(HttpContext context)
+    {
+        var now = timeProvider.GetUtcNow();
+        return TryReadCandidate(context, out var candidateId) &&
+            _candidates.TryGetValue(candidateId, out var candidate) &&
+            candidate.ApprovedUntil is { } approvedUntil &&
+            now < approvedUntil;
+    }
+
+    public bool TryConsumeCandidate(HttpContext context)
+    {
+        if (!TryReadCandidate(context, out var candidateId) ||
+            !_candidates.TryRemove(candidateId, out var candidate) ||
+            candidate.ApprovedUntil is not { } approvedUntil ||
+            timeProvider.GetUtcNow() >= approvedUntil)
+        {
+            return false;
+        }
+
+        context.Response.Cookies.Delete(
+            ConsoleAccessOptions.LocalCandidateCookieName,
+            CandidateCookieOptions(context.Request.IsHttps, null));
+        return true;
+    }
+
+    private static bool TryReadCandidate(HttpContext context, out string candidateId) =>
+        context.Request.Cookies.TryGetValue(
+            ConsoleAccessOptions.LocalCandidateCookieName,
+            out candidateId!) &&
+        !string.IsNullOrWhiteSpace(candidateId);
+
+    private void Prune(DateTimeOffset now)
+    {
+        foreach (var pair in _candidates.Where(pair => now >= pair.Value.ExpiresAt))
+        {
+            _candidates.TryRemove(pair.Key, out _);
+        }
+    }
+
+    private static CookieOptions CandidateCookieOptions(
+        bool secure,
+        DateTimeOffset? expiresAt) => new()
+        {
+            HttpOnly = true,
+            Secure = secure,
+            SameSite = SameSiteMode.Strict,
+            Path = "/",
+            Expires = expiresAt,
+            IsEssential = true
+        };
+
+    private sealed class LocalConsoleCandidate(DateTimeOffset expiresAt)
+    {
+        public DateTimeOffset ExpiresAt { get; } = expiresAt;
+        public DateTimeOffset? ApprovedUntil { get; set; }
+    }
+}
+
 public interface IConsoleSessionStore
 {
     ConsoleSessionIdentity? Authenticate(HttpContext context);
+    bool IsLocalEligible(HttpContext context);
     ConsoleSessionIdentity CreateLocal(HttpContext context);
     ConsoleSessionIdentity CreateCloud(HttpContext context, AuthenticatedConsoleAuthority authority);
     void Revoke(HttpContext context);
@@ -93,6 +210,7 @@ public sealed class InMemoryConsoleSessionStore(
     IOptions<LuthnIdentityOptions> identityOptions,
     IOptions<LuthnHostOperationalOptions> hostOptions,
     IConsoleLifecycleStore lifecycle,
+    IConsoleLocalAccessArmStore localAccessArm,
     IHostEnvironment environment) : IConsoleSessionStore
 {
     private static readonly string[] LocalScopes =
@@ -103,6 +221,7 @@ public sealed class InMemoryConsoleSessionStore(
         ServiceScopes.ExternalPublicationRead,
         ServiceScopes.ExternalPublicationWrite,
         ServiceScopes.AccessRequest,
+        ServiceScopes.AccessReview,
         ServiceScopes.AccessDecide,
         ServiceScopes.AuditRead,
         ServiceScopes.ConfigWrite,
@@ -149,7 +268,7 @@ public sealed class InMemoryConsoleSessionStore(
             return null;
         }
 
-        if (session.Mode == ConsoleAccessMode.LocalAuto && !CanCreateLocal(context))
+        if (session.Mode == ConsoleAccessMode.LocalAuto && !IsLocalEligible(context))
         {
             _sessions.TryRemove(sessionId, out _);
             DeleteCookie(context);
@@ -179,10 +298,16 @@ public sealed class InMemoryConsoleSessionStore(
 
     public ConsoleSessionIdentity CreateLocal(HttpContext context)
     {
-        if (!CanCreateLocal(context))
+        if (!IsLocalEligible(context))
         {
             throw new InvalidOperationException(
                 "Local automatic console access requires an un-enrolled SingleOwner installation with explicit loopback-only exposure.");
+        }
+
+        if (!localAccessArm.TryConsumeCandidate(context))
+        {
+            throw new InvalidOperationException(
+                "Local console access must first be authorized with the installed `luthn console` command.");
         }
 
         var userId = ServiceTokenAuthorization.NormalizeUserId(identityOptions.Value.SingleOwnerUserId)
@@ -283,23 +408,18 @@ public sealed class InMemoryConsoleSessionStore(
         }
     }
 
-    private bool CanCreateLocal(HttpContext context)
+    public bool IsLocalEligible(HttpContext context)
     {
-        if (!options.Value.LocalOnly ||
-            identityOptions.Value.Mode != LuthnIdentityMode.SingleOwner ||
-            lifecycle.IsEnrolled ||
-            hostOptions.Value.EnableForwardedHeaders)
+        if (identityOptions.Value.Mode != LuthnIdentityMode.SingleOwner || lifecycle.IsEnrolled)
         {
             return false;
         }
 
-        if (environment.IsEnvironment("Testing"))
-        {
-            return true;
-        }
-
-        return IsLoopback(context.Connection.LocalIpAddress) &&
-            IsLoopback(context.Connection.RemoteIpAddress);
+        return ConsoleRequestSecurity.IsTrustedLocalRequest(
+            context,
+            options.Value,
+            hostOptions.Value,
+            environment);
     }
 
     private static void ApplyRestriction(ConsoleSessionRecord session)
@@ -310,9 +430,6 @@ public sealed class InMemoryConsoleSessionStore(
         session.Scopes.UnionWith(RestrictedScopes);
         session.Capabilities = RestrictedCapabilities;
     }
-
-    private static bool IsLoopback(IPAddress? address) =>
-        address is not null && IPAddress.IsLoopback(address);
 
     internal static void AppendCookie(
         HttpContext context,
@@ -367,6 +484,9 @@ public static class ConsoleSessionEndpoints
     {
         var group = app.MapGroup("/api/operator/session");
         group.MapGet("", Read).WithName("ReadConsoleSession");
+        group.MapPost("/local/arm", ArmLocal)
+            .RequireServiceScope(ServiceScopes.ConfigWrite)
+            .WithName("ArmLocalConsoleSession");
         group.MapPost("/local", CreateLocal).WithName("CreateLocalConsoleSession");
         group.MapPost("/logout", Logout).WithName("LogoutConsoleSession");
         return app;
@@ -375,9 +495,8 @@ public static class ConsoleSessionEndpoints
     private static Ok<ConsoleSessionDto> Read(
         HttpContext context,
         IConsoleSessionStore sessions,
+        IConsoleLocalAccessArmStore localAccessArm,
         IAntiforgery antiforgery,
-        IOptions<LuthnIdentityOptions> identityOptions,
-        IOptions<ConsoleAccessOptions> consoleOptions,
         IConsoleInstallationState installationState)
     {
         var session = sessions.Authenticate(context);
@@ -387,9 +506,19 @@ public static class ConsoleSessionEndpoints
             return TypedResults.Ok(ToDto(session));
         }
 
-        var localEligible = consoleOptions.Value.LocalOnly &&
-            identityOptions.Value.Mode == LuthnIdentityMode.SingleOwner &&
-            !installationState.IsEnrolled;
+        var localEligible = sessions.IsLocalEligible(context);
+        if (localEligible)
+        {
+            localAccessArm.EnsureCandidate(context);
+        }
+        var nextAction = "cloud-login";
+        if (!installationState.IsEnrolled && localEligible)
+        {
+            nextAction = localAccessArm.IsCandidateApproved(context)
+                ? "create-local-session"
+                : "arm-local-session";
+        }
+
         return TypedResults.Ok(new ConsoleSessionDto(
             installationState.IsEnrolled || !localEligible
                 ? ConsoleAccessMode.CloudLoginRequired
@@ -400,8 +529,35 @@ public static class ConsoleSessionEndpoints
             null,
             null,
             [],
-            installationState.IsEnrolled || !localEligible ? "cloud-login" : "create-local-session",
+            nextAction,
             true));
+    }
+
+    private static IResult ArmLocal(
+        HttpContext context,
+        IConsoleSessionStore sessions,
+        IConsoleLocalAccessArmStore localAccessArm)
+    {
+        var principal = ServiceTokenAuthorization.GetPrincipal(context);
+        if (!ServiceTokenAuthorization.IsServiceTokenAuthenticated(context) ||
+            !principal.IsOperator ||
+            !sessions.IsLocalEligible(context))
+        {
+            return TypedResults.Problem(
+                title: "Local console access is unavailable.",
+                detail: "The installed local operator credential and an eligible loopback-only installation are required.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!localAccessArm.ArmSingleCandidate())
+        {
+            return TypedResults.Problem(
+                title: "Local console authorization could not continue.",
+                detail: "Open one local console window and retry. Multiple or missing browser candidates fail closed.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        return TypedResults.NoContent();
     }
 
     private static Results<Ok<ConsoleSessionDto>, ProblemHttpResult> CreateLocal(
@@ -486,6 +642,66 @@ public static class ConsoleRequestSecurity
         return Uri.TryCreate(origin, UriKind.Absolute, out var originUri) &&
             string.Equals(originUri.Scheme, request.Scheme, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(originUri.Authority, request.Host.Value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsTrustedLocalRequest(
+        HttpContext context,
+        ConsoleAccessOptions consoleOptions,
+        LuthnHostOperationalOptions hostOptions,
+        IHostEnvironment environment)
+    {
+        if (!consoleOptions.LocalOnly || hostOptions.EnableForwardedHeaders)
+        {
+            return false;
+        }
+
+        if (environment.IsEnvironment("Testing"))
+        {
+            return true;
+        }
+
+        var local = context.Connection.LocalIpAddress;
+        var remote = context.Connection.RemoteIpAddress;
+        if (local is null || remote is null)
+        {
+            return false;
+        }
+
+        if (IPAddress.IsLoopback(local) && IPAddress.IsLoopback(remote))
+        {
+            return true;
+        }
+
+        return consoleOptions.TrustedLocalBridge &&
+            IsLoopbackHost(context.Request.Host.Host) &&
+            IsPrivateOrLoopback(local) &&
+            IsPrivateOrLoopback(remote);
+    }
+
+    private static bool IsLoopbackHost(string host) =>
+        string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+        IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address);
+
+    private static bool IsPrivateOrLoopback(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+        if (IPAddress.IsLoopback(address))
+        {
+            return true;
+        }
+
+        var bytes = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return bytes[0] == 10 ||
+                (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
+                (bytes[0] == 192 && bytes[1] == 168);
+        }
+
+        return address.IsIPv6LinkLocal || (bytes[0] & 0xfe) == 0xfc;
     }
 
     public static async Task<ProblemHttpResult?> ValidateMutationAsync(

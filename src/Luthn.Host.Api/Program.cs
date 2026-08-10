@@ -146,6 +146,7 @@ builder.Services.AddSingleton<IConsoleLifecycleStore>(provider =>
     provider.GetRequiredService<ConsoleLifecycleStore>());
 builder.Services.AddSingleton<IConsoleInstallationState>(provider =>
     provider.GetRequiredService<ConsoleLifecycleStore>());
+builder.Services.AddSingleton<IConsoleLocalAccessArmStore, InMemoryConsoleLocalAccessArmStore>();
 builder.Services.AddSingleton<DisabledInstallationEnrollmentAdapter>();
 builder.Services.AddSingleton<FakeInstallationEnrollmentAdapter>();
 builder.Services.AddSingleton<IInstallationEnrollmentAdapter>(provider =>

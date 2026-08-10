@@ -26,12 +26,17 @@ export LUTHN_SKIP_PULL=true
 export LUTHN_SOURCE_BASE_URL="file://$repo_root"
 
 mkdir -p "$HOME"
+export LUTHN_TEST_CONSOLE_URL_FILE="$test_root/console-url"
+export LUTHN_TEST_CONSOLE_COOKIE_FILE="$test_root/console-cookie"
 mkdir -p "$test_root/forbidden-bin"
 for forbidden_command in git dotnet; do
   printf '#!/usr/bin/env bash\necho "host %s must not be invoked" >&2\nexit 99\n' \
     "$forbidden_command" >"$test_root/forbidden-bin/$forbidden_command"
   chmod 0755 "$test_root/forbidden-bin/$forbidden_command"
 done
+printf '#!/usr/bin/env bash\nprintf "%%s" "$1" >"$LUTHN_TEST_CONSOLE_URL_FILE"\ncurl -sS -c "$LUTHN_TEST_CONSOLE_COOKIE_FILE" "${1%%/}/api/operator/session" >/dev/null\n' \
+  >"$test_root/forbidden-bin/open"
+chmod 0755 "$test_root/forbidden-bin/open"
 export PATH="$test_root/forbidden-bin:$PATH"
 
 cleanup() {
@@ -94,6 +99,8 @@ test -n "$operator_key_manifest_before"
 grep -q '^LUTHN_ENVIRONMENT=Production$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Classification__Provider=mock$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Classification__AllowMock=true$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Classification__Credential=$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Console__TrustedLocalBridge=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnRetentionDays=30$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnCleanupEnabled=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60$' "$LUTHN_CONFIG_DIR/luthn.env"
@@ -115,6 +122,24 @@ grep -q '"status":403' "$agent_config_body"
 curl -fsS "$base_url/readyz" >/dev/null
 console_html="$(curl -fsS "$base_url/")"
 grep -q '<title>Luthn Operator Console</title>' <<<"$console_html"
+direct_console_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base_url/api/operator/session/local")"
+test "$direct_console_status" = "403"
+console_command_output="$("$cli" console)"
+console_url="$(cat "$LUTHN_TEST_CONSOLE_URL_FILE")"
+test "$console_url" = "$base_url/"
+test -s "$LUTHN_TEST_CONSOLE_COOKIE_FILE"
+if grep -Fq "$operator_token_before" <<<"$console_command_output$console_url"; then
+  echo "operator token leaked from the console bootstrap command" >&2
+  exit 1
+fi
+console_session_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  -b "$LUTHN_TEST_CONSOLE_COOKIE_FILE" -c "$LUTHN_TEST_CONSOLE_COOKIE_FILE" \
+  "$base_url/api/operator/session/local")"
+test "$console_session_status" = "200"
+console_replay_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  -b "$LUTHN_TEST_CONSOLE_COOKIE_FILE" -c "$LUTHN_TEST_CONSOLE_COOKIE_FILE" \
+  "$base_url/api/operator/session/local")"
+test "$console_replay_status" = "403"
 fresh_preview_body="$test_root/fresh-preview.json"
 fresh_preview_status="$(curl -sS -o "$fresh_preview_body" -w '%{http_code}' -X POST "$base_url/api/classification/preview" \
   -H 'content-type: application/json' \
@@ -144,17 +169,17 @@ docker compose \
   exec -T postgres psql -v ON_ERROR_STOP=1 -U luthn -d luthn >/dev/null <<'SQL'
 BEGIN;
 INSERT INTO source_events
-  ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial", "OwnerUserId")
+  ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial", "OwnerUserId", "WorkspaceId")
 VALUES
-  ('lifecycle-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-fixture', true, 'local-owner');
+  ('lifecycle-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-fixture', true, 'local-owner', 'default');
 INSERT INTO collection_provenance
-  ("Id", "ContractVersion", "SourceEventId", "AuthenticatedActor", "ActorTrust", "ClaimsTrust", "AuthenticatedUserId", "ReceivedAt")
+  ("Id", "ContractVersion", "SourceEventId", "AuthenticatedActor", "ActorTrust", "ClaimsTrust", "AuthenticatedUserId", "ReceivedAt", "WorkspaceId")
 VALUES
-  ('provenance-lifecycle-sensitive-source', 1, 'lifecycle-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now());
+  ('provenance-lifecycle-sensitive-source', 1, 'lifecycle-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now(), 'default');
 INSERT INTO sensitive_record_references
-  ("Id", "SourceEventId", "SourceSystem", "SourceType", "ReceivedAt", "ContainsSensitiveMaterial", "ReferenceLabel", "RedactedSummary", "OwnerUserId")
+  ("Id", "SourceEventId", "SourceSystem", "SourceType", "ReceivedAt", "ContainsSensitiveMaterial", "ReferenceLabel", "RedactedSummary", "OwnerUserId", "WorkspaceId")
 VALUES
-  ('lifecycle-sensitive-reference', 'lifecycle-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-sensitive-source', 'Public-safe lifecycle summary.', 'local-owner');
+  ('lifecycle-sensitive-reference', 'lifecycle-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-sensitive-source', 'Public-safe lifecycle summary.', 'local-owner', 'default');
 COMMIT;
 SQL
 access_request="$(curl -fsS -X POST "$base_url/api/access-requests" \

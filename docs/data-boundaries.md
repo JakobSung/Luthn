@@ -274,7 +274,8 @@ decisions; provenance remains the immutable origin statement.
 Sensitive access starts as a bounded request with a structured purpose, session
 correlation, and 60–3600 second expiry. Request creation, status, and result
 reads are scoped to the server-derived owner; listing and decisions require the
-separate `access.decide` scope. The operator-detail projection is a local
+separate `access.review` scope, while approval and denial require `access.decide`.
+For backward compatibility, `access.decide` also implies review. The operator-detail projection is a local
 operator surface, not an agent surface: it may contain an existing safe label,
 source metadata, and a redacted summary, but never raw Vault/source content,
 protected payloads, credentials, workspace identity, or owner identity.

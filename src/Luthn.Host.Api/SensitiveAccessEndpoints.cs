@@ -23,7 +23,7 @@ public static class SensitiveAccessEndpoints
         var requests = app.MapGroup("/api/access-requests");
 
         requests.MapGet("", ListRequests)
-            .RequireServiceScope(ServiceScopes.AccessDecide)
+            .RequireServiceScope(ServiceScopes.AccessReview)
             .WithName("ListSensitiveAccessRequests");
 
         requests.MapPost("", CreateRequest)
@@ -35,7 +35,7 @@ public static class SensitiveAccessEndpoints
             .WithName("ReadSensitiveAccessRequest");
 
         requests.MapGet("/{id}/operator-detail", ReadOperatorDetail)
-            .RequireServiceScope(ServiceScopes.AccessDecide)
+            .RequireServiceScope(ServiceScopes.AccessReview)
             .WithName("ReadSensitiveAccessOperatorDetail");
 
         requests.MapGet("/{id}/result", ReadRequestResult)

@@ -8,6 +8,7 @@ services:
       ConnectionStrings__LuthnDb: ${LUTHN_DOCKER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=luthn;Username=luthn}
       Luthn__Classification__Provider: ${Luthn__Classification__Provider:-mock}
       Luthn__Classification__AllowMock: ${Luthn__Classification__AllowMock:-true}
+      Luthn__Classification__Credential: ${Luthn__Classification__Credential:-}
       Luthn__Memory__AutomaticTurnRetentionDays: ${Luthn__Memory__AutomaticTurnRetentionDays:-30}
       Luthn__Memory__AutomaticTurnCleanupEnabled: ${Luthn__Memory__AutomaticTurnCleanupEnabled:-true}
       Luthn__Memory__AutomaticTurnCleanupIntervalMinutes: ${Luthn__Memory__AutomaticTurnCleanupIntervalMinutes:-60}
@@ -27,6 +28,7 @@ services:
       Luthn__OperatorConfig__Directory: ${Luthn__OperatorConfig__Directory:-/var/lib/luthn/operator}
       Luthn__Host__RequestTimeoutSeconds: ${Luthn__Host__RequestTimeoutSeconds:-65}
       Luthn__Console__LocalOnly: ${Luthn__Console__LocalOnly:-true}
+      Luthn__Console__TrustedLocalBridge: ${Luthn__Console__TrustedLocalBridge:-true}
       Luthn__Auth__RequireServiceToken: ${Luthn__Auth__RequireServiceToken:-true}
       Luthn__Auth__Tokens__0__Name: ${Luthn__Auth__Tokens__0__Name:-local-agent}
       Luthn__Auth__Tokens__0__Sha256Digest: ${Luthn__Auth__Tokens__0__Sha256Digest:-}
@@ -49,7 +51,7 @@ services:
       Luthn__Auth__Tokens__1__Name: ${Luthn__Auth__Tokens__1__Name:-local-operator}
       Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:-}
       Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
-      Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-}
+      Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-config.write}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

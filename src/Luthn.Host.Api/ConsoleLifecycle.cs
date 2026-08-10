@@ -87,6 +87,7 @@ public static class ConsoleLifecycleEndpoints
         InMemoryConsoleSessionStore.DeleteCookie(context);
         await AuditAsync(
             db,
+            session,
             "console.membership.removed",
             "revoked",
             timeProvider.GetUtcNow(),
@@ -126,7 +127,7 @@ public static class ConsoleLifecycleEndpoints
         await lifecycle.RestrictOrganizationAsync(cancellationToken);
         sessions.RestrictCloudSessions();
         var restricted = sessions.Authenticate(context);
-        await AuditAsync(db, "console.organization.restricted", "restricted", now, cancellationToken);
+        await AuditAsync(db, session, "console.organization.restricted", "restricted", now, cancellationToken);
         return TypedResults.Ok(ToDto(lifecycle.Current, restricted, recovery.Kind));
     }
 
@@ -161,6 +162,7 @@ public static class ConsoleLifecycleEndpoints
             var reconnectedSession = sessions.CreateCloud(context, authority);
             await AuditAsync(
                 db,
+                session,
                 "console.organization.reconnected",
                 "active",
                 timeProvider.GetUtcNow(),
@@ -236,7 +238,13 @@ public static class ConsoleLifecycleEndpoints
         sessions.RevokeAll();
         sessions.Revoke(context);
         await lifecycle.CompleteLocalReclaimAsync(now, cancellationToken);
-        await AuditAsync(db, "console.local_reclaim.completed", "reclaimed", now, cancellationToken);
+        await AuditAsync(
+            db,
+            request.Method == ConsoleReclaimMethod.CloudOwnerReauthentication ? session : null,
+            "console.local_reclaim.completed",
+            "reclaimed",
+            now,
+            cancellationToken);
         return TypedResults.Ok(ToDto(lifecycle.Current, null, recovery.Kind));
     }
 
@@ -295,21 +303,23 @@ public static class ConsoleLifecycleEndpoints
 
     private static async ValueTask AuditAsync(
         LuthnDbContext db,
+        ConsoleSessionIdentity? session,
         string action,
         string outcome,
         DateTimeOffset occurredAt,
         CancellationToken cancellationToken)
     {
         db.AuditEvents.Add(AuditEventFactory.ForInstallation(
-            "console:lifecycle",
+            session?.ActorId ?? "console:offline-recovery",
             action,
             "console-installation",
             "metadata-only",
             "no-content",
             occurredAt,
-            actorKind: "user",
+            actorKind: session is null ? "system" : "user",
             subjectType: "console_lifecycle",
-            outcome: outcome));
+            outcome: outcome,
+            actorUserId: session?.UserId));
         await db.SaveChangesAsync(cancellationToken);
     }
 

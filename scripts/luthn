@@ -38,6 +38,7 @@ commands:
                                    Install Luthn and optionally configure an agent.
   version [--json]                Show installed runtime and compatibility versions.
   status                          Show services, readiness, console, and image.
+  console                         Authorize once and open the local operator console.
   update check [--json]           Check the configured update channel without pulling.
   update [image]                  Back up, pull, migrate, restart, and verify.
   doctor [--json]                 Diagnose runtime, update, and Codex integration state.
@@ -509,11 +510,13 @@ POSTGRES_USER=luthn
 POSTGRES_HOST_AUTH_METHOD=trust
 Luthn__Classification__Provider=mock
 Luthn__Classification__AllowMock=true
+Luthn__Classification__Credential=
 Luthn__Memory__AutomaticTurnRetentionDays=30
 Luthn__Memory__AutomaticTurnCleanupEnabled=true
 Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60
 Luthn__Memory__AutomaticTurnCleanupBatchSize=100
 Luthn__Console__LocalOnly=true
+Luthn__Console__TrustedLocalBridge=true
 Luthn__Auth__RequireServiceToken=true
 Luthn__Identity__Mode=SingleOwner
 Luthn__Identity__SingleOwnerUserId=local-owner
@@ -1241,6 +1244,63 @@ show_status() {
   if [[ -n "$image_id" && -n "$selected_id" && "$image_id" != "$selected_id" ]]; then
     echo "Runtime drift: a locally selected image is not running; run 'luthn update'."
   fi
+}
+
+open_console() {
+  if (( $# > 0 )); then
+    echo "usage: luthn console" >&2
+    return 2
+  fi
+
+  require_installation
+  require_command curl
+  local base_url configured_operator_token_file operator_token console_status
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  configured_operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
+  if [[ ! -f "$configured_operator_token_file" ]]; then
+    echo "Local operator credential is unavailable. Run: luthn update" >&2
+    return 1
+  fi
+  operator_token="$(<"$configured_operator_token_file")"
+  if [[ -z "$operator_token" ]]; then
+    echo "Local operator credential is empty. Run: luthn update" >&2
+    return 1
+  fi
+  if [[ ! "$operator_token" =~ ^[A-Za-z0-9._~-]+$ ]]; then
+    unset operator_token
+    echo "Local operator credential has an invalid format. Run: luthn update" >&2
+    return 1
+  fi
+
+  if command -v open >/dev/null 2>&1; then
+    open "$base_url/"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$base_url/" >/dev/null 2>&1
+  else
+    unset operator_token
+    echo "No graphical browser opener is available. Run 'luthn console' on the local workstation." >&2
+    return 1
+  fi
+
+  console_status=""
+  for _ in $(seq 1 20); do
+    console_status="$(printf 'Authorization: Bearer %s\n' "$operator_token" \
+      | curl --header @- --silent --show-error --output /dev/null \
+          --write-out '%{http_code}' --request POST \
+          "$base_url/api/operator/session/local/arm")"
+    if [[ "$console_status" == "204" ]]; then
+      unset operator_token
+      echo "Opening the local console: $base_url/"
+      return 0
+    fi
+    if [[ "$console_status" != "409" ]]; then
+      break
+    fi
+    sleep 0.25
+  done
+  unset operator_token
+  echo "Local console authorization failed with HTTP ${console_status:-unavailable}. Keep one console window open and retry." >&2
+  return 1
 }
 
 doctor_add_check() {
@@ -2731,6 +2791,7 @@ case "$command" in
   install) shift; install_luthn "$@" ;;
   version) shift; show_version "$@" ;;
   status|check) show_status ;;
+  console) shift; open_console "$@" ;;
   update)
     shift
     if [[ "${1:-}" == "check" ]]; then

@@ -1,8 +1,10 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Luthn.Core.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Luthn.Host.Api.Tests;
 
@@ -23,6 +25,7 @@ public sealed class ConsoleLifecycleTests
         using var session = await client.GetAsync("/api/operator/session");
         using var sessionBody = await JsonDocument.ParseAsync(await session.Content.ReadAsStreamAsync());
         using var relogin = await client.PostAsync("/api/operator/cloud-login", null);
+        using var arm = await ConsoleSessionSecurityTests.ArmLocalConsoleAsync(client);
         using var local = await client.PostAsync("/api/operator/session/local", null);
 
         Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
@@ -32,6 +35,7 @@ public sealed class ConsoleLifecycleTests
         Assert.Equal("CloudLoginRequired", sessionBody.RootElement.GetProperty("mode").GetString());
         Assert.Equal("LoginRequired", sessionBody.RootElement.GetProperty("state").GetString());
         Assert.Equal(HttpStatusCode.Forbidden, relogin.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, arm.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, local.StatusCode);
     }
 
@@ -69,6 +73,20 @@ public sealed class ConsoleLifecycleTests
         Assert.Equal(HttpStatusCode.OK, reconnect.StatusCode);
         Assert.Equal("Active", reconnectBody.RootElement.GetProperty("organizationState").GetString());
         Assert.True(reconnectBody.RootElement.GetProperty("connectionAuthorityActive").GetBoolean());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var audits = db.AuditEvents
+            .Where(item => item.Action == "console.organization.restricted" ||
+                item.Action == "console.organization.reconnected")
+            .ToArray();
+        Assert.Equal(2, audits.Length);
+        Assert.All(audits, item =>
+        {
+            Assert.Equal("console:cloud-user", item.Actor);
+            Assert.Equal("user", item.ActorKind);
+            Assert.Equal("lifecycle-owner", item.ActorUserId);
+        });
     }
 
     [Fact]
@@ -90,7 +108,7 @@ public sealed class ConsoleLifecycleTests
             csrf,
             "{\"method\":\"CloudOwnerReauthentication\"}");
         using var reclaimBody = await JsonDocument.ParseAsync(await reclaim.Content.ReadAsStreamAsync());
-        using var local = await client.PostAsync("/api/operator/session/local", null);
+        using var local = await ConsoleSessionSecurityTests.CreateArmedLocalSessionAsync(client);
         using var localBody = await JsonDocument.ParseAsync(await local.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.OK, reclaim.StatusCode);
@@ -115,6 +133,7 @@ public sealed class ConsoleLifecycleTests
             "/api/operator/lifecycle/reclaim",
             null,
             "{\"method\":\"OfflineRecovery\"}");
+        using var rejectedArm = await ConsoleSessionSecurityTests.ArmLocalConsoleAsync(disabledClient);
         using var rejectedLocal = await disabledClient.PostAsync("/api/operator/session/local", null);
 
         using var enabledFactory = CreateFactory(recoveryVerifier: "Fake", fakeProofVerified: true);
@@ -130,18 +149,27 @@ public sealed class ConsoleLifecycleTests
             null,
             "{\"method\":\"OfflineRecovery\"}");
         using var reclaimedBody = await JsonDocument.ParseAsync(await reclaimed.Content.ReadAsStreamAsync());
-        using var allowedLocal = await enabledClient.PostAsync("/api/operator/session/local", null);
+        using var allowedLocal = await ConsoleSessionSecurityTests.CreateArmedLocalSessionAsync(enabledClient);
 
         Assert.Equal(HttpStatusCode.Forbidden, rejected.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, rejectedArm.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, rejectedLocal.StatusCode);
         Assert.Equal(HttpStatusCode.OK, reclaimed.StatusCode);
         Assert.Equal("Detached", reclaimedBody.RootElement.GetProperty("organizationState").GetString());
         Assert.Equal(HttpStatusCode.OK, allowedLocal.StatusCode);
+
+        using var scope = enabledFactory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var audit = Assert.Single(db.AuditEvents.Where(item =>
+            item.Action == "console.local_reclaim.completed"));
+        Assert.Equal("console:offline-recovery", audit.Actor);
+        Assert.Equal("system", audit.ActorKind);
+        Assert.Null(audit.ActorUserId);
     }
 
     private static async Task<string> EnrollAndLoginAsync(HttpClient client)
     {
-        using var local = await client.PostAsync("/api/operator/session/local", null);
+        using var local = await ConsoleSessionSecurityTests.CreateArmedLocalSessionAsync(client);
         var csrf = Assert.Single(local.Headers.GetValues(ConsoleAccessOptions.AntiforgeryHeaderName));
         using var start = await SendMutationAsync(client, "/api/operator/enrollment/start", csrf);
         using var localStatus = await client.GetAsync("/api/operator/session");
@@ -187,6 +215,7 @@ public sealed class ConsoleLifecycleTests
             builder.UseEnvironment("Testing");
             builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
             builder.UseSetting("Luthn:Auth:RequireServiceToken", "true");
+            ConsoleSessionSecurityTests.ConfigureOperatorCredential(builder);
             builder.UseSetting("Luthn:Identity:Mode", "SingleOwner");
             builder.UseSetting("Luthn:Console:LocalOnly", "true");
             builder.UseSetting("Luthn:Console:Enrollment:Adapter", "Fake");
