@@ -201,6 +201,7 @@ public interface IConsoleSessionStore
     void Revoke(HttpContext context);
     void RevokeAll(Func<ConsoleSessionIdentity, bool>? predicate = null);
     void RevokeSubject(string subjectKey);
+    void RestrictSubject(string subjectKey);
     void RestrictCloudSessions();
 }
 
@@ -400,6 +401,16 @@ public sealed class InMemoryConsoleSessionStore(
     public void RevokeSubject(string subjectKey) =>
         RevokeAll(session => string.Equals(session.CloudSubjectKey, subjectKey, StringComparison.Ordinal));
 
+    public void RestrictSubject(string subjectKey)
+    {
+        foreach (var session in _sessions.Values.Where(item =>
+            item.Mode != ConsoleAccessMode.LocalAuto &&
+            string.Equals(item.CloudSubjectKey, subjectKey, StringComparison.Ordinal)))
+        {
+            ApplyRestriction(session);
+        }
+    }
+
     public void RestrictCloudSessions()
     {
         foreach (var session in _sessions.Values.Where(item => item.Mode != ConsoleAccessMode.LocalAuto))
@@ -487,19 +498,27 @@ public static class ConsoleSessionEndpoints
         group.MapPost("/local/arm", ArmLocal)
             .RequireServiceScope(ServiceScopes.ConfigWrite)
             .WithName("ArmLocalConsoleSession");
+        group.MapPost("/local/connect", ConnectLocal)
+            .WithName("ConnectLocalConsoleSession");
         group.MapPost("/local", CreateLocal).WithName("CreateLocalConsoleSession");
         group.MapPost("/logout", Logout).WithName("LogoutConsoleSession");
         return app;
     }
 
-    private static Ok<ConsoleSessionDto> Read(
+    private static async Task<Ok<ConsoleSessionDto>> Read(
         HttpContext context,
         IConsoleSessionStore sessions,
         IConsoleLocalAccessArmStore localAccessArm,
         IAntiforgery antiforgery,
-        IConsoleInstallationState installationState)
+        IConsoleInstallationState installationState,
+        IConsoleCloudSessionValidator cloudSessionValidator,
+        CancellationToken cancellationToken)
     {
-        var session = sessions.Authenticate(context);
+        var validation = await cloudSessionValidator.ValidateAsync(
+            context,
+            sessions.Authenticate(context),
+            cancellationToken);
+        var session = validation.Session;
         if (session is not null)
         {
             WriteAntiforgeryHeader(context, antiforgery);
@@ -530,7 +549,8 @@ public static class ConsoleSessionEndpoints
             null,
             [],
             nextAction,
-            true));
+            true,
+            validation.Reason));
     }
 
     private static IResult ArmLocal(
@@ -588,6 +608,51 @@ public static class ConsoleSessionEndpoints
         }
     }
 
+    private static Results<Ok<ConsoleSessionDto>, ProblemHttpResult> ConnectLocal(
+        HttpContext context,
+        IConsoleSessionStore sessions,
+        IConsoleLocalAccessArmStore localAccessArm,
+        IAntiforgery antiforgery)
+    {
+        if (!ConsoleRequestSecurity.IsSameOriginOrNonBrowser(context.Request))
+        {
+            return TypedResults.Problem(
+                title: "Untrusted console origin.",
+                detail: "Local console access can only be connected from the console origin.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!sessions.IsLocalEligible(context))
+        {
+            return TypedResults.Problem(
+                title: "Local console access is unavailable.",
+                detail: "Local access requires an un-enrolled SingleOwner installation with explicit loopback-only exposure.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!localAccessArm.IsCandidateApproved(context))
+        {
+            return TypedResults.Problem(
+                title: "Local console authorization could not continue.",
+                detail: "Authorize this browser with the installed `luthn console` command, then retry. Multiple or missing browser candidates fail closed.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        try
+        {
+            var session = sessions.CreateLocal(context);
+            WriteAntiforgeryHeader(context, antiforgery);
+            return TypedResults.Ok(ToDto(session));
+        }
+        catch (InvalidOperationException error)
+        {
+            return TypedResults.Problem(
+                title: "Local console access is unavailable.",
+                detail: error.Message,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+
     private static async Task<Results<NoContent, ProblemHttpResult>> Logout(
         HttpContext context,
         IConsoleSessionStore sessions,
@@ -609,7 +674,9 @@ public static class ConsoleSessionEndpoints
         return TypedResults.NoContent();
     }
 
-    internal static ConsoleSessionDto ToDto(ConsoleSessionIdentity session) =>
+    internal static ConsoleSessionDto ToDto(
+        ConsoleSessionIdentity session,
+        string? reason = null) =>
         new(
             session.Mode,
             session.Restricted ? ConsoleSessionState.Restricted : ConsoleSessionState.Active,
@@ -617,7 +684,8 @@ public static class ConsoleSessionEndpoints
             session.IdleExpiresAt,
             session.Capabilities,
             session.Restricted ? "offboarding" : "continue",
-            true);
+            true,
+            reason);
 
     internal static void WriteAntiforgeryHeader(HttpContext context, IAntiforgery antiforgery)
     {

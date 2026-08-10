@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luthn Operator Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/operator.css?v=console-nav-2">
+  <link rel="stylesheet" href="/assets/operator.css?v=console-nav-6">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to console</a>
@@ -59,7 +59,7 @@
           <li>
             <span>01</span>
             <strong data-i18n="orientation.stepAccessTitle">Set up access</strong>
-            <p data-i18n="orientation.stepAccessBody">Run <code>luthn console</code> to authorize one bounded Personal Local session. Enrolled installations require Cloud login.</p>
+            <p data-i18n="orientation.stepAccessBody">Use Console access to connect one bounded Personal Local session. Enrolled installations require Cloud login.</p>
             <button type="button" class="text-button" data-console-nav="settings" data-i18n="orientation.stepAccessAction">Open access settings</button>
           </li>
           <li>
@@ -86,7 +86,7 @@
           <span id="authPanelStatus" class="inline-status" aria-live="polite" data-i18n="auth.starting">Starting secure session</span>
         </div>
         <p class="auth-intro" data-i18n="auth.description">The Host keeps the credential server-side. The browser receives only a bounded HttpOnly session cookie and never reads a service or decision token.</p>
-        <p class="auth-scope-note" data-i18n="auth.scopeNote">LocalAuto requires <code>luthn console</code> and is available only for an un-enrolled SingleOwner installation bound to loopback. Cloud mode requires login.</p>
+        <p class="auth-scope-note" data-i18n="auth.scopeNote">LocalAuto is available from this screen only for an un-enrolled SingleOwner installation bound to loopback. Cloud mode requires login.</p>
         <div class="auth-explainer">
           <article>
             <span class="auth-step">01</span>
@@ -114,6 +114,16 @@
             <dd id="sessionExpiry">Checking</dd>
           </div>
         </dl>
+        <section class="enrollment-card local-access-card" aria-labelledby="localAccessTitle">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="auth.localEyebrow">Personal Local access</p>
+              <h3 id="localAccessTitle" data-i18n="auth.localTitle">Connect local access</h3>
+            </div>
+          </div>
+          <p id="localAccessDetail" class="security-note" data-i18n="auth.localReadyDetail">Local access is ready to connect from this console.</p>
+          <button id="connectLocal" type="button" data-i18n="auth.connectLocal">Connect local access</button>
+        </section>
         <section class="enrollment-card" aria-labelledby="enrollmentTitle">
           <div class="panel-heading compact">
             <div>
@@ -613,7 +623,7 @@
       </section>
     </main>
   </div>
-  <script src="/assets/operator-i18n.js?v=console-nav-2" defer></script>
-  <script src="/assets/operator.js?v=console-nav-2" defer></script>
+  <script src="/assets/operator-i18n.js?v=console-nav-6" defer></script>
+  <script src="/assets/operator.js?v=console-nav-6" defer></script>
 </body>
 </html>

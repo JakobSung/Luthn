@@ -359,6 +359,18 @@ public static class ServiceTokenAuthorization
             return (false, null);
         }
 
+        var cloudValidation = await httpContext.RequestServices
+            .GetRequiredService<IConsoleCloudSessionValidator>()
+            .ValidateAsync(httpContext, session, httpContext.RequestAborted);
+        session = cloudValidation.Session;
+        if (session is null)
+        {
+            return (true, TypedResults.Problem(
+                title: "Cloud console session expired.",
+                detail: cloudValidation.Detail ?? "Cloud console authentication is no longer active. Sign in again; Local access will not be restored automatically.",
+                statusCode: StatusCodes.Status401Unauthorized));
+        }
+
         if (!HasScope(session.Scopes, requiredScope))
         {
             return (true, TypedResults.Problem(

@@ -53,6 +53,29 @@ public sealed class ConsoleSessionSecurityTests
     }
 
     [Fact]
+    public async Task EligiblePersonalInstallCanConnectLocalFromConsoleAfterOperatorAuthorization()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var candidate = await client.GetAsync("/api/operator/session");
+        using var rejected = await client.PostAsync("/api/operator/session/local/connect", null);
+        using var arm = await ArmLocalConsoleAsync(client);
+        using var connected = await client.PostAsync("/api/operator/session/local/connect", null);
+        using var body = await JsonDocument.ParseAsync(await connected.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, candidate.StatusCode);
+        Assert.Equal("arm-local-session", (await JsonDocument.ParseAsync(await candidate.Content.ReadAsStreamAsync()))
+            .RootElement.GetProperty("nextAction").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, arm.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, connected.StatusCode);
+        Assert.Equal("LocalAuto", body.RootElement.GetProperty("mode").GetString());
+        Assert.Equal("Active", body.RootElement.GetProperty("state").GetString());
+        Assert.True(connected.Headers.Contains(ConsoleAccessOptions.AntiforgeryHeaderName));
+    }
+
+    [Fact]
     public async Task LocalSessionRequiresAndConsumesOneOperatorAuthorization()
     {
         using var factory = CreateFactory();
@@ -98,9 +121,11 @@ public sealed class ConsoleSessionSecurityTests
 
         using var arm = await ArmLocalConsoleAsync(client);
         using var response = await client.PostAsync("/api/operator/session/local", null);
+        using var browserConnect = await client.PostAsync("/api/operator/session/local/connect", null);
 
         Assert.Equal(HttpStatusCode.Forbidden, arm.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, browserConnect.StatusCode);
         Assert.False(response.Headers.TryGetValues("Set-Cookie", out var values) &&
             values.Any(value => value.StartsWith("LuthnConsoleSid=", StringComparison.Ordinal)));
     }
@@ -164,6 +189,7 @@ public sealed class ConsoleSessionSecurityTests
         Assert.DoesNotContain("sessionStorage", script, StringComparison.Ordinal);
         Assert.DoesNotContain("localStorage", script, StringComparison.Ordinal);
         Assert.Contains("/api/operator/session/local", script, StringComparison.Ordinal);
+        Assert.Contains("/api/operator/session/local/connect", script, StringComparison.Ordinal);
         Assert.DoesNotContain("luthn-console-bootstrap", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("X-Luthn-CSRF", script, StringComparison.Ordinal);
     }

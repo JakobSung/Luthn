@@ -71,12 +71,14 @@ public sealed class OperatorConsoleContractTests
         var script = await client.GetStringAsync("/assets/operator.js");
 
         Assert.Contains("id=\"externalPublicationTitle\"", index, StringComparison.Ordinal);
+        Assert.Contains("id=\"connectLocal\"", index, StringComparison.Ordinal);
         Assert.Contains("data-i18n=\"access.title\"", index, StringComparison.Ordinal);
         Assert.Contains("data-i18n=\"audit.title\"", index, StringComparison.Ordinal);
         Assert.Contains("name=\"category\"", index, StringComparison.Ordinal);
         Assert.Contains("id=\"nextAuditPage\"", index, StringComparison.Ordinal);
         Assert.Contains("id=\"exportAudit\"", index, StringComparison.Ordinal);
         Assert.Contains("/api/operator/console-profile", script, StringComparison.Ordinal);
+        Assert.Contains("cloud-account-expired", script, StringComparison.Ordinal);
         Assert.Contains("/api/access-requests/", script, StringComparison.Ordinal);
         Assert.Contains("/api/external-publication/", script, StringComparison.Ordinal);
         Assert.Contains("/api/audit-events/export", script, StringComparison.Ordinal);
@@ -86,6 +88,10 @@ public sealed class OperatorConsoleContractTests
         Assert.DoesNotContain("event.workspaceId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("event.actorUserId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/api/operator/metrics", script, StringComparison.Ordinal);
+        Assert.Contains("response.status === 401", script, StringComparison.Ordinal);
+        Assert.Contains("markCloudSessionExpired", script, StringComparison.Ordinal);
+        Assert.Contains("renderSessionGuidance()", script, StringComparison.Ordinal);
+        Assert.Contains("console-nav-6", index, StringComparison.Ordinal);
     }
 }
 

@@ -48,4 +48,5 @@ public sealed record ConsoleSessionDto(
     [property: JsonPropertyName("idleExpiresAt")] DateTimeOffset? IdleExpiresAt,
     [property: JsonPropertyName("capabilities")] IReadOnlyList<ConsoleCapability> Capabilities,
     [property: JsonPropertyName("nextAction")] string NextAction,
-    [property: JsonPropertyName("serverDerived")] bool ServerDerived);
+    [property: JsonPropertyName("serverDerived")] bool ServerDerived,
+    [property: JsonPropertyName("reason")] string? Reason = null);

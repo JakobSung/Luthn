@@ -554,6 +554,33 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
+    public async Task OperatorProviderFallbackLoadsCredentialFromServerRuntimeConfiguration()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "luthn-operator-tests",
+            Guid.NewGuid().ToString("N"));
+        var store = new OperatorClassificationSettingsStore(
+            Options.Create(new OperatorConfigOptions { Directory = directory }),
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
+                new DirectoryInfo(Path.Combine(directory, "keys"))),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Luthn:Classification:Provider"] = "external-http",
+                    ["Luthn:Classification:Credential"] = "server-runtime-secret",
+                    ["Luthn:Classification:ExternalHttp:Endpoint"] = "https://provider.example/classify"
+                })
+                .Build());
+
+        var settings = await store.ReadAsync();
+
+        Assert.Equal(OperatorClassificationProviderKind.ExternalHttp, settings.Provider);
+        Assert.Equal("https://provider.example/classify", settings.Endpoint);
+        Assert.Equal("server-runtime-secret", settings.ApiKey);
+    }
+
+    [Fact]
     public async Task OperatorProviderConfigurationCanReplaceUndecryptableApiKey()
     {
         var directory = Path.Combine(
