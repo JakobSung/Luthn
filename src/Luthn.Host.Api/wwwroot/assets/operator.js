@@ -1,6 +1,8 @@
 const state = {
   consoleSession: null,
   csrfProof: "",
+  localConnectPending: false,
+  localAccessError: "",
   selectedAccessRequestId: "",
   selectedAccessDetail: null,
   accessDetailRequestSequence: 0,
@@ -17,6 +19,36 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const i18n = window.LuthnOperatorI18n;
 const t = (key) => i18n?.translate(key) || key;
+
+const renderLocalAccess = () => {
+  const button = $("#connectLocal");
+  const detail = $("#localAccessDetail");
+  if (!button || !detail) {
+    return;
+  }
+
+  const session = state.consoleSession;
+  const localMode = session?.mode === "LocalAuto";
+  const connectable = localMode &&
+    session?.state === "Anonymous" &&
+    session?.nextAction === "arm-local-session";
+  button.hidden = !localMode;
+  button.disabled = state.localConnectPending || !connectable;
+
+  if (state.localAccessError && !state.localConnectPending) {
+    detail.textContent = state.localAccessError;
+  } else if (state.localConnectPending || session?.nextAction === "create-local-session") {
+    detail.textContent = t("auth.localConnectingDetail");
+  } else if (session?.state === "Active" && localMode) {
+    detail.textContent = t("auth.localActiveDetail");
+  } else if (connectable) {
+    detail.textContent = t("auth.localReadyDetail");
+  } else if (session?.state === "LoginRequired") {
+    detail.textContent = t("auth.localCloudRequired");
+  } else {
+    detail.textContent = t("auth.localUnavailable");
+  }
+};
 
 const setConsoleView = (view) => {
   document.querySelectorAll("[data-console-view]").forEach((section) => {
@@ -40,12 +72,16 @@ const setConsoleView = (view) => {
 };
 
 const renderAuthStatus = () => {
-  const statusKey = state.consoleSession?.state === "Active"
+  const statusKey = state.localConnectPending || state.consoleSession?.nextAction === "create-local-session"
+    ? "auth.localConnecting"
+    : state.consoleSession?.state === "Active"
     ? "auth.active"
     : state.consoleSession?.state === "Restricted"
       ? "auth.restricted"
       : state.consoleSession?.state === "LoginRequired"
         ? "auth.loginRequired"
+        : state.consoleSession?.mode === "LocalAuto" && state.consoleSession?.nextAction === "arm-local-session"
+          ? "auth.localReady"
         : "auth.starting";
   const status = t(statusKey);
   ["#authStatus", "#authPanelStatus"].forEach((selector) => {
@@ -56,6 +92,7 @@ const renderAuthStatus = () => {
       target.classList.toggle("partial", statusKey === "auth.restricted" || statusKey === "auth.loginRequired");
     }
   });
+  renderLocalAccess();
 };
 
 const renderSessionGuidance = () => {
@@ -146,17 +183,14 @@ const hasConsoleSession = () => ["Active", "Restricted"].includes(state.consoleS
 
 const refreshConsoleSession = async () => {
   let session = await requestJson("/api/operator/session", { cache: "no-store" });
-  for (let attempt = 0;
-    attempt < 40 && session?.state === "Anonymous" && session?.nextAction === "arm-local-session";
-    attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
-    session = await requestJson("/api/operator/session", { cache: "no-store" });
-  }
   if (session?.state === "Anonymous" && session?.nextAction === "create-local-session") {
     session = await requestJson("/api/operator/session/local", { method: "POST" });
   }
 
   state.consoleSession = session;
+  if (session?.state === "Active") {
+    state.localAccessError = "";
+  }
   renderAuthStatus();
   const mode = $("#sessionMode");
   const expiry = $("#sessionExpiry");
@@ -169,6 +203,32 @@ const refreshConsoleSession = async () => {
       : "Login required";
   }
   return session;
+};
+
+const connectLocalAccess = async () => {
+  state.localConnectPending = true;
+  state.localAccessError = "";
+  renderAuthStatus();
+  try {
+    state.consoleSession = await requestJson("/api/operator/session/local/connect", { method: "POST" });
+    state.localAccessError = "";
+    renderAuthStatus();
+    await refreshCloudLogin();
+    await refreshLifecycle();
+    await refreshEnrollment();
+    setAction("local access connected", "Local console authority is active");
+    refreshAgentConnections();
+    refreshSyncStatus();
+    refreshProviderSettings();
+    refreshAccessRequests();
+    refreshAudit();
+  } catch (error) {
+    state.localAccessError = error.message;
+    setAction("local access failed", error.message);
+  } finally {
+    state.localConnectPending = false;
+    renderAuthStatus();
+  }
 };
 
 const renderEnrollment = () => {
@@ -1213,11 +1273,13 @@ $("#logoutSession").addEventListener("click", async () => {
   } finally {
     state.consoleSession = null;
     state.csrfProof = "";
+    state.localAccessError = "";
     renderAuthStatus();
     renderSessionGuidance();
     setAction("session ended", "Reload to create a new eligible Local session or sign in to Cloud");
   }
 });
+$("#connectLocal").addEventListener("click", connectLocalAccess);
 $("#startEnrollment").addEventListener("click", () => changeEnrollment("start"));
 $("#verifyEnrollment").addEventListener("click", () => changeEnrollment("verify"));
 $("#cloudLogin").addEventListener("click", loginToCloud);

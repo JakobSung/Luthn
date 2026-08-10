@@ -487,6 +487,8 @@ public static class ConsoleSessionEndpoints
         group.MapPost("/local/arm", ArmLocal)
             .RequireServiceScope(ServiceScopes.ConfigWrite)
             .WithName("ArmLocalConsoleSession");
+        group.MapPost("/local/connect", ConnectLocal)
+            .WithName("ConnectLocalConsoleSession");
         group.MapPost("/local", CreateLocal).WithName("CreateLocalConsoleSession");
         group.MapPost("/logout", Logout).WithName("LogoutConsoleSession");
         return app;
@@ -571,6 +573,51 @@ public static class ConsoleSessionEndpoints
                 title: "Untrusted console origin.",
                 detail: "Local console sessions can only be created from the same origin.",
                 statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        try
+        {
+            var session = sessions.CreateLocal(context);
+            WriteAntiforgeryHeader(context, antiforgery);
+            return TypedResults.Ok(ToDto(session));
+        }
+        catch (InvalidOperationException error)
+        {
+            return TypedResults.Problem(
+                title: "Local console access is unavailable.",
+                detail: error.Message,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+
+    private static Results<Ok<ConsoleSessionDto>, ProblemHttpResult> ConnectLocal(
+        HttpContext context,
+        IConsoleSessionStore sessions,
+        IConsoleLocalAccessArmStore localAccessArm,
+        IAntiforgery antiforgery)
+    {
+        if (!ConsoleRequestSecurity.IsSameOriginOrNonBrowser(context.Request))
+        {
+            return TypedResults.Problem(
+                title: "Untrusted console origin.",
+                detail: "Local console access can only be connected from the console origin.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!sessions.IsLocalEligible(context))
+        {
+            return TypedResults.Problem(
+                title: "Local console access is unavailable.",
+                detail: "Local access requires an un-enrolled SingleOwner installation with explicit loopback-only exposure.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!localAccessArm.ArmSingleCandidate())
+        {
+            return TypedResults.Problem(
+                title: "Local console authorization could not continue.",
+                detail: "Refresh this console and retry. Multiple or missing browser candidates fail closed.",
+                statusCode: StatusCodes.Status409Conflict);
         }
 
         try

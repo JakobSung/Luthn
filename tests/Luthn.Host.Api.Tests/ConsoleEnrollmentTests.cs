@@ -87,10 +87,12 @@ public sealed class ConsoleEnrollmentTests
         using var restartedClient = restartedFactory.CreateClient();
         using var arm = await ConsoleSessionSecurityTests.ArmLocalConsoleAsync(restartedClient);
         using var localAttempt = await restartedClient.PostAsync("/api/operator/session/local", null);
+        using var browserLocalAttempt = await restartedClient.PostAsync("/api/operator/session/local/connect", null);
         using var status = await restartedClient.GetAsync("/api/operator/session");
         using var body = await JsonDocument.ParseAsync(await status.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.Forbidden, localAttempt.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, browserLocalAttempt.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, arm.StatusCode);
         Assert.Equal("CloudLoginRequired", body.RootElement.GetProperty("mode").GetString());
         Assert.Equal("LoginRequired", body.RootElement.GetProperty("state").GetString());
