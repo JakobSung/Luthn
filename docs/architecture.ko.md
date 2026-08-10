@@ -59,8 +59,11 @@ runtime에는 선택 활성화 방식의 기반이 구현되어 있습니다. Hu
 metadata-only 감사 사건을 저장한 뒤 `202`를 반환하고, 제한된 Workspace 공정 worker가
 lease/retry/dead-letter와 명시적 replay를 처리하며 `/api/hub/status`는 내용 없는
 aggregate 상태를 반환합니다. relay 경계는 disabled/fake이므로 OSS build가 Cloud 요청을
-보내지 않습니다. Cloud connection identity, enrollment와 실제 outbound transport는
-[중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)에 정의된 미래 경계입니다.
+보내지 않습니다. 공개 Host에는 provider-neutral disabled/fake enrollment·사람 login·
+회원/종료 준비·명시적 Local 회수 경계도 있습니다. 이는 2단계 활성화와 revoke-first를
+검증하지만 실제 Cloud identity를 발급하지 않습니다. Production Cloud identity, billing,
+실제 outbound transport는 [중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)에 정의된
+미래 경계입니다.
 
 ## Plugin 수집 계약
 

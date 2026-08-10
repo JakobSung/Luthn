@@ -162,6 +162,7 @@ commands:
           [--connect-codex|--connect-claude]
                              Install Luthn and optionally connect one agent.
   status                     Show services, readiness, console, and image.
+  console                    Authorize once and open the local operator console.
   update check [--json]      Check the configured update channel without pulling.
   update [image]             Back up, pull, migrate, restart, and verify.
   doctor [--json]            Diagnose runtime, update, and Codex integration state.
@@ -958,10 +959,13 @@ function Write-InitialConfig {
         "POSTGRES_HOST_AUTH_METHOD=trust",
         "Luthn__Classification__Provider=mock",
         "Luthn__Classification__AllowMock=true",
+        "Luthn__Classification__Credential=",
         "Luthn__Memory__AutomaticTurnRetentionDays=30",
         "Luthn__Memory__AutomaticTurnCleanupEnabled=true",
         "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60",
         "Luthn__Memory__AutomaticTurnCleanupBatchSize=100",
+        "Luthn__Console__LocalOnly=true",
+        "Luthn__Console__TrustedLocalBridge=true",
         "Luthn__Auth__RequireServiceToken=true",
         "Luthn__Identity__Mode=SingleOwner",
         "Luthn__Identity__SingleOwnerUserId=local-owner",
@@ -977,7 +981,7 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Scopes__3=memory.read",
         "Luthn__Auth__Tokens__0__Scopes__4=classification.preview",
         "Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read",
-        "Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write"
+        "Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write",
         "Luthn__Auth__Tokens__0__Scopes__7=access.request",
         "Luthn__Auth__Tokens__0__Scopes__8=metrics.write",
         "Luthn__Auth__Tokens__1__Name=local-operator",
@@ -1315,6 +1319,38 @@ function Show-Status {
     if ($imageId -and $selectedImageId -and $imageId -cne $selectedImageId) {
         Write-Host "Runtime drift: a locally selected image is not running; run 'luthn update'."
     }
+}
+
+function Open-Console {
+    param([string[]]$Arguments)
+    if ($Arguments.Count -gt 0) {
+        throw "usage: luthn console"
+    }
+
+    Require-Installation
+    $baseUrl = Read-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:8080"
+    $configuredOperatorTokenFile = Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
+    if (-not [IO.File]::Exists($configuredOperatorTokenFile)) {
+        throw "Local operator credential is unavailable. Run: luthn update"
+    }
+    $operatorToken = [IO.File]::ReadAllText($configuredOperatorTokenFile).Trim()
+    if (-not $operatorToken) { throw "Local operator credential is empty. Run: luthn update" }
+
+    Start-Process "$baseUrl/"
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $response = Invoke-WebRequest -Method Post -Uri "$baseUrl/api/operator/session/local/arm" -Headers @{
+            Authorization = "Bearer $operatorToken"
+        } -SkipHttpErrorCheck
+        if ($response.StatusCode -eq 204) {
+            $operatorToken = $null
+            Write-Host "Opening the local console: $baseUrl/"
+            return
+        }
+        if ($response.StatusCode -ne 409) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    $operatorToken = $null
+    throw "Local console authorization failed. Keep one console window open and retry."
 }
 
 function Add-DoctorCheck {
@@ -2721,6 +2757,7 @@ try {
         "manifest" { Get-CurrentWindowsCliManifest | ConvertTo-Json -Compress }
         "install" { Install-Luthn $CommandArguments }
         "status" { Show-Status }
+        "console" { Open-Console $CommandArguments }
         "update" {
             if ($CommandArguments.Count -ge 1 -and $CommandArguments[0] -ceq "check") {
                 Invoke-UpdateCheck @($CommandArguments | Select-Object -Skip 1)

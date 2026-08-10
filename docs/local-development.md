@@ -98,18 +98,13 @@ Agent installation, reconfiguration, and disconnect remain host CLI operations.
 
 ## Use the operator console
 
-Open `Console access` before choosing a workflow. The console keeps the values
-in the current browser session and sends them only as bearer headers to the
-local Host API; it never generates, displays, or exports a credential.
-
-- **Service token** is the installation's routine API credential. Its configured
-  scopes decide which read, intake, publication, provider, or audit tabs are
-  available. It is not an approval credential by itself.
-- **Decision token** is a separate trusted token with `access.decide`. The
-  access-approval list, operator detail, approve, and deny actions use this
-  token so read-only operators cannot decide.
-- **Operator label** is optional `X-Luthn-Operator` audit metadata. It does not
-  grant a role, scope, or identity.
+Open `Console access` before choosing a workflow. Development and packaged
+personal installs explicitly set `Luthn__Console__LocalOnly=true` and bind the
+published port to `127.0.0.1`. An un-enrolled `SingleOwner` then receives a
+bounded server-side LocalAuto session after `luthn console` approves exactly one
+unprivileged HttpOnly browser candidate. The browser does not read, store, or send
+a service/decision bearer or bootstrap value. Cookie-authenticated mutations require the
+same-origin antiforgery header returned by the Host.
 
 The source self-host installer creates `LUTHN_SERVICE_VALUE` and
 `LUTHN_OPERATOR_VALUE` in the ignored, permission-restricted `.env` file. The
@@ -117,6 +112,14 @@ source install's operator token is decision-only by default. Packaged installs
 keep the equivalent secrets at `~/.config/luthn/service-token` and
 `~/.config/luthn/operator-token` (Windows: `%LOCALAPPDATA%\\Luthn\\config\\service-token`
 and `operator-token`). Do not print or commit these files.
+
+Those credentials remain necessary for agents and direct API clients. They are
+not human-console sessions and are not upgraded into one. For lifecycle tests,
+set `Luthn:Console:Enrollment:Adapter=Fake` and
+`Luthn:Console:CloudLogin:Provider=Fake`; both default to `Disabled`, make no
+network call, and must never be described as live Cloud authentication. The
+fake recovery verifier is also disabled unless a focused test explicitly
+enables it.
 
 Use the menu by task:
 
@@ -128,8 +131,8 @@ Use the menu by task:
 - **Audit center**: investigate metadata-only events with presets, filters,
   cursor pagination, and export.
 
-If a tab returns `403`, keep the credential value unchanged and add the scope
-required by that tab to the server-configured token. Never solve a permission
+If a direct bearer client returns `403`, keep the credential value unchanged and
+add the scope required by that client to the server-configured token. Never solve a permission
 error by putting a broader token into an agent connector.
 
 ## Run Docker self-host stack
@@ -223,7 +226,7 @@ Supported scopes include `agent.read`, `agent.write.summary`,
 `config.write`,
 `external-publication.read`, `external-publication.write`, `source.write`,
 `memory.read`, `memory.write`, `access.request`,
-`access.decide`, `audit.read`, `metrics.read`, `metrics.write`, and `*` for operator-controlled admin use. Local
+`access.review`, `access.decide`, `audit.read`, `metrics.read`, `metrics.write`, and `*` for operator-controlled admin use. Local
 `Testing` mode remains credential-free unless token options are configured.
 `ExpiresAt` is optional. Expired tokens are ignored by the authorization filter
 and make `/readyz` fail when no other active token is available.
@@ -233,9 +236,12 @@ and make `/readyz` fail when no other active token is available.
 The operator console can configure the active classification provider at
 `/api/operator/classification-provider`. Self-host operators can select `Mock`,
 `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, or `External
-HTTP`, enter a model and API key, and run a provider test from the console.
-Provider API keys are stored server-side and are not returned by the API or
-rendered back into the console after save.
+HTTP`, enter non-secret provider settings, and run a provider test from the
+console. The browser never accepts provider credentials. Supply them to the
+server through the runtime secret `Luthn__Classification__Credential`; the
+console reports only whether a credential is present. Existing API clients may
+still use the additive `apiKey` request field for backward compatibility, but
+credentials are never returned by the API or rendered into the console.
 
 Direct third-party LLM providers receive raw source content in the classification
 prompt before Luthn knows the content sensitivity. Configure `ChatGPT API`,

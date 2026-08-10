@@ -29,6 +29,7 @@ AGENTS.md
 .luthn/out/
 
 .DS_Store
+tmp/
 
 # BEGIN DRIG GENERATED ARTIFACTS
 .drig/

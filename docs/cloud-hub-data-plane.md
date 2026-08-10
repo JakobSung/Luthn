@@ -170,10 +170,13 @@ not production capacity or latency SLOs.
 
 ## Remaining Cloud boundary
 
-The next boundary is outside the current OSS runtime: versioned enrollment and
-capability exchange, Cloud-issued connection authority, an authenticated relay
-transport, remote MCP/OAuth lifecycle capture, and managed Organization
-operations. Any future adapter must preserve the authenticated-installation
+The OSS runtime now owns the provider-neutral contracts and disabled/fake test
+boundaries for versioned enrollment/capabilities, console login,
+membership/offboarding, and explicit revoke-first Local reclaim. The remaining
+external boundary is production Cloud-issued connection authority, identity and
+entitlement verification, an authenticated relay transport, remote MCP/OAuth
+lifecycle capture, billing, and managed Organization operations. Any production
+adapter must preserve the authenticated-installation
 tenant derivation, metadata-only audit contract, safe-projection-only payload,
 revoke-first ordering, and disabled-by-default personal self-host path.
 

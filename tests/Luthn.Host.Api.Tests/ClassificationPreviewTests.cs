@@ -80,13 +80,17 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("/api/external-publication/status", script, StringComparison.Ordinal);
         Assert.Contains("mockOption.disabled = !settings.mockAllowed", script, StringComparison.Ordinal);
         Assert.Contains("settings.statusDetail", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("name=\"apiKey\"", index, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("form.get(\"apiKey\")", script, StringComparison.Ordinal);
+        Assert.Contains("Luthn__Classification__Credential", index, StringComparison.Ordinal);
         Assert.Contains("/operator-detail", script, StringComparison.Ordinal);
         Assert.Contains("sanitizeAccessDetail", script, StringComparison.Ordinal);
         Assert.Contains("viewSelectedAccessAudit", script, StringComparison.Ordinal);
         Assert.Contains("applyAuditPreset", script, StringComparison.Ordinal);
         Assert.Contains("clearAccessDetail(\"Refreshing access requests...\")", script, StringComparison.Ordinal);
         Assert.Contains("requests.some((request) => request.id === previousSelectedId)", script, StringComparison.Ordinal);
-        Assert.Contains("useDecisionToken: true", script, StringComparison.Ordinal);
+        Assert.Contains("X-Luthn-CSRF", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("sessionStorage", script, StringComparison.Ordinal);
         Assert.DoesNotContain("request.requestedBy", script, StringComparison.Ordinal);
         Assert.DoesNotContain("request.workspaceId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("detail?.requestedBy", script, StringComparison.Ordinal);
@@ -516,6 +520,37 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(OperatorClassificationProviderKind.Mock, mock.Provider);
         Assert.False(mock.HasApiKey);
         Assert.False((await store.ReadAsync()).HasApiKey);
+    }
+
+    [Fact]
+    public async Task OperatorProviderConfigurationLoadsCredentialFromServerRuntimeConfiguration()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "luthn-operator-tests",
+            Guid.NewGuid().ToString("N"));
+        var store = new OperatorClassificationSettingsStore(
+            Options.Create(new OperatorConfigOptions { Directory = directory }),
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
+                new DirectoryInfo(Path.Combine(directory, "keys"))),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Luthn:Classification:Credential"] = "server-runtime-secret"
+                })
+                .Build());
+
+        var saved = await store.SaveAsync(new SaveClassificationProviderConfigurationRequest(
+            "OpenAi",
+            "gpt-4.1-mini",
+            "https://api.openai.com/v1/chat/completions",
+            "Authorization",
+            ApiKey: null,
+            ClearApiKey: false));
+
+        Assert.True(saved.HasApiKey);
+        Assert.Equal("server-runtime-secret", saved.ApiKey);
+        Assert.True((await store.ReadAsync()).HasApiKey);
     }
 
     [Fact]

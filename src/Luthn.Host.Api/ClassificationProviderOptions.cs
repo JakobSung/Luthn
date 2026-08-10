@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Luthn.Host.Api;
 
 public sealed record ClassificationProviderOptions
@@ -10,6 +12,8 @@ public sealed record ClassificationProviderOptions
 
     public string Provider { get; init; } = UnconfiguredProvider;
     public bool AllowMock { get; init; }
+    [JsonIgnore]
+    public string? Credential { get; init; }
     public ExternalHttpClassificationProviderOptions ExternalHttp { get; init; } = new();
 
     public string ResolveProvider()

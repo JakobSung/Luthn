@@ -313,23 +313,40 @@ export. It is not a raw-content viewer or a database administration surface.
 
 ### Console access and menus
 
-Open `Console access` before using a workflow. The **service token** is the
-installation's routine API credential; its server-configured scopes control
-which tabs can read or write. It does not approve sensitive access by itself.
-The separate **decision token** must have `access.decide` and is used only for
-the access-approval list, operator detail, approve, and deny actions. The
-optional **operator label** is audit metadata only and never grants permission.
+Open `Console access` to inspect the current session. A packaged personal
+`SingleOwner` install is loopback-bound. Run `luthn console` to authorize one
+bounded `LocalAuto` session without key entry. The installed CLI reads the
+OS-protected local operator credential, opens the browser, and approves its single
+unprivileged HttpOnly candidate. Multiple or missing candidates fail closed. The
+CLI never places the credential or a bootstrap token in the browser, URL, API body,
+or command arguments. The
+browser receives only an opaque HttpOnly, host-only,
+SameSite session cookie; mutation requests also require same-origin antiforgery
+proof. Service and decision credentials stay in protected server configuration
+for agents and non-console API clients and are never copied into the page, URL,
+browser storage, logs, or exports.
 
-The browser keeps these values in the current session and sends them to the
-local Host API as bearer headers. It never generates or displays credentials.
-On packaged installs, use the private files
-`~/.config/luthn/service-token` and `~/.config/luthn/operator-token` (Windows:
-`%LOCALAPPDATA%\\Luthn\\config\\service-token` and `operator-token`) without
-printing or committing them. The menu is divided into Overview, Access
-approvals, Publication, Classify & intake, Audit center, and Console access so
-each workflow has one bounded surface. A `403` means the server token is
-missing that workflow's scope; change server configuration rather than
-placing a broader credential into an agent connector.
+Opening the URL directly does not authorize a new session. LocalAuto fails closed
+when the installation is multi-user, enrolled, forwarded,
+or not explicitly local-only. Cloud enrollment is disabled by default. The
+public fake adapter can exercise the two-phase fingerprint-bound flow without
+network access: Local remains active until the grant is durably verified, then
+all Local sessions are revoked and subsequent human access requires Cloud
+login. The disabled/fake login and recovery providers are contract/test
+boundaries, not live Cloud. Membership loss never restores Local automatically;
+Organization restriction provides offboarding actions, and Local reclaim is an
+explicit revoke-first owner/recovery transition.
+
+The packaged loopback bridge may begin Cloud login over its direct local HTTP
+origin while keeping the Cloud session cookie `Secure`. Any non-loopback,
+forwarded, or remotely exposed console must terminate HTTPS before Cloud login;
+plain HTTP is rejected outside the explicit local-only boundary. Packaged Compose
+sets `Luthn__Console__TrustedLocalBridge=true`; the Host accepts that bridge only
+with a loopback Host header, private container endpoints, and forwarded headers disabled.
+
+The menu remains divided into Overview, Access approvals, Publication,
+Classify & intake, Audit center, and Console access. Existing bearer clients and
+their least-privilege scopes remain compatible.
 
 ### Classification defaults
 

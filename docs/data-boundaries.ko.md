@@ -216,7 +216,8 @@ provenance는 불변 수집 기원 기록입니다.
 
 민감 접근은 구조화된 목적, session correlation과 60~3600초 만료를 가진 제한된
 요청으로 시작합니다. 요청 생성·상태·결과 조회는 server가 정한 owner로 제한하고,
-목록과 결정에는 별도 `access.decide` scope가 필요합니다. 운영자 상세 투영은 agent
+목록·운영자 상세에는 `access.review`, 승인·반려에는 `access.decide` scope가 필요합니다.
+하위 호환을 위해 `access.decide`는 조회도 포함합니다. 운영자 상세 투영은 agent
 화면이 아닙니다. 기존의 안전한 label, source metadata와 redacted summary만 포함할 수
 있으며 원본 Vault/source, protected payload, credential, workspace·owner identity는
 포함하지 않습니다.

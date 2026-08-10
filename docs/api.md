@@ -322,6 +322,12 @@ provider configuration. All three require the `config.write` service-token
 scope. Supported provider values are `Mock`, `ExternalHttp`, `OpenAi`,
 `Anthropic`, `GoogleAi`, and `OpenRouter`.
 
+The browser console never accepts a raw provider credential. Configure
+`Luthn__Classification__Credential` in the server runtime secret environment;
+the console sends only non-secret provider settings and the clear-credential
+choice. The optional `apiKey` request member remains accepted for existing API
+clients, but it is never included in a response.
+
 Save request:
 
 ```json
@@ -673,9 +679,9 @@ POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references, with an optional bounded redacted output after server reclassification. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and decision operations require the separate trusted `access.decide` scope; an explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
+These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references, with an optional bounded redacted output after server reclassification. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and operator detail require `access.review`; approval and denial require the separate trusted `access.decide` scope. For existing clients, `access.decide` also implies review. An explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
 
-`GET /api/access-requests/{id}/operator-detail` is a separate `access.decide`
+`GET /api/access-requests/{id}/operator-detail` is a separate `access.review`
 contract for local or self-hosted Hub consoles. It returns the request and decision
 reasons plus the sensitive reference's existing label, source metadata, and redacted
 summary. The response is marked `operator-sensitive-metadata` and
@@ -793,7 +799,7 @@ GET /api/operator/console-profile
 ```
 
 The read-only profile tells the shared OSS console whether the server is in
-`Local` (`SingleOwner`) or `Hub` (`MultiUser`) mode. It also returns the fixed
+`Local` (un-enrolled `SingleOwner`) or `Hub` (`MultiUser` or enrolled) mode. It also returns the fixed
 `cloudTransport: disabled`, `sensitiveAuthority: oss-console`, and
 `tenancySource: authenticated-request` boundaries. The endpoint accepts no
 request body or caller-selected tenant/mode identity and returns no workspace,
@@ -804,6 +810,45 @@ static labels. Language choice does not change authorization, identity, audit,
 or transport state. Sensitive-access approval and external-publication approval
 remain separate API and console sections; both continue to use Host APIs rather
 than direct database access.
+
+## Console session and Cloud lifecycle boundaries
+
+```http
+GET  /api/operator/session
+POST /api/operator/session/local/arm
+POST /api/operator/session/local
+POST /api/operator/session/logout
+GET  /api/operator/enrollment
+POST /api/operator/enrollment/start
+POST /api/operator/enrollment/verify
+GET  /api/operator/cloud-login
+POST /api/operator/cloud-login
+GET  /api/operator/lifecycle
+POST /api/operator/lifecycle/reconnect
+POST /api/operator/lifecycle/reclaim
+```
+
+The browser first receives an unprivileged HttpOnly candidate cookie. The installed
+CLI then calls `/local/arm` with its OS-protected operator bearer. Exactly one active
+candidate is approved; missing or multiple candidates fail closed. No bearer or raw
+bootstrap value enters the browser, URL, or API body. The session cookie is opaque,
+server-side, bounded by idle and absolute expiry,
+HttpOnly, host-only, and SameSite. Cookie-authenticated mutations require the
+same-origin `X-Luthn-CSRF` proof. LocalAuto is limited to an explicitly
+local-only, loopback, un-enrolled `SingleOwner`; enrollment activation and Local
+reclaim revoke existing authority first. Enrollment, login, lifecycle, and
+recovery providers default to disabled. Fake providers are deterministic test
+adapters with zero outbound traffic, not production Cloud endpoints.
+
+Cloud login accepts plain HTTP only for a direct, local-only loopback request
+with forwarded headers disabled. Every remote or forwarded deployment must use
+HTTPS, and Cloud session cookies remain `Secure` in both cases.
+
+These JSON contracts expose bounded state, capabilities, expiry, actions, and
+server-derived labels only. They do not accept or return service credentials,
+recovery proof values, caller-selected tenant identity, raw/Vault content,
+prompts, transcripts, or local paths. Existing bearer-token API clients remain
+independent and compatible.
 
 ## Audit events
 
@@ -912,6 +957,7 @@ Supported scopes:
 - `external-publication.read`
 - `external-publication.write`
 - `access.request`
+- `access.review`
 - `access.decide`
 - `audit.read`
 - `metrics.read`

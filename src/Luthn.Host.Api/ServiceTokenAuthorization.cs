@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Luthn.Core.Common;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
 
@@ -19,6 +20,7 @@ public static class ServiceScopes
     public const string ClassificationPreview = "classification.preview";
     public const string SourceWrite = "source.write";
     public const string AccessRequest = "access.request";
+    public const string AccessReview = "access.review";
     public const string AccessDecide = "access.decide";
     public const string AuditRead = "audit.read";
     public const string ConfigWrite = "config.write";
@@ -265,6 +267,15 @@ public static class ServiceTokenAuthorization
         var authorization = httpContext.Request.Headers.Authorization.ToString();
         if (!TryReadBearer(authorization, out var bearer))
         {
+            var consoleResult = await TryAuthorizeConsoleSessionAsync(
+                context,
+                next,
+                requiredScope);
+            if (consoleResult.Handled)
+            {
+                return consoleResult.Result;
+            }
+
             httpContext.Response.Headers.WWWAuthenticate = "Bearer";
             return Unauthorized();
         }
@@ -333,6 +344,52 @@ public static class ServiceTokenAuthorization
             NormalizeHubIdentity(matchedToken.HubSessionId));
         httpContext.Items[ActorItemKey] = actor;
         return await ContinueWhenSensitiveMemoryProtectionIsReady(context, next);
+    }
+
+    private static async ValueTask<(bool Handled, object? Result)> TryAuthorizeConsoleSessionAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next,
+        string requiredScope)
+    {
+        var httpContext = context.HttpContext;
+        var sessions = httpContext.RequestServices.GetRequiredService<IConsoleSessionStore>();
+        var session = sessions.Authenticate(httpContext);
+        if (session is null)
+        {
+            return (false, null);
+        }
+
+        if (!HasScope(session.Scopes, requiredScope))
+        {
+            return (true, TypedResults.Problem(
+                title: "Forbidden.",
+                detail: "The console session is not authorized for this operation.",
+                statusCode: StatusCodes.Status403Forbidden));
+        }
+
+        if (!HttpMethods.IsGet(httpContext.Request.Method) &&
+            !HttpMethods.IsHead(httpContext.Request.Method) &&
+            !HttpMethods.IsOptions(httpContext.Request.Method) &&
+            !HttpMethods.IsTrace(httpContext.Request.Method))
+        {
+            var antiforgery = httpContext.RequestServices.GetRequiredService<IAntiforgery>();
+            var csrfFailure = await ConsoleRequestSecurity.ValidateMutationAsync(httpContext, antiforgery);
+            if (csrfFailure is not null)
+            {
+                return (true, csrfFailure);
+            }
+        }
+
+        httpContext.Items[ServiceTokenAuthenticatedItemKey] = false;
+        httpContext.Items[PrincipalItemKey] = new LuthnRequestPrincipal(
+            session.UserId,
+            session.WorkspaceId,
+            LuthnActorKind.User,
+            session.ActorId,
+            IsOperator: true,
+            HubOrganizationId: session.OrganizationId);
+        httpContext.Items[ActorItemKey] = session.ActorId;
+        return (true, await ContinueWhenSensitiveMemoryProtectionIsReady(context, next));
     }
 
     private static ValueTask<object?> ContinueWhenSensitiveMemoryProtectionIsReady(
@@ -528,10 +585,16 @@ public static class ServiceTokenAuthorization
 
     private static bool HasScope(
         LuthnServiceTokenOptions token,
+        string requiredScope) => HasScope(token.Scopes, requiredScope);
+
+    private static bool HasScope(
+        IEnumerable<string> scopes,
         string requiredScope) =>
-        token.Scopes.Any(scope =>
+        scopes.Any(scope =>
             string.Equals(scope, ServiceScopes.All, StringComparison.Ordinal) ||
-            string.Equals(scope, requiredScope, StringComparison.OrdinalIgnoreCase));
+            string.Equals(scope, requiredScope, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(requiredScope, ServiceScopes.AccessReview, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(scope, ServiceScopes.AccessDecide, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsExpired(LuthnServiceTokenOptions token, DateTimeOffset now) =>
         token.ExpiresAt is { } expiresAt && expiresAt <= now;
