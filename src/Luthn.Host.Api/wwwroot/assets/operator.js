@@ -3,6 +3,7 @@ const state = {
   csrfProof: "",
   localConnectPending: false,
   localAccessError: "",
+  sessionReason: "",
   selectedAccessRequestId: "",
   selectedAccessDetail: null,
   accessDetailRequestSequence: 0,
@@ -74,6 +75,8 @@ const setConsoleView = (view) => {
 const renderAuthStatus = () => {
   const statusKey = state.localConnectPending || state.consoleSession?.nextAction === "create-local-session"
     ? "auth.localConnecting"
+    : state.sessionReason === "cloud-account-expired"
+      ? "auth.cloudExpired"
     : state.consoleSession?.state === "Active"
     ? "auth.active"
     : state.consoleSession?.state === "Restricted"
@@ -96,23 +99,26 @@ const renderAuthStatus = () => {
 };
 
 const renderSessionGuidance = () => {
-  renderConnectionMessage("Console login is required to view agent connections.");
+  const guidance = state.sessionReason === "cloud-account-expired"
+    ? t("auth.cloudExpiredDetail")
+    : "Console login is required to view agent connections.";
+  renderConnectionMessage(guidance);
   $("#connectionsStatus").textContent = "Login required";
   $("#syncStatus").textContent = "Login required";
-  writeResult($("#publicationOutput"), "Console login is required to view publication state.");
+  writeResult($("#publicationOutput"), guidance);
   $("#providerStatus").textContent = "Console login required";
-  writeResult($("#providerOutput"), "Console login is required to view provider settings.");
+  writeResult($("#providerOutput"), guidance);
   const providerForm = $("#providerForm");
   if (providerForm) {
     providerForm.clearApiKey.checked = false;
   }
   renderAccessRows([]);
-  clearAccessDetail("Console login is required to review sensitive access requests.");
+  clearAccessDetail(guidance);
   state.auditEvents = [];
   state.auditNextCursor = "";
   state.auditBaseQuery = "";
   renderAuditRows([]);
-  $("#auditStatus").textContent = "Console login is required to load audit metadata.";
+  $("#auditStatus").textContent = guidance;
 };
 
 const writeResult = (target, value) => {
@@ -188,6 +194,7 @@ const refreshConsoleSession = async () => {
   }
 
   state.consoleSession = session;
+  state.sessionReason = session?.reason || "";
   if (session?.state === "Active") {
     state.localAccessError = "";
   }
@@ -211,6 +218,7 @@ const connectLocalAccess = async () => {
   renderAuthStatus();
   try {
     state.consoleSession = await requestJson("/api/operator/session/local/connect", { method: "POST" });
+    state.sessionReason = "";
     state.localAccessError = "";
     renderAuthStatus();
     await refreshCloudLogin();
@@ -294,7 +302,9 @@ const renderCloudLogin = () => {
   }
 
   button.disabled = !login.available || login.sessionState === "Active";
-  $("#cloudLoginDetail").textContent = login.sessionState === "Active"
+  $("#cloudLoginDetail").textContent = state.sessionReason === "cloud-account-expired"
+    ? t("auth.cloudExpiredDetail")
+    : login.sessionState === "Active"
     ? "Cloud login is active. Authority and capabilities came from the server-verified provider result."
     : login.available
       ? "Cloud login is required. Organization and workspace identity are never accepted from this page."
@@ -313,6 +323,7 @@ const refreshCloudLogin = async () => {
 const loginToCloud = async () => {
   try {
     state.consoleSession = await requestJson("/api/operator/cloud-login", { method: "POST" });
+    state.sessionReason = "";
     renderAuthStatus();
     await refreshCloudLogin();
     await refreshLifecycle();
@@ -1274,6 +1285,7 @@ $("#logoutSession").addEventListener("click", async () => {
     state.consoleSession = null;
     state.csrfProof = "";
     state.localAccessError = "";
+    state.sessionReason = "";
     renderAuthStatus();
     renderSessionGuidance();
     setAction("session ended", "Reload to create a new eligible Local session or sign in to Cloud");

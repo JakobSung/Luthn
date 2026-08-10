@@ -166,6 +166,7 @@ builder.Services.AddSingleton<IConsoleCloudLoginProvider>(provider =>
             provider.GetRequiredService<FakeConsoleCloudLoginProvider>(),
         _ => provider.GetRequiredService<DisabledConsoleCloudLoginProvider>()
     });
+builder.Services.AddSingleton<IConsoleCloudSessionValidator, ConsoleCloudSessionValidator>();
 builder.Services.AddSingleton<DisabledConsoleOfflineRecoveryVerifier>();
 builder.Services.AddSingleton<FakeConsoleOfflineRecoveryVerifier>();
 builder.Services.AddSingleton<IConsoleOfflineRecoveryVerifier>(provider =>

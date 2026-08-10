@@ -1,10 +1,14 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Luthn.Sdk.Console;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
@@ -18,7 +22,8 @@ public sealed class ConsoleCloudLoginTests
         var environment = new TestHostEnvironment { EnvironmentName = Environments.Production };
         var login = new FakeConsoleCloudLoginProvider(
             Options.Create(new ConsoleCloudLoginOptions()),
-            environment);
+            environment,
+            TimeProvider.System);
         var enrollment = new FakeInstallationEnrollmentAdapter(
             TimeProvider.System,
             Options.Create(new ConsoleEnrollmentOptions()),
@@ -89,6 +94,29 @@ public sealed class ConsoleCloudLoginTests
         Assert.DoesNotContain("attacker", combinedJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("organizationId", combinedJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("workspaceId", combinedJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExpiredCloudAuthorityRevokesSessionWithoutRestoringLocalAccess()
+    {
+        var provider = new MutableCloudLoginProvider();
+        using var factory = CreateFactory(provider);
+        using var client = CreateHttpsClient(factory);
+        await EnrollAsync(client);
+
+        using var login = await client.PostAsync("/api/operator/cloud-login", null);
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
+        provider.IsActive = false;
+        using var session = await client.GetAsync("/api/operator/session");
+        using var body = await JsonDocument.ParseAsync(await session.Content.ReadAsStreamAsync());
+        using var localAttempt = await client.PostAsync("/api/operator/session/local/connect", null);
+
+        Assert.Equal(HttpStatusCode.OK, session.StatusCode);
+        Assert.Equal("CloudLoginRequired", body.RootElement.GetProperty("mode").GetString());
+        Assert.Equal("LoginRequired", body.RootElement.GetProperty("state").GetString());
+        Assert.Equal("cloud-account-expired", body.RootElement.GetProperty("reason").GetString());
+        Assert.Equal(HttpStatusCode.Forbidden, localAttempt.StatusCode);
     }
 
     [Fact]
@@ -213,6 +241,66 @@ public sealed class ConsoleCloudLoginTests
                 "Luthn:OperatorConfig:Directory",
                 Path.Combine(Path.GetTempPath(), "luthn-console-login-tests", Guid.NewGuid().ToString("N")));
         });
+
+    private static WebApplicationFactory<Program> CreateFactory(MutableCloudLoginProvider provider) =>
+        CreateFactory("Fake").WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IConsoleCloudLoginProvider>();
+                services.AddSingleton<IConsoleCloudLoginProvider>(provider);
+            }));
+
+    private sealed class MutableCloudLoginProvider : IConsoleCloudLoginProvider
+    {
+        private static readonly IReadOnlyList<ConsoleCapability> Capabilities =
+        [
+            ConsoleCapability.AccessReview,
+            ConsoleCapability.AccessDecision,
+            ConsoleCapability.AuditRead,
+            ConsoleCapability.ConfigurationWrite
+        ];
+
+        public bool IsActive { get; set; } = true;
+        public ConsoleCloudLoginProvider Kind => ConsoleCloudLoginProvider.Fake;
+        public bool Available => true;
+
+        public ValueTask<AuthenticatedConsoleAuthority> AuthenticateAsync(CancellationToken cancellationToken)
+        {
+            if (!IsActive)
+            {
+                return ValueTask.FromException<AuthenticatedConsoleAuthority>(
+                    new InvalidOperationException("Cloud account authentication has expired."));
+            }
+
+            return ValueTask.FromResult(CreateAuthority());
+        }
+
+        public ValueTask<AuthenticatedConsoleAuthority?> ValidateAsync(
+            string subjectKey,
+            CancellationToken cancellationToken) =>
+            IsActive && string.Equals(subjectKey, "test-org:test-user", StringComparison.Ordinal)
+                ? ValueTask.FromResult<AuthenticatedConsoleAuthority?>(CreateAuthority())
+                : ValueTask.FromResult<AuthenticatedConsoleAuthority?>(null);
+
+        private static AuthenticatedConsoleAuthority CreateAuthority() =>
+            new(
+                "test-org:test-user",
+                "test-user",
+                "test-org",
+                "test-workspace",
+                true,
+                ConsoleMembershipState.Active,
+                ConsoleEntitlementState.Active,
+                Capabilities,
+                new HashSet<string>(
+                [
+                    ServiceScopes.AccessReview,
+                    ServiceScopes.AccessDecide,
+                    ServiceScopes.AuditRead,
+                    ServiceScopes.ConfigWrite
+                ],
+                StringComparer.OrdinalIgnoreCase));
+    }
 
     private sealed class TestHostEnvironment : IHostEnvironment
     {

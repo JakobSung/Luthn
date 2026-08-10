@@ -52,12 +52,20 @@ public static class ConsoleLifecycleEndpoints
         return app;
     }
 
-    private static Ok<ConsoleLifecycleDto> Read(
+    private static async Task<Ok<ConsoleLifecycleDto>> Read(
         HttpContext context,
         IConsoleLifecycleStore lifecycle,
         IConsoleSessionStore sessions,
-        IConsoleOfflineRecoveryVerifier recovery) =>
-        TypedResults.Ok(ToDto(lifecycle.Current, sessions.Authenticate(context), recovery.Kind));
+        IConsoleOfflineRecoveryVerifier recovery,
+        IConsoleCloudSessionValidator cloudSessionValidator,
+        CancellationToken cancellationToken)
+    {
+        var validation = await cloudSessionValidator.ValidateAsync(
+            context,
+            sessions.Authenticate(context),
+            cancellationToken);
+        return TypedResults.Ok(ToDto(lifecycle.Current, validation.Session, recovery.Kind));
+    }
 
     private static async Task<Results<Ok<ConsoleLifecycleDto>, ProblemHttpResult>> RemoveMembership(
         HttpContext context,
@@ -65,12 +73,19 @@ public static class ConsoleLifecycleEndpoints
         IConsoleSessionStore sessions,
         IConsoleCloudLoginProvider provider,
         IConsoleOfflineRecoveryVerifier recovery,
+        IConsoleCloudSessionValidator cloudSessionValidator,
         IAntiforgery antiforgery,
         LuthnDbContext db,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var session = sessions.Authenticate(context);
+        var validation = await cloudSessionValidator.ValidateAsync(context, session, cancellationToken);
+        session = validation.Session;
+        if (session is null && validation.Reason is not null)
+        {
+            return LifecycleProblem(validation.Detail!, StatusCodes.Status401Unauthorized);
+        }
         var failure = await RequireFakeCloudMutationAsync(context, session, provider, antiforgery);
         if (failure is not null)
         {
@@ -105,12 +120,19 @@ public static class ConsoleLifecycleEndpoints
         IConsoleSessionStore sessions,
         IConsoleCloudLoginProvider provider,
         IConsoleOfflineRecoveryVerifier recovery,
+        IConsoleCloudSessionValidator cloudSessionValidator,
         IAntiforgery antiforgery,
         LuthnDbContext db,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var session = sessions.Authenticate(context);
+        var validation = await cloudSessionValidator.ValidateAsync(context, session, cancellationToken);
+        session = validation.Session;
+        if (session is null && validation.Reason is not null)
+        {
+            return LifecycleProblem(validation.Detail!, StatusCodes.Status401Unauthorized);
+        }
         var failure = await RequireFakeCloudMutationAsync(context, session, provider, antiforgery);
         if (failure is not null)
         {
@@ -137,12 +159,19 @@ public static class ConsoleLifecycleEndpoints
         IConsoleSessionStore sessions,
         IConsoleCloudLoginProvider provider,
         IConsoleOfflineRecoveryVerifier recovery,
+        IConsoleCloudSessionValidator cloudSessionValidator,
         IAntiforgery antiforgery,
         LuthnDbContext db,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var session = sessions.Authenticate(context);
+        var validation = await cloudSessionValidator.ValidateAsync(context, session, cancellationToken);
+        session = validation.Session;
+        if (session is null && validation.Reason is not null)
+        {
+            return LifecycleProblem(validation.Detail!, StatusCodes.Status401Unauthorized);
+        }
         var failure = await RequireCloudMutationAsync(context, session, antiforgery);
         if (failure is not null)
         {

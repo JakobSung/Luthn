@@ -201,6 +201,7 @@ public interface IConsoleSessionStore
     void Revoke(HttpContext context);
     void RevokeAll(Func<ConsoleSessionIdentity, bool>? predicate = null);
     void RevokeSubject(string subjectKey);
+    void RestrictSubject(string subjectKey);
     void RestrictCloudSessions();
 }
 
@@ -400,6 +401,16 @@ public sealed class InMemoryConsoleSessionStore(
     public void RevokeSubject(string subjectKey) =>
         RevokeAll(session => string.Equals(session.CloudSubjectKey, subjectKey, StringComparison.Ordinal));
 
+    public void RestrictSubject(string subjectKey)
+    {
+        foreach (var session in _sessions.Values.Where(item =>
+            item.Mode != ConsoleAccessMode.LocalAuto &&
+            string.Equals(item.CloudSubjectKey, subjectKey, StringComparison.Ordinal)))
+        {
+            ApplyRestriction(session);
+        }
+    }
+
     public void RestrictCloudSessions()
     {
         foreach (var session in _sessions.Values.Where(item => item.Mode != ConsoleAccessMode.LocalAuto))
@@ -494,14 +505,20 @@ public static class ConsoleSessionEndpoints
         return app;
     }
 
-    private static Ok<ConsoleSessionDto> Read(
+    private static async Task<Ok<ConsoleSessionDto>> Read(
         HttpContext context,
         IConsoleSessionStore sessions,
         IConsoleLocalAccessArmStore localAccessArm,
         IAntiforgery antiforgery,
-        IConsoleInstallationState installationState)
+        IConsoleInstallationState installationState,
+        IConsoleCloudSessionValidator cloudSessionValidator,
+        CancellationToken cancellationToken)
     {
-        var session = sessions.Authenticate(context);
+        var validation = await cloudSessionValidator.ValidateAsync(
+            context,
+            sessions.Authenticate(context),
+            cancellationToken);
+        var session = validation.Session;
         if (session is not null)
         {
             WriteAntiforgeryHeader(context, antiforgery);
@@ -532,7 +549,8 @@ public static class ConsoleSessionEndpoints
             null,
             [],
             nextAction,
-            true));
+            true,
+            validation.Reason));
     }
 
     private static IResult ArmLocal(
@@ -656,7 +674,9 @@ public static class ConsoleSessionEndpoints
         return TypedResults.NoContent();
     }
 
-    internal static ConsoleSessionDto ToDto(ConsoleSessionIdentity session) =>
+    internal static ConsoleSessionDto ToDto(
+        ConsoleSessionIdentity session,
+        string? reason = null) =>
         new(
             session.Mode,
             session.Restricted ? ConsoleSessionState.Restricted : ConsoleSessionState.Active,
@@ -664,7 +684,8 @@ public static class ConsoleSessionEndpoints
             session.IdleExpiresAt,
             session.Capabilities,
             session.Restricted ? "offboarding" : "continue",
-            true);
+            true,
+            reason);
 
     internal static void WriteAntiforgeryHeader(HttpContext context, IAntiforgery antiforgery)
     {

@@ -17,6 +17,7 @@ public sealed class ConsoleCloudLoginOptions
     public bool Owner { get; set; } = true;
     public bool MembershipActive { get; set; } = true;
     public bool EntitlementActive { get; set; } = true;
+    public DateTimeOffset? ExpiresAt { get; set; }
 }
 
 public sealed record AuthenticatedConsoleAuthority(
@@ -35,6 +36,9 @@ public interface IConsoleCloudLoginProvider
     ConsoleCloudLoginProvider Kind { get; }
     bool Available { get; }
     ValueTask<AuthenticatedConsoleAuthority> AuthenticateAsync(CancellationToken cancellationToken);
+    ValueTask<AuthenticatedConsoleAuthority?> ValidateAsync(
+        string subjectKey,
+        CancellationToken cancellationToken);
 }
 
 public sealed class DisabledConsoleCloudLoginProvider : IConsoleCloudLoginProvider
@@ -45,11 +49,17 @@ public sealed class DisabledConsoleCloudLoginProvider : IConsoleCloudLoginProvid
     public ValueTask<AuthenticatedConsoleAuthority> AuthenticateAsync(CancellationToken cancellationToken) =>
         ValueTask.FromException<AuthenticatedConsoleAuthority>(
             new InvalidOperationException("A live Luthn Cloud login provider is not configured."));
+
+    public ValueTask<AuthenticatedConsoleAuthority?> ValidateAsync(
+        string subjectKey,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult<AuthenticatedConsoleAuthority?>(null);
 }
 
 public sealed class FakeConsoleCloudLoginProvider(
     IOptions<ConsoleCloudLoginOptions> options,
-    IHostEnvironment environment)
+    IHostEnvironment environment,
+    TimeProvider timeProvider)
     : IConsoleCloudLoginProvider
 {
     private static readonly ConsoleCapability[] OwnerCapabilities =
@@ -86,6 +96,12 @@ public sealed class FakeConsoleCloudLoginProvider(
         }
 
         var configured = options.Value;
+        if (configured.ExpiresAt is { } expiresAt && timeProvider.GetUtcNow() >= expiresAt)
+        {
+            return ValueTask.FromException<AuthenticatedConsoleAuthority>(
+                new InvalidOperationException("Cloud account authentication has expired."));
+        }
+
         var userId = ServiceTokenAuthorization.NormalizeUserId(configured.UserId);
         var organizationId = ServiceTokenAuthorization.NormalizeHubIdentity(configured.OrganizationId);
         var workspaceId = ServiceTokenAuthorization.NormalizeWorkspaceId(configured.WorkspaceId);
@@ -119,6 +135,23 @@ public sealed class FakeConsoleCloudLoginProvider(
             entitlement,
             capabilities,
             scopes));
+    }
+
+    public async ValueTask<AuthenticatedConsoleAuthority?> ValidateAsync(
+        string subjectKey,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var authority = await AuthenticateAsync(cancellationToken);
+            return string.Equals(authority.SubjectKey, subjectKey, StringComparison.Ordinal)
+                ? authority
+                : null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static IReadOnlySet<string> MapScopes(IReadOnlyList<ConsoleCapability> capabilities)
@@ -160,6 +193,97 @@ public sealed class FakeConsoleCloudLoginProvider(
     }
 }
 
+public sealed record ConsoleCloudSessionValidation(
+    ConsoleSessionIdentity? Session,
+    string? Reason,
+    string? Detail);
+
+public interface IConsoleCloudSessionValidator
+{
+    ValueTask<ConsoleCloudSessionValidation> ValidateAsync(
+        HttpContext context,
+        ConsoleSessionIdentity? session,
+        CancellationToken cancellationToken);
+}
+
+public sealed class ConsoleCloudSessionValidator(
+    IConsoleCloudLoginProvider provider,
+    IConsoleSessionStore sessions,
+    IConsoleLifecycleStore lifecycle,
+    TimeProvider timeProvider) : IConsoleCloudSessionValidator
+{
+    private const string ExpiredReason = "cloud-account-expired";
+    private const string ExpiredDetail =
+        "Cloud account authentication expired or was revoked. Sign in again; Local access will not be restored automatically.";
+
+    public async ValueTask<ConsoleCloudSessionValidation> ValidateAsync(
+        HttpContext context,
+        ConsoleSessionIdentity? session,
+        CancellationToken cancellationToken)
+    {
+        if (session is null || session.Mode == ConsoleAccessMode.LocalAuto)
+        {
+            return new(session, null, null);
+        }
+
+        var subjectKey = session.CloudSubjectKey;
+        if (string.IsNullOrWhiteSpace(subjectKey) || lifecycle.IsSubjectRemoved(subjectKey))
+        {
+            return Revoke(context, subjectKey);
+        }
+
+        AuthenticatedConsoleAuthority? authority;
+        try
+        {
+            authority = await provider.ValidateAsync(subjectKey, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            authority = null;
+        }
+
+        if (authority is null || !string.Equals(authority.SubjectKey, subjectKey, StringComparison.Ordinal))
+        {
+            return Revoke(context, subjectKey);
+        }
+
+        if (authority.Entitlement == ConsoleEntitlementState.Restricted)
+        {
+            if (lifecycle.Current.OrganizationState != ConsoleOrganizationState.RestrictedOffboarding)
+            {
+                var now = timeProvider.GetUtcNow();
+                await lifecycle.RevokeConnectionAuthorityAsync(now, cancellationToken);
+                await lifecycle.RestrictOrganizationAsync(cancellationToken);
+                sessions.RestrictCloudSessions();
+            }
+            else
+            {
+                sessions.RestrictSubject(subjectKey);
+            }
+
+            return new(sessions.Authenticate(context), null, null);
+        }
+
+        // A restricted session must not regain authority silently after the
+        // provider becomes active again. Explicit Cloud reauthentication is
+        // required to create a fresh session with the restored capabilities.
+        return new(session, null, null);
+    }
+
+    private ConsoleCloudSessionValidation Revoke(
+        HttpContext context,
+        string? subjectKey)
+    {
+        if (!string.IsNullOrWhiteSpace(subjectKey))
+        {
+            sessions.RevokeSubject(subjectKey);
+        }
+
+        sessions.Revoke(context);
+        return new(null, ExpiredReason, ExpiredDetail);
+    }
+}
+
 public static class ConsoleCloudLoginEndpoints
 {
     public static IEndpointRouteBuilder MapConsoleCloudLogin(this IEndpointRouteBuilder app)
@@ -170,13 +294,19 @@ public static class ConsoleCloudLoginEndpoints
         return app;
     }
 
-    private static Ok<ConsoleCloudLoginDto> Read(
+    private static async Task<Ok<ConsoleCloudLoginDto>> Read(
         HttpContext context,
         IConsoleCloudLoginProvider provider,
         IConsoleSessionStore sessions,
-        IConsoleLifecycleStore lifecycle)
+        IConsoleLifecycleStore lifecycle,
+        IConsoleCloudSessionValidator cloudSessionValidator,
+        CancellationToken cancellationToken)
     {
-        var session = sessions.Authenticate(context);
+        var validation = await cloudSessionValidator.ValidateAsync(
+            context,
+            sessions.Authenticate(context),
+            cancellationToken);
+        var session = validation.Session;
         return TypedResults.Ok(ToDto(provider, lifecycle.IsEnrolled, session));
     }
 
