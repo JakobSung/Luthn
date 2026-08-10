@@ -630,11 +630,11 @@ public static class ConsoleSessionEndpoints
                 statusCode: StatusCodes.Status403Forbidden);
         }
 
-        if (!localAccessArm.ArmSingleCandidate())
+        if (!localAccessArm.IsCandidateApproved(context))
         {
             return TypedResults.Problem(
                 title: "Local console authorization could not continue.",
-                detail: "Refresh this console and retry. Multiple or missing browser candidates fail closed.",
+                detail: "Authorize this browser with the installed `luthn console` command, then retry. Multiple or missing browser candidates fail closed.",
                 statusCode: StatusCodes.Status409Conflict);
         }
 

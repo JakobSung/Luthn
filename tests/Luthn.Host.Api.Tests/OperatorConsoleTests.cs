@@ -88,6 +88,10 @@ public sealed class OperatorConsoleContractTests
         Assert.DoesNotContain("event.workspaceId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("event.actorUserId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/api/operator/metrics", script, StringComparison.Ordinal);
+        Assert.Contains("response.status === 401", script, StringComparison.Ordinal);
+        Assert.Contains("markCloudSessionExpired", script, StringComparison.Ordinal);
+        Assert.Contains("renderSessionGuidance()", script, StringComparison.Ordinal);
+        Assert.Contains("console-nav-6", index, StringComparison.Ordinal);
     }
 }
 

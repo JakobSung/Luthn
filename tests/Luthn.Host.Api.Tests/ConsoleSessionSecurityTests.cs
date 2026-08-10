@@ -53,18 +53,22 @@ public sealed class ConsoleSessionSecurityTests
     }
 
     [Fact]
-    public async Task EligiblePersonalInstallCanConnectLocalFromConsole()
+    public async Task EligiblePersonalInstallCanConnectLocalFromConsoleAfterOperatorAuthorization()
     {
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
         using var candidate = await client.GetAsync("/api/operator/session");
+        using var rejected = await client.PostAsync("/api/operator/session/local/connect", null);
+        using var arm = await ArmLocalConsoleAsync(client);
         using var connected = await client.PostAsync("/api/operator/session/local/connect", null);
         using var body = await JsonDocument.ParseAsync(await connected.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.OK, candidate.StatusCode);
         Assert.Equal("arm-local-session", (await JsonDocument.ParseAsync(await candidate.Content.ReadAsStreamAsync()))
             .RootElement.GetProperty("nextAction").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, arm.StatusCode);
         Assert.Equal(HttpStatusCode.OK, connected.StatusCode);
         Assert.Equal("LocalAuto", body.RootElement.GetProperty("mode").GetString());
         Assert.Equal("Active", body.RootElement.GetProperty("state").GetString());

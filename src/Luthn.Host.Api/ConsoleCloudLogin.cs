@@ -247,6 +247,11 @@ public sealed class ConsoleCloudSessionValidator(
             return Revoke(context, subjectKey);
         }
 
+        if (authority.Membership != ConsoleMembershipState.Active)
+        {
+            return Revoke(context, subjectKey);
+        }
+
         if (authority.Entitlement == ConsoleEntitlementState.Restricted)
         {
             if (lifecycle.Current.OrganizationState != ConsoleOrganizationState.RestrictedOffboarding)
@@ -267,7 +272,37 @@ public sealed class ConsoleCloudSessionValidator(
         // A restricted session must not regain authority silently after the
         // provider becomes active again. Explicit Cloud reauthentication is
         // required to create a fresh session with the restored capabilities.
+        if (session.Restricted || session.Entitlement == ConsoleEntitlementState.Restricted)
+        {
+            return new(session, null, null);
+        }
+
+        if (!MatchesActiveAuthority(session, authority))
+        {
+            return Revoke(context, subjectKey);
+        }
+
         return new(session, null, null);
+    }
+
+    private static bool MatchesActiveAuthority(
+        ConsoleSessionIdentity session,
+        AuthenticatedConsoleAuthority authority) =>
+        string.Equals(session.UserId, authority.UserId, StringComparison.Ordinal) &&
+        string.Equals(session.OrganizationId, authority.OrganizationId, StringComparison.Ordinal) &&
+        string.Equals(session.WorkspaceId, authority.WorkspaceId, StringComparison.Ordinal) &&
+        session.CloudOwner == authority.Owner &&
+        session.Membership == authority.Membership &&
+        session.Entitlement == authority.Entitlement &&
+        HasSameValues(session.Scopes, authority.Scopes) &&
+        HasSameValues(session.Capabilities, authority.Capabilities);
+
+    private static bool HasSameValues<T>(
+        IEnumerable<T> left,
+        IEnumerable<T> right)
+    {
+        var rightValues = right.ToArray();
+        return left.Count() == rightValues.Length && left.All(rightValues.Contains);
     }
 
     private ConsoleCloudSessionValidation Revoke(
@@ -356,7 +391,7 @@ public static class ConsoleCloudLoginEndpoints
                 await lifecycle.RevokeConnectionAuthorityAsync(now, cancellationToken);
                 await lifecycle.RestrictOrganizationAsync(cancellationToken);
             }
-            sessions.RevokeAll();
+            sessions.RevokeAll(session => session.Mode == ConsoleAccessMode.LocalAuto);
             var session = sessions.CreateCloud(context, authority);
             db.AuditEvents.Add(AuditEventFactory.ForInstallation(
                 "console:cloud-user",

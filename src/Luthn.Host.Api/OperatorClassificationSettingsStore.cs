@@ -190,6 +190,7 @@ public sealed class OperatorClassificationSettingsStore(
                 Provider = OperatorClassificationProviderKind.ExternalHttp,
                 Endpoint = options.ExternalHttp.Endpoint ?? "",
                 AuthHeaderName = Normalize(options.ExternalHttp.AuthHeaderName, "Authorization"),
+                ApiKey = options.Credential?.Trim() ?? "",
                 PayloadClass = Normalize(options.ExternalHttp.PayloadClass, "classification-input"),
                 RedactionState = Normalize(options.ExternalHttp.RedactionState, "external-provider-opt-in")
             };

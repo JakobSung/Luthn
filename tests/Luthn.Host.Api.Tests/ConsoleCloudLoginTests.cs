@@ -120,6 +120,94 @@ public sealed class ConsoleCloudLoginTests
     }
 
     [Fact]
+    public async Task ExpiredCloudAuthorityReturnsUnauthorizedForProtectedOperations()
+    {
+        var provider = new MutableCloudLoginProvider();
+        using var factory = CreateFactory(provider);
+        using var client = CreateHttpsClient(factory);
+        await EnrollAsync(client);
+
+        using var login = await client.PostAsync("/api/operator/cloud-login", null);
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
+        provider.IsActive = false;
+        using var protectedAttempt = await client.GetAsync("/api/access-requests");
+        using var protectedBody = await JsonDocument.ParseAsync(await protectedAttempt.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, protectedAttempt.StatusCode);
+        Assert.Equal("Cloud console session expired.", protectedBody.RootElement.GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task CloudLoginPreservesOtherActiveCloudSessions()
+    {
+        using var factory = CreateFactory("Fake");
+        using var firstClient = CreateHttpsClient(factory);
+        using var secondClient = CreateHttpsClient(factory);
+        await EnrollAsync(firstClient);
+
+        using var firstLogin = await firstClient.PostAsync("/api/operator/cloud-login", null);
+        using var secondLogin = await secondClient.PostAsync("/api/operator/cloud-login", null);
+        using var firstStatus = await firstClient.GetAsync("/api/operator/session");
+        using var firstBody = await JsonDocument.ParseAsync(await firstStatus.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, firstLogin.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondLogin.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, firstStatus.StatusCode);
+        Assert.Equal("Active", firstBody.RootElement.GetProperty("state").GetString());
+        Assert.Equal("CloudAuthenticated", firstBody.RootElement.GetProperty("mode").GetString());
+    }
+
+    [Fact]
+    public async Task ChangedCloudAuthorityRevokesStaleSession()
+    {
+        var provider = new MutableCloudLoginProvider();
+        using var factory = CreateFactory(provider);
+        using var client = CreateHttpsClient(factory);
+        await EnrollAsync(client);
+
+        using var login = await client.PostAsync("/api/operator/cloud-login", null);
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
+        provider.Capabilities =
+        [
+            ConsoleCapability.AccessReview
+        ];
+        provider.Scopes = new HashSet<string>(
+        [
+            ServiceScopes.AccessReview
+        ],
+        StringComparer.OrdinalIgnoreCase);
+
+        using var status = await client.GetAsync("/api/operator/session");
+        using var body = await JsonDocument.ParseAsync(await status.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+        Assert.Equal("LoginRequired", body.RootElement.GetProperty("state").GetString());
+        Assert.Equal("cloud-account-expired", body.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task RemovedCloudMembershipRevokesExistingSession()
+    {
+        var provider = new MutableCloudLoginProvider();
+        using var factory = CreateFactory(provider);
+        using var client = CreateHttpsClient(factory);
+        await EnrollAsync(client);
+
+        using var login = await client.PostAsync("/api/operator/cloud-login", null);
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
+        provider.Membership = ConsoleMembershipState.Removed;
+        using var status = await client.GetAsync("/api/operator/session");
+        using var body = await JsonDocument.ParseAsync(await status.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+        Assert.Equal("LoginRequired", body.RootElement.GetProperty("state").GetString());
+        Assert.Equal("cloud-account-expired", body.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
     public async Task ServerConfiguredMemberCannotEscalateToConfigurationWrite()
     {
         using var factory = CreateFactory("Fake", owner: false);
@@ -252,7 +340,7 @@ public sealed class ConsoleCloudLoginTests
 
     private sealed class MutableCloudLoginProvider : IConsoleCloudLoginProvider
     {
-        private static readonly IReadOnlyList<ConsoleCapability> Capabilities =
+        private static readonly IReadOnlyList<ConsoleCapability> OwnerCapabilities =
         [
             ConsoleCapability.AccessReview,
             ConsoleCapability.AccessDecision,
@@ -260,7 +348,20 @@ public sealed class ConsoleCloudLoginTests
             ConsoleCapability.ConfigurationWrite
         ];
 
+        private static readonly IReadOnlySet<string> OwnerScopes = new HashSet<string>(
+        [
+            ServiceScopes.AccessReview,
+            ServiceScopes.AccessDecide,
+            ServiceScopes.AuditRead,
+            ServiceScopes.ConfigWrite
+        ],
+        StringComparer.OrdinalIgnoreCase);
+
         public bool IsActive { get; set; } = true;
+        public ConsoleMembershipState Membership { get; set; } = ConsoleMembershipState.Active;
+        public bool Owner { get; set; } = true;
+        public IReadOnlyList<ConsoleCapability> Capabilities { get; set; } = OwnerCapabilities;
+        public IReadOnlySet<string> Scopes { get; set; } = OwnerScopes;
         public ConsoleCloudLoginProvider Kind => ConsoleCloudLoginProvider.Fake;
         public bool Available => true;
 
@@ -282,24 +383,17 @@ public sealed class ConsoleCloudLoginTests
                 ? ValueTask.FromResult<AuthenticatedConsoleAuthority?>(CreateAuthority())
                 : ValueTask.FromResult<AuthenticatedConsoleAuthority?>(null);
 
-        private static AuthenticatedConsoleAuthority CreateAuthority() =>
+        private AuthenticatedConsoleAuthority CreateAuthority() =>
             new(
                 "test-org:test-user",
                 "test-user",
                 "test-org",
                 "test-workspace",
-                true,
-                ConsoleMembershipState.Active,
+                Owner,
+                Membership,
                 ConsoleEntitlementState.Active,
                 Capabilities,
-                new HashSet<string>(
-                [
-                    ServiceScopes.AccessReview,
-                    ServiceScopes.AccessDecide,
-                    ServiceScopes.AuditRead,
-                    ServiceScopes.ConfigWrite
-                ],
-                StringComparer.OrdinalIgnoreCase));
+                Scopes);
     }
 
     private sealed class TestHostEnvironment : IHostEnvironment

@@ -32,7 +32,7 @@ const renderLocalAccess = () => {
   const localMode = session?.mode === "LocalAuto";
   const connectable = localMode &&
     session?.state === "Anonymous" &&
-    session?.nextAction === "arm-local-session";
+    ["arm-local-session", "create-local-session"].includes(session?.nextAction);
   button.hidden = !localMode;
   button.disabled = state.localConnectPending || !connectable;
 
@@ -42,6 +42,8 @@ const renderLocalAccess = () => {
     detail.textContent = t("auth.localConnectingDetail");
   } else if (session?.state === "Active" && localMode) {
     detail.textContent = t("auth.localActiveDetail");
+  } else if (session?.nextAction === "arm-local-session") {
+    detail.textContent = t("auth.localArmRequired");
   } else if (connectable) {
     detail.textContent = t("auth.localReadyDetail");
   } else if (session?.state === "LoginRequired") {
@@ -121,6 +123,27 @@ const renderSessionGuidance = () => {
   $("#auditStatus").textContent = guidance;
 };
 
+const isCloudSessionExpired = (response, body) => response.status === 401 && (
+  body?.title === "Cloud console session expired." ||
+  body?.detail?.includes("Cloud console authentication is no longer active") ||
+  body?.detail?.includes("Cloud account authentication expired or was revoked")
+);
+
+const markCloudSessionExpired = () => {
+  state.consoleSession = {
+    mode: "CloudLoginRequired",
+    state: "LoginRequired",
+    nextAction: "cloud-login",
+    reason: "cloud-account-expired"
+  };
+  state.csrfProof = "";
+  state.localAccessError = "";
+  state.sessionReason = "cloud-account-expired";
+  renderAuthStatus();
+  renderSessionGuidance();
+  setAction("cloud session expired", t("auth.cloudExpiredDetail"));
+};
+
 const writeResult = (target, value) => {
   target.textContent = typeof value === "string"
     ? value
@@ -177,6 +200,9 @@ const requestJson = async (url, options = {}) => {
   const body = text ? JSON.parse(text) : null;
   if (!response.ok) {
     const message = body?.detail || body?.title || response.statusText;
+    if (isCloudSessionExpired(response, body)) {
+      markCloudSessionExpired();
+    }
     const error = new Error(`${response.status} ${message}`);
     error.body = body;
     throw error;
@@ -217,7 +243,18 @@ const connectLocalAccess = async () => {
   state.localAccessError = "";
   renderAuthStatus();
   try {
-    state.consoleSession = await requestJson("/api/operator/session/local/connect", { method: "POST" });
+    let session = state.consoleSession;
+    if (session?.nextAction === "arm-local-session") {
+      session = await refreshConsoleSession();
+    }
+    if (!["Active", "Restricted"].includes(session?.state) &&
+        session?.nextAction === "create-local-session") {
+      session = await requestJson("/api/operator/session/local/connect", { method: "POST" });
+    }
+    if (!["Active", "Restricted"].includes(session?.state)) {
+      throw new Error(t("auth.localArmRequired"));
+    }
+    state.consoleSession = session;
     state.sessionReason = "";
     state.localAccessError = "";
     renderAuthStatus();
