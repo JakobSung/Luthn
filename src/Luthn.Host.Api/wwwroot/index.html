@@ -136,6 +136,27 @@
           </div>
           <p id="enrollmentDetail" class="security-note" data-i18n="enrollment.disabled">Cloud enrollment is disabled by default. Local operation remains unchanged.</p>
         </section>
+        <section class="enrollment-card" aria-labelledby="lifecycleTitle">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="lifecycle.eyebrow">Cloud access lifecycle</p>
+              <h3 id="lifecycleTitle" data-i18n="lifecycle.title">Membership, offboarding, and Local reclaim</h3>
+            </div>
+            <span id="lifecycleStatus" class="inline-status" aria-live="polite">Checking</span>
+          </div>
+          <p id="lifecycleDetail" data-i18n="lifecycle.active">Cloud access is evaluated server-side. Loss never falls back to Local automatically.</p>
+          <p><span data-i18n="lifecycle.actions">Available actions</span>: <strong id="lifecycleActions">Checking</strong></p>
+          <div class="row-actions lifecycle-actions">
+            <button id="reconnectCloud" type="button" data-i18n="lifecycle.reconnect">Reconnect</button>
+            <button id="reclaimCloudOwner" type="button" class="secondary" data-i18n="lifecycle.reclaimOwner">Detach and reclaim with owner reauthentication</button>
+            <button id="reclaimOffline" type="button" class="secondary" data-i18n="lifecycle.reclaimOffline">Use offline recovery verifier</button>
+          </div>
+          <div id="fakeLifecycleActions" class="row-actions lifecycle-actions" hidden>
+            <button id="simulateMembershipRemoval" type="button" class="secondary" data-i18n="lifecycle.simulateMember">Simulate membership removal</button>
+            <button id="simulateRestriction" type="button" class="secondary" data-i18n="lifecycle.simulateRestriction">Simulate Organization restriction</button>
+          </div>
+          <p class="security-note" data-i18n="lifecycle.recoveryNote">Recovery proof transport and production identity providers remain outside this public OSS implementation.</p>
+        </section>
         <div class="row-actions auth-actions">
           <button id="cloudLogin" type="button" data-i18n="auth.cloudLogin">Sign in with Luthn Cloud</button>
           <button id="logoutSession" type="button" class="secondary" data-i18n="auth.logout">End this session</button>

@@ -30,7 +30,10 @@ internal sealed record PersistedConsoleLifecycle(
     DateTimeOffset? EnrollmentExpiresAt,
     DateTimeOffset? EnrolledAt,
     string PendingReference,
-    IReadOnlyList<string> Capabilities);
+    IReadOnlyList<string> Capabilities,
+    ConsoleOrganizationState OrganizationState = ConsoleOrganizationState.Active,
+    DateTimeOffset? ConnectionAuthorityRevokedAt = null,
+    IReadOnlyList<string>? RemovedSubjects = null);
 
 public sealed record ConsoleLifecycleSnapshot(
     InstallationEnrollmentState? EnrollmentState,
@@ -38,7 +41,10 @@ public sealed record ConsoleLifecycleSnapshot(
     DateTimeOffset? EnrollmentExpiresAt,
     DateTimeOffset? EnrolledAt,
     string PendingReference,
-    IReadOnlyList<string> Capabilities)
+    IReadOnlyList<string> Capabilities,
+    ConsoleOrganizationState OrganizationState,
+    DateTimeOffset? ConnectionAuthorityRevokedAt,
+    IReadOnlyList<string> RemovedSubjects)
 {
     public bool IsEnrolled => EnrollmentState == InstallationEnrollmentState.Approved;
 }
@@ -56,6 +62,20 @@ public interface IConsoleLifecycleStore : IConsoleInstallationState
         string installationFingerprint,
         IReadOnlyList<string> capabilities,
         DateTimeOffset enrolledAt,
+        CancellationToken cancellationToken);
+    bool IsSubjectRemoved(string subjectKey);
+    ValueTask<ConsoleLifecycleSnapshot> RemoveSubjectAsync(
+        string subjectKey,
+        CancellationToken cancellationToken);
+    ValueTask<ConsoleLifecycleSnapshot> RestrictOrganizationAsync(
+        CancellationToken cancellationToken);
+    ValueTask<ConsoleLifecycleSnapshot> ReconnectOrganizationAsync(
+        CancellationToken cancellationToken);
+    ValueTask<ConsoleLifecycleSnapshot> RevokeConnectionAuthorityAsync(
+        DateTimeOffset revokedAt,
+        CancellationToken cancellationToken);
+    ValueTask<ConsoleLifecycleSnapshot> CompleteLocalReclaimAsync(
+        DateTimeOffset reclaimedAt,
         CancellationToken cancellationToken);
 }
 
@@ -76,6 +96,8 @@ public sealed class ConsoleLifecycleStore(
 
     public ConsoleLifecycleSnapshot Current => _current ??= ReadOrCreate();
     public bool IsEnrolled => Current.IsEnrolled;
+    public bool IsSubjectRemoved(string subjectKey) =>
+        Current.RemovedSubjects.Contains(subjectKey, StringComparer.Ordinal);
 
     public async ValueTask<ConsoleLifecycleSnapshot> BeginEnrollmentAsync(
         string pendingReference,
@@ -97,8 +119,81 @@ public sealed class ConsoleLifecycleStore(
                 EnrollmentState = InstallationEnrollmentState.Pending,
                 EnrollmentExpiresAt = expiresAt,
                 PendingReference = BoundReference(pendingReference),
-                Capabilities = capabilities.ToArray()
+                Capabilities = capabilities.ToArray(),
+                OrganizationState = ConsoleOrganizationState.Active,
+                ConnectionAuthorityRevokedAt = null
             };
+            await PersistAsync(next, cancellationToken);
+            _current = next;
+            return next;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public ValueTask<ConsoleLifecycleSnapshot> RemoveSubjectAsync(
+        string subjectKey,
+        CancellationToken cancellationToken) =>
+        UpdateAsync(
+            current => current with
+            {
+                RemovedSubjects = current.RemovedSubjects
+                    .Append(subjectKey)
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(256)
+                    .ToArray()
+            },
+            cancellationToken);
+
+    public ValueTask<ConsoleLifecycleSnapshot> RestrictOrganizationAsync(
+        CancellationToken cancellationToken) =>
+        UpdateAsync(
+            current => current with { OrganizationState = ConsoleOrganizationState.RestrictedOffboarding },
+            cancellationToken);
+
+    public ValueTask<ConsoleLifecycleSnapshot> ReconnectOrganizationAsync(
+        CancellationToken cancellationToken) =>
+        UpdateAsync(
+            current => current with
+            {
+                OrganizationState = ConsoleOrganizationState.Active,
+                ConnectionAuthorityRevokedAt = null
+            },
+            cancellationToken);
+
+    public ValueTask<ConsoleLifecycleSnapshot> RevokeConnectionAuthorityAsync(
+        DateTimeOffset revokedAt,
+        CancellationToken cancellationToken) =>
+        UpdateAsync(
+            current => current with { ConnectionAuthorityRevokedAt = revokedAt },
+            cancellationToken);
+
+    public ValueTask<ConsoleLifecycleSnapshot> CompleteLocalReclaimAsync(
+        DateTimeOffset reclaimedAt,
+        CancellationToken cancellationToken) =>
+        UpdateAsync(
+            current => current with
+            {
+                EnrollmentState = InstallationEnrollmentState.Revoked,
+                EnrollmentExpiresAt = null,
+                EnrolledAt = null,
+                PendingReference = "",
+                Capabilities = [],
+                OrganizationState = ConsoleOrganizationState.Detached,
+                RemovedSubjects = []
+            },
+            cancellationToken);
+
+    private async ValueTask<ConsoleLifecycleSnapshot> UpdateAsync(
+        Func<ConsoleLifecycleSnapshot, ConsoleLifecycleSnapshot> update,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var next = update(Current);
             await PersistAsync(next, cancellationToken);
             _current = next;
             return next;
@@ -169,14 +264,26 @@ public sealed class ConsoleLifecycleStore(
                     persisted.EnrollmentExpiresAt,
                     persisted.EnrolledAt,
                     persisted.PendingReference,
-                    persisted.Capabilities);
+                    persisted.Capabilities ?? [],
+                    persisted.OrganizationState,
+                    persisted.ConnectionAuthorityRevokedAt,
+                    persisted.RemovedSubjects ?? []);
             }
         }
 
         Directory.CreateDirectory(StateDirectory);
         var proof = RandomNumberGenerator.GetBytes(32);
         var fingerprint = Convert.ToHexString(SHA256.HashData(proof)).ToLowerInvariant();
-        var initial = new ConsoleLifecycleSnapshot(null, fingerprint, null, null, "", []);
+        var initial = new ConsoleLifecycleSnapshot(
+            null,
+            fingerprint,
+            null,
+            null,
+            "",
+            [],
+            ConsoleOrganizationState.Active,
+            null,
+            []);
         Persist(initial, _protector.Protect(Convert.ToBase64String(proof)));
         return initial;
     }
@@ -193,7 +300,10 @@ public sealed class ConsoleLifecycleStore(
             snapshot.EnrollmentExpiresAt,
             snapshot.EnrolledAt,
             snapshot.PendingReference,
-            snapshot.Capabilities);
+            snapshot.Capabilities,
+            snapshot.OrganizationState,
+            snapshot.ConnectionAuthorityRevokedAt,
+            snapshot.RemovedSubjects);
         await WriteAtomicallyAsync(next, cancellationToken);
     }
 
@@ -206,7 +316,10 @@ public sealed class ConsoleLifecycleStore(
             snapshot.EnrollmentExpiresAt,
             snapshot.EnrolledAt,
             snapshot.PendingReference,
-            snapshot.Capabilities);
+            snapshot.Capabilities,
+            snapshot.OrganizationState,
+            snapshot.ConnectionAuthorityRevokedAt,
+            snapshot.RemovedSubjects);
         var temporaryPath = TemporaryPath();
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(persisted, SerializerOptions));
         File.Move(temporaryPath, StatePath);
@@ -303,7 +416,8 @@ public sealed class DisabledInstallationEnrollmentAdapter : IInstallationEnrollm
 
 public sealed class FakeInstallationEnrollmentAdapter(
     TimeProvider timeProvider,
-    IOptions<ConsoleEnrollmentOptions> options) : IInstallationEnrollmentAdapter
+    IOptions<ConsoleEnrollmentOptions> options,
+    IHostEnvironment environment) : IInstallationEnrollmentAdapter
 {
     private static readonly string[] SupportedCapabilities =
     ["console-login.v1", "safe-projection.v2", "metadata-audit.v1"];
@@ -312,16 +426,20 @@ public sealed class FakeInstallationEnrollmentAdapter(
 
     public ValueTask<EnrollmentChallenge> BeginAsync(
         string installationFingerprint,
-        CancellationToken cancellationToken) =>
-        ValueTask.FromResult(new EnrollmentChallenge(
+        CancellationToken cancellationToken)
+    {
+        EnsureNonProduction();
+        return ValueTask.FromResult(new EnrollmentChallenge(
             $"enroll-{Guid.NewGuid():N}",
             timeProvider.GetUtcNow() + options.Value.EffectivePendingLifetime,
             SupportedCapabilities));
+    }
 
     public ValueTask<EnrollmentGrant> VerifyAsync(
         ConsoleLifecycleSnapshot snapshot,
         CancellationToken cancellationToken)
     {
+        EnsureNonProduction();
         if (snapshot.EnrollmentState != InstallationEnrollmentState.Pending ||
             string.IsNullOrWhiteSpace(snapshot.PendingReference) ||
             snapshot.EnrollmentExpiresAt is not { } expiresAt ||
@@ -336,6 +454,14 @@ public sealed class FakeInstallationEnrollmentAdapter(
             snapshot.InstallationFingerprint,
             expiresAt,
             SupportedCapabilities));
+    }
+
+    private void EnsureNonProduction()
+    {
+        if (environment.IsProduction())
+        {
+            throw new InvalidOperationException("The fake enrollment adapter is disabled in Production.");
+        }
     }
 }
 

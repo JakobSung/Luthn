@@ -42,7 +42,8 @@ public sealed record ConsoleSessionIdentity(
     string? CloudSubjectKey = null,
     string? OrganizationId = null,
     ConsoleMembershipState? Membership = null,
-    ConsoleEntitlementState? Entitlement = null);
+    ConsoleEntitlementState? Entitlement = null,
+    bool CloudOwner = false);
 
 internal sealed class ConsoleSessionRecord
 {
@@ -55,13 +56,14 @@ internal sealed class ConsoleSessionRecord
     public required DateTimeOffset LastSeenAt { get; set; }
     public required DateTimeOffset ExpiresAt { get; init; }
     public required HashSet<string> Scopes { get; init; }
-    public required IReadOnlyList<ConsoleCapability> Capabilities { get; init; }
+    public required IReadOnlyList<ConsoleCapability> Capabilities { get; set; }
     public bool Restricted { get; set; }
     public bool Revoked { get; set; }
     public string? CloudSubjectKey { get; init; }
     public string? OrganizationId { get; init; }
     public ConsoleMembershipState? Membership { get; init; }
     public ConsoleEntitlementState? Entitlement { get; set; }
+    public bool CloudOwner { get; init; }
 }
 
 public interface IConsoleInstallationState
@@ -81,6 +83,8 @@ public interface IConsoleSessionStore
     ConsoleSessionIdentity CreateCloud(HttpContext context, AuthenticatedConsoleAuthority authority);
     void Revoke(HttpContext context);
     void RevokeAll(Func<ConsoleSessionIdentity, bool>? predicate = null);
+    void RevokeSubject(string subjectKey);
+    void RestrictCloudSessions();
 }
 
 public sealed class InMemoryConsoleSessionStore(
@@ -88,7 +92,7 @@ public sealed class InMemoryConsoleSessionStore(
     IOptions<ConsoleAccessOptions> options,
     IOptions<LuthnIdentityOptions> identityOptions,
     IOptions<LuthnHostOperationalOptions> hostOptions,
-    IConsoleInstallationState installationState,
+    IConsoleLifecycleStore lifecycle,
     IHostEnvironment environment) : IConsoleSessionStore
 {
     private static readonly string[] LocalScopes =
@@ -118,6 +122,12 @@ public sealed class InMemoryConsoleSessionStore(
         ConsoleCapability.EnrollmentManage
     ];
 
+    private static readonly string[] RestrictedScopes =
+    [ServiceScopes.AuditRead, ServiceScopes.AgentConnectionRead, ServiceScopes.ExternalPublicationRead];
+
+    private static readonly ConsoleCapability[] RestrictedCapabilities =
+    [ConsoleCapability.AuditRead, ConsoleCapability.AgentConnectionRead, ConsoleCapability.OffboardingExport, ConsoleCapability.InstallationDetach, ConsoleCapability.LocalReclaim];
+
     private readonly ConcurrentDictionary<string, ConsoleSessionRecord> _sessions =
         new(StringComparer.Ordinal);
 
@@ -144,6 +154,23 @@ public sealed class InMemoryConsoleSessionStore(
             _sessions.TryRemove(sessionId, out _);
             DeleteCookie(context);
             return null;
+        }
+
+        if (session.Mode != ConsoleAccessMode.LocalAuto)
+        {
+            if (lifecycle.Current.OrganizationState == ConsoleOrganizationState.Detached ||
+                session.CloudSubjectKey is null ||
+                lifecycle.IsSubjectRemoved(session.CloudSubjectKey))
+            {
+                _sessions.TryRemove(sessionId, out _);
+                DeleteCookie(context);
+                return null;
+            }
+
+            if (lifecycle.Current.OrganizationState == ConsoleOrganizationState.RestrictedOffboarding)
+            {
+                ApplyRestriction(session);
+            }
         }
 
         session.LastSeenAt = now;
@@ -177,7 +204,7 @@ public sealed class InMemoryConsoleSessionStore(
             Restricted = false
         };
         _sessions[sessionId] = session;
-        AppendCookie(context, sessionId, session.ExpiresAt, secure: false);
+        AppendCookie(context, sessionId, session.ExpiresAt, secure: context.Request.IsHttps);
         return ToIdentity(session, now + options.Value.EffectiveIdleLifetime);
     }
 
@@ -185,7 +212,7 @@ public sealed class InMemoryConsoleSessionStore(
         HttpContext context,
         AuthenticatedConsoleAuthority authority)
     {
-        if (!installationState.IsEnrolled ||
+        if (!lifecycle.IsEnrolled ||
             authority.Membership != ConsoleMembershipState.Active)
         {
             throw new InvalidOperationException("An enrolled installation and active membership are required.");
@@ -209,8 +236,13 @@ public sealed class InMemoryConsoleSessionStore(
             CloudSubjectKey = authority.SubjectKey,
             OrganizationId = authority.OrganizationId,
             Membership = authority.Membership,
-            Entitlement = authority.Entitlement
+            Entitlement = authority.Entitlement,
+            CloudOwner = authority.Owner
         };
+        if (lifecycle.Current.OrganizationState == ConsoleOrganizationState.RestrictedOffboarding)
+        {
+            ApplyRestriction(session);
+        }
         _sessions[sessionId] = session;
         AppendCookie(context, sessionId, session.ExpiresAt, secure: true);
         return ToIdentity(session, now + options.Value.EffectiveIdleLifetime);
@@ -240,11 +272,22 @@ public sealed class InMemoryConsoleSessionStore(
         }
     }
 
+    public void RevokeSubject(string subjectKey) =>
+        RevokeAll(session => string.Equals(session.CloudSubjectKey, subjectKey, StringComparison.Ordinal));
+
+    public void RestrictCloudSessions()
+    {
+        foreach (var session in _sessions.Values.Where(item => item.Mode != ConsoleAccessMode.LocalAuto))
+        {
+            ApplyRestriction(session);
+        }
+    }
+
     private bool CanCreateLocal(HttpContext context)
     {
         if (!options.Value.LocalOnly ||
             identityOptions.Value.Mode != LuthnIdentityMode.SingleOwner ||
-            installationState.IsEnrolled ||
+            lifecycle.IsEnrolled ||
             hostOptions.Value.EnableForwardedHeaders)
         {
             return false;
@@ -257,6 +300,15 @@ public sealed class InMemoryConsoleSessionStore(
 
         return IsLoopback(context.Connection.LocalIpAddress) &&
             IsLoopback(context.Connection.RemoteIpAddress);
+    }
+
+    private static void ApplyRestriction(ConsoleSessionRecord session)
+    {
+        session.Restricted = true;
+        session.Entitlement = ConsoleEntitlementState.Restricted;
+        session.Scopes.Clear();
+        session.Scopes.UnionWith(RestrictedScopes);
+        session.Capabilities = RestrictedCapabilities;
     }
 
     private static bool IsLoopback(IPAddress? address) =>
@@ -305,7 +357,8 @@ public sealed class InMemoryConsoleSessionStore(
             session.CloudSubjectKey,
             session.OrganizationId,
             session.Membership,
-            session.Entitlement);
+            session.Entitlement,
+            session.CloudOwner);
 }
 
 public static class ConsoleSessionEndpoints

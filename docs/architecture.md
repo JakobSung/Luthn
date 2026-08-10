@@ -147,8 +147,11 @@ persists an encrypted capsule and metadata-only audit event before returning
 `202`, a bounded Workspace-fair worker handles leases/retries/dead letters and
 explicit replay, and `/api/hub/status` exposes aggregate content-free status.
 The relay boundary remains disabled or fake, so no Cloud request is made by the
-OSS build. Cloud-issued connection identity, enrollment, and real outbound
-transport remain future boundaries defined in
+OSS build. The public Host also provides provider-neutral disabled/fake
+enrollment, human-login, membership/offboarding, and explicit Local-reclaim
+boundaries. These exercise two-phase activation and revoke-first behavior but
+do not issue real Cloud identity. Production Cloud identity, billing, and real
+outbound transport remain future boundaries defined in
 [`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
 
 ## Plugin Ingestion Contract

@@ -132,6 +132,7 @@ builder.Services.Configure<LuthnIdentityOptions>(builder.Configuration.GetSectio
 builder.Services.Configure<ConsoleAccessOptions>(builder.Configuration.GetSection(ConsoleAccessOptions.SectionName));
 builder.Services.Configure<ConsoleEnrollmentOptions>(builder.Configuration.GetSection(ConsoleEnrollmentOptions.SectionName));
 builder.Services.Configure<ConsoleCloudLoginOptions>(builder.Configuration.GetSection(ConsoleCloudLoginOptions.SectionName));
+builder.Services.Configure<ConsoleRecoveryOptions>(builder.Configuration.GetSection(ConsoleRecoveryOptions.SectionName));
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = ConsoleAccessOptions.AntiforgeryHeaderName;
@@ -163,6 +164,15 @@ builder.Services.AddSingleton<IConsoleCloudLoginProvider>(provider =>
         Luthn.Sdk.Console.ConsoleCloudLoginProvider.Fake =>
             provider.GetRequiredService<FakeConsoleCloudLoginProvider>(),
         _ => provider.GetRequiredService<DisabledConsoleCloudLoginProvider>()
+    });
+builder.Services.AddSingleton<DisabledConsoleOfflineRecoveryVerifier>();
+builder.Services.AddSingleton<FakeConsoleOfflineRecoveryVerifier>();
+builder.Services.AddSingleton<IConsoleOfflineRecoveryVerifier>(provider =>
+    provider.GetRequiredService<IOptions<ConsoleRecoveryOptions>>().Value.Verifier switch
+    {
+        Luthn.Sdk.Console.ConsoleRecoveryVerifier.Fake =>
+            provider.GetRequiredService<FakeConsoleOfflineRecoveryVerifier>(),
+        _ => provider.GetRequiredService<DisabledConsoleOfflineRecoveryVerifier>()
     });
 builder.Services.AddOptions<HubIngressOptions>()
     .Bind(builder.Configuration.GetSection("Luthn:Hub:Ingress"))
@@ -235,6 +245,7 @@ app.MapLuthnApi();
 app.MapConsoleSessions();
 app.MapConsoleEnrollment();
 app.MapConsoleCloudLogin();
+app.MapConsoleLifecycle();
 app.MapOperatorConfiguration();
 app.MapOperationalMetrics();
 app.MapSearchTelemetry();

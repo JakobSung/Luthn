@@ -141,19 +141,20 @@ Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를
 
 ### 콘솔 접근과 메뉴
 
-작업 전에 `콘솔 접근` 탭을 엽니다. **Service token**은 설치된 Luthn의 일반 API 자격
-증명이며 서버에 설정된 scope가 각 메뉴의 조회·쓰기 범위를 결정합니다. 이 token만으로
-민감 접근을 승인할 수 없습니다. 별도의 **Decision token**에는 `access.decide`가 있어야
-하며 민감 접근 목록·operator detail·승인·반려에만 사용합니다. 선택적인 **Operator
-label**은 감사 metadata일 뿐 권한을 주지 않습니다.
+`콘솔 접근` 탭에서 현재 세션을 확인합니다. 패키지형 개인 `SingleOwner` 설치는 loopback에
+바인딩되고 키 입력 없이 제한된 `LocalAuto` 세션을 시작합니다. 브라우저에는 불투명한
+HttpOnly·host-only·SameSite 세션 cookie만 전달하며 변경 요청에는 same-origin CSRF 검증도
+적용합니다. Service/decision 자격 증명은 Agent와 비콘솔 API client를 위한 보호된 서버
+설정에만 남고 페이지·URL·브라우저 저장소·로그·export로 복사하지 않습니다.
 
-입력값은 현재 브라우저 session에만 보관하고 로컬 Host API에 bearer header로 전송합니다.
-콘솔은 token을 생성하거나 표시하지 않습니다. 패키지 설치에서는
-`~/.config/luthn/service-token`, `~/.config/luthn/operator-token`을 사용합니다(Windows는
-`%LOCALAPPDATA%\\Luthn\\config\\service-token`, `operator-token`). 값을 출력하거나
-커밋하지 않습니다. 메뉴는 개요, 민감 접근 승인, 외부 공개, 분류·수집, 감사 센터,
-콘솔 접근으로 나뉘며, `403`은 해당 token에 메뉴 scope가 없다는 뜻이므로 agent connector에
-더 넓은 자격 증명을 넣지 말고 서버 설정을 수정해야 합니다.
+MultiUser, 등록 완료, forwarded 노출, 명시적 local-only가 아닌 설치에서는 LocalAuto를
+fail-closed로 차단합니다. Cloud enrollment는 기본 비활성입니다. 공개 fake adapter는
+네트워크 없이 fingerprint 결합 2단계 흐름을 검증합니다. Grant를 영속 검증하기 전에는
+로컬 세션을 유지하고, 활성화가 끝나면 모든 Local 세션을 철회한 뒤 Cloud 로그인만
+허용합니다. Disabled/fake login·recovery provider는 계약·시험 경계이며 실제 Cloud가
+아닙니다. 회원·구독 상실은 로컬로 자동 전환하지 않고, Organization 제한은 종료 준비
+작업만 허용하며, Local 회수는 owner/recovery 검증 뒤 Cloud 권한을 먼저 철회하는 명시적
+전환입니다. 기존 bearer client와 최소 scope 계약은 그대로 유지합니다.
 
 ### 분류 기본값
 

@@ -3,11 +3,37 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api.Tests;
 
 public sealed class ConsoleCloudLoginTests
 {
+    [Fact]
+    public async Task FakeSecurityProvidersAreDisabledInProduction()
+    {
+        var environment = new TestHostEnvironment { EnvironmentName = Environments.Production };
+        var login = new FakeConsoleCloudLoginProvider(
+            Options.Create(new ConsoleCloudLoginOptions()),
+            environment);
+        var enrollment = new FakeInstallationEnrollmentAdapter(
+            TimeProvider.System,
+            Options.Create(new ConsoleEnrollmentOptions()),
+            environment);
+        var recovery = new FakeConsoleOfflineRecoveryVerifier(
+            Options.Create(new ConsoleRecoveryOptions { FakeProofVerified = true }),
+            environment);
+
+        Assert.False(login.Available);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await login.AuthenticateAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await enrollment.BeginAsync("fingerprint", CancellationToken.None));
+        Assert.False(await recovery.VerifyAsync(CancellationToken.None));
+    }
+
     [Fact]
     public async Task DisabledProviderCannotCreateCloudSessionAfterEnrollment()
     {
@@ -133,4 +159,12 @@ public sealed class ConsoleCloudLoginTests
                 "Luthn:OperatorConfig:Directory",
                 Path.Combine(Path.GetTempPath(), "luthn-console-login-tests", Guid.NewGuid().ToString("N")));
         });
+
+    private sealed class TestHostEnvironment : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Environments.Production;
+        public string ApplicationName { get; set; } = "Luthn.Host.Api.Tests";
+        public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+    }
 }

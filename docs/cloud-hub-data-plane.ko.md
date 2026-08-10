@@ -153,9 +153,11 @@ relay 재연결·revoke-first를 검증합니다. 이는 정확성·복구 basel
 
 ## 남아 있는 Cloud 경계
 
-다음 경계는 현재 OSS runtime 밖에 있습니다. versioned enrollment·capability 교환,
-Cloud가 발급하는 connection authority, 인증 relay transport, remote MCP/OAuth lifecycle
-capture와 Organization 운영입니다. 미래 adapter도 인증된 installation에서 tenant 범위를
+OSS runtime은 이제 versioned enrollment/capability, 콘솔 login, 회원/종료 준비, 명시적
+revoke-first Local 회수의 provider-neutral 계약과 disabled/fake 시험 경계를 소유합니다.
+남은 외부 경계는 production Cloud가 발급하는 connection authority, identity·entitlement
+검증, 인증 relay transport, remote MCP/OAuth lifecycle capture, billing과 관리형
+Organization 운영입니다. Production adapter도 인증된 installation에서 tenant 범위를
 정하고 metadata-only 감사, safe-projection-only payload, revoke-first 순서와 개인
 self-host disabled-by-default를 유지해야 합니다.
 

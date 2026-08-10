@@ -10,7 +10,8 @@ const state = {
   auditBaseQuery: "",
   consoleProfile: null,
   enrollment: null,
-  cloudLogin: null
+  cloudLogin: null,
+  lifecycle: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -249,6 +250,7 @@ const loginToCloud = async () => {
     state.consoleSession = await requestJson("/api/operator/cloud-login", { method: "POST" });
     renderAuthStatus();
     await refreshCloudLogin();
+    await refreshLifecycle();
     await refreshEnrollment();
     setAction("cloud login", "Server-derived console authority is active");
     refreshAgentConnections();
@@ -259,6 +261,58 @@ const loginToCloud = async () => {
   } catch (error) {
     $("#cloudLoginDetail").textContent = error.message;
     setAction("cloud login failed", error.message);
+  }
+};
+
+const renderLifecycle = () => {
+  const lifecycle = state.lifecycle;
+  if (!lifecycle) {
+    $("#lifecycleStatus").textContent = "Unavailable";
+    $("#lifecycleActions").textContent = "None";
+    return;
+  }
+
+  const actions = Array.isArray(lifecycle.allowedActions) ? lifecycle.allowedActions : [];
+  $("#lifecycleStatus").textContent = lifecycle.organizationState;
+  $("#lifecycleActions").textContent = actions.join(", ") || "None";
+  $("#lifecycleDetail").textContent = lifecycle.organizationState === "RestrictedOffboarding"
+    ? "New Cloud connection authority and console mutations are stopped. Export, reconnect, detach, or explicit reclaim remain available."
+    : actions.includes("switch-account")
+      ? "This account has no active access. Switch account or contact the Organization administrator; Local access was not restored."
+      : lifecycle.organizationState === "Detached"
+        ? "Cloud authority is revoked. This SingleOwner installation may now create a Local session."
+        : "Cloud access is evaluated server-side. Loss never falls back to Local automatically.";
+  $("#reconnectCloud").disabled = !actions.includes("reconnect");
+  $("#reclaimCloudOwner").disabled = !actions.includes("local-reclaim");
+  $("#reclaimOffline").disabled = !actions.includes("local-reclaim") || lifecycle.recoveryVerifier === "Disabled";
+  $("#fakeLifecycleActions").hidden = state.cloudLogin?.provider !== "Fake" || state.cloudLogin?.sessionState !== "Active";
+};
+
+const refreshLifecycle = async () => {
+  try {
+    state.lifecycle = await requestJson("/api/operator/lifecycle", { cache: "no-store" });
+  } catch {
+    state.lifecycle = null;
+  }
+  renderLifecycle();
+};
+
+const changeLifecycle = async (path, body) => {
+  try {
+    state.lifecycle = await requestJson(`/api/operator/lifecycle/${path}`, {
+      method: "POST",
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+    await refreshConsoleSession();
+    await refreshCloudLogin();
+    renderLifecycle();
+    if (state.lifecycle?.organizationState === "Detached") {
+      await refreshConsoleSession();
+    }
+    setAction("lifecycle updated", state.lifecycle?.nextAction || path);
+  } catch (error) {
+    $("#lifecycleDetail").textContent = error.message;
+    setAction("lifecycle failed", error.message);
   }
 };
 
@@ -1164,6 +1218,11 @@ $("#logoutSession").addEventListener("click", async () => {
 $("#startEnrollment").addEventListener("click", () => changeEnrollment("start"));
 $("#verifyEnrollment").addEventListener("click", () => changeEnrollment("verify"));
 $("#cloudLogin").addEventListener("click", loginToCloud);
+$("#reconnectCloud").addEventListener("click", () => changeLifecycle("reconnect"));
+$("#reclaimCloudOwner").addEventListener("click", () => changeLifecycle("reclaim", { method: "CloudOwnerReauthentication" }));
+$("#reclaimOffline").addEventListener("click", () => changeLifecycle("reclaim", { method: "OfflineRecovery" }));
+$("#simulateMembershipRemoval").addEventListener("click", () => changeLifecycle("fake-membership-removed"));
+$("#simulateRestriction").addEventListener("click", () => changeLifecycle("fake-organization-restricted"));
 $("#previewForm").addEventListener("submit", previewContent);
 $("#intakeForm").addEventListener("submit", submitSource);
 $("#providerForm").addEventListener("submit", saveProviderSettings);
@@ -1198,6 +1257,7 @@ const initializeConsole = async () => {
   try {
     await refreshConsoleSession();
     await refreshCloudLogin();
+    await refreshLifecycle();
   } catch (error) {
     state.consoleSession = null;
     setAction("session unavailable", error.message);

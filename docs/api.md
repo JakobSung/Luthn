@@ -793,7 +793,7 @@ GET /api/operator/console-profile
 ```
 
 The read-only profile tells the shared OSS console whether the server is in
-`Local` (`SingleOwner`) or `Hub` (`MultiUser`) mode. It also returns the fixed
+`Local` (un-enrolled `SingleOwner`) or `Hub` (`MultiUser` or enrolled) mode. It also returns the fixed
 `cloudTransport: disabled`, `sensitiveAuthority: oss-console`, and
 `tenancySource: authenticated-request` boundaries. The endpoint accepts no
 request body or caller-selected tenant/mode identity and returns no workspace,
@@ -804,6 +804,36 @@ static labels. Language choice does not change authorization, identity, audit,
 or transport state. Sensitive-access approval and external-publication approval
 remain separate API and console sections; both continue to use Host APIs rather
 than direct database access.
+
+## Console session and Cloud lifecycle boundaries
+
+```http
+GET  /api/operator/session
+POST /api/operator/session/local
+POST /api/operator/session/logout
+GET  /api/operator/enrollment
+POST /api/operator/enrollment/start
+POST /api/operator/enrollment/verify
+GET  /api/operator/cloud-login
+POST /api/operator/cloud-login
+GET  /api/operator/lifecycle
+POST /api/operator/lifecycle/reconnect
+POST /api/operator/lifecycle/reclaim
+```
+
+The session cookie is opaque, server-side, bounded by idle and absolute expiry,
+HttpOnly, host-only, and SameSite. Cookie-authenticated mutations require the
+same-origin `X-Luthn-CSRF` proof. LocalAuto is limited to an explicitly
+local-only, loopback, un-enrolled `SingleOwner`; enrollment activation and Local
+reclaim revoke existing authority first. Enrollment, login, lifecycle, and
+recovery providers default to disabled. Fake providers are deterministic test
+adapters with zero outbound traffic, not production Cloud endpoints.
+
+These JSON contracts expose bounded state, capabilities, expiry, actions, and
+server-derived labels only. They do not accept or return service credentials,
+recovery proof values, caller-selected tenant identity, raw/Vault content,
+prompts, transcripts, or local paths. Existing bearer-token API clients remain
+independent and compatible.
 
 ## Audit events
 

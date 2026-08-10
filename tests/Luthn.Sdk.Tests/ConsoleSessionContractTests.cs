@@ -129,3 +129,33 @@ public sealed class ConsoleCloudLoginContractTests
         Assert.DoesNotContain("localPath", json, StringComparison.OrdinalIgnoreCase);
     }
 }
+
+public sealed class ConsoleLifecycleContractTests
+{
+    [Fact]
+    public void LifecycleAndReclaimContractsContainNoRecoveryCredentialOrTenantIdentity()
+    {
+        var lifecycle = new ConsoleLifecycleDto(
+            ConsoleOrganizationState.RestrictedOffboarding,
+            ConsoleMembershipState.Active,
+            false,
+            ConsoleRecoveryVerifier.Disabled,
+            ["reconnect", "export-metadata", "local-reclaim"],
+            "reconnect",
+            true);
+        var reclaim = new ConsoleReclaimRequestDto(ConsoleReclaimMethod.OfflineRecovery);
+
+        var json = JsonSerializer.Serialize(new { lifecycle, reclaim });
+
+        Assert.Contains("\"organizationState\":\"RestrictedOffboarding\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"method\":\"OfflineRecovery\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("proof", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("organizationId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("workspaceId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tenant", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("transcript", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("localPath", json, StringComparison.OrdinalIgnoreCase);
+    }
+}

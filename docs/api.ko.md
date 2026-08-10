@@ -412,8 +412,8 @@ encrypted payload, credential, prompt, transcript, working directory, local path
 GET /api/operator/console-profile
 ```
 
-read-only profile은 같은 OSS console에 server의 `SingleOwner`를 `Local`,
-`MultiUser`를 `Hub` mode로 알려 줍니다. 또한 `cloudTransport: disabled`,
+read-only profile은 같은 OSS console에 미등록 `SingleOwner`를 `Local`,
+`MultiUser` 또는 등록 완료 설치를 `Hub` mode로 알려 줍니다. 또한 `cloudTransport: disabled`,
 `sensitiveAuthority: oss-console`, `tenancySource: authenticated-request` 경계를
 고정해 반환합니다. 요청 body나 호출자가 선택한 tenant/mode identity를 받지 않으며
 workspace, organization, installation, owner, credential 필드를 반환하지 않습니다.
@@ -422,6 +422,34 @@ browser는 정적 label에 allowlist된 `en`, `ko` 언어 preference만 사용�
 선택은 authorization, identity, audit, transport 상태를 바꾸지 않습니다. 민감 접근
 승인과 외부 공개 승인은 별도 API·console section으로 유지되며 DB가 아니라 Host API만
 사용합니다.
+
+## 콘솔 세션과 Cloud 수명주기 경계
+
+```http
+GET  /api/operator/session
+POST /api/operator/session/local
+POST /api/operator/session/logout
+GET  /api/operator/enrollment
+POST /api/operator/enrollment/start
+POST /api/operator/enrollment/verify
+GET  /api/operator/cloud-login
+POST /api/operator/cloud-login
+GET  /api/operator/lifecycle
+POST /api/operator/lifecycle/reconnect
+POST /api/operator/lifecycle/reclaim
+```
+
+세션 cookie는 불투명한 서버측 식별자이며 유휴·절대 만료, HttpOnly, host-only,
+SameSite를 적용합니다. Cookie 인증 변경 요청에는 same-origin `X-Luthn-CSRF` proof가
+필요합니다. LocalAuto는 명시적 local-only·loopback·미등록 `SingleOwner`로 제한하며,
+enrollment 활성화와 Local 회수는 기존 권한을 먼저 철회합니다. Enrollment, login,
+lifecycle, recovery provider의 기본값은 disabled입니다. Fake provider는 outbound가 없는
+결정적 시험 adapter일 뿐 production Cloud endpoint가 아닙니다.
+
+JSON 계약은 제한된 상태·capability·만료·작업·server-derived label만 노출합니다.
+Service credential, recovery proof 값, caller-selected tenant identity, raw/Vault content,
+prompt, transcript, local path는 받거나 반환하지 않습니다. 기존 bearer API client는
+독립적으로 하위 호환을 유지합니다.
 
 ## 감사 사건
 

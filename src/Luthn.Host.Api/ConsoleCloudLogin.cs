@@ -47,7 +47,9 @@ public sealed class DisabledConsoleCloudLoginProvider : IConsoleCloudLoginProvid
             new InvalidOperationException("A live Luthn Cloud login provider is not configured."));
 }
 
-public sealed class FakeConsoleCloudLoginProvider(IOptions<ConsoleCloudLoginOptions> options)
+public sealed class FakeConsoleCloudLoginProvider(
+    IOptions<ConsoleCloudLoginOptions> options,
+    IHostEnvironment environment)
     : IConsoleCloudLoginProvider
 {
     private static readonly ConsoleCapability[] OwnerCapabilities =
@@ -73,10 +75,16 @@ public sealed class FakeConsoleCloudLoginProvider(IOptions<ConsoleCloudLoginOpti
     ];
 
     public ConsoleCloudLoginProvider Kind => ConsoleCloudLoginProvider.Fake;
-    public bool Available => true;
+    public bool Available => !environment.IsProduction();
 
     public ValueTask<AuthenticatedConsoleAuthority> AuthenticateAsync(CancellationToken cancellationToken)
     {
+        if (!Available)
+        {
+            return ValueTask.FromException<AuthenticatedConsoleAuthority>(
+                new InvalidOperationException("The fake Cloud login provider is disabled in Production."));
+        }
+
         var configured = options.Value;
         var userId = ServiceTokenAuthorization.NormalizeUserId(configured.UserId);
         var organizationId = ServiceTokenAuthorization.NormalizeHubIdentity(configured.OrganizationId);
@@ -201,6 +209,16 @@ public static class ConsoleCloudLoginEndpoints
         try
         {
             var authority = await provider.AuthenticateAsync(cancellationToken);
+            if (lifecycle.IsSubjectRemoved(authority.SubjectKey))
+            {
+                throw new InvalidOperationException("Cloud membership is no longer active for this account.");
+            }
+            if (authority.Entitlement == ConsoleEntitlementState.Restricted)
+            {
+                var now = timeProvider.GetUtcNow();
+                await lifecycle.RevokeConnectionAuthorityAsync(now, cancellationToken);
+                await lifecycle.RestrictOrganizationAsync(cancellationToken);
+            }
             sessions.RevokeAll();
             var session = sessions.CreateCloud(context, authority);
             db.AuditEvents.Add(AuditEventFactory.ForInstallation(
