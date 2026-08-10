@@ -1,7 +1,6 @@
 const state = {
-  token: sessionStorage.getItem("luthn.serviceToken") || "",
-  decisionToken: sessionStorage.getItem("luthn.decisionToken") || "",
-  operatorIdentity: sessionStorage.getItem("luthn.operatorIdentity") || "",
+  consoleSession: null,
+  csrfProof: "",
   selectedAccessRequestId: "",
   selectedAccessDetail: null,
   accessDetailRequestSequence: 0,
@@ -38,43 +37,43 @@ const setConsoleView = (view) => {
 };
 
 const renderAuthStatus = () => {
-  const statusKey = state.token && state.decisionToken
-    ? "auth.configured"
-    : state.token
-      ? "auth.partial"
-      : state.decisionToken
-        ? "auth.decisionOnly"
-        : "auth.notConfigured";
+  const statusKey = state.consoleSession?.state === "Active"
+    ? "auth.active"
+    : state.consoleSession?.state === "Restricted"
+      ? "auth.restricted"
+      : state.consoleSession?.state === "LoginRequired"
+        ? "auth.loginRequired"
+        : "auth.starting";
   const status = t(statusKey);
   ["#authStatus", "#authPanelStatus"].forEach((selector) => {
     const target = $(selector);
     if (target) {
       target.textContent = status;
-      target.classList.toggle("configured", statusKey === "auth.configured");
-      target.classList.toggle("partial", statusKey !== "auth.notConfigured" && statusKey !== "auth.configured");
+      target.classList.toggle("configured", statusKey === "auth.active");
+      target.classList.toggle("partial", statusKey === "auth.restricted" || statusKey === "auth.loginRequired");
     }
   });
 };
 
-const renderCredentialGuidance = () => {
-  renderConnectionMessage("Open Console access and add a service token to view agent connections.");
-  $("#connectionsStatus").textContent = "Configure access";
-  $("#syncStatus").textContent = "Configure access";
-  writeResult($("#publicationOutput"), "Open Console access and add a service token to view publication state.");
-  $("#providerStatus").textContent = "Configure a service token in Console access";
-  writeResult($("#providerOutput"), "Open Console access and add a service token to view provider settings.");
+const renderSessionGuidance = () => {
+  renderConnectionMessage("Console login is required to view agent connections.");
+  $("#connectionsStatus").textContent = "Login required";
+  $("#syncStatus").textContent = "Login required";
+  writeResult($("#publicationOutput"), "Console login is required to view publication state.");
+  $("#providerStatus").textContent = "Console login required";
+  writeResult($("#providerOutput"), "Console login is required to view provider settings.");
   const providerForm = $("#providerForm");
   if (providerForm) {
     providerForm.apiKey.value = "";
     providerForm.clearApiKey.checked = false;
   }
   renderAccessRows([]);
-  clearAccessDetail("Open Console access and add a decision token with access.decide.");
+  clearAccessDetail("Console login is required to review sensitive access requests.");
   state.auditEvents = [];
   state.auditNextCursor = "";
   state.auditBaseQuery = "";
   renderAuditRows([]);
-  $("#auditStatus").textContent = "Configure a service token in Console access to load audit metadata.";
+  $("#auditStatus").textContent = "Console login is required to load audit metadata.";
 };
 
 const writeResult = (target, value) => {
@@ -110,33 +109,24 @@ const renderReadinessChecks = (checks) => {
   }));
 };
 
-const authHeaders = (useDecisionToken = false) => {
-  const headers = {};
-  const token = useDecisionToken ? state.decisionToken : state.token;
-  if (!token) {
-    return state.operatorIdentity
-      ? { "X-Luthn-Operator": state.operatorIdentity }
-      : headers;
-  }
-
-  headers.Authorization = `Bearer ${token}`;
-  if (state.operatorIdentity) {
-    headers["X-Luthn-Operator"] = state.operatorIdentity;
-  }
-
-  return headers;
-};
-
 const requestJson = async (url, options = {}) => {
-  const { useDecisionToken = false, ...requestOptions } = options;
+  const requestOptions = options;
+  const method = (requestOptions.method || "GET").toUpperCase();
+  const mutation = !["GET", "HEAD", "OPTIONS", "TRACE"].includes(method);
   const response = await fetch(url, {
     ...requestOptions,
+    credentials: "same-origin",
     headers: {
-      ...authHeaders(useDecisionToken),
       ...(requestOptions.body ? { "Content-Type": "application/json" } : {}),
+      ...(mutation && state.csrfProof ? { "X-Luthn-CSRF": state.csrfProof } : {}),
       ...(requestOptions.headers || {})
     }
   });
+
+  const nextCsrfProof = response.headers.get("X-Luthn-CSRF");
+  if (nextCsrfProof) {
+    state.csrfProof = nextCsrfProof;
+  }
 
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;
@@ -148,6 +138,29 @@ const requestJson = async (url, options = {}) => {
   }
 
   return body;
+};
+
+const hasConsoleSession = () => ["Active", "Restricted"].includes(state.consoleSession?.state);
+
+const refreshConsoleSession = async () => {
+  let session = await requestJson("/api/operator/session", { cache: "no-store" });
+  if (session?.state === "Anonymous" && session?.nextAction === "create-local-session") {
+    session = await requestJson("/api/operator/session/local", { method: "POST" });
+  }
+
+  state.consoleSession = session;
+  renderAuthStatus();
+  const mode = $("#sessionMode");
+  const expiry = $("#sessionExpiry");
+  if (mode) {
+    mode.textContent = session?.mode || "Unavailable";
+  }
+  if (expiry) {
+    expiry.textContent = session?.idleExpiresAt
+      ? formatTimestamp(session.idleExpiresAt)
+      : "Login required";
+  }
+  return session;
 };
 
 const renderConsoleProfile = () => {
@@ -403,10 +416,10 @@ const refreshAgentConnections = async () => {
     setAction("connections refreshed", label);
   } catch {
     renderConnectionMessage("Agent connection status is unavailable.");
-    if (!state.token) {
-      renderConnectionMessage("Open Console access and add a service token to view agent connections.");
-      $("#connectionsStatus").textContent = "Configure access";
-      setAction("connections waiting", "Add a service token in Console access");
+    if (!hasConsoleSession()) {
+      renderConnectionMessage("Console login is required to view agent connections.");
+      $("#connectionsStatus").textContent = "Login required";
+      setAction("connections waiting", "Sign in through Console access");
     } else {
       $("#connectionsStatus").textContent = "Unavailable";
       setAction("connections failed", "Status unavailable");
@@ -424,9 +437,9 @@ const refreshSyncStatus = async () => {
     $("#syncStatus").textContent = `${result.connectionState} / ${result.outboxState}`;
     writeResult($("#publicationOutput"), result);
   } catch (error) {
-    if (!state.token) {
-      $("#syncStatus").textContent = "Configure access";
-      writeResult($("#publicationOutput"), "Open Console access and add a service token to view publication state.");
+    if (!hasConsoleSession()) {
+      $("#syncStatus").textContent = "Login required";
+      writeResult($("#publicationOutput"), "Console login is required to view publication state.");
     } else {
       $("#syncStatus").textContent = "Unavailable";
       writeResult($("#publicationOutput"), error.message);
@@ -528,12 +541,12 @@ const refreshProviderSettings = async () => {
     const settings = await requestJson("/api/operator/classification-provider");
     renderProviderSettings(settings);
   } catch (error) {
-    writeResult($("#providerOutput"), state.token
+    writeResult($("#providerOutput"), hasConsoleSession()
       ? error.message
-      : "Open Console access and add a service token to view provider settings.");
-    $("#providerStatus").textContent = state.token
+      : "Console login is required to view provider settings.");
+    $("#providerStatus").textContent = hasConsoleSession()
       ? "Provider settings unavailable"
-      : "Configure a service token in Console access";
+      : "Console login required";
   }
 };
 
@@ -634,10 +647,10 @@ const refreshAudit = async (event) => {
     state.auditBaseQuery = "";
     renderAuditRows([]);
     $("#nextAuditPage").disabled = true;
-    $("#auditStatus").textContent = state.token
+    $("#auditStatus").textContent = hasConsoleSession()
       ? "Audit metadata is unavailable for these filters."
-      : "Configure a service token in Console access to load audit metadata.";
-    setAction(state.token ? "audit failed" : "audit waiting", state.token ? error.message : "Add a service token in Console access");
+      : "Console login is required to load audit metadata.";
+    setAction(hasConsoleSession() ? "audit failed" : "audit waiting", hasConsoleSession() ? error.message : "Sign in through Console access");
   }
 };
 
@@ -744,9 +757,7 @@ const refreshAccessRequests = async (event) => {
   params.set("limit", limit);
 
   try {
-    const result = await requestJson(`/api/access-requests?${params}`, {
-      useDecisionToken: true
-    });
+    const result = await requestJson(`/api/access-requests?${params}`);
     const requests = Array.isArray(result.requests) ? result.requests : [];
     renderAccessRows(requests);
     if (previousSelectedId && requests.some((request) => request.id === previousSelectedId)) {
@@ -757,10 +768,10 @@ const refreshAccessRequests = async (event) => {
     setAction("access refreshed", `${requests.length} requests`);
   } catch (error) {
     renderAccessRows([]);
-    clearAccessDetail(state.decisionToken
+    clearAccessDetail(hasConsoleSession()
       ? "Access requests could not be loaded."
-      : "Open Console access and add a decision token with access.decide.");
-    setAction(state.decisionToken ? "access failed" : "access waiting", state.decisionToken ? error.message : "Add a decision token in Console access");
+      : "Console login is required to review sensitive access requests.");
+    setAction(hasConsoleSession() ? "access failed" : "access waiting", hasConsoleSession() ? error.message : "Sign in through Console access");
   }
 };
 
@@ -790,8 +801,7 @@ const decideAccessRequest = async (id, decision) => {
   try {
     const result = await requestJson(`/api/access-requests/${encodeURIComponent(id)}/${decision}`, {
       method: "POST",
-      body: JSON.stringify(body),
-      useDecisionToken: true
+      body: JSON.stringify(body)
     });
     setAction(`access ${decision}`, result.id);
     await refreshAccessRequests();
@@ -869,7 +879,6 @@ const loadAccessRequestDetail = async (id) => {
 
   try {
     const detail = await requestJson(`/api/access-requests/${encodeURIComponent(id)}/operator-detail`, {
-      useDecisionToken: true,
       cache: "no-store"
     });
     if (state.accessDetailRequestSequence !== sequence) {
@@ -1037,59 +1046,21 @@ const fillIntakeExample = () => {
   $("#intakeForm").content.value = "Implementation decision and release runbook note.";
 };
 
-$("#serviceToken").value = state.token;
-$("#decisionToken").value = state.decisionToken;
-$("#operatorIdentity").value = state.operatorIdentity;
 renderAuthStatus();
 setConsoleView("overview");
 document.querySelectorAll("[data-console-nav]").forEach((control) => {
   control.addEventListener("click", () => setConsoleView(control.dataset.consoleNav));
 });
-$("#saveToken").addEventListener("click", () => {
-  state.token = $("#serviceToken").value.trim();
-  state.decisionToken = $("#decisionToken").value.trim();
-  state.operatorIdentity = $("#operatorIdentity").value.trim();
-  clearAccessDetail("Credentials changed. Select a request again.");
-  if (state.token) {
-    sessionStorage.setItem("luthn.serviceToken", state.token);
-  } else {
-    sessionStorage.removeItem("luthn.serviceToken");
+$("#logoutSession").addEventListener("click", async () => {
+  try {
+    await requestJson("/api/operator/session/logout", { method: "POST" });
+  } finally {
+    state.consoleSession = null;
+    state.csrfProof = "";
+    renderAuthStatus();
+    renderSessionGuidance();
+    setAction("session ended", "Reload to create a new eligible Local session or sign in to Cloud");
   }
-  if (state.decisionToken) {
-    sessionStorage.setItem("luthn.decisionToken", state.decisionToken);
-  } else {
-    sessionStorage.removeItem("luthn.decisionToken");
-  }
-  if (state.operatorIdentity) {
-    sessionStorage.setItem("luthn.operatorIdentity", state.operatorIdentity);
-  } else {
-    sessionStorage.removeItem("luthn.operatorIdentity");
-  }
-  renderAuthStatus();
-  setAction("token saved", state.token || state.decisionToken ? "Session credentials updated" : "No token set");
-  if (state.token || state.decisionToken) {
-    refreshAgentConnections();
-    refreshSyncStatus();
-    refreshProviderSettings();
-    refreshAccessRequests();
-    refreshAudit();
-  } else {
-    renderCredentialGuidance();
-  }
-});
-$("#clearToken").addEventListener("click", () => {
-  state.token = "";
-  state.decisionToken = "";
-  state.operatorIdentity = "";
-  $("#serviceToken").value = "";
-  $("#decisionToken").value = "";
-  $("#operatorIdentity").value = "";
-  sessionStorage.removeItem("luthn.serviceToken");
-  sessionStorage.removeItem("luthn.decisionToken");
-  sessionStorage.removeItem("luthn.operatorIdentity");
-  renderAuthStatus();
-  setAction("token cleared", "Bearer header disabled");
-  renderCredentialGuidance();
 });
 $("#previewForm").addEventListener("submit", previewContent);
 $("#intakeForm").addEventListener("submit", submitSource);
@@ -1119,14 +1090,25 @@ $("#readPublication").addEventListener("click", readPublication);
 $("#approvePublication").addEventListener("click", () => changePublication("approve"));
 $("#revokePublication").addEventListener("click", () => changePublication("revoke"));
 
-refreshConsoleProfile();
-refreshStatus();
-if (state.token || state.decisionToken) {
-  refreshAgentConnections();
-  refreshSyncStatus();
-  refreshProviderSettings();
-  refreshAccessRequests();
-  refreshAudit();
-} else {
-  renderCredentialGuidance();
-}
+const initializeConsole = async () => {
+  refreshConsoleProfile();
+  refreshStatus();
+  try {
+    await refreshConsoleSession();
+  } catch (error) {
+    state.consoleSession = null;
+    setAction("session unavailable", error.message);
+  }
+
+  if (hasConsoleSession()) {
+    refreshAgentConnections();
+    refreshSyncStatus();
+    refreshProviderSettings();
+    refreshAccessRequests();
+    refreshAudit();
+  } else {
+    renderSessionGuidance();
+  }
+};
+
+initializeConsole();

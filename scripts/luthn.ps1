@@ -962,6 +962,7 @@ function Write-InitialConfig {
         "Luthn__Memory__AutomaticTurnCleanupEnabled=true",
         "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60",
         "Luthn__Memory__AutomaticTurnCleanupBatchSize=100",
+        "Luthn__Console__LocalOnly=true",
         "Luthn__Auth__RequireServiceToken=true",
         "Luthn__Identity__Mode=SingleOwner",
         "Luthn__Identity__SingleOwnerUserId=local-owner",

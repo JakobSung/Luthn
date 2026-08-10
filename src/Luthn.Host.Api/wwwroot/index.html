@@ -27,7 +27,7 @@
       <div class="topbar-actions">
         <div class="auth-summary" aria-live="polite">
           <span class="eyebrow" data-i18n="auth.summaryLabel">Console access</span>
-          <strong id="authStatus" data-i18n="auth.notConfigured">Not configured</strong>
+          <strong id="authStatus" data-i18n="auth.starting">Starting secure session</strong>
         </div>
         <button id="openSettings" type="button" class="secondary" data-console-nav="settings" data-i18n="auth.openSettings">Set up access</button>
       </div>
@@ -59,7 +59,7 @@
           <li>
             <span>01</span>
             <strong data-i18n="orientation.stepAccessTitle">Set up access</strong>
-            <p data-i18n="orientation.stepAccessBody">Add the API token for reading the local runtime. Add a separate decision token only when you approve or deny.</p>
+            <p data-i18n="orientation.stepAccessBody">Personal Local mode starts a bounded session automatically. Enrolled installations require Cloud login.</p>
             <button type="button" class="text-button" data-console-nav="settings" data-i18n="orientation.stepAccessAction">Open access settings</button>
           </li>
           <li>
@@ -83,51 +83,41 @@
             <p class="eyebrow" data-i18n="auth.eyebrow">Access setup</p>
             <h2 id="authPanelTitle" data-i18n="auth.title">How this console authenticates</h2>
           </div>
-          <span id="authPanelStatus" class="inline-status" aria-live="polite" data-i18n="auth.notConfigured">Not configured</span>
+          <span id="authPanelStatus" class="inline-status" aria-live="polite" data-i18n="auth.starting">Starting secure session</span>
         </div>
-        <p class="auth-intro" data-i18n="auth.description">Tokens are local session credentials. They are kept in this browser session only and are sent as bearer headers to the local Host API.</p>
-        <p class="auth-scope-note" data-i18n="auth.scopeNote">Common service scopes: agent.connection.read, classification.preview, source.write, external-publication.read/write, audit.read. Configure only what this operator needs.</p>
+        <p class="auth-intro" data-i18n="auth.description">The Host keeps the credential server-side. The browser receives only a bounded HttpOnly session cookie and never reads a service or decision token.</p>
+        <p class="auth-scope-note" data-i18n="auth.scopeNote">LocalAuto is available only for an un-enrolled SingleOwner installation bound to loopback. Cloud mode requires login.</p>
         <div class="auth-explainer">
           <article>
             <span class="auth-step">01</span>
-            <strong data-i18n="auth.serviceTitle">Service token = read and operator API access</strong>
-            <p data-i18n="auth.serviceBody">Use the token configured for this Luthn installation. In Testing mode it can be blank. It does not grant sensitive approval by itself.</p>
+            <strong data-i18n="auth.serviceTitle">Personal Local = automatic session</strong>
+            <p data-i18n="auth.serviceBody">No key entry is needed. The server permits it only on the hardened personal installation.</p>
           </article>
           <article>
             <span class="auth-step">02</span>
-            <strong data-i18n="auth.decisionTitle">Decision token = approve or deny</strong>
-            <p data-i18n="auth.decisionBody">Use a trusted operator token with the decision scope for access requests. Keep it separate when read-only operators should not decide.</p>
+            <strong data-i18n="auth.decisionTitle">Luthn Cloud = login required</strong>
+            <p data-i18n="auth.decisionBody">After enrollment, LocalAuto is revoked and human access is derived from Cloud membership.</p>
           </article>
           <article>
             <span class="auth-step">03</span>
-            <strong data-i18n="auth.identityTitle">Operator label = audit context only</strong>
-            <p data-i18n="auth.identityBody">This optional label appears in audit metadata. It never creates permission or changes the authenticated identity.</p>
+            <strong data-i18n="auth.identityTitle">Agent credentials stay separate</strong>
+            <p data-i18n="auth.identityBody">Existing service tokens continue to authenticate agents and API clients, never a human console session.</p>
           </article>
         </div>
-        <form id="authForm" class="stack">
-          <div class="token-control">
-            <label for="serviceToken">
-              <span data-i18n="auth.serviceLabel">Service token</span>
-              <small data-i18n="auth.serviceHint">Used for non-decision API calls; the required scope depends on the selected menu.</small>
-              <input id="serviceToken" name="serviceToken" type="password" autocomplete="off" placeholder="Optional in Testing mode" data-i18n-placeholder="auth.servicePlaceholder">
-            </label>
-            <label for="decisionToken">
-              <span data-i18n="auth.decisionLabel">Decision token</span>
-              <small data-i18n="auth.decisionHint">Required for sensitive-access list, detail, approve, and deny.</small>
-              <input id="decisionToken" name="decisionToken" type="password" autocomplete="off" placeholder="Operator token with access.decide" data-i18n-placeholder="auth.decisionPlaceholder">
-            </label>
-            <label for="operatorIdentity">
-              <span data-i18n="auth.identityLabel">Operator label</span>
-              <small data-i18n="auth.identityHint">Optional audit label; not an authorization control.</small>
-              <input id="operatorIdentity" name="operatorIdentity" maxlength="64" autocomplete="off" placeholder="for example local-operator" data-i18n-placeholder="auth.identityPlaceholder">
-            </label>
+        <dl class="mode-boundaries session-boundaries">
+          <div>
+            <dt data-i18n="auth.modeLabel">Session mode</dt>
+            <dd id="sessionMode">Checking</dd>
           </div>
-          <div class="row-actions auth-actions">
-            <button id="saveToken" type="button" data-i18n="auth.save">Save for this session</button>
-            <button id="clearToken" type="button" class="secondary" data-i18n="auth.clear">Clear session credentials</button>
+          <div>
+            <dt data-i18n="auth.expiryLabel">Idle expiry</dt>
+            <dd id="sessionExpiry">Checking</dd>
           </div>
-          <p class="security-note" data-i18n="auth.securityNote">Never paste a credential into a ticket, screenshot, prompt, or audit export. The console does not display raw Vault/source content.</p>
-        </form>
+        </dl>
+        <div class="row-actions auth-actions">
+          <button id="logoutSession" type="button" class="secondary" data-i18n="auth.logout">End this session</button>
+        </div>
+        <p class="security-note" data-i18n="auth.securityNote">No console credential is placed in the page, URL, browser storage, logs, or exports.</p>
       </section>
 
       <section class="mode-banner" data-console-view="overview" aria-labelledby="consoleModeLabel">

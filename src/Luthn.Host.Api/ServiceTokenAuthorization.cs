@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Luthn.Core.Common;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
 
@@ -265,6 +266,15 @@ public static class ServiceTokenAuthorization
         var authorization = httpContext.Request.Headers.Authorization.ToString();
         if (!TryReadBearer(authorization, out var bearer))
         {
+            var consoleResult = await TryAuthorizeConsoleSessionAsync(
+                context,
+                next,
+                requiredScope);
+            if (consoleResult.Handled)
+            {
+                return consoleResult.Result;
+            }
+
             httpContext.Response.Headers.WWWAuthenticate = "Bearer";
             return Unauthorized();
         }
@@ -333,6 +343,51 @@ public static class ServiceTokenAuthorization
             NormalizeHubIdentity(matchedToken.HubSessionId));
         httpContext.Items[ActorItemKey] = actor;
         return await ContinueWhenSensitiveMemoryProtectionIsReady(context, next);
+    }
+
+    private static async ValueTask<(bool Handled, object? Result)> TryAuthorizeConsoleSessionAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next,
+        string requiredScope)
+    {
+        var httpContext = context.HttpContext;
+        var sessions = httpContext.RequestServices.GetRequiredService<IConsoleSessionStore>();
+        var session = sessions.Authenticate(httpContext);
+        if (session is null)
+        {
+            return (false, null);
+        }
+
+        if (!session.Scopes.Contains(requiredScope))
+        {
+            return (true, TypedResults.Problem(
+                title: "Forbidden.",
+                detail: "The console session is not authorized for this operation.",
+                statusCode: StatusCodes.Status403Forbidden));
+        }
+
+        if (!HttpMethods.IsGet(httpContext.Request.Method) &&
+            !HttpMethods.IsHead(httpContext.Request.Method) &&
+            !HttpMethods.IsOptions(httpContext.Request.Method) &&
+            !HttpMethods.IsTrace(httpContext.Request.Method))
+        {
+            var antiforgery = httpContext.RequestServices.GetRequiredService<IAntiforgery>();
+            var csrfFailure = await ConsoleRequestSecurity.ValidateMutationAsync(httpContext, antiforgery);
+            if (csrfFailure is not null)
+            {
+                return (true, csrfFailure);
+            }
+        }
+
+        httpContext.Items[ServiceTokenAuthenticatedItemKey] = false;
+        httpContext.Items[PrincipalItemKey] = new LuthnRequestPrincipal(
+            session.UserId,
+            session.WorkspaceId,
+            LuthnActorKind.User,
+            session.ActorId,
+            IsOperator: true);
+        httpContext.Items[ActorItemKey] = session.ActorId;
+        return (true, await ContinueWhenSensitiveMemoryProtectionIsReady(context, next));
     }
 
     private static ValueTask<object?> ContinueWhenSensitiveMemoryProtectionIsReady(

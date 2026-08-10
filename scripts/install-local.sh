@@ -220,6 +220,7 @@ ensure_local_service_token() {
   append_env_if_missing "LUTHN_OPERATOR_VALUE" "$operator_token"
   append_env_if_missing "Luthn__Auth__Tokens__1__Sha256Digest" "$operator_digest"
   append_env_if_missing "Luthn__Auth__RequireServiceToken" "true"
+  append_env_if_missing "Luthn__Console__LocalOnly" "true"
   append_env_if_missing "Luthn__Identity__Mode" "SingleOwner"
   append_env_if_missing "Luthn__Identity__SingleOwnerUserId" "local-owner"
   append_env_if_missing "Luthn__Auth__Tokens__0__Name" "local-agent"

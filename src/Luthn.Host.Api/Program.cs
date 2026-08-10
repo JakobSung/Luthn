@@ -128,6 +128,17 @@ if (hostOptions.EnableForwardedHeaders)
 }
 builder.Services.Configure<LuthnAuthOptions>(builder.Configuration.GetSection("Luthn:Auth"));
 builder.Services.Configure<LuthnIdentityOptions>(builder.Configuration.GetSection("Luthn:Identity"));
+builder.Services.Configure<ConsoleAccessOptions>(builder.Configuration.GetSection(ConsoleAccessOptions.SectionName));
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = ConsoleAccessOptions.AntiforgeryHeaderName;
+    options.Cookie.Name = "LuthnConsoleCsrf";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+});
+builder.Services.AddSingleton<IConsoleInstallationState, UnenrolledConsoleInstallationState>();
+builder.Services.AddSingleton<IConsoleSessionStore, InMemoryConsoleSessionStore>();
 builder.Services.AddOptions<HubIngressOptions>()
     .Bind(builder.Configuration.GetSection("Luthn:Hub:Ingress"))
     .Validate(options => options.IsValid, "Luthn Hub ingress limits are invalid.")
@@ -196,6 +207,7 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 
 app.MapLuthnApi();
+app.MapConsoleSessions();
 app.MapOperatorConfiguration();
 app.MapOperationalMetrics();
 app.MapSearchTelemetry();

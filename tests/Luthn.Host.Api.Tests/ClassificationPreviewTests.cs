@@ -86,7 +86,8 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("applyAuditPreset", script, StringComparison.Ordinal);
         Assert.Contains("clearAccessDetail(\"Refreshing access requests...\")", script, StringComparison.Ordinal);
         Assert.Contains("requests.some((request) => request.id === previousSelectedId)", script, StringComparison.Ordinal);
-        Assert.Contains("useDecisionToken: true", script, StringComparison.Ordinal);
+        Assert.Contains("X-Luthn-CSRF", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("sessionStorage", script, StringComparison.Ordinal);
         Assert.DoesNotContain("request.requestedBy", script, StringComparison.Ordinal);
         Assert.DoesNotContain("request.workspaceId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("detail?.requestedBy", script, StringComparison.Ordinal);
