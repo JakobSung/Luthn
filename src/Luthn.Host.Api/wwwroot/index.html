@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luthn Operator Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/operator.css?v=console-nav-3">
+  <link rel="stylesheet" href="/assets/operator.css?v=console-nav-5">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to console</a>
@@ -114,6 +114,16 @@
             <dd id="sessionExpiry">Checking</dd>
           </div>
         </dl>
+        <section class="enrollment-card local-access-card" aria-labelledby="localAccessTitle">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="auth.localEyebrow">Personal Local access</p>
+              <h3 id="localAccessTitle" data-i18n="auth.localTitle">Connect local access</h3>
+            </div>
+          </div>
+          <p id="localAccessDetail" class="security-note" data-i18n="auth.localReadyDetail">Local access is ready to connect from this console.</p>
+          <button id="connectLocal" type="button" data-i18n="auth.connectLocal">Connect local access</button>
+        </section>
         <section class="enrollment-card" aria-labelledby="enrollmentTitle">
           <div class="panel-heading compact">
             <div>
@@ -158,11 +168,9 @@
           <p class="security-note" data-i18n="lifecycle.recoveryNote">Recovery proof transport and production identity providers remain outside this public OSS implementation.</p>
         </section>
         <div class="row-actions auth-actions">
-          <button id="connectLocal" type="button" data-i18n="auth.connectLocal">Connect local access</button>
           <button id="cloudLogin" type="button" data-i18n="auth.cloudLogin">Sign in with Luthn Cloud</button>
           <button id="logoutSession" type="button" class="secondary" data-i18n="auth.logout">End this session</button>
         </div>
-        <p id="localAccessDetail" class="security-note" data-i18n="auth.localReadyDetail">Local access is ready to connect from this console.</p>
         <p id="cloudLoginDetail" class="security-note" data-i18n="auth.cloudUnavailable">Cloud login is not configured in this OSS build.</p>
         <p class="security-note" data-i18n="auth.securityNote">No console credential is placed in the page, URL, browser storage, logs, or exports.</p>
       </section>
@@ -615,7 +623,7 @@
       </section>
     </main>
   </div>
-  <script src="/assets/operator-i18n.js?v=console-nav-3" defer></script>
-  <script src="/assets/operator.js?v=console-nav-3" defer></script>
+  <script src="/assets/operator-i18n.js?v=console-nav-5" defer></script>
+  <script src="/assets/operator.js?v=console-nav-5" defer></script>
 </body>
 </html>
