@@ -235,9 +235,12 @@ and make `/readyz` fail when no other active token is available.
 The operator console can configure the active classification provider at
 `/api/operator/classification-provider`. Self-host operators can select `Mock`,
 `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, or `External
-HTTP`, enter a model and API key, and run a provider test from the console.
-Provider API keys are stored server-side and are not returned by the API or
-rendered back into the console after save.
+HTTP`, enter non-secret provider settings, and run a provider test from the
+console. The browser never accepts provider credentials. Supply them to the
+server through the runtime secret `Luthn__Classification__Credential`; the
+console reports only whether a credential is present. Existing API clients may
+still use the additive `apiKey` request field for backward compatibility, but
+credentials are never returned by the API or rendered into the console.
 
 Direct third-party LLM providers receive raw source content in the classification
 prompt before Luthn knows the content sensitivity. Configure `ChatGPT API`,

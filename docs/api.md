@@ -322,6 +322,12 @@ provider configuration. All three require the `config.write` service-token
 scope. Supported provider values are `Mock`, `ExternalHttp`, `OpenAi`,
 `Anthropic`, `GoogleAi`, and `OpenRouter`.
 
+The browser console never accepts a raw provider credential. Configure
+`Luthn__Classification__Credential` in the server runtime secret environment;
+the console sends only non-secret provider settings and the clear-credential
+choice. The optional `apiKey` request member remains accepted for existing API
+clients, but it is never included in a response.
+
 Save request:
 
 ```json

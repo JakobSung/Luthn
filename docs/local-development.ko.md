@@ -136,7 +136,7 @@ user 또는 connector마다 별도 최소권한 token을 사용합니다. 같은
 
 ## 분류 Provider 설정
 
-운영자 화면의 `/api/operator/classification-provider`에서 `Mock`, `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, `External HTTP`를 선택하고 model·API key·연결 시험을 설정할 수 있습니다. API key는 server에 저장하며 응답이나 화면에 되돌려 보내지 않습니다.
+운영자 화면의 `/api/operator/classification-provider`에서 `Mock`, `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, `External HTTP`를 선택하고 비밀정보가 아닌 model·endpoint·연결 시험을 설정할 수 있습니다. 브라우저는 provider 자격 증명을 입력받지 않습니다. 자격 증명은 server runtime secret `Luthn__Classification__Credential`로 제공하고 화면에는 존재 여부만 표시합니다. 기존 API client의 `apiKey` 요청 필드는 하위 호환을 위해 유지하지만 자격 증명을 API 응답이나 화면에 되돌려 보내지 않습니다.
 
 직접 제3자 LLM provider는 민감도 판정 전에 원문을 받습니다. 이 전송이 허용될 때만 사용하고, 원문을 통제된 경계에 남겨야 하면 `External HTTP`를 사용합니다. API key를 보내는 endpoint는 HTTPS여야 합니다. 기본 설정은 새 설치가 바로 동작하도록 로컬 `mock`을 선택합니다. `mock`은 결정적 keyword 분류기이므로 provider 기반의 안전성 또는 다국어 분류가 필요하면 외부 provider로 교체하세요. 수동으로 로컬 설정을 지정할 때는 두 값을 함께 설정할 수 있습니다.
 

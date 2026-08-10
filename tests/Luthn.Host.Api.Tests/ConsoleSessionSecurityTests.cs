@@ -108,6 +108,9 @@ public sealed class ConsoleSessionSecurityTests
 
         Assert.DoesNotContain("serviceToken", index, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("decisionToken", index, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("name=\"apiKey\"", index, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("form.get(\"apiKey\")", script, StringComparison.Ordinal);
+        Assert.Contains("Luthn__Classification__Credential", index, StringComparison.Ordinal);
         Assert.DoesNotContain("sessionStorage", script, StringComparison.Ordinal);
         Assert.DoesNotContain("localStorage", script, StringComparison.Ordinal);
         Assert.Contains("/api/operator/session/local", script, StringComparison.Ordinal);

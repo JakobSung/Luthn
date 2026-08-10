@@ -155,7 +155,12 @@ public sealed class OperatorClassificationSettingsStore(
         }
 
         var existing = await ReadAsync(cancellationToken);
-        return existing.Provider == provider ? existing.ApiKey : "";
+        if (existing.Provider == provider && existing.HasApiKey)
+        {
+            return existing.ApiKey;
+        }
+
+        return ReadClassificationOptions().Credential?.Trim() ?? "";
     }
 
     private OperatorClassificationProviderSettings ReadCurrent()

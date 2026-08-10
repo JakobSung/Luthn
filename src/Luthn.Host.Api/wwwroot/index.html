@@ -312,13 +312,13 @@
             </label>
           </div>
           <div class="form-grid provider-grid">
-            <label>
-              API key
-              <input name="apiKey" type="password" autocomplete="off" placeholder="Leave blank to keep current key">
-            </label>
+            <p class="field-help">
+              Provider credentials are loaded only from the server runtime secret
+              <code>Luthn__Classification__Credential</code>. They are never entered in this browser.
+            </p>
             <label class="checkbox-row">
               <input name="clearApiKey" type="checkbox">
-              Clear saved key
+              Remove the saved server-side credential
             </label>
           </div>
           <div class="row-actions provider-actions">

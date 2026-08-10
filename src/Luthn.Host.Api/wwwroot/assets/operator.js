@@ -67,7 +67,6 @@ const renderSessionGuidance = () => {
   writeResult($("#providerOutput"), "Console login is required to view provider settings.");
   const providerForm = $("#providerForm");
   if (providerForm) {
-    providerForm.apiKey.value = "";
     providerForm.clearApiKey.checked = false;
   }
   renderAccessRows([]);
@@ -683,7 +682,6 @@ const renderProviderSettings = (settings) => {
   form.model.value = settings.model || "";
   form.endpoint.value = settings.endpoint || "";
   form.authHeaderName.value = settings.authHeaderName || "Authorization";
-  form.apiKey.value = "";
   form.clearApiKey.checked = false;
   $("#providerStatus").textContent = settings.statusDetail;
   writeResult($("#providerOutput"), settings);
@@ -723,7 +721,6 @@ const saveProviderSettings = async (event) => {
     model: form.get("model")?.toString().trim(),
     endpoint: form.get("endpoint")?.toString().trim(),
     authHeaderName: form.get("authHeaderName")?.toString().trim(),
-    apiKey: form.get("apiKey")?.toString(),
     clearApiKey: form.get("clearApiKey") === "on"
   };
 

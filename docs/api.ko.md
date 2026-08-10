@@ -164,6 +164,11 @@ POST /api/operator/classification-provider/test
 
 현재 분류 provider 설정을 조회·저장·시험하는 운영자 전용 endpoint입니다. 세 endpoint 모두 서비스 token에 `config.write` scope가 있어야 합니다. 지원 값은 `Mock`, `ExternalHttp`, `OpenAi`, `Anthropic`, `GoogleAi`, `OpenRouter`입니다.
 
+브라우저 콘솔은 원시 provider 자격 증명을 입력받지 않습니다. server runtime secret
+환경에 `Luthn__Classification__Credential`을 설정하면 콘솔은 비밀정보가 아닌 provider
+설정과 자격 증명 삭제 여부만 전송합니다. 기존 API client를 위해 선택적 `apiKey` 요청
+필드는 계속 허용하지만 어떤 응답에도 포함하지 않습니다.
+
 ```json
 {
   "provider": "ExternalHttp",
