@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Luthn.Sdk.Console;
+using Luthn.Sdk.Sync;
 
 namespace Luthn.Sdk.Tests;
 
@@ -68,5 +69,33 @@ public sealed class ConsoleSessionContractTests
         {
             Assert.DoesNotContain(value, json, StringComparison.OrdinalIgnoreCase);
         }
+    }
+}
+
+public sealed class ConsoleEnrollmentContractTests
+{
+    [Fact]
+    public void EnrollmentContractRemainsBoundedAndTenantNeutral()
+    {
+        var response = new ConsoleEnrollmentDto(
+            InstallationEnrollmentState.Pending,
+            ConsoleEnrollmentAdapter.Fake,
+            DateTimeOffset.Parse("2026-08-10T10:10:00Z"),
+            "0123456789abcdef",
+            ["console-login.v1"],
+            "Luthn Cloud",
+            "verify-enrollment",
+            true);
+
+        var json = JsonSerializer.Serialize(response);
+
+        Assert.Contains("\"state\":\"Pending\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"installationFingerprint\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("organization", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("transcript", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("localPath", json, StringComparison.OrdinalIgnoreCase);
     }
 }

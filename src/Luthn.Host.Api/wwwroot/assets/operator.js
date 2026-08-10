@@ -8,7 +8,8 @@ const state = {
   auditEvents: [],
   auditNextCursor: "",
   auditBaseQuery: "",
-  consoleProfile: null
+  consoleProfile: null,
+  enrollment: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -161,6 +162,58 @@ const refreshConsoleSession = async () => {
       : "Login required";
   }
   return session;
+};
+
+const renderEnrollment = () => {
+  const enrollment = state.enrollment;
+  if (!enrollment) {
+    $("#enrollmentStatus").textContent = "Unavailable";
+    $("#enrollmentFingerprint").textContent = "Unavailable";
+    $("#startEnrollment").disabled = true;
+    $("#verifyEnrollment").disabled = true;
+    return;
+  }
+
+  $("#enrollmentStatus").textContent = enrollment.state || enrollment.adapter;
+  $("#enrollmentFingerprint").textContent = boundedText(enrollment.installationFingerprint, 64, "Unavailable");
+  $("#startEnrollment").disabled = enrollment.adapter === "Disabled" || Boolean(enrollment.state);
+  $("#verifyEnrollment").disabled = enrollment.state !== "Pending";
+  $("#enrollmentDetail").textContent = enrollment.state === "Approved"
+    ? "Enrollment is active. End this Local session and continue with Cloud login."
+    : enrollment.state === "Pending"
+      ? "The Local session stays active until the bound grant is durably verified."
+      : enrollment.adapter === "Disabled"
+        ? "Cloud enrollment is disabled. Zero outbound is preserved."
+        : "Review the five steps, then start a provider-neutral enrollment challenge.";
+};
+
+const refreshEnrollment = async () => {
+  if (!hasConsoleSession()) {
+    state.enrollment = null;
+    renderEnrollment();
+    return;
+  }
+
+  try {
+    state.enrollment = await requestJson("/api/operator/enrollment", { cache: "no-store" });
+  } catch {
+    state.enrollment = null;
+  }
+  renderEnrollment();
+};
+
+const changeEnrollment = async (action) => {
+  try {
+    state.enrollment = await requestJson(`/api/operator/enrollment/${action}`, { method: "POST" });
+    renderEnrollment();
+    if (state.enrollment?.state === "Approved") {
+      await refreshConsoleSession();
+      renderSessionGuidance();
+    }
+  } catch (error) {
+    $("#enrollmentDetail").textContent = error.message;
+    setAction("enrollment failed", error.message);
+  }
 };
 
 const renderConsoleProfile = () => {
@@ -1062,6 +1115,8 @@ $("#logoutSession").addEventListener("click", async () => {
     setAction("session ended", "Reload to create a new eligible Local session or sign in to Cloud");
   }
 });
+$("#startEnrollment").addEventListener("click", () => changeEnrollment("start"));
+$("#verifyEnrollment").addEventListener("click", () => changeEnrollment("verify"));
 $("#previewForm").addEventListener("submit", previewContent);
 $("#intakeForm").addEventListener("submit", submitSource);
 $("#providerForm").addEventListener("submit", saveProviderSettings);
@@ -1101,6 +1156,7 @@ const initializeConsole = async () => {
   }
 
   if (hasConsoleSession()) {
+    refreshEnrollment();
     refreshAgentConnections();
     refreshSyncStatus();
     refreshProviderSettings();

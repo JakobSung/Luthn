@@ -114,6 +114,28 @@
             <dd id="sessionExpiry">Checking</dd>
           </div>
         </dl>
+        <section class="enrollment-card" aria-labelledby="enrollmentTitle">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="enrollment.eyebrow">Optional Cloud connection</p>
+              <h3 id="enrollmentTitle" data-i18n="enrollment.title">Connect this installation to Luthn Cloud</h3>
+            </div>
+            <span id="enrollmentStatus" class="inline-status" aria-live="polite">Checking</span>
+          </div>
+          <ol class="enrollment-steps">
+            <li><strong data-i18n="enrollment.stepExplain">1. Review what changes</strong><span data-i18n="enrollment.stepExplainBody">Local data authority stays in OSS; human console access changes to Cloud login after activation.</span></li>
+            <li><strong data-i18n="enrollment.stepAccount">2. Verify Cloud account</strong><span data-i18n="enrollment.stepAccountBody">The provider verifies the person. This public OSS adapter never asks for a Cloud password.</span></li>
+            <li><strong data-i18n="enrollment.stepDestination">3. Verify destination</strong><span data-i18n="enrollment.stepDestinationBody">The provider, not the browser payload, determines the destination.</span></li>
+            <li><strong data-i18n="enrollment.stepInstallation">4. Confirm installation</strong><span data-i18n="enrollment.stepInstallationBody">The one-time grant is bound to this installation fingerprint.</span></li>
+            <li><strong data-i18n="enrollment.stepComplete">5. Activate Cloud login</strong><span data-i18n="enrollment.stepCompleteBody">Only durable grant verification revokes LocalAuto.</span></li>
+          </ol>
+          <p><span data-i18n="enrollment.fingerprint">Installation fingerprint</span>: <code id="enrollmentFingerprint">Unavailable</code></p>
+          <div class="row-actions">
+            <button id="startEnrollment" type="button" data-i18n="enrollment.start">Start connection</button>
+            <button id="verifyEnrollment" type="button" class="secondary" data-i18n="enrollment.verify">Verify and activate</button>
+          </div>
+          <p id="enrollmentDetail" class="security-note" data-i18n="enrollment.disabled">Cloud enrollment is disabled by default. Local operation remains unchanged.</p>
+        </section>
         <div class="row-actions auth-actions">
           <button id="logoutSession" type="button" class="secondary" data-i18n="auth.logout">End this session</button>
         </div>
