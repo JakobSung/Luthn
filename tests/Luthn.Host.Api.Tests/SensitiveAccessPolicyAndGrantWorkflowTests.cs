@@ -69,7 +69,12 @@ public sealed class SensitiveAccessGrantWorkflowTests
         await db.SaveChangesAsync();
         var workflow = TestData.CreateWorkflow(db, new ManualTimeProvider(TestData.ObservedAt));
         var approvedRequest = await TestData.CreateRequestAsync(workflow, "approved-session");
-        var deniedRequest = await TestData.CreateRequestAsync(workflow, "denied-session");
+        TestData.AddReference(db, "sensitive-reference-b");
+        await db.SaveChangesAsync();
+        var deniedRequest = await TestData.CreateRequestAsync(
+            workflow,
+            "denied-session",
+            "sensitive-reference-b");
 
         var approved = await workflow.DecideRequestAsync(
             approvedRequest.Id,
@@ -168,27 +173,30 @@ internal static class TestData
     internal static SensitiveAccessWorkflow CreateWorkflow(LuthnDbContext db, TimeProvider time) =>
         new(db, NullOperationalMetrics.Instance, time);
 
-    internal static void AddReference(LuthnDbContext db) =>
+    internal static void AddReference(
+        LuthnDbContext db,
+        string referenceId = ReferenceId) =>
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {
-            Id = ReferenceId,
-            SourceEventId = "source-a",
+            Id = referenceId,
+            SourceEventId = $"source-{referenceId}",
             SourceSystem = "local",
             SourceType = "vault",
             ReceivedAt = ObservedAt,
             ContainsSensitiveMaterial = true,
-            ReferenceLabel = "sensitive-record:source-a",
+            ReferenceLabel = $"sensitive-record:{referenceId}",
             WorkspaceId = "workspace-a",
             OwnerUserId = "owner-a"
         });
 
     internal static async Task<SensitiveAccessRequestState> CreateRequestAsync(
         SensitiveAccessWorkflow workflow,
-        string sessionId) =>
+        string sessionId,
+        string sensitiveReferenceId = ReferenceId) =>
         (await workflow.CreateRequestAsync(
             new SensitiveAccessRequestCreateRequest
             {
-                SensitiveReferenceId = ReferenceId,
+                SensitiveReferenceId = sensitiveReferenceId,
                 Reason = "bounded request",
                 SessionId = sessionId
             },
@@ -243,5 +251,9 @@ internal static class TestData
 
 internal sealed class ManualTimeProvider(DateTimeOffset current) : TimeProvider
 {
-    public override DateTimeOffset GetUtcNow() => current;
+    private DateTimeOffset _current = current;
+
+    public override DateTimeOffset GetUtcNow() => _current;
+
+    internal void Advance(TimeSpan amount) => _current = _current.Add(amount);
 }

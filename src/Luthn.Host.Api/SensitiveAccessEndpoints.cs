@@ -3,6 +3,7 @@ using Luthn.Core.Persistence;
 using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Serialization;
 
 namespace Luthn.Host.Api;
 
@@ -432,7 +433,14 @@ internal static class SensitiveAccessEndpointMapping
                 request.RedactedOutputAvailable,
             OutputPolicy: ToOutputPolicy(
                 request.Status,
-                request.Status == SensitiveAccessRequestStatus.Approved && request.RedactedOutputAvailable));
+                request.Status == SensitiveAccessRequestStatus.Approved && request.RedactedOutputAvailable))
+        {
+            StatusCode = request.StatusCode,
+            RequestExpiresAt = request.RequestExpiresAt,
+            GrantExpiresAt = request.GrantExpiresAt,
+            RemainingReads = request.RemainingReads,
+            MaxReads = request.MaxReads
+        };
 
     internal static SensitiveAccessOperatorDetailResponse ToResponse(
         SensitiveAccessOperatorDetailState detail) =>
@@ -471,15 +479,19 @@ internal static class SensitiveAccessEndpointMapping
             ? BoundRedactedOutput(result.RedactedOutput!)
             : null;
         var payloadClass = redactedOutputAvailable ? "redacted-output" : "metadata-only";
-        IReadOnlyList<string> reasons = result.Status switch
+        IReadOnlyList<string> reasons = result.StatusCode switch
         {
-            SensitiveAccessRequestStatus.Approved when redactedOutputAvailable =>
+            SensitiveAccessStatusCodes.ResultReturned =>
                 ["Approved limited output is sourced from a public-safe redacted summary."],
-            SensitiveAccessRequestStatus.Approved =>
+            SensitiveAccessStatusCodes.GrantActive =>
                 ["Approval is recorded, but no public-safe redacted summary is available."],
-            SensitiveAccessRequestStatus.Denied =>
+            SensitiveAccessStatusCodes.GrantConsumed =>
+                ["The approved grant has no remaining reads; no output is available."],
+            SensitiveAccessStatusCodes.GrantExpired =>
+                ["The approved grant expired; no output is available."],
+            SensitiveAccessStatusCodes.RequestDenied =>
                 ["The sensitive access request was denied; no output is available."],
-            SensitiveAccessRequestStatus.Expired =>
+            SensitiveAccessStatusCodes.RequestExpired =>
                 ["The sensitive access request expired before a decision; no output is available."],
             _ =>
                 ["The sensitive access request is pending decision; no output is available."]
@@ -494,7 +506,14 @@ internal static class SensitiveAccessEndpointMapping
             redactedOutput,
             payloadClass,
             outputPolicy,
-            reasons);
+            reasons)
+        {
+            StatusCode = result.StatusCode,
+            RequestExpiresAt = result.RequestExpiresAt,
+            GrantExpiresAt = result.GrantExpiresAt,
+            RemainingReads = result.RemainingReads,
+            MaxReads = result.MaxReads
+        };
     }
 
     internal static string ToOutputPolicy(
@@ -558,7 +577,28 @@ public sealed record SensitiveAccessRequestResponse(
     string? DecidedBy,
     DateTimeOffset? DecidedAt,
     bool RedactedOutputAvailable,
-    string OutputPolicy);
+    string OutputPolicy)
+{
+    [JsonPropertyName("statusCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusCode { get; init; }
+
+    [JsonPropertyName("requestExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+
+    [JsonPropertyName("grantExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+
+    [JsonPropertyName("remainingReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("maxReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxReads { get; init; }
+}
 
 public sealed record SensitiveAccessOperatorReferenceResponse(
     string SourceSystem,
@@ -595,4 +635,25 @@ public sealed record SensitiveAccessResultResponse(
     string? RedactedOutput,
     string PayloadClass,
     string RedactionState,
-    IReadOnlyList<string> Reasons);
+    IReadOnlyList<string> Reasons)
+{
+    [JsonPropertyName("statusCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusCode { get; init; }
+
+    [JsonPropertyName("requestExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+
+    [JsonPropertyName("grantExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+
+    [JsonPropertyName("remainingReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("maxReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxReads { get; init; }
+}

@@ -467,22 +467,13 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
-    public async Task SensitiveAccessStatusCacheIsShortLivedAndPrincipalPartitioned()
+    public async Task SensitiveAccessStatusAlwaysReadsCurrentServerState()
     {
-        var now = DateTimeOffset.UnixEpoch;
         var client = new FakeLuthnClient();
-        var tool = new GetSensitiveAccessRequestTool(client, "principal-alice", () => now);
+        var tool = new GetSensitiveAccessRequestTool(client);
         using var args = JsonDocument.Parse("""{"id":"access-1"}""");
 
         await tool.InvokeAsync(args.RootElement);
-        await tool.InvokeAsync(args.RootElement);
-        Assert.Equal(1, client.SensitiveAccessStatusCallCount);
-
-        Assert.NotEqual(
-            GetSensitiveAccessRequestTool.BuildCacheKey("principal-alice", "access-1"),
-            GetSensitiveAccessRequestTool.BuildCacheKey("principal-bob", "access-1"));
-
-        now = now.AddSeconds(2);
         await tool.InvokeAsync(args.RootElement);
         Assert.Equal(2, client.SensitiveAccessStatusCallCount);
     }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq.Expressions;
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
 using Luthn.Core.Persistence;
@@ -68,6 +69,7 @@ internal sealed class SensitiveAccessWorkflow(
     private const int MaxStoredRedactedSummaryLength = 4000;
     private static readonly TimeSpan ReadPermitLifetime = TimeSpan.FromSeconds(5);
     private static readonly SemaphoreSlim PolicyRevisionLock = new(1, 1);
+    private static readonly SemaphoreSlim RequestResolutionLock = new(1, 1);
     private static readonly SemaphoreSlim NonRelationalDecisionLock = new(1, 1);
     private static readonly SemaphoreSlim NonRelationalGrantReadLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SensitiveAccessReadPermitState> _readPermits =
@@ -157,24 +159,17 @@ internal sealed class SensitiveAccessWorkflow(
             query = query.Where(record => record.Status == parsedStatus);
         }
 
+        var observedAt = timeProvider.GetUtcNow();
         var requests = await query
             .OrderByDescending(record => record.UpdatedAt)
             .ThenByDescending(record => record.CreatedAt)
             .Take(take)
-            .Select(record => new SensitiveAccessRequestState(
-                record.Id,
-                record.SensitiveRecordReferenceId,
-                record.Status,
-                record.RequestedBy,
-                record.SessionId,
-                record.CreatedAt,
-                record.ExpiresAt,
-                record.DecidedBy,
-                record.DecidedAt,
-                record.RedactedSummary != ""))
+            .Select(ToResolutionCandidateExpression())
             .ToArrayAsync(cancellationToken);
 
-        return new SensitiveAccessListResult(requests, null);
+        return new SensitiveAccessListResult(
+            requests.Select(request => ToState(request, observedAt)).ToArray(),
+            null);
     }
 
     public async Task<SensitiveAccessRequestState?> CreateRequestAsync(
@@ -199,47 +194,69 @@ internal sealed class SensitiveAccessWorkflow(
             return null;
         }
 
-        var observedAt = timeProvider.GetUtcNow();
-        var policy = await GetOrCreateActivePolicyAsync(
-            reference.WorkspaceId,
-            "workflow-default",
-            cancellationToken);
         var sessionId = string.IsNullOrWhiteSpace(request.SessionId)
             ? $"legacy-{Guid.NewGuid():N}"
             : request.SessionId.Trim();
-        var accessRequest = new SensitiveAccessRequestRecord
+        await RequestResolutionLock.WaitAsync(cancellationToken);
+        try
         {
-            Id = $"access-{Guid.NewGuid():N}",
-            SensitiveRecordReferenceId = reference.Id,
-            RequestedBy = actor,
-            SessionId = sessionId,
-            RequestReason = request.Reason.Trim(),
-            Status = SensitiveAccessRequestStatus.Pending,
-            CreatedAt = observedAt,
-            ExpiresAt = observedAt.AddSeconds(policy.RequestTimeoutSeconds),
-            UpdatedAt = observedAt,
-            WorkspaceId = reference.WorkspaceId,
-            OwnerUserId = reference.OwnerUserId,
-            PolicyRevision = policy.Revision,
-            RequestTimeoutSeconds = policy.RequestTimeoutSeconds
-        };
+            await ExpirePendingRequestsAsync(requestId: null, principal, cancellationToken);
+            var observedAt = timeProvider.GetUtcNow();
+            var existing = await ResolveForCreateAsync(
+                reference,
+                sessionId,
+                observedAt,
+                cancellationToken);
+            if (existing is not null)
+            {
+                return ToState(existing, observedAt);
+            }
 
-        db.SensitiveAccessRequests.Add(accessRequest);
-        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
-            principal,
-            actor,
-            "sensitive_access.requested",
-            accessRequest.Id,
-            "metadata-only",
-            "sensitive-boundary-only",
-            observedAt,
-            subjectType: "sensitive_access_request",
-            outcome: "requested"));
+            var policy = await GetOrCreateActivePolicyAsync(
+                reference.WorkspaceId,
+                "workflow-default",
+                cancellationToken);
+            var accessRequest = new SensitiveAccessRequestRecord
+            {
+                Id = $"access-{Guid.NewGuid():N}",
+                SensitiveRecordReferenceId = reference.Id,
+                RequestedBy = actor,
+                SessionId = sessionId,
+                RequestReason = request.Reason.Trim(),
+                Status = SensitiveAccessRequestStatus.Pending,
+                CreatedAt = observedAt,
+                ExpiresAt = observedAt.AddSeconds(policy.RequestTimeoutSeconds),
+                UpdatedAt = observedAt,
+                WorkspaceId = reference.WorkspaceId,
+                OwnerUserId = reference.OwnerUserId,
+                PolicyRevision = policy.Revision,
+                RequestTimeoutSeconds = policy.RequestTimeoutSeconds
+            };
 
-        await db.SaveChangesAsync(cancellationToken);
-        metrics.RecordSensitiveAccessRequest();
+            db.SensitiveAccessRequests.Add(accessRequest);
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "sensitive_access.requested",
+                accessRequest.Id,
+                "metadata-only",
+                "sensitive-boundary-only",
+                observedAt,
+                subjectType: "sensitive_access_request",
+                outcome: "requested"));
 
-        return ToState(accessRequest, redactedOutputAvailable: false);
+            await db.SaveChangesAsync(cancellationToken);
+            metrics.RecordSensitiveAccessRequest();
+
+            return ToState(
+                accessRequest,
+                redactedOutputAvailable: false,
+                SensitiveAccessStatusCodes.RequestCreated);
+        }
+        finally
+        {
+            RequestResolutionLock.Release();
+        }
     }
 
     public async Task<SensitiveAccessRequestState?> ReadRequestAsync(
@@ -248,23 +265,8 @@ internal sealed class SensitiveAccessWorkflow(
         CancellationToken cancellationToken)
     {
         await ExpirePendingRequestsAsync(id, principal, cancellationToken);
-        return await db.SensitiveAccessRequests
-            .AsNoTracking()
-            .Where(record => record.Id == id &&
-                record.WorkspaceId == principal.WorkspaceId &&
-                record.OwnerUserId == principal.UserId)
-            .Select(record => new SensitiveAccessRequestState(
-                record.Id,
-                record.SensitiveRecordReferenceId,
-                record.Status,
-                record.RequestedBy,
-                record.SessionId,
-                record.CreatedAt,
-                record.ExpiresAt,
-                record.DecidedBy,
-                record.DecidedAt,
-                record.RedactedSummary != ""))
-            .SingleOrDefaultAsync(cancellationToken);
+        var request = await ReadResolutionCandidateAsync(id, principal, cancellationToken);
+        return request is null ? null : ToState(request, timeProvider.GetUtcNow());
     }
 
     public async Task<SensitiveAccessOperatorDetailState?> ReadOperatorDetailAsync(
@@ -364,14 +366,15 @@ internal sealed class SensitiveAccessWorkflow(
         CancellationToken cancellationToken)
     {
         await ExpirePendingRequestsAsync(id, principal, cancellationToken);
-        var request = await ReadResultMetadataAsync(id, principal, cancellationToken);
+        var request = await ReadResolutionCandidateAsync(id, principal, cancellationToken);
         if (request is null)
         {
             return null;
         }
 
+        var statusCode = ResolveStatusCode(request, timeProvider.GetUtcNow());
         string? redactedOutput = null;
-        if (request.Status == SensitiveAccessRequestStatus.Approved && request.RedactedOutputAvailable)
+        if (statusCode == SensitiveAccessStatusCodes.GrantActive && request.RedactedOutputAvailable)
         {
             var permit = await IssueReadPermitAsync(id, principal, cancellationToken);
             if (permit is not null)
@@ -385,11 +388,23 @@ internal sealed class SensitiveAccessWorkflow(
             }
         }
 
+        var current = statusCode == SensitiveAccessStatusCodes.GrantActive
+            ? await ReadResolutionCandidateAsync(id, principal, cancellationToken) ?? request
+            : request;
         var result = new SensitiveAccessResultState(
             request.Id,
             request.SensitiveReferenceId,
             request.Status,
-            redactedOutput);
+            redactedOutput)
+        {
+            StatusCode = redactedOutput is null
+                ? ResolveStatusCode(current, timeProvider.GetUtcNow())
+                : SensitiveAccessStatusCodes.ResultReturned,
+            RequestExpiresAt = current.RequestExpiresAt,
+            GrantExpiresAt = current.GrantExpiresAt,
+            RemainingReads = RemainingReads(current),
+            MaxReads = current.MaximumSuccessfulReads
+        };
         db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
             principal,
             actor,
@@ -618,7 +633,11 @@ internal sealed class SensitiveAccessWorkflow(
         return SensitiveAccessDecisionResult.Succeeded(ToState(
             accessRequest,
             status == SensitiveAccessRequestStatus.Approved &&
-                !string.IsNullOrWhiteSpace(accessRequest.RedactedSummary)));
+                !string.IsNullOrWhiteSpace(accessRequest.RedactedSummary),
+            status == SensitiveAccessRequestStatus.Approved
+                ? SensitiveAccessStatusCodes.GrantActive
+                : SensitiveAccessStatusCodes.RequestDenied,
+            grantRecord));
     }
 
     internal async Task<SensitiveAccessReadPermit?> IssueReadPermitAsync(
@@ -810,22 +829,6 @@ internal sealed class SensitiveAccessWorkflow(
             ? requestId
             : "invalid-sensitive-access-request";
 
-    private Task<SensitiveAccessResultMetadata?> ReadResultMetadataAsync(
-        string id,
-        LuthnRequestPrincipal principal,
-        CancellationToken cancellationToken) =>
-        db.SensitiveAccessRequests
-            .AsNoTracking()
-            .Where(record => record.Id == id &&
-                record.WorkspaceId == principal.WorkspaceId &&
-                record.OwnerUserId == principal.UserId)
-            .Select(record => new SensitiveAccessResultMetadata(
-                record.Id,
-                record.SensitiveRecordReferenceId,
-                record.Status,
-                record.RedactedSummary != ""))
-            .SingleOrDefaultAsync(cancellationToken);
-
     private async Task<ValidatedRedactedSummary> ValidateDecisionRedactedSummaryAsync(
         SensitiveAccessRequestRecord accessRequest,
         SensitiveAccessDecisionRequest request,
@@ -990,6 +993,125 @@ internal sealed class SensitiveAccessWorkflow(
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task<SensitiveAccessResolutionCandidate?> ResolveForCreateAsync(
+        SensitiveAccessReferenceIdentity reference,
+        string sessionId,
+        DateTimeOffset observedAt,
+        CancellationToken cancellationToken)
+    {
+        var requests = await db.SensitiveAccessRequests
+            .AsNoTracking()
+            .Where(record =>
+                record.SensitiveRecordReferenceId == reference.Id &&
+                record.WorkspaceId == reference.WorkspaceId &&
+                record.OwnerUserId == reference.OwnerUserId)
+            .OrderByDescending(record => record.UpdatedAt)
+            .ThenByDescending(record => record.CreatedAt)
+            .ThenByDescending(record => record.Id)
+            .Select(ToResolutionCandidateExpression())
+            .ToArrayAsync(cancellationToken);
+
+        var activeGrant = requests.FirstOrDefault(candidate =>
+            ResolveStatusCode(candidate, observedAt) == SensitiveAccessStatusCodes.GrantActive);
+        if (activeGrant is not null)
+        {
+            return activeGrant;
+        }
+
+        var pending = requests.FirstOrDefault(candidate =>
+            ResolveStatusCode(candidate, observedAt) == SensitiveAccessStatusCodes.RequestPending);
+        if (pending is not null)
+        {
+            return pending;
+        }
+
+        var terminal = requests.FirstOrDefault();
+        return terminal is not null &&
+            string.Equals(terminal.SessionId, sessionId, StringComparison.Ordinal)
+                ? terminal
+                : null;
+    }
+
+    private Task<SensitiveAccessResolutionCandidate?> ReadResolutionCandidateAsync(
+        string id,
+        LuthnRequestPrincipal principal,
+        CancellationToken cancellationToken) =>
+        db.SensitiveAccessRequests
+            .AsNoTracking()
+            .Where(record =>
+                record.Id == id &&
+                record.WorkspaceId == principal.WorkspaceId &&
+                record.OwnerUserId == principal.UserId)
+            .Select(ToResolutionCandidateExpression())
+            .SingleOrDefaultAsync(cancellationToken);
+
+    private static Expression<Func<SensitiveAccessRequestRecord, SensitiveAccessResolutionCandidate>>
+        ToResolutionCandidateExpression() =>
+        record => new SensitiveAccessResolutionCandidate(
+            record.Id,
+            record.SensitiveRecordReferenceId,
+            record.Status,
+            record.RequestedBy,
+            record.SessionId,
+            record.CreatedAt,
+            record.ExpiresAt,
+            record.UpdatedAt,
+            record.DecidedBy,
+            record.DecidedAt,
+            record.RedactedSummary != "",
+            record.Grant == null ? null : record.Grant.StartsAt,
+            record.Grant == null ? null : record.Grant.ExpiresAt,
+            record.Grant == null ? null : record.Grant.MaximumSuccessfulReads,
+            record.Grant == null ? null : record.Grant.SuccessfulReadCount);
+
+    private static string ResolveStatusCode(
+        SensitiveAccessResolutionCandidate request,
+        DateTimeOffset observedAt)
+    {
+        if (request.Status == SensitiveAccessRequestStatus.Pending)
+        {
+            return request.RequestExpiresAt > observedAt
+                ? SensitiveAccessStatusCodes.RequestPending
+                : SensitiveAccessStatusCodes.RequestExpired;
+        }
+
+        if (request.Status == SensitiveAccessRequestStatus.Denied)
+        {
+            return SensitiveAccessStatusCodes.RequestDenied;
+        }
+
+        if (request.Status == SensitiveAccessRequestStatus.Expired)
+        {
+            return SensitiveAccessStatusCodes.RequestExpired;
+        }
+
+        if (request.MaximumSuccessfulReads is int maximumSuccessfulReads &&
+            request.SuccessfulReadCount is int successfulReadCount &&
+            successfulReadCount >= maximumSuccessfulReads)
+        {
+            return SensitiveAccessStatusCodes.GrantConsumed;
+        }
+
+        if (request.GrantStartsAt is DateTimeOffset startsAt &&
+            request.GrantExpiresAt is DateTimeOffset expiresAt &&
+            request.MaximumSuccessfulReads is int maxReads &&
+            request.SuccessfulReadCount is int readCount &&
+            startsAt <= observedAt &&
+            expiresAt > observedAt &&
+            readCount < maxReads)
+        {
+            return SensitiveAccessStatusCodes.GrantActive;
+        }
+
+        return SensitiveAccessStatusCodes.GrantExpired;
+    }
+
+    private static int? RemainingReads(SensitiveAccessResolutionCandidate request) =>
+        request.MaximumSuccessfulReads is int maximumSuccessfulReads &&
+        request.SuccessfulReadCount is int successfulReadCount
+            ? Math.Max(0, maximumSuccessfulReads - successfulReadCount)
+            : null;
+
     private async Task<SensitiveAccessPolicyRevisionRecord> GetOrCreateActivePolicyAsync(
         string workspaceId,
         string createdBy,
@@ -1060,7 +1182,9 @@ internal sealed class SensitiveAccessWorkflow(
 
     private static SensitiveAccessRequestState ToState(
         SensitiveAccessRequestRecord request,
-        bool redactedOutputAvailable) =>
+        bool redactedOutputAvailable,
+        string statusCode,
+        SensitiveAccessGrantRecord? grant = null) =>
         new(
             request.Id,
             request.SensitiveRecordReferenceId,
@@ -1071,7 +1195,41 @@ internal sealed class SensitiveAccessWorkflow(
             request.ExpiresAt,
             request.DecidedBy,
             request.DecidedAt,
-            redactedOutputAvailable);
+            redactedOutputAvailable)
+        {
+            StatusCode = statusCode,
+            RequestExpiresAt = request.ExpiresAt,
+            GrantExpiresAt = grant?.ExpiresAt,
+            RemainingReads = grant is null
+                ? null
+                : Math.Max(0, grant.MaximumSuccessfulReads - grant.SuccessfulReadCount),
+            MaxReads = grant?.MaximumSuccessfulReads
+        };
+
+    private static SensitiveAccessRequestState ToState(
+        SensitiveAccessResolutionCandidate request,
+        DateTimeOffset observedAt)
+    {
+        var statusCode = ResolveStatusCode(request, observedAt);
+        return new SensitiveAccessRequestState(
+            request.Id,
+            request.SensitiveReferenceId,
+            request.Status,
+            request.RequestedBy,
+            request.SessionId,
+            request.CreatedAt,
+            request.RequestExpiresAt,
+            request.DecidedBy,
+            request.DecidedAt,
+            statusCode == SensitiveAccessStatusCodes.GrantActive && request.RedactedOutputAvailable)
+        {
+            StatusCode = statusCode,
+            RequestExpiresAt = request.RequestExpiresAt,
+            GrantExpiresAt = request.GrantExpiresAt,
+            RemainingReads = RemainingReads(request),
+            MaxReads = request.MaximumSuccessfulReads
+        };
+    }
 
     private static SensitiveAccessPolicyState ToState(SensitiveAccessPolicyRevisionRecord policy) =>
         new(
@@ -1102,11 +1260,22 @@ internal sealed class SensitiveAccessWorkflow(
         string OwnerUserId,
         bool RedactedOutputAvailable);
 
-    private sealed record SensitiveAccessResultMetadata(
+    private sealed record SensitiveAccessResolutionCandidate(
         string Id,
         string SensitiveReferenceId,
         SensitiveAccessRequestStatus Status,
-        bool RedactedOutputAvailable);
+        string RequestedBy,
+        string SessionId,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset RequestExpiresAt,
+        DateTimeOffset UpdatedAt,
+        string? DecidedBy,
+        DateTimeOffset? DecidedAt,
+        bool RedactedOutputAvailable,
+        DateTimeOffset? GrantStartsAt,
+        DateTimeOffset? GrantExpiresAt,
+        int? MaximumSuccessfulReads,
+        int? SuccessfulReadCount);
 
     private sealed record SensitiveAccessPermitScope(
         string RequestId,
@@ -1185,7 +1354,14 @@ internal sealed record SensitiveAccessRequestState(
     DateTimeOffset ExpiresAt,
     string? DecidedBy,
     DateTimeOffset? DecidedAt,
-    bool RedactedOutputAvailable);
+    bool RedactedOutputAvailable)
+{
+    public string? StatusCode { get; init; }
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+    public int? RemainingReads { get; init; }
+    public int? MaxReads { get; init; }
+}
 
 internal sealed record SensitiveAccessOperatorDecisionState(
     SensitiveAccessDecisionKind Decision,
@@ -1222,9 +1398,27 @@ internal sealed record SensitiveAccessResultState(
     SensitiveAccessRequestStatus Status,
     string? RedactedOutput)
 {
+    public string? StatusCode { get; init; }
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+    public int? RemainingReads { get; init; }
+    public int? MaxReads { get; init; }
+
     public bool RedactedOutputAvailable =>
         Status == SensitiveAccessRequestStatus.Approved &&
         !string.IsNullOrWhiteSpace(RedactedOutput);
+}
+
+internal static class SensitiveAccessStatusCodes
+{
+    internal const string RequestCreated = "request-created";
+    internal const string RequestPending = "request-pending";
+    internal const string RequestDenied = "request-denied";
+    internal const string RequestExpired = "request-expired";
+    internal const string GrantActive = "grant-active";
+    internal const string GrantExpired = "grant-expired";
+    internal const string GrantConsumed = "grant-consumed";
+    internal const string ResultReturned = "result-returned";
 }
 
 internal enum SensitiveAccessDecisionOutcome

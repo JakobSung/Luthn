@@ -558,7 +558,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var client = factory.CreateClient();
 
         var approveId = await CreateSensitiveAccessRequestAsync(client);
-        var denyId = await CreateSensitiveAccessRequestAsync(client);
+        var denyId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
 
         client.SetBearer(DeciderBearer);
         using var approveResponse = await client.PostAsJsonAsync($"/api/access-requests/{approveId}/approve", new
@@ -594,7 +594,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var factory = CreateAuthFactory();
         using var client = factory.CreateClient();
         var approveId = await CreateSensitiveAccessRequestAsync(client);
-        var denyId = await CreateSensitiveAccessRequestAsync(client);
+        var denyId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
 
         client.SetBearer(RequestBearer);
         using var pendingResponse = await client.GetAsync($"/api/access-requests/{approveId}/result");
@@ -734,7 +734,6 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var factory = CreateAuthFactory();
         using var client = factory.CreateClient();
         var firstRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
-        var secondRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
 
         client.SetBearer(DeciderBearer);
         using var firstApproval = await client.PostAsJsonAsync($"/api/access-requests/{firstRequestId}/approve", new
@@ -744,6 +743,12 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         });
         Assert.Equal(HttpStatusCode.OK, firstApproval.StatusCode);
 
+        client.SetBearer(RequestBearer);
+        using var firstResult = await client.GetAsync($"/api/access-requests/{firstRequestId}/result");
+        using var firstBody = await JsonDocument.ParseAsync(await firstResult.Content.ReadAsStreamAsync());
+        Assert.Equal("First public-safe result.", firstBody.RootElement.GetProperty("redactedOutput").GetString());
+
+        var secondRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
         client.SetBearer(RequestBearer);
         using var pendingSecondResult = await client.GetAsync($"/api/access-requests/{secondRequestId}/result");
         using var pendingSecondBody = await JsonDocument.ParseAsync(await pendingSecondResult.Content.ReadAsStreamAsync());
@@ -760,12 +765,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         Assert.Equal(HttpStatusCode.OK, secondApproval.StatusCode);
 
         client.SetBearer(RequestBearer);
-        using var firstResult = await client.GetAsync($"/api/access-requests/{firstRequestId}/result");
-        using var firstBody = await JsonDocument.ParseAsync(await firstResult.Content.ReadAsStreamAsync());
         using var secondResult = await client.GetAsync($"/api/access-requests/{secondRequestId}/result");
         using var secondBody = await JsonDocument.ParseAsync(await secondResult.Content.ReadAsStreamAsync());
 
-        Assert.Equal("First public-safe result.", firstBody.RootElement.GetProperty("redactedOutput").GetString());
         Assert.Equal("Second public-safe result.", secondBody.RootElement.GetProperty("redactedOutput").GetString());
 
         using var scope = factory.Services.CreateScope();
@@ -1111,7 +1113,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         {
             sensitiveReferenceId,
             reason = "Need approval for a redacted operational summary.",
-            sessionId = "session-sensitive-access",
+            sessionId = $"session-sensitive-access-{Guid.NewGuid():N}",
             expiresInSeconds = 600
         });
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());

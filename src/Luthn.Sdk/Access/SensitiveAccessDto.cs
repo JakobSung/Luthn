@@ -28,6 +28,26 @@ public sealed record SensitiveAccessRequestDto(
 
     [JsonPropertyName("expiresAt")]
     public DateTimeOffset ExpiresAt { get; init; }
+
+    [JsonPropertyName("statusCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusCode { get; init; }
+
+    [JsonPropertyName("requestExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+
+    [JsonPropertyName("grantExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+
+    [JsonPropertyName("remainingReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("maxReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxReads { get; init; }
 }
 
 /// <summary>
@@ -73,4 +93,25 @@ public sealed record SensitiveAccessResultDto(
     [property: JsonPropertyName("redactedOutput")] string? RedactedOutput,
     [property: JsonPropertyName("payloadClass")] string PayloadClass,
     [property: JsonPropertyName("redactionState")] string RedactionState,
-    [property: JsonPropertyName("reasons")] IReadOnlyList<string> Reasons);
+    [property: JsonPropertyName("reasons")] IReadOnlyList<string> Reasons)
+{
+    [JsonPropertyName("statusCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusCode { get; init; }
+
+    [JsonPropertyName("requestExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+
+    [JsonPropertyName("grantExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+
+    [JsonPropertyName("remainingReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("maxReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxReads { get; init; }
+}
