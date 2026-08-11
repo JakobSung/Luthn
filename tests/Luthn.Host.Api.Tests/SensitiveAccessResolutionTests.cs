@@ -51,6 +51,39 @@ public sealed class SensitiveAccessResolutionTests
         Assert.Equal(2, await db.SensitiveAccessRequests.CountAsync());
     }
 
+    [Fact]
+    public async Task TerminalRetryReusesMatchingOlderSessionAfterNewerTerminalRequest()
+    {
+        await using var db = TestData.CreateDbContext();
+        TestData.AddReference(db);
+        await db.SaveChangesAsync();
+        var time = new ManualTimeProvider(TestData.ObservedAt);
+        var workflow = TestData.CreateWorkflow(db, time);
+        var sessionA = await CreateAsync(workflow, "session-a");
+        await workflow.DecideRequestAsync(
+            sessionA.Id,
+            new SensitiveAccessDecisionRequest { Reason = "denied a" },
+            SensitiveAccessRequestStatus.Denied,
+            TestData.OperatorPrincipal,
+            "operator",
+            CancellationToken.None);
+        time.Advance(TimeSpan.FromSeconds(1));
+        var sessionB = await CreateAsync(workflow, "session-b");
+        await workflow.DecideRequestAsync(
+            sessionB.Id,
+            new SensitiveAccessDecisionRequest { Reason = "denied b" },
+            SensitiveAccessRequestStatus.Denied,
+            TestData.OperatorPrincipal,
+            "operator",
+            CancellationToken.None);
+
+        var retriedSessionA = await CreateAsync(workflow, "session-a");
+
+        Assert.Equal(sessionA.Id, retriedSessionA.Id);
+        Assert.Equal(SensitiveAccessStatusCodes.RequestDenied, retriedSessionA.StatusCode);
+        Assert.Equal(2, await db.SensitiveAccessRequests.CountAsync());
+    }
+
     private static async Task<SensitiveAccessRequestState> CreateAsync(
         SensitiveAccessWorkflow workflow,
         string sessionId) =>

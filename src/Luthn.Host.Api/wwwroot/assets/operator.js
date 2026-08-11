@@ -1047,8 +1047,8 @@ const renderAccessPolicy = (policy) => {
   if (!form) {
     return;
   }
-  form.requestTimeoutMinutes.value = Math.max(1, Math.round((policy?.requestTimeoutSeconds || 600) / 60));
-  form.grantDurationMinutes.value = Math.max(1, Math.round((policy?.grantDurationSeconds || 600) / 60));
+  form.requestTimeoutMinutes.value = (policy?.requestTimeoutSeconds || 600) / 60;
+  form.grantDurationMinutes.value = (policy?.grantDurationSeconds || 600) / 60;
   form.maximumSuccessfulReads.value = policy?.maximumSuccessfulReads || 1;
   $("#accessPolicyStatus").textContent = policy?.revision
     ? `Revision ${policy.revision} · ${formatTimestamp(policy.createdAt)}`
@@ -1080,8 +1080,8 @@ const saveAccessPolicy = async (event) => {
     const policy = await requestJson("/api/access-requests/policy", {
       method: "PUT",
       body: JSON.stringify({
-        requestTimeoutSeconds: Number(form.requestTimeoutMinutes.value) * 60,
-        grantDurationSeconds: Number(form.grantDurationMinutes.value) * 60,
+        requestTimeoutSeconds: Math.round(Number(form.requestTimeoutMinutes.value) * 60),
+        grantDurationSeconds: Math.round(Number(form.grantDurationMinutes.value) * 60),
         maximumSuccessfulReads: Number(form.maximumSuccessfulReads.value)
       })
     });

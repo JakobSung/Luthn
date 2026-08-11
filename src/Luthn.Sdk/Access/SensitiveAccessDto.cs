@@ -45,6 +45,10 @@ public sealed record SensitiveAccessRequestDto(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? RemainingReads { get; init; }
 
+    [JsonPropertyName("usedReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? UsedReads { get; init; }
+
     [JsonPropertyName("maxReads")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxReads { get; init; }
@@ -110,6 +114,10 @@ public sealed record SensitiveAccessResultDto(
     [JsonPropertyName("remainingReads")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("usedReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? UsedReads { get; init; }
 
     [JsonPropertyName("maxReads")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

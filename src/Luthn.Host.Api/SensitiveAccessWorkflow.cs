@@ -1345,11 +1345,8 @@ internal sealed class SensitiveAccessWorkflow(
             return pending;
         }
 
-        var terminal = requests.FirstOrDefault();
-        return terminal is not null &&
-            string.Equals(terminal.SessionId, sessionId, StringComparison.Ordinal)
-                ? terminal
-                : null;
+        return requests.FirstOrDefault(candidate =>
+            string.Equals(candidate.SessionId, sessionId, StringComparison.Ordinal));
     }
 
     private Task<SensitiveAccessResolutionCandidate?> ReadResolutionCandidateAsync(

@@ -33,14 +33,19 @@ public sealed class SensitiveAccessLifecycleContractTests
               "requestExpiresAt": "2026-08-11T00:10:00Z",
               "grantExpiresAt": "2026-08-11T00:11:00Z",
               "remainingReads": 1,
+              "usedReads": 0,
               "maxReads": 1
             }
             """);
 
         Assert.Null(legacy.StatusCode);
+        Assert.Null(legacy.UsedReads);
         Assert.Equal("grant-active", current!.StatusCode);
         Assert.Equal(1, current.RemainingReads);
+        Assert.Equal(0, current.UsedReads);
         Assert.Equal(1, current.MaxReads);
+        Assert.DoesNotContain("usedReads", JsonSerializer.Serialize(legacy), StringComparison.Ordinal);
+        Assert.Contains("\"usedReads\":0", JsonSerializer.Serialize(current), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -59,13 +64,16 @@ public sealed class SensitiveAccessLifecycleContractTests
               "reasons": ["No output."],
               "statusCode": "grant-consumed",
               "remainingReads": 0,
+              "usedReads": 1,
               "maxReads": 1
             }
             """);
 
         Assert.Equal("grant-consumed", result!.StatusCode);
         Assert.Equal(0, result.RemainingReads);
+        Assert.Equal(1, result.UsedReads);
         Assert.Null(result.RedactedOutput);
         Assert.Equal("metadata-only", result.PayloadClass);
+        Assert.Contains("\"usedReads\":1", JsonSerializer.Serialize(result), StringComparison.Ordinal);
     }
 }
