@@ -131,6 +131,16 @@ public sealed class SensitiveAccessWorkflowBypassTests
             .Options;
         var db = new LuthnDbContext(options);
         db.Database.EnsureCreated();
+        db.SensitiveAccessPolicyRevisions.Add(new SensitiveAccessPolicyRevisionRecord
+        {
+            WorkspaceId = "workspace-a",
+            Revision = 1,
+            RequestTimeoutSeconds = SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds,
+            GrantDurationSeconds = SensitiveAccessPolicyLimits.DefaultGrantDurationSeconds,
+            MaximumSuccessfulReads = SensitiveAccessPolicyLimits.DefaultMaximumSuccessfulReads,
+            CreatedAt = InitialTime.AddMinutes(-3),
+            CreatedBy = "test"
+        });
         db.SensitiveAccessRequests.Add(new SensitiveAccessRequestRecord
         {
             Id = RequestId,
@@ -147,6 +157,18 @@ public sealed class SensitiveAccessWorkflowBypassTests
             DecidedAt = InitialTime.AddMinutes(-1),
             WorkspaceId = "workspace-a",
             OwnerUserId = "owner-a"
+        });
+        db.SensitiveAccessGrants.Add(new SensitiveAccessGrantRecord
+        {
+            SensitiveAccessRequestId = RequestId,
+            WorkspaceId = "workspace-a",
+            OwnerUserId = "owner-a",
+            PolicyRevision = 1,
+            GrantDurationSeconds = SensitiveAccessPolicyLimits.DefaultGrantDurationSeconds,
+            StartsAt = InitialTime.AddMinutes(-1),
+            ExpiresAt = InitialTime.AddMinutes(9),
+            MaximumSuccessfulReads = SensitiveAccessPolicyLimits.DefaultMaximumSuccessfulReads,
+            SuccessfulReadCount = 0
         });
         db.SaveChanges();
 

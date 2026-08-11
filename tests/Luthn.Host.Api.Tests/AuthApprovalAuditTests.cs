@@ -386,7 +386,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     [InlineData(60, HttpStatusCode.Created)]
     [InlineData(3600, HttpStatusCode.Created)]
     [InlineData(3601, HttpStatusCode.BadRequest)]
-    public async Task SensitiveAccessRequestValidatesExplicitExpiryBoundaries(
+    public async Task SensitiveAccessRequestValidatesLegacyExpiryShapeButUsesServerPolicy(
         int expiresInSeconds,
         HttpStatusCode expectedStatus)
     {
@@ -410,8 +410,8 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
             var expiresAt = body.RootElement.GetProperty("expiresAt").GetDateTimeOffset();
             Assert.InRange(
                 expiresAt - createdAt,
-                TimeSpan.FromSeconds(expiresInSeconds - 1),
-                TimeSpan.FromSeconds(expiresInSeconds + 1));
+                TimeSpan.FromSeconds(SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds - 1),
+                TimeSpan.FromSeconds(SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds + 1));
         }
     }
 

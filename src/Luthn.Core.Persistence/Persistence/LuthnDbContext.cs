@@ -13,8 +13,10 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public DbSet<ClassificationResultRecord> ClassificationResults => Set<ClassificationResultRecord>();
     public DbSet<WikiProposalRecord> WikiProposals => Set<WikiProposalRecord>();
     public DbSet<SensitiveRecordReferenceRecord> SensitiveRecordReferences => Set<SensitiveRecordReferenceRecord>();
+    public DbSet<SensitiveAccessPolicyRevisionRecord> SensitiveAccessPolicyRevisions => Set<SensitiveAccessPolicyRevisionRecord>();
     public DbSet<SensitiveAccessRequestRecord> SensitiveAccessRequests => Set<SensitiveAccessRequestRecord>();
     public DbSet<SensitiveAccessDecisionRecord> SensitiveAccessDecisions => Set<SensitiveAccessDecisionRecord>();
+    public DbSet<SensitiveAccessGrantRecord> SensitiveAccessGrants => Set<SensitiveAccessGrantRecord>();
     public DbSet<SharedMemoryItemRecord> SharedMemoryItems => Set<SharedMemoryItemRecord>();
     public DbSet<SensitiveMemoryPayloadRecord> SensitiveMemoryPayloads => Set<SensitiveMemoryPayloadRecord>();
     public DbSet<CollectionProvenanceRecord> CollectionProvenance => Set<CollectionProvenanceRecord>();
@@ -161,12 +163,42 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SensitiveAccessPolicyRevisionRecord>(entity =>
+        {
+            entity.ToTable("sensitive_access_policy_revisions", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_workspace_id",
+                    "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_revision",
+                    "\"Revision\" > 0");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_request_timeout",
+                    "\"RequestTimeoutSeconds\" BETWEEN 60 AND 3600");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_grant_duration",
+                    "\"GrantDurationSeconds\" BETWEEN 60 AND 3600");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_maximum_successful_reads",
+                    "\"MaximumSuccessfulReads\" BETWEEN 1 AND 10");
+            });
+            entity.HasKey(record => new { record.WorkspaceId, record.Revision });
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength);
+            entity.Property(record => record.CreatedBy).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => new { record.WorkspaceId, record.CreatedAt });
+        });
+
         modelBuilder.Entity<SensitiveAccessRequestRecord>(entity =>
         {
             entity.ToTable("sensitive_access_requests", table =>
             {
                 table.HasCheckConstraint("CK_sensitive_access_requests_owner_user_id", "\"OwnerUserId\" <> ''");
                 table.HasCheckConstraint("CK_sensitive_access_requests_workspace_id", "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_requests_policy_revision", "\"PolicyRevision\" > 0");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_requests_request_timeout",
+                    "\"RequestTimeoutSeconds\" BETWEEN 60 AND 3600");
             });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
@@ -185,6 +217,10 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 .WithMany()
                 .HasForeignKey(record => record.SensitiveRecordReferenceId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(record => record.Policy)
+                .WithMany()
+                .HasForeignKey(record => new { record.WorkspaceId, record.PolicyRevision })
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<SensitiveAccessDecisionRecord>(entity =>
@@ -201,6 +237,42 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.HasOne(record => record.SensitiveAccessRequest)
                 .WithMany()
                 .HasForeignKey(record => record.SensitiveAccessRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SensitiveAccessGrantRecord>(entity =>
+        {
+            entity.ToTable("sensitive_access_grants", table =>
+            {
+                table.HasCheckConstraint("CK_sensitive_access_grants_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_grants_workspace_id", "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_grants_policy_revision", "\"PolicyRevision\" > 0");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_grants_grant_duration",
+                    "\"GrantDurationSeconds\" BETWEEN 60 AND 3600");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_grants_maximum_successful_reads",
+                    "\"MaximumSuccessfulReads\" BETWEEN 1 AND 10");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_grants_successful_read_count",
+                    "\"SuccessfulReadCount\" >= 0 AND \"SuccessfulReadCount\" <= \"MaximumSuccessfulReads\"");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_grants_time_window",
+                    "\"StartsAt\" < \"ExpiresAt\"");
+            });
+            entity.HasKey(record => record.SensitiveAccessRequestId);
+            entity.Property(record => record.SensitiveAccessRequestId).HasMaxLength(128);
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SuccessfulReadCount).IsConcurrencyToken();
+            entity.HasIndex(record => new { record.WorkspaceId, record.OwnerUserId, record.ExpiresAt });
+            entity.HasOne(record => record.SensitiveAccessRequest)
+                .WithOne(record => record.Grant)
+                .HasForeignKey<SensitiveAccessGrantRecord>(record => record.SensitiveAccessRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(record => record.Policy)
+                .WithMany()
+                .HasForeignKey(record => new { record.WorkspaceId, record.PolicyRevision })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -474,6 +546,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ValidateWorkspaceScopes();
+        ValidateSensitiveAccessPoliciesAndGrants();
         ValidateAuditScopes();
         RejectProvenanceUpdates();
         UpdateSearchIndexes();
@@ -485,6 +558,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         CancellationToken cancellationToken = default)
     {
         ValidateWorkspaceScopes();
+        ValidateSensitiveAccessPoliciesAndGrants();
         ValidateAuditScopes();
         RejectProvenanceUpdates();
         UpdateSearchIndexes();
@@ -528,6 +602,49 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         if (mutatedEntry is not null)
         {
             throw new InvalidOperationException("Audit event records are immutable.");
+        }
+    }
+
+    private void ValidateSensitiveAccessPoliciesAndGrants()
+    {
+        var invalidPolicy = ChangeTracker.Entries<SensitiveAccessPolicyRevisionRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (entry.Entity.Revision < 1 ||
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.RequestTimeoutSeconds) ||
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.GrantDurationSeconds) ||
+                 !SensitiveAccessPolicyLimits.IsValidMaximumSuccessfulReads(entry.Entity.MaximumSuccessfulReads)));
+        if (invalidPolicy is not null)
+        {
+            throw new InvalidOperationException(
+                "Sensitive access policy revisions require 60..3600 second durations and 1..10 successful reads.");
+        }
+
+        var invalidRequestSnapshot = ChangeTracker.Entries<SensitiveAccessRequestRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (entry.Entity.PolicyRevision < 1 ||
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.RequestTimeoutSeconds)));
+        if (invalidRequestSnapshot is not null)
+        {
+            throw new InvalidOperationException(
+                "Sensitive access requests require a valid policy revision and request timeout snapshot.");
+        }
+
+        var invalidGrant = ChangeTracker.Entries<SensitiveAccessGrantRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (entry.Entity.PolicyRevision < 1 ||
+                 string.IsNullOrWhiteSpace(entry.Entity.OwnerUserId) ||
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.GrantDurationSeconds) ||
+                 !SensitiveAccessPolicyLimits.IsValidMaximumSuccessfulReads(entry.Entity.MaximumSuccessfulReads) ||
+                 entry.Entity.SuccessfulReadCount < 0 ||
+                 entry.Entity.SuccessfulReadCount > entry.Entity.MaximumSuccessfulReads ||
+                 entry.Entity.StartsAt >= entry.Entity.ExpiresAt));
+        if (invalidGrant is not null)
+        {
+            throw new InvalidOperationException(
+                "Sensitive access grants require a valid policy snapshot, bounded reads, and an active time window.");
         }
     }
 
