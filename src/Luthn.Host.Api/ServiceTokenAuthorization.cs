@@ -22,6 +22,7 @@ public static class ServiceScopes
     public const string AccessRequest = "access.request";
     public const string AccessReview = "access.review";
     public const string AccessDecide = "access.decide";
+    public const string AccessConfigure = "access.configure";
     public const string AuditRead = "audit.read";
     public const string ConfigWrite = "config.write";
     public const string MetricsRead = "metrics.read";
@@ -371,7 +372,7 @@ public static class ServiceTokenAuthorization
                 statusCode: StatusCodes.Status401Unauthorized));
         }
 
-        if (!HasScope(session.Scopes, requiredScope))
+        if (!HasConsoleScope(session.Scopes, requiredScope))
         {
             return (true, TypedResults.Problem(
                 title: "Forbidden.",
@@ -607,6 +608,14 @@ public static class ServiceTokenAuthorization
             string.Equals(scope, requiredScope, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(requiredScope, ServiceScopes.AccessReview, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(scope, ServiceScopes.AccessDecide, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasConsoleScope(
+        IEnumerable<string> scopes,
+        string requiredScope) =>
+        HasScope(scopes, requiredScope) ||
+        string.Equals(requiredScope, ServiceScopes.AccessConfigure, StringComparison.OrdinalIgnoreCase) &&
+        scopes.Any(scope =>
+            string.Equals(scope, ServiceScopes.ConfigWrite, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsExpired(LuthnServiceTokenOptions token, DateTimeOffset now) =>
         token.ExpiresAt is { } expiresAt && expiresAt <= now;

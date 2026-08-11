@@ -671,6 +671,8 @@ Returns Markdown rendered from safe summaries and redacted source references onl
 
 ```http
 GET /api/access-requests?status=Pending&limit=25
+GET /api/access-requests/policy
+PUT /api/access-requests/policy
 POST /api/access-requests
 GET /api/access-requests/{id}
 GET /api/access-requests/{id}/operator-detail
@@ -680,6 +682,131 @@ POST /api/access-requests/{id}/deny
 ```
 
 These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references, with an optional bounded redacted output after server reclassification. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and operator detail require `access.review`; approval and denial require the separate trusted `access.decide` scope. For existing clients, `access.decide` also implies review. An explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
+
+### Authorization and policy contract
+
+The local/self-hosted operator surface keeps review, decision, and policy
+configuration as separate capabilities:
+
+| Scope | Allowed sensitive-access operations |
+| --- | --- |
+| `access.request` | Create an owner-scoped request and synchronously read its current status or bounded result. |
+| `access.review` | List requests and read operator detail inside the authenticated workspace. |
+| `access.decide` | Approve or deny a non-expired Pending request. It also implies review for compatibility, but not policy configuration. |
+| `access.configure` | Read and revise the workspace-wide request timeout, grant duration, and maximum successful reads. It does not imply review or decision authority. |
+
+New service tokens use `access.configure` for both policy routes. Existing local
+console sessions that already carry `config.write` are accepted only as a
+compatibility bridge; this does not grant review or decision authority.
+
+The default policy is a 600-second request timeout, a separate 600-second
+approved-result grant, and one successful result read. Both durations accept
+60–3600 seconds; maximum successful reads accepts 1–10. There is no unlimited
+value. Invalid or unauthorized policy changes fail closed. Each revision is
+server-owned, applies prospectively, and never extends or restores an existing
+request or grant.
+
+Policy update:
+
+```json
+{
+  "requestTimeoutSeconds": 600,
+  "grantDurationSeconds": 600,
+  "maximumSuccessfulReads": 1
+}
+```
+
+Policy response:
+
+```json
+{
+  "revision": 3,
+  "requestTimeoutSeconds": 600,
+  "grantDurationSeconds": 600,
+  "maximumSuccessfulReads": 1,
+  "createdAt": "2026-07-04T00:00:00Z"
+}
+```
+
+`GET /api/access-requests/policy` and `PUT /api/access-requests/policy` are
+workspace-scoped, return `Cache-Control: no-store`, and expose only bounded
+policy metadata. A successful update creates a new revision; it does not mutate
+an earlier revision in place.
+
+Request creation snapshots the active request timeout and policy revision, and
+exposes the resulting expiry as `requestExpiresAt`. Approval snapshots the
+then-current grant duration, maximum successful reads, and policy revision into
+the separate `grantExpiresAt` and read-limit state. The two expiry clocks are not
+interchangeable: request expiry ends the decision window, while grant expiry ends
+approved-result availability.
+Current server time and the atomic read counter are checked on every decision and
+result read, even if background expiry materialization has not run yet. Status
+reads and unavailable results do not consume a successful read; returning the
+approved bounded output does.
+
+`expiresInSeconds` remains accepted and range-validated in the legacy create JSON
+shape, but it is not caller authority over the current request lifetime. The
+active server policy determines the snapshotted request expiry. Omitting
+`sessionId` preserves the legacy server-generated `legacy-...` identifier.
+
+### Local synchronous lifecycle resolution
+
+`status` is the durable request decision state (`Pending`, `Approved`, `Denied`,
+or `Expired`). The additive `statusCode` describes the current request/grant/read
+lifecycle observed at server time:
+
+| `statusCode` | Meaning and result behavior |
+| --- | --- |
+| `request-created` | A new Pending request was created. |
+| `request-pending` | The same owner/workspace/reference still has an active Pending request; the existing request is reused. |
+| `request-denied` | The request was denied; no result is returned. |
+| `request-expired` | The decision window expired; no result is returned. |
+| `grant-active` | Approval has an unexpired grant with remaining reads; the result endpoint may return reviewed bounded output. |
+| `grant-expired` | The approved-result grant expired; no result is returned. |
+| `grant-consumed` | All successful reads were used; no result is returned. |
+| `result-returned` | This result call returned the approved bounded output and atomically consumed one successful read. |
+
+List, request, operator-detail, and result responses add `requestExpiresAt`,
+`grantExpiresAt`, `remainingReads`, `maxReads`, and `usedReads` when applicable.
+`usedReads` is the bounded server-derived difference between maximum and
+remaining reads. A repeated create for the same server-derived workspace, owner,
+and sensitive reference resolves the existing Pending request or active grant
+instead of creating a duplicate. Terminal states are returned without silently
+creating a replacement; a later explicit create request may start a new Pending
+lifecycle.
+
+This is a local synchronous re-query contract. The Agent learns about approval,
+denial, expiry, or consumption only when it calls the existing create/status/result
+operation again; no SignalR, SSE, WebSocket, webhook, email, Slack, mobile push,
+or unsolicited Agent message is emitted. A `grant-active` response can be
+followed by the existing result operation in the same user turn. Approved output
+is not transported through Cloud, Cloud safe-projection sync, or an external
+publication outbox. No Cloud result relay or Cloud administrator route is part of
+this contract.
+
+### Workflow, audit, and bypass boundary
+
+`SensitiveAccessWorkflow` is the only application boundary allowed to resolve or
+mutate requests, decisions, policy revisions, grants, expiry, and read counters.
+Approved output reads additionally require its non-serializable, one-time internal
+permit. The permit is never exposed in HTTP, SDK, MCP, logs, audit, cache, or Cloud
+contracts. Agent-facing API/MCP surfaces do not expose approve, deny, policy/grant
+mutation, permit, or raw Vault/source read operations.
+
+The background expiry materializer also invokes a Workflow-owned system
+operation; it does not write request or grant rows directly. Materialization is
+idempotent and records lifecycle evidence, but it is never the authorization
+boundary because synchronous reads and decisions always re-check current server
+time and counters.
+
+Direct payload reads, direct sensitive-state mutations, invalid transitions,
+scope mismatches, expired grants, exhausted read limits, and invalid/reused
+permits fail closed with no output and no unauthorized state change. Request
+reuse, decisions, policy revisions, grant creation/expiry/consumption, result
+reads, expiry materialization, and bypass rejection emit bounded metadata-only
+audit and low-cardinality metrics. They never include prompt or reason text,
+reference labels, redacted-output content, credentials, secrets, owner paths,
+workspace/owner display identifiers, or raw sensitive content.
 
 `GET /api/access-requests/{id}/operator-detail` is a separate `access.review`
 contract for local or self-hosted Hub consoles. It returns the request and decision
@@ -708,6 +835,8 @@ List response:
       "expiresAt": "2026-07-04T00:10:00Z",
       "decidedBy": null,
       "decidedAt": null,
+      "statusCode": "request-pending",
+      "requestExpiresAt": "2026-07-04T00:10:00Z",
       "redactedOutputAvailable": false
     }
   ]
@@ -720,15 +849,13 @@ Create request:
 {
   "sensitiveReferenceId": "sensitive-ref-...",
   "reason": "Need approval for a redacted operational summary.",
-  "sessionId": "session-...",
-  "expiresInSeconds": 600
+  "sessionId": "session-..."
 }
 ```
 
-New callers should send both `sessionId` and `expiresInSeconds`. For compatibility
-with the pre-expiry unversioned contract, omitted values receive a server-generated
-`legacy-...` session id and a 600-second lifetime. Explicit lifetimes must remain
-within 60–3600 seconds.
+New callers should send `sessionId`. `expiresInSeconds` is retained in the
+unversioned JSON shape for compatibility and values outside 60–3600 are rejected,
+but the active server policy determines the actual snapshotted request lifetime.
 
 Response shape includes request/decision metadata only:
 
@@ -738,6 +865,8 @@ Response shape includes request/decision metadata only:
   "sensitiveReferenceId": "sensitive-ref-...",
   "requestedBy": "agent-service",
   "status": "Pending",
+  "statusCode": "request-created",
+  "requestExpiresAt": "2026-07-04T00:10:00Z",
   "redactedOutputAvailable": false
 }
 ```
@@ -760,6 +889,12 @@ Result response:
   "id": "access-...",
   "sensitiveReferenceId": "sensitive-ref-...",
   "status": "Approved",
+  "statusCode": "result-returned",
+  "requestExpiresAt": "2026-07-04T00:10:00Z",
+  "grantExpiresAt": "2026-07-04T00:20:00Z",
+  "remainingReads": 0,
+  "maxReads": 1,
+  "usedReads": 1,
   "outputPolicy": "approved-redacted-output-available",
   "redactedOutputAvailable": true,
   "redactedOutput": "Public-safe release steps.",
@@ -771,7 +906,7 @@ Result response:
 }
 ```
 
-`GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Explicit request lifetime is bounded to 60–3600 seconds; expiry records a metadata-only `sensitive_access.expired` audit event. Result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy.
+`GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Request and grant durations are independently bounded to 60–3600 seconds by server policy. Expiry records metadata-only audit, and result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy without copying the result content.
 
 ## Cloud-neutral synchronization contracts
 
@@ -959,6 +1094,7 @@ Supported scopes:
 - `access.request`
 - `access.review`
 - `access.decide`
+- `access.configure`
 - `audit.read`
 - `metrics.read`
 - `hub.ingress.write`

@@ -20,6 +20,14 @@ public static class SensitiveAccessEndpoints
             .RequireServiceScope(ServiceScopes.AccessReview)
             .WithName("ListSensitiveAccessRequests");
 
+        requests.MapGet("/policy", ReadPolicyEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessConfigure)
+            .WithName("ReadSensitiveAccessPolicy");
+
+        requests.MapPut("/policy", UpdatePolicyEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessConfigure)
+            .WithName("UpdateSensitiveAccessPolicy");
+
         requests.MapPost("", CreateRequestEndpoint)
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("CreateSensitiveAccessRequest");
@@ -54,6 +62,19 @@ public static class SensitiveAccessEndpoints
         HttpContext httpContext,
         CancellationToken cancellationToken) =>
         await ListRequestsCore(status, limit, workflow, httpContext, cancellationToken);
+
+    private static async Task<Ok<SensitiveAccessPolicyResponse>> ReadPolicyEndpoint(
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await ReadPolicyCore(workflow, httpContext, cancellationToken);
+
+    private static async Task<Results<Ok<SensitiveAccessPolicyResponse>, BadRequest<ProblemDetails>>> UpdatePolicyEndpoint(
+        SensitiveAccessPolicyUpdateRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await UpdatePolicyCore(request, workflow, httpContext, cancellationToken);
 
     private static async Task<Results<
         Created<SensitiveAccessRequestResponse>,
@@ -147,6 +168,40 @@ public static class SensitiveAccessEndpoints
             result.Requests.Select(SensitiveAccessEndpointMapping.ToResponse).ToArray()));
     }
 
+    private static async Task<Ok<SensitiveAccessPolicyResponse>> ReadPolicyCore(
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        var policy = await workflow.GetPolicyAsync(
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
+        return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(policy));
+    }
+
+    private static async Task<Results<Ok<SensitiveAccessPolicyResponse>, BadRequest<ProblemDetails>>> UpdatePolicyCore(
+        SensitiveAccessPolicyUpdateRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        var result = await workflow.CreatePolicyRevisionAsync(
+            new SensitiveAccessPolicyUpdate(
+                request.RequestTimeoutSeconds,
+                request.GrantDurationSeconds,
+                request.MaximumSuccessfulReads),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        return result.ValidationError is null
+            ? TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result.Policy!))
+            : TypedResults.BadRequest(ApiValidation.CreateProblem(
+                "Invalid sensitive access policy.",
+                result.ValidationError));
+    }
+
     private static async Task<Results<
         Created<SensitiveAccessRequestResponse>,
         BadRequest<ProblemDetails>,
@@ -199,9 +254,10 @@ public static class SensitiveAccessEndpoints
         CancellationToken cancellationToken)
     {
         httpContext.Response.Headers.CacheControl = "no-store";
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
         var detail = await workflow.ReadOperatorDetailAsync(
             id,
-            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            principal,
             ServiceTokenAuthorization.GetActor(httpContext),
             cancellationToken);
         return detail is null
@@ -439,8 +495,17 @@ internal static class SensitiveAccessEndpointMapping
             RequestExpiresAt = request.RequestExpiresAt,
             GrantExpiresAt = request.GrantExpiresAt,
             RemainingReads = request.RemainingReads,
-            MaxReads = request.MaxReads
+            MaxReads = request.MaxReads,
+            UsedReads = UsedReads(request.MaxReads, request.RemainingReads)
         };
+
+    internal static SensitiveAccessPolicyResponse ToResponse(SensitiveAccessPolicyState policy) =>
+        new(
+            policy.Revision,
+            policy.RequestTimeoutSeconds,
+            policy.GrantDurationSeconds,
+            policy.MaximumSuccessfulReads,
+            policy.CreatedAt);
 
     internal static SensitiveAccessOperatorDetailResponse ToResponse(
         SensitiveAccessOperatorDetailState detail) =>
@@ -469,7 +534,15 @@ internal static class SensitiveAccessEndpointMapping
                 detail.Reference.RedactedSummary,
                 detail.Reference.ReceivedAt),
             PayloadClass: "operator-sensitive-metadata",
-            RedactionState: "local-operator-only");
+            RedactionState: "local-operator-only")
+        {
+            StatusCode = detail.StatusCode,
+            RequestExpiresAt = detail.RequestExpiresAt,
+            GrantExpiresAt = detail.GrantExpiresAt,
+            RemainingReads = detail.RemainingReads,
+            MaxReads = detail.MaxReads,
+            UsedReads = UsedReads(detail.MaxReads, detail.RemainingReads)
+        };
 
     internal static SensitiveAccessResultResponse ToResponse(SensitiveAccessResultState result)
     {
@@ -512,7 +585,8 @@ internal static class SensitiveAccessEndpointMapping
             RequestExpiresAt = result.RequestExpiresAt,
             GrantExpiresAt = result.GrantExpiresAt,
             RemainingReads = result.RemainingReads,
-            MaxReads = result.MaxReads
+            MaxReads = result.MaxReads,
+            UsedReads = UsedReads(result.MaxReads, result.RemainingReads)
         };
     }
 
@@ -547,7 +621,24 @@ internal static class SensitiveAccessEndpointMapping
 
         return trimmed[..end];
     }
+
+    private static int? UsedReads(int? maxReads, int? remainingReads) =>
+        maxReads is null || remainingReads is null
+            ? null
+            : Math.Max(0, maxReads.Value - remainingReads.Value);
 }
+
+public sealed record SensitiveAccessPolicyUpdateRequest(
+    int RequestTimeoutSeconds,
+    int GrantDurationSeconds,
+    int MaximumSuccessfulReads);
+
+public sealed record SensitiveAccessPolicyResponse(
+    int Revision,
+    int RequestTimeoutSeconds,
+    int GrantDurationSeconds,
+    int MaximumSuccessfulReads,
+    DateTimeOffset CreatedAt);
 
 public sealed record SensitiveAccessRequestCreateRequest
 {
@@ -598,6 +689,10 @@ public sealed record SensitiveAccessRequestResponse(
     [JsonPropertyName("maxReads")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxReads { get; init; }
+
+    [JsonPropertyName("usedReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? UsedReads { get; init; }
 }
 
 public sealed record SensitiveAccessOperatorReferenceResponse(
@@ -624,7 +719,32 @@ public sealed record SensitiveAccessOperatorDetailResponse(
     string OutputPolicy,
     SensitiveAccessOperatorReferenceResponse Reference,
     string PayloadClass,
-    string RedactionState);
+    string RedactionState)
+{
+    [JsonPropertyName("statusCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusCode { get; init; }
+
+    [JsonPropertyName("requestExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+
+    [JsonPropertyName("grantExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+
+    [JsonPropertyName("remainingReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("maxReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxReads { get; init; }
+
+    [JsonPropertyName("usedReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? UsedReads { get; init; }
+}
 
 public sealed record SensitiveAccessResultResponse(
     string Id,
@@ -656,4 +776,8 @@ public sealed record SensitiveAccessResultResponse(
     [JsonPropertyName("maxReads")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxReads { get; init; }
+
+    [JsonPropertyName("usedReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? UsedReads { get; init; }
 }

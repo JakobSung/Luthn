@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
+using System.Security.Cryptography;
+using System.Text;
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
 using Luthn.Core.Persistence;
@@ -59,19 +61,39 @@ internal interface ISensitiveAccessWorkflow
         CancellationToken cancellationToken);
 }
 
+internal interface ISensitiveAccessSystemWorkflow
+{
+    Task<SensitiveAccessExpiryMaterializationResult> MaterializeExpiriesAsync(
+        DateTimeOffset observedAt,
+        int batchSize,
+        CancellationToken cancellationToken);
+}
+
+internal sealed record SensitiveAccessExpiryMaterializationResult(
+    int RequestsExpired,
+    int GrantsExpired)
+{
+    public int MaterializedCount => RequestsExpired + GrantsExpired;
+}
+
 internal sealed class SensitiveAccessWorkflow(
     LuthnDbContext db,
     IOperationalMetrics metrics,
     TimeProvider timeProvider,
     IContentClassifier? classifier = null,
-    IPolicyEngine? policyEngine = null) : ISensitiveAccessWorkflow
+    IPolicyEngine? policyEngine = null) : ISensitiveAccessWorkflow, ISensitiveAccessSystemWorkflow
 {
     private const int MaxStoredRedactedSummaryLength = 4000;
+    internal const int MinimumExpiryMaterializationBatchSize = 1;
+    internal const int MaximumExpiryMaterializationBatchSize = 1000;
+    internal const int DefaultExpiryMaterializationBatchSize = 100;
     private static readonly TimeSpan ReadPermitLifetime = TimeSpan.FromSeconds(5);
     private static readonly SemaphoreSlim PolicyRevisionLock = new(1, 1);
     private static readonly SemaphoreSlim RequestResolutionLock = new(1, 1);
     private static readonly SemaphoreSlim NonRelationalDecisionLock = new(1, 1);
     private static readonly SemaphoreSlim NonRelationalGrantReadLock = new(1, 1);
+    private static readonly SemaphoreSlim ExpiryMaterializationLock = new(1, 1);
+    private static readonly SemaphoreSlim LifecycleAuditLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SensitiveAccessReadPermitState> _readPermits =
         new(StringComparer.Ordinal);
 
@@ -124,6 +146,7 @@ internal sealed class SensitiveAccessWorkflow(
                 subjectType: "sensitive_access_policy",
                 outcome: "updated"));
             await db.SaveChangesAsync(cancellationToken);
+            metrics.RecordSensitiveAccessLifecycle("policy_updated");
             return SensitiveAccessPolicyRevisionResult.Succeeded(ToState(policy));
         }
         finally
@@ -209,6 +232,18 @@ internal sealed class SensitiveAccessWorkflow(
                 cancellationToken);
             if (existing is not null)
             {
+                db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                    principal,
+                    actor,
+                    "sensitive_access.request_reused",
+                    existing.Id,
+                    "metadata-only",
+                    "request-reused-no-output",
+                    observedAt,
+                    subjectType: "sensitive_access_request",
+                    outcome: "reused"));
+                await db.SaveChangesAsync(cancellationToken);
+                metrics.RecordSensitiveAccessLifecycle("request_reused");
                 return ToState(existing, observedAt);
             }
 
@@ -290,11 +325,16 @@ internal sealed class SensitiveAccessWorkflow(
                 record.RequestReason,
                 record.CreatedAt,
                 record.ExpiresAt,
+                record.UpdatedAt,
                 record.DecidedBy,
                 record.DecidedAt,
                 record.WorkspaceId,
                 record.OwnerUserId,
-                record.RedactedSummary != ""))
+                record.RedactedSummary != "",
+                record.Grant == null ? null : record.Grant.StartsAt,
+                record.Grant == null ? null : record.Grant.ExpiresAt,
+                record.Grant == null ? null : record.Grant.MaximumSuccessfulReads,
+                record.Grant == null ? null : record.Grant.SuccessfulReadCount))
             .SingleOrDefaultAsync(cancellationToken);
         if (request is null)
         {
@@ -342,6 +382,23 @@ internal sealed class SensitiveAccessWorkflow(
             outcome: "read"));
         await db.SaveChangesAsync(cancellationToken);
 
+        var lifecycle = new SensitiveAccessResolutionCandidate(
+            request.Id,
+            request.SensitiveReferenceId,
+            request.Status,
+            request.RequestedBy,
+            request.SessionId,
+            request.CreatedAt,
+            request.ExpiresAt,
+            request.UpdatedAt,
+            request.DecidedBy,
+            request.DecidedAt,
+            request.RedactedOutputAvailable,
+            request.GrantStartsAt,
+            request.GrantExpiresAt,
+            request.MaximumSuccessfulReads,
+            request.SuccessfulReadCount);
+        var statusCode = ResolveStatusCode(lifecycle, timeProvider.GetUtcNow());
         return new SensitiveAccessOperatorDetailState(
             request.Id,
             request.SensitiveReferenceId,
@@ -356,7 +413,14 @@ internal sealed class SensitiveAccessWorkflow(
             decision?.DecidedAt ?? request.DecidedAt,
             decision?.DecisionReason,
             request.Status == SensitiveAccessRequestStatus.Approved && request.RedactedOutputAvailable,
-            reference);
+            reference)
+        {
+            StatusCode = statusCode,
+            RequestExpiresAt = request.ExpiresAt,
+            GrantExpiresAt = request.GrantExpiresAt,
+            RemainingReads = RemainingReads(lifecycle),
+            MaxReads = request.MaximumSuccessfulReads
+        };
     }
 
     public async Task<SensitiveAccessResultState?> ReadRequestResultAsync(
@@ -414,8 +478,10 @@ internal sealed class SensitiveAccessWorkflow(
             SensitiveAccessEndpointMapping.ToOutputPolicy(request.Status, result.RedactedOutputAvailable),
             timeProvider.GetUtcNow(),
             subjectType: "sensitive_access_request",
-            outcome: "read"));
+            outcome: result.RedactedOutputAvailable ? "returned" : "unavailable"));
         await db.SaveChangesAsync(cancellationToken);
+        metrics.RecordSensitiveAccessLifecycle(
+            result.RedactedOutputAvailable ? "result_returned" : "result_unavailable");
 
         return result;
     }
@@ -530,6 +596,22 @@ internal sealed class SensitiveAccessWorkflow(
             observedAt,
             subjectType: "sensitive_access_request",
             outcome: status.ToString().ToLowerInvariant());
+        var grantAuditRecord = grantRecord is null
+            ? null
+            : AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "sensitive_access.grant_created",
+                accessRequest.Id,
+                "metadata-only",
+                "bounded-grant-created",
+                observedAt,
+                subjectType: "sensitive_access_grant",
+                outcome: "created",
+                id: LifecycleAuditId(
+                    "sensitive_access.grant_created",
+                    accessRequest.WorkspaceId,
+                    accessRequest.Id));
         var transitioned = false;
         try
         {
@@ -544,6 +626,10 @@ internal sealed class SensitiveAccessWorkflow(
                         {
                             db.Entry(decisionRecord).State = EntityState.Detached;
                             db.Entry(auditRecord).State = EntityState.Detached;
+                            if (grantAuditRecord is not null)
+                            {
+                                db.Entry(grantAuditRecord).State = EntityState.Detached;
+                            }
                             if (grantRecord is not null)
                             {
                                 db.Entry(grantRecord).State = EntityState.Detached;
@@ -575,6 +661,7 @@ internal sealed class SensitiveAccessWorkflow(
                             if (grantRecord is not null)
                             {
                                 db.SensitiveAccessGrants.Add(grantRecord);
+                                db.AuditEvents.Add(grantAuditRecord!);
                             }
                         }
                         await db.SaveChangesAsync(acceptAllChangesOnSuccess: false, operationCancellationToken);
@@ -602,6 +689,7 @@ internal sealed class SensitiveAccessWorkflow(
                     if (grantRecord is not null)
                     {
                         db.SensitiveAccessGrants.Add(grantRecord);
+                        db.AuditEvents.Add(grantAuditRecord!);
                     }
                     await db.SaveChangesAsync(cancellationToken);
                 }
@@ -623,6 +711,10 @@ internal sealed class SensitiveAccessWorkflow(
 
         metrics.RecordSensitiveAccessDecision(
             decisionKind == SensitiveAccessDecisionKind.Approved ? "approved" : "denied");
+        if (grantRecord is not null)
+        {
+            metrics.RecordSensitiveAccessLifecycle("grant_created");
+        }
 
         accessRequest.Status = status;
         accessRequest.DecidedBy = actor;
@@ -709,9 +801,27 @@ internal sealed class SensitiveAccessWorkflow(
             return null;
         }
 
-        return await ReserveGrantReadAsync(requestId, principal, cancellationToken)
-            ? redactedOutput
-            : null;
+        var reservation = await ReserveGrantReadAsync(requestId, principal, cancellationToken);
+        if (!reservation.Succeeded)
+        {
+            return null;
+        }
+
+        if (reservation.Consumed)
+        {
+            await AuditLifecycleOnceAsync(
+                requestId,
+                principal,
+                actor: "luthn-sensitive-access-workflow",
+                action: "sensitive_access.grant_consumed",
+                subjectType: "sensitive_access_grant",
+                outcome: "consumed",
+                redactionState: "bounded-grant-consumed",
+                metricEvent: "grant_consumed",
+                cancellationToken);
+        }
+
+        return redactedOutput;
     }
 
     private string? ValidateAndConsumeReadPermit(
@@ -749,7 +859,7 @@ internal sealed class SensitiveAccessWorkflow(
         return null;
     }
 
-    private async Task<bool> ReserveGrantReadAsync(
+    private async Task<SensitiveAccessGrantReadReservation> ReserveGrantReadAsync(
         string requestId,
         LuthnRequestPrincipal principal,
         CancellationToken cancellationToken)
@@ -757,7 +867,7 @@ internal sealed class SensitiveAccessWorkflow(
         var observedAt = timeProvider.GetUtcNow();
         if (db.Database.IsRelational())
         {
-            return await db.SensitiveAccessGrants
+            var reserved = await db.SensitiveAccessGrants
                 .Where(grant =>
                     grant.SensitiveAccessRequestId == requestId &&
                     grant.WorkspaceId == principal.WorkspaceId &&
@@ -768,6 +878,20 @@ internal sealed class SensitiveAccessWorkflow(
                 .ExecuteUpdateAsync(setters => setters.SetProperty(
                     grant => grant.SuccessfulReadCount,
                     grant => grant.SuccessfulReadCount + 1), cancellationToken) == 1;
+            if (!reserved)
+            {
+                return SensitiveAccessGrantReadReservation.Rejected;
+            }
+
+            var consumed = await db.SensitiveAccessGrants
+                .AsNoTracking()
+                .AnyAsync(grant =>
+                    grant.SensitiveAccessRequestId == requestId &&
+                    grant.WorkspaceId == principal.WorkspaceId &&
+                    grant.OwnerUserId == principal.UserId &&
+                    grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads,
+                    cancellationToken);
+            return new SensitiveAccessGrantReadReservation(true, consumed);
         }
 
         await NonRelationalGrantReadLock.WaitAsync(cancellationToken);
@@ -781,7 +905,7 @@ internal sealed class SensitiveAccessWorkflow(
                     cancellationToken);
             if (grant is null)
             {
-                return false;
+                return SensitiveAccessGrantReadReservation.Rejected;
             }
 
             await db.Entry(grant).ReloadAsync(cancellationToken);
@@ -789,12 +913,14 @@ internal sealed class SensitiveAccessWorkflow(
                 grant.ExpiresAt <= observedAt ||
                 grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads)
             {
-                return false;
+                return SensitiveAccessGrantReadReservation.Rejected;
             }
 
             grant.SuccessfulReadCount++;
             await db.SaveChangesAsync(cancellationToken);
-            return true;
+            return new SensitiveAccessGrantReadReservation(
+                true,
+                grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads);
         }
         finally
         {
@@ -820,6 +946,55 @@ internal sealed class SensitiveAccessWorkflow(
             subjectType: "sensitive_access_request",
             outcome: "rejected"));
         await db.SaveChangesAsync(cancellationToken);
+        metrics.RecordSensitiveAccessLifecycle("bypass_rejected");
+    }
+
+    private async Task AuditLifecycleOnceAsync(
+        string subjectId,
+        LuthnRequestPrincipal principal,
+        string actor,
+        string action,
+        string subjectType,
+        string outcome,
+        string redactionState,
+        string metricEvent,
+        CancellationToken cancellationToken)
+    {
+        await LifecycleAuditLock.WaitAsync(cancellationToken);
+        try
+        {
+            var auditId = LifecycleAuditId(action, principal.WorkspaceId, subjectId);
+            if (await db.AuditEvents.AsNoTracking().AnyAsync(
+                audit => audit.Id == auditId,
+                cancellationToken))
+            {
+                return;
+            }
+
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                action,
+                subjectId,
+                "metadata-only",
+                redactionState,
+                timeProvider.GetUtcNow(),
+                subjectType,
+                outcome,
+                id: auditId));
+            await db.SaveChangesAsync(cancellationToken);
+            metrics.RecordSensitiveAccessLifecycle(metricEvent);
+        }
+        finally
+        {
+            LifecycleAuditLock.Release();
+        }
+    }
+
+    private static string LifecycleAuditId(string action, string workspaceId, string subjectId)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"{action}\n{workspaceId}\n{subjectId}"));
+        return $"audit-sensitive-{Convert.ToHexString(digest).ToLowerInvariant()}";
     }
 
     private static string BoundAuditSubjectId(string requestId) =>
@@ -872,44 +1047,96 @@ internal sealed class SensitiveAccessWorkflow(
         return new ValidatedRedactedSummary(candidate, null);
     }
 
+    public async Task<SensitiveAccessExpiryMaterializationResult> MaterializeExpiriesAsync(
+        DateTimeOffset observedAt,
+        int batchSize,
+        CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(batchSize, MinimumExpiryMaterializationBatchSize);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(batchSize, MaximumExpiryMaterializationBatchSize);
+
+        await ExpiryMaterializationLock.WaitAsync(cancellationToken);
+        try
+        {
+            var requestsExpired = await MaterializeRequestExpiriesAsync(
+                observedAt,
+                batchSize,
+                workspaceId: null,
+                ownerUserId: null,
+                requestId: null,
+                cancellationToken);
+            var grantsExpired = requestsExpired < batchSize
+                ? await MaterializeGrantExpiriesAsync(
+                    observedAt,
+                    batchSize - requestsExpired,
+                    cancellationToken)
+                : 0;
+            return new SensitiveAccessExpiryMaterializationResult(requestsExpired, grantsExpired);
+        }
+        finally
+        {
+            ExpiryMaterializationLock.Release();
+        }
+    }
+
     private async Task ExpirePendingRequestsAsync(
         string? requestId,
         LuthnRequestPrincipal principal,
         CancellationToken cancellationToken)
     {
-        var observedAt = timeProvider.GetUtcNow();
+        await ExpiryMaterializationLock.WaitAsync(cancellationToken);
+        try
+        {
+            await MaterializeRequestExpiriesAsync(
+                timeProvider.GetUtcNow(),
+                requestId is null ? DefaultExpiryMaterializationBatchSize : 1,
+                principal.WorkspaceId,
+                principal.IsOperator ? null : principal.UserId,
+                requestId,
+                cancellationToken);
+        }
+        finally
+        {
+            ExpiryMaterializationLock.Release();
+        }
+    }
+
+    private async Task<int> MaterializeRequestExpiriesAsync(
+        DateTimeOffset observedAt,
+        int batchSize,
+        string? workspaceId,
+        string? ownerUserId,
+        string? requestId,
+        CancellationToken cancellationToken)
+    {
         var candidates = await db.SensitiveAccessRequests
             .AsNoTracking()
             .Where(request =>
                 request.Status == SensitiveAccessRequestStatus.Pending &&
                 request.ExpiresAt <= observedAt &&
-                request.WorkspaceId == principal.WorkspaceId &&
-                (principal.IsOperator || request.OwnerUserId == principal.UserId) &&
+                (workspaceId == null || request.WorkspaceId == workspaceId) &&
+                (ownerUserId == null || request.OwnerUserId == ownerUserId) &&
                 (requestId == null || request.Id == requestId))
-            .Select(request => request.Id)
+            .OrderBy(request => request.ExpiresAt)
+            .ThenBy(request => request.Id)
+            .Take(batchSize)
+            .Select(request => new SensitiveAccessExpiryCandidate(
+                request.Id,
+                request.WorkspaceId,
+                request.OwnerUserId))
             .ToArrayAsync(cancellationToken);
         if (candidates.Length == 0)
         {
-            return;
+            return 0;
         }
 
+        var transitionedCandidates = new List<SensitiveAccessExpiryCandidate>(candidates.Length);
         if (db.Database.IsRelational())
         {
             var auditRecords = candidates.ToDictionary(
-                candidateId => candidateId,
-                candidateId => AuditEventFactory.ForWorkspace(
-                    principal.WorkspaceId,
-                    actorUserId: null,
-                    actorKind: "system",
-                    actor: "local-expiry",
-                    action: "sensitive_access.expired",
-                    subjectId: candidateId,
-                    payloadClass: "metadata-only",
-                    redactionState: "expired-no-output",
-                    occurredAt: observedAt,
-                    subjectType: "sensitive_access_request",
-                    outcome: "expired"));
-            var transitionedCandidateIds = new HashSet<string>(StringComparer.Ordinal);
+                candidate => candidate.Id,
+                candidate => CreateRequestExpiredAudit(candidate, observedAt),
+                StringComparer.Ordinal);
             var strategy = db.Database.CreateExecutionStrategy();
             await strategy.ExecuteInTransactionAsync(
                 async operationCancellationToken =>
@@ -921,12 +1148,13 @@ internal sealed class SensitiveAccessWorkflow(
                             db.Entry(auditRecord).State = EntityState.Detached;
                         }
                     }
-                    transitionedCandidateIds.Clear();
-                    foreach (var candidateId in candidates)
+
+                    transitionedCandidates.Clear();
+                    foreach (var candidate in candidates)
                     {
                         var transitioned = await db.SensitiveAccessRequests
                             .Where(request =>
-                                request.Id == candidateId &&
+                                request.Id == candidate.Id &&
                                 request.Status == SensitiveAccessRequestStatus.Pending &&
                                 request.ExpiresAt <= observedAt)
                             .ExecuteUpdateAsync(setters => setters
@@ -934,8 +1162,8 @@ internal sealed class SensitiveAccessWorkflow(
                                 .SetProperty(request => request.UpdatedAt, observedAt), operationCancellationToken) == 1;
                         if (transitioned)
                         {
-                            transitionedCandidateIds.Add(candidateId);
-                            var auditRecord = auditRecords[candidateId];
+                            transitionedCandidates.Add(candidate);
+                            var auditRecord = auditRecords[candidate.Id];
                             if (db.Entry(auditRecord).State == EntityState.Detached)
                             {
                                 db.AuditEvents.Add(auditRecord);
@@ -947,50 +1175,142 @@ internal sealed class SensitiveAccessWorkflow(
                 },
                 async operationCancellationToken =>
                 {
-                    if (transitionedCandidateIds.Count == 0)
-                    {
-                        return true;
-                    }
-
-                    var auditIds = transitionedCandidateIds
-                        .Select(candidateId => auditRecords[candidateId].Id)
+                    var auditIds = transitionedCandidates
+                        .Select(candidate => auditRecords[candidate.Id].Id)
                         .ToArray();
-                    return await db.AuditEvents
+                    return auditIds.Length == 0 || await db.AuditEvents
                         .AsNoTracking()
                         .CountAsync(record => auditIds.Contains(record.Id), operationCancellationToken) == auditIds.Length;
                 },
                 cancellationToken);
             db.ChangeTracker.AcceptAllChanges();
-            return;
+        }
+        else
+        {
+            foreach (var candidate in candidates)
+            {
+                var request = await db.SensitiveAccessRequests
+                    .SingleAsync(record => record.Id == candidate.Id, cancellationToken);
+                if (request.Status != SensitiveAccessRequestStatus.Pending || request.ExpiresAt > observedAt)
+                {
+                    continue;
+                }
+
+                request.Status = SensitiveAccessRequestStatus.Expired;
+                request.UpdatedAt = observedAt;
+                transitionedCandidates.Add(candidate);
+                db.AuditEvents.Add(CreateRequestExpiredAudit(candidate, observedAt));
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
         }
 
-        foreach (var candidateId in candidates)
+        RecordSensitiveAccessLifecycle("request_expired", transitionedCandidates.Count);
+        return transitionedCandidates.Count;
+    }
+
+    private async Task<int> MaterializeGrantExpiriesAsync(
+        DateTimeOffset observedAt,
+        int batchSize,
+        CancellationToken cancellationToken)
+    {
+        if (batchSize == 0)
         {
-            var request = await db.SensitiveAccessRequests
-                .SingleAsync(record => record.Id == candidateId, cancellationToken);
-            var transitioned = request.Status == SensitiveAccessRequestStatus.Pending &&
-                request.ExpiresAt <= observedAt;
-            if (!transitioned)
+            return 0;
+        }
+
+        const string action = "sensitive_access.grant_expired";
+        var candidates = await db.SensitiveAccessGrants
+            .AsNoTracking()
+            .Where(grant =>
+                grant.ExpiresAt <= observedAt &&
+                !db.AuditEvents.Any(audit =>
+                    audit.WorkspaceId == grant.WorkspaceId &&
+                    audit.Action == action &&
+                    audit.SubjectType == "sensitive_access_grant" &&
+                    audit.SubjectId == grant.SensitiveAccessRequestId))
+            .OrderBy(grant => grant.ExpiresAt)
+            .ThenBy(grant => grant.SensitiveAccessRequestId)
+            .Take(batchSize)
+            .Select(grant => new SensitiveAccessExpiryCandidate(
+                grant.SensitiveAccessRequestId,
+                grant.WorkspaceId,
+                grant.OwnerUserId))
+            .ToArrayAsync(cancellationToken);
+        if (candidates.Length == 0)
+        {
+            return 0;
+        }
+
+        var materializedCount = 0;
+        foreach (var candidate in candidates)
+        {
+            var auditId = LifecycleAuditId(action, candidate.WorkspaceId, candidate.Id);
+            if (await db.AuditEvents.AsNoTracking().AnyAsync(
+                audit => audit.Id == auditId,
+                cancellationToken))
             {
                 continue;
             }
 
-            request.Status = SensitiveAccessRequestStatus.Expired;
-            request.UpdatedAt = observedAt;
-            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
-                principal.WorkspaceId,
+            var auditRecord = AuditEventFactory.ForWorkspace(
+                candidate.WorkspaceId,
                 actorUserId: null,
                 actorKind: "system",
-                actor: "local-expiry",
-                action: "sensitive_access.expired",
-                subjectId: candidateId,
+                actor: "luthn-sensitive-access-expiry",
+                action,
+                subjectId: candidate.Id,
                 payloadClass: "metadata-only",
-                redactionState: "expired-no-output",
+                redactionState: "bounded-grant-expired",
                 occurredAt: observedAt,
-                subjectType: "sensitive_access_request",
-                outcome: "expired"));
+                subjectType: "sensitive_access_grant",
+                outcome: "expired",
+                id: auditId);
+            db.AuditEvents.Add(auditRecord);
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+                materializedCount++;
+            }
+            catch (DbUpdateException)
+            {
+                db.Entry(auditRecord).State = EntityState.Detached;
+                if (!await db.AuditEvents.AsNoTracking().AnyAsync(
+                    audit => audit.Id == auditId,
+                    cancellationToken))
+                {
+                    throw;
+                }
+            }
         }
-        await db.SaveChangesAsync(cancellationToken);
+
+        RecordSensitiveAccessLifecycle("grant_expired", materializedCount);
+        return materializedCount;
+    }
+
+    private static AuditEventRecord CreateRequestExpiredAudit(
+        SensitiveAccessExpiryCandidate candidate,
+        DateTimeOffset observedAt) =>
+        AuditEventFactory.ForWorkspace(
+            candidate.WorkspaceId,
+            actorUserId: null,
+            actorKind: "system",
+            actor: "luthn-sensitive-access-expiry",
+            action: "sensitive_access.expired",
+            subjectId: candidate.Id,
+            payloadClass: "metadata-only",
+            redactionState: "expired-no-output",
+            occurredAt: observedAt,
+            subjectType: "sensitive_access_request",
+            outcome: "expired",
+            id: LifecycleAuditId("sensitive_access.expired", candidate.WorkspaceId, candidate.Id));
+
+    private void RecordSensitiveAccessLifecycle(string eventName, int count)
+    {
+        for (var index = 0; index < count; index++)
+        {
+            metrics.RecordSensitiveAccessLifecycle(eventName);
+        }
     }
 
     private async Task<SensitiveAccessResolutionCandidate?> ResolveForCreateAsync(
@@ -1254,11 +1574,16 @@ internal sealed class SensitiveAccessWorkflow(
         string RequestReason,
         DateTimeOffset CreatedAt,
         DateTimeOffset ExpiresAt,
+        DateTimeOffset UpdatedAt,
         string? DecidedBy,
         DateTimeOffset? DecidedAt,
         string WorkspaceId,
         string OwnerUserId,
-        bool RedactedOutputAvailable);
+        bool RedactedOutputAvailable,
+        DateTimeOffset? GrantStartsAt,
+        DateTimeOffset? GrantExpiresAt,
+        int? MaximumSuccessfulReads,
+        int? SuccessfulReadCount);
 
     private sealed record SensitiveAccessResolutionCandidate(
         string Id,
@@ -1281,6 +1606,16 @@ internal sealed class SensitiveAccessWorkflow(
         string RequestId,
         string WorkspaceId,
         string OwnerUserId);
+
+    private sealed record SensitiveAccessExpiryCandidate(
+        string Id,
+        string WorkspaceId,
+        string OwnerUserId);
+
+    private sealed record SensitiveAccessGrantReadReservation(bool Succeeded, bool Consumed)
+    {
+        public static readonly SensitiveAccessGrantReadReservation Rejected = new(false, false);
+    }
 
     private sealed record ValidatedRedactedSummary(
         string? Value,
@@ -1390,7 +1725,14 @@ internal sealed record SensitiveAccessOperatorDetailState(
     DateTimeOffset? DecidedAt,
     string? DecisionReason,
     bool RedactedOutputAvailable,
-    SensitiveAccessOperatorReferenceState Reference);
+    SensitiveAccessOperatorReferenceState Reference)
+{
+    public string? StatusCode { get; init; }
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+    public int? RemainingReads { get; init; }
+    public int? MaxReads { get; init; }
+}
 
 internal sealed record SensitiveAccessResultState(
     string Id,
