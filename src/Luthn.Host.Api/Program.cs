@@ -90,6 +90,7 @@ builder.Services.AddSingleton<ContextPackBuilder>();
 builder.Services.AddSingleton<WikiMarkdownRenderer>();
 builder.Services.AddSingleton<IOperationalMetrics, OperationalMetrics>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<ISensitiveAccessWorkflow, SensitiveAccessWorkflow>();
 builder.Services.AddSafeProjectionSyncFoundation();
 builder.Services.AddProblemDetails();
 builder.Services.AddRequestTimeouts(options =>
