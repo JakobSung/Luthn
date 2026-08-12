@@ -252,6 +252,11 @@ public sealed class PersistenceContractTests
         Assert.Contains(migrations, migration => migration.EndsWith("_InitialCreate", StringComparison.Ordinal));
         Assert.Contains(migrations, migration => migration.EndsWith("_AddWorkspaceScopedDataPlane", StringComparison.Ordinal));
         Assert.Contains(migrations, migration => migration.EndsWith("_AddAuditEventScopeAndCorrelation", StringComparison.Ordinal));
+        Assert.Contains(
+            migrations,
+            migration => migration.EndsWith(
+                "_AddExpiringSensitiveTurnSummaryReferences",
+                StringComparison.Ordinal));
     }
 
     [Fact]

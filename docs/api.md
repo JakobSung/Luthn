@@ -60,7 +60,10 @@ The default API runtime also prunes eligible expired automatic turn capsules.
 Cleanup is enabled by default, runs every 60 minutes, and processes at most 100
 records per batch. It deletes only `Ephemeral` memory linked by immutable
 provenance to a `turn-summary` source event when the memory remains `LocalOnly`
-and has no safe-sync outbox history. The memory row, encrypted payload,
+and has no safe-sync outbox history or sensitive-record reference. Referenced
+turn summaries remain fail-closed after expiry until the dedicated sensitive
+access lifecycle cleanup processes them. For eligible unreferenced capsules,
+the memory row, encrypted payload,
 provenance, classification, and source event are removed in one transaction.
 Prior audit events remain and one metadata-only
 `turn_summary.retention.pruned` event records the cleanup. Configure the loop
@@ -102,6 +105,7 @@ Response:
   "sourceEventId": "turn-summary-...",
   "classificationResultId": "classification-turn-summary-...",
   "memoryItemId": "memory-turn-summary-...",
+  "sensitiveReferenceId": "sensitive-turn-summary-...",
   "auditEventId": "audit-...",
   "allowsAgentContext": true,
   "duplicate": false,
@@ -132,7 +136,10 @@ safe projection and may store it as `SharedAcrossAgents`. The response
 classification and storage decision describe the selected safe projection,
 while the source event remains marked as containing sensitive material and the
 original title, summary, metadata, and session identifier remain only in the
-owner-scoped encrypted payload. Incomplete, still-sensitive, or meaningless
+owner-scoped encrypted payload. Every encrypted turn summary also receives one
+idempotent `sensitiveReferenceId` linked to the parent memory item. The
+reference and encrypted payload share the memory expiry; retries return the
+same reference without duplicate rows. Incomplete, still-sensitive, or meaningless
 redactions keep the whole turn summary behind the private inert boundary.
 
 ## Agent connection observations
@@ -867,7 +874,7 @@ Response shape includes request/decision metadata only:
 }
 ```
 
-Approving or denying records decision metadata and audit events. Approval does not create a raw content read path. An approval request may include `redactedSummary`; the server enforces the 4000-character storage limit, reclassifies it, and stores it only when it is public agent-safe. Rejected approval summaries create metadata-only audit events. Approved result delivery is limited to the reviewed summary stored by the approval decision.
+Approving or denying records decision metadata and audit events. Approval does not create a raw content read path. An approval request may include `redactedSummary`; the server enforces the 4000-character storage limit, reclassifies it, and stores it only when it is public agent-safe. For a turn-summary reference, omitting this field revalidates and uses the reference's stored public-safe projection when one exists. Rejected approval summaries create metadata-only audit events. Approved result delivery is limited to that server-validated summary. Reference expiry is rechecked during request creation, decision, permit/grant use, and result reads; expiry always produces no output.
 
 Approval request with reviewed output:
 

@@ -6,6 +6,65 @@ namespace Luthn.Host.Api.Tests;
 public sealed class SensitiveAccessResolutionTests
 {
     [Fact]
+    public async Task ExpiredOrCrossOwnerReferenceCannotCreateRequest()
+    {
+        await using var db = TestData.CreateDbContext();
+        TestData.AddReference(db, expiresAt: TestData.ObservedAt);
+        await db.SaveChangesAsync();
+        var workflow = TestData.CreateWorkflow(db, new ManualTimeProvider(TestData.ObservedAt));
+
+        var expired = await workflow.CreateRequestAsync(
+            new SensitiveAccessRequestCreateRequest
+            {
+                SensitiveReferenceId = TestData.ReferenceId,
+                Reason = "expired reference",
+                SessionId = "expired-session"
+            },
+            TestData.Principal,
+            "agent",
+            CancellationToken.None);
+        var otherOwner = await workflow.CreateRequestAsync(
+            new SensitiveAccessRequestCreateRequest
+            {
+                SensitiveReferenceId = TestData.ReferenceId,
+                Reason = "cross-owner reference",
+                SessionId = "other-owner-session"
+            },
+            TestData.Principal with { UserId = "owner-b" },
+            "agent",
+            CancellationToken.None);
+
+        Assert.Null(expired);
+        Assert.Null(otherOwner);
+        Assert.Empty(await db.SensitiveAccessRequests.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task ReferenceExpiryAfterRequestRejectsDecisionAndGrant()
+    {
+        await using var db = TestData.CreateDbContext();
+        TestData.AddReference(db, expiresAt: TestData.ObservedAt.AddMinutes(5));
+        await db.SaveChangesAsync();
+        var workflow = TestData.CreateWorkflow(db, new ManualTimeProvider(TestData.ObservedAt));
+        var request = await CreateAsync(workflow, "session-reference-expires");
+        var reference = await db.SensitiveRecordReferences.SingleAsync();
+        reference.ExpiresAt = TestData.ObservedAt;
+        await db.SaveChangesAsync();
+
+        var decision = await workflow.DecideRequestAsync(
+            request.Id,
+            new SensitiveAccessDecisionRequest { Reason = "must reject expired reference" },
+            SensitiveAccessRequestStatus.Approved,
+            TestData.OperatorPrincipal,
+            "operator",
+            CancellationToken.None);
+
+        Assert.Equal(SensitiveAccessDecisionOutcome.AlreadyDecided, decision.Outcome);
+        Assert.Empty(await db.SensitiveAccessDecisions.ToArrayAsync());
+        Assert.Empty(await db.SensitiveAccessGrants.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task RepeatedPendingRequestReusesOriginalRequestAcrossSessions()
     {
         await using var db = TestData.CreateDbContext();
@@ -101,6 +160,32 @@ public sealed class SensitiveAccessResolutionTests
 
 public sealed class SensitiveAccessLifecycleStatusTests
 {
+    [Fact]
+    public async Task ReferenceExpiryInvalidatesPermitGrantAndResult()
+    {
+        await using var db = TestData.CreateDbContext();
+        TestData.AddApprovedGrant(db, TestData.ObservedAt.AddMinutes(1));
+        await db.SaveChangesAsync();
+        var workflow = TestData.CreateWorkflow(
+            db,
+            new ManualTimeProvider(TestData.ObservedAt.AddMinutes(2)));
+
+        var permit = await workflow.IssueReadPermitAsync(
+            TestData.ApprovedRequestId,
+            TestData.Principal,
+            CancellationToken.None);
+        var result = await workflow.ReadRequestResultAsync(
+            TestData.ApprovedRequestId,
+            TestData.Principal,
+            "agent",
+            CancellationToken.None);
+
+        Assert.Null(permit);
+        Assert.Equal(SensitiveAccessStatusCodes.GrantExpired, result!.StatusCode);
+        Assert.Null(result.RedactedOutput);
+        Assert.Equal(0, (await db.SensitiveAccessGrants.SingleAsync()).SuccessfulReadCount);
+    }
+
     [Fact]
     public async Task ActiveGrantReturnsResultThenReportsConsumedWithoutMoreOutput()
     {

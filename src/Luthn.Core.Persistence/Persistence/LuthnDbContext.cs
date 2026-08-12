@@ -150,6 +150,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.MemoryItemId).HasMaxLength(128);
             entity.Property(record => record.SourceSystem).HasMaxLength(128).IsRequired();
             entity.Property(record => record.SourceType).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ReferenceLabel).HasMaxLength(256).IsRequired();
@@ -157,9 +158,14 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new { record.WorkspaceId, record.ReceivedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.OwnerUserId, record.ExpiresAt });
             entity.HasOne(record => record.SourceEvent)
                 .WithMany()
                 .HasForeignKey(record => record.SourceEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(record => record.MemoryItem)
+                .WithMany()
+                .HasForeignKey(record => record.MemoryItemId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -333,6 +339,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.ContractVersion).HasDefaultValue(1);
             entity.Property(record => record.ProtectionScheme).HasMaxLength(64).IsRequired();
             entity.Property(record => record.ProtectedPayload).HasColumnType("text").IsRequired();
+            entity.HasIndex(record => record.ExpiresAt);
             entity.HasOne<SharedMemoryItemRecord>()
                 .WithOne()
                 .HasForeignKey<SensitiveMemoryPayloadRecord>(record => record.MemoryItemId)

@@ -202,15 +202,26 @@ internal sealed class SensitiveAccessWorkflow(
         CancellationToken cancellationToken)
     {
         var sensitiveReferenceId = request.SensitiveReferenceId.Trim();
+        var observedAt = timeProvider.GetUtcNow();
         var reference = await db.SensitiveRecordReferences
             .AsNoTracking()
             .Where(record => record.Id == sensitiveReferenceId &&
                 record.WorkspaceId == principal.WorkspaceId &&
-                record.OwnerUserId == principal.UserId)
+                record.OwnerUserId == principal.UserId &&
+                (record.ExpiresAt == null || record.ExpiresAt > observedAt) &&
+                (record.MemoryItemId == null ||
+                    (record.MemoryItem != null &&
+                        record.MemoryItem.WorkspaceId == principal.WorkspaceId &&
+                        record.MemoryItem.OwnerUserId == principal.UserId &&
+                        record.MemoryItem.ExpiresAt == record.ExpiresAt &&
+                        db.SensitiveMemoryPayloads.Any(payload =>
+                            payload.MemoryItemId == record.MemoryItemId &&
+                            payload.ExpiresAt == record.ExpiresAt))))
             .Select(record => new SensitiveAccessReferenceIdentity(
                 record.Id,
                 record.WorkspaceId,
-                record.OwnerUserId))
+                record.OwnerUserId,
+                record.ExpiresAt))
             .SingleOrDefaultAsync(cancellationToken);
         if (reference is null)
         {
@@ -224,7 +235,11 @@ internal sealed class SensitiveAccessWorkflow(
         try
         {
             await ExpirePendingRequestsAsync(requestId: null, principal, cancellationToken);
-            var observedAt = timeProvider.GetUtcNow();
+            observedAt = timeProvider.GetUtcNow();
+            if (reference.ExpiresAt <= observedAt)
+            {
+                return null;
+            }
             var existing = await ResolveForCreateAsync(
                 reference,
                 sessionId,
@@ -253,14 +268,16 @@ internal sealed class SensitiveAccessWorkflow(
                 cancellationToken);
             var accessRequest = new SensitiveAccessRequestRecord
             {
-                Id = $"access-{Guid.NewGuid():N}",
+                Id = CreateStableRequestId(reference, sessionId),
                 SensitiveRecordReferenceId = reference.Id,
                 RequestedBy = actor,
                 SessionId = sessionId,
                 RequestReason = request.Reason.Trim(),
                 Status = SensitiveAccessRequestStatus.Pending,
                 CreatedAt = observedAt,
-                ExpiresAt = observedAt.AddSeconds(policy.RequestTimeoutSeconds),
+                ExpiresAt = MinExpiry(
+                    observedAt.AddSeconds(policy.RequestTimeoutSeconds),
+                    reference.ExpiresAt),
                 UpdatedAt = observedAt,
                 WorkspaceId = reference.WorkspaceId,
                 OwnerUserId = reference.OwnerUserId,
@@ -331,6 +348,9 @@ internal sealed class SensitiveAccessWorkflow(
                 record.WorkspaceId,
                 record.OwnerUserId,
                 record.RedactedSummary != "",
+                record.SensitiveRecordReference == null
+                    ? null
+                    : record.SensitiveRecordReference.ExpiresAt,
                 record.Grant == null ? null : record.Grant.StartsAt,
                 record.Grant == null ? null : record.Grant.ExpiresAt,
                 record.Grant == null ? null : record.Grant.MaximumSuccessfulReads,
@@ -394,6 +414,7 @@ internal sealed class SensitiveAccessWorkflow(
             request.DecidedBy,
             request.DecidedAt,
             request.RedactedOutputAvailable,
+            request.ReferenceExpiresAt,
             request.GrantStartsAt,
             request.GrantExpiresAt,
             request.MaximumSuccessfulReads,
@@ -511,6 +532,12 @@ internal sealed class SensitiveAccessWorkflow(
             return SensitiveAccessDecisionResult.AlreadyDecided();
         }
 
+        var referenceLifetime = await ReadReferenceLifetimeAsync(accessRequest, cancellationToken);
+        if (!IsActive(referenceLifetime, timeProvider.GetUtcNow()))
+        {
+            return SensitiveAccessDecisionResult.AlreadyDecided();
+        }
+
         if (request.Reason is not null &&
             request.Reason.Trim().Length > ApiValidation.ReasonMaxLength)
         {
@@ -561,6 +588,11 @@ internal sealed class SensitiveAccessWorkflow(
         }
 
         var observedAt = timeProvider.GetUtcNow();
+        referenceLifetime = await ReadReferenceLifetimeAsync(accessRequest, cancellationToken);
+        if (!IsActive(referenceLifetime, observedAt))
+        {
+            return SensitiveAccessDecisionResult.AlreadyDecided();
+        }
         var decisionRecord = new SensitiveAccessDecisionRecord
         {
             Id = $"decision-{Guid.NewGuid():N}",
@@ -582,7 +614,9 @@ internal sealed class SensitiveAccessWorkflow(
                 PolicyRevision = approvalPolicy.Revision,
                 GrantDurationSeconds = approvalPolicy.GrantDurationSeconds,
                 StartsAt = observedAt,
-                ExpiresAt = observedAt.AddSeconds(approvalPolicy.GrantDurationSeconds),
+                ExpiresAt = MinExpiry(
+                    observedAt.AddSeconds(approvalPolicy.GrantDurationSeconds),
+                    referenceLifetime!.ExpiresAt),
                 MaximumSuccessfulReads = approvalPolicy.MaximumSuccessfulReads,
                 SuccessfulReadCount = 0
             };
@@ -639,7 +673,12 @@ internal sealed class SensitiveAccessWorkflow(
                             .Where(record =>
                                 record.Id == id &&
                                 record.Status == SensitiveAccessRequestStatus.Pending &&
-                                record.ExpiresAt > observedAt)
+                                record.ExpiresAt > observedAt &&
+                                db.SensitiveRecordReferences.Any(reference =>
+                                    reference.Id == record.SensitiveRecordReferenceId &&
+                                    reference.WorkspaceId == record.WorkspaceId &&
+                                    reference.OwnerUserId == record.OwnerUserId &&
+                                    (reference.ExpiresAt == null || reference.ExpiresAt > observedAt)))
                             .ExecuteUpdateAsync(setters => setters
                                 .SetProperty(record => record.Status, status)
                                 .SetProperty(record => record.DecidedBy, actor)
@@ -676,7 +715,10 @@ internal sealed class SensitiveAccessWorkflow(
             {
                 await db.Entry(accessRequest).ReloadAsync(cancellationToken);
                 transitioned = accessRequest.Status == SensitiveAccessRequestStatus.Pending &&
-                    accessRequest.ExpiresAt > observedAt;
+                    accessRequest.ExpiresAt > observedAt &&
+                    IsActive(
+                        await ReadReferenceLifetimeAsync(accessRequest, cancellationToken),
+                        observedAt);
                 if (transitioned)
                 {
                     accessRequest.Status = status;
@@ -749,7 +791,10 @@ internal sealed class SensitiveAccessWorkflow(
                 grant.SuccessfulReadCount < grant.MaximumSuccessfulReads &&
                 grant.SensitiveAccessRequest != null &&
                 grant.SensitiveAccessRequest.Status == SensitiveAccessRequestStatus.Approved &&
-                grant.SensitiveAccessRequest.RedactedSummary != "")
+                grant.SensitiveAccessRequest.RedactedSummary != "" &&
+                grant.SensitiveAccessRequest.SensitiveRecordReference != null &&
+                (grant.SensitiveAccessRequest.SensitiveRecordReference.ExpiresAt == null ||
+                    grant.SensitiveAccessRequest.SensitiveRecordReference.ExpiresAt > observedAt))
             .Select(grant => new SensitiveAccessPermitScope(
                 grant.SensitiveAccessRequestId,
                 grant.WorkspaceId,
@@ -787,13 +832,17 @@ internal sealed class SensitiveAccessWorkflow(
             return null;
         }
 
+        var observedAt = timeProvider.GetUtcNow();
         var redactedOutput = await db.SensitiveAccessRequests
             .AsNoTracking()
             .Where(record => record.Id == requestId &&
                 record.WorkspaceId == principal.WorkspaceId &&
                 record.OwnerUserId == principal.UserId &&
                 record.Status == SensitiveAccessRequestStatus.Approved &&
-                record.RedactedSummary != "")
+                record.RedactedSummary != "" &&
+                record.SensitiveRecordReference != null &&
+                (record.SensitiveRecordReference.ExpiresAt == null ||
+                    record.SensitiveRecordReference.ExpiresAt > observedAt))
             .Select(record => record.RedactedSummary)
             .SingleOrDefaultAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(redactedOutput))
@@ -874,7 +923,11 @@ internal sealed class SensitiveAccessWorkflow(
                     grant.OwnerUserId == principal.UserId &&
                     grant.StartsAt <= observedAt &&
                     grant.ExpiresAt > observedAt &&
-                    grant.SuccessfulReadCount < grant.MaximumSuccessfulReads)
+                    grant.SuccessfulReadCount < grant.MaximumSuccessfulReads &&
+                    grant.SensitiveAccessRequest != null &&
+                    grant.SensitiveAccessRequest.SensitiveRecordReference != null &&
+                    (grant.SensitiveAccessRequest.SensitiveRecordReference.ExpiresAt == null ||
+                        grant.SensitiveAccessRequest.SensitiveRecordReference.ExpiresAt > observedAt))
                 .ExecuteUpdateAsync(setters => setters.SetProperty(
                     grant => grant.SuccessfulReadCount,
                     grant => grant.SuccessfulReadCount + 1), cancellationToken) == 1;
@@ -909,9 +962,20 @@ internal sealed class SensitiveAccessWorkflow(
             }
 
             await db.Entry(grant).ReloadAsync(cancellationToken);
+            var accessRequest = await db.SensitiveAccessRequests
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    request => request.Id == requestId &&
+                        request.WorkspaceId == principal.WorkspaceId &&
+                        request.OwnerUserId == principal.UserId,
+                    cancellationToken);
             if (grant.StartsAt > observedAt ||
                 grant.ExpiresAt <= observedAt ||
-                grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads)
+                grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads ||
+                accessRequest is null ||
+                !IsActive(
+                    await ReadReferenceLifetimeAsync(accessRequest, cancellationToken),
+                    observedAt))
             {
                 return SensitiveAccessGrantReadReservation.Rejected;
             }
@@ -997,6 +1061,40 @@ internal sealed class SensitiveAccessWorkflow(
         return $"audit-sensitive-{Convert.ToHexString(digest).ToLowerInvariant()}";
     }
 
+    private static string CreateStableRequestId(
+        SensitiveAccessReferenceIdentity reference,
+        string sessionId)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"{reference.WorkspaceId}\n{reference.OwnerUserId}\n{reference.Id}\n{sessionId}"));
+        return $"access-{Convert.ToHexString(digest).ToLowerInvariant()[..32]}";
+    }
+
+    private static DateTimeOffset MinExpiry(
+        DateTimeOffset policyExpiry,
+        DateTimeOffset? referenceExpiry) =>
+        referenceExpiry is DateTimeOffset expiresAt && expiresAt < policyExpiry
+            ? expiresAt
+            : policyExpiry;
+
+    private Task<SensitiveAccessReferenceLifetime?> ReadReferenceLifetimeAsync(
+        SensitiveAccessRequestRecord request,
+        CancellationToken cancellationToken) =>
+        db.SensitiveRecordReferences
+            .AsNoTracking()
+            .Where(reference =>
+                reference.Id == request.SensitiveRecordReferenceId &&
+                reference.WorkspaceId == request.WorkspaceId &&
+                reference.OwnerUserId == request.OwnerUserId)
+            .Select(reference => new SensitiveAccessReferenceLifetime(reference.ExpiresAt))
+            .SingleOrDefaultAsync(cancellationToken);
+
+    private static bool IsActive(
+        SensitiveAccessReferenceLifetime? reference,
+        DateTimeOffset observedAt) =>
+        reference is not null &&
+        (reference.ExpiresAt is null || reference.ExpiresAt > observedAt);
+
     private static string BoundAuditSubjectId(string requestId) =>
         !string.IsNullOrWhiteSpace(requestId) &&
         requestId.Length <= ApiValidation.PublicRecordIdMaxLength &&
@@ -1010,8 +1108,26 @@ internal sealed class SensitiveAccessWorkflow(
         SensitiveAccessRequestStatus status,
         CancellationToken cancellationToken)
     {
-        if (status != SensitiveAccessRequestStatus.Approved ||
-            string.IsNullOrWhiteSpace(request.RedactedSummary))
+        if (status != SensitiveAccessRequestStatus.Approved)
+        {
+            return new ValidatedRedactedSummary(null, null);
+        }
+
+        var candidate = request.RedactedSummary?.Trim();
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            candidate = await db.SensitiveRecordReferences
+                .AsNoTracking()
+                .Where(reference =>
+                    reference.Id == accessRequest.SensitiveRecordReferenceId &&
+                    reference.WorkspaceId == accessRequest.WorkspaceId &&
+                    reference.OwnerUserId == accessRequest.OwnerUserId &&
+                    reference.MemoryItemId != null)
+                .Select(reference => reference.RedactedSummary)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+
+        if (string.IsNullOrWhiteSpace(candidate))
         {
             return new ValidatedRedactedSummary(null, null);
         }
@@ -1023,7 +1139,6 @@ internal sealed class SensitiveAccessWorkflow(
                 "redactedSummary can only be provided for approval decisions.");
         }
 
-        var candidate = request.RedactedSummary.Trim();
         if (candidate.Length > MaxStoredRedactedSummaryLength)
         {
             return new ValidatedRedactedSummary(
@@ -1376,6 +1491,9 @@ internal sealed class SensitiveAccessWorkflow(
             record.DecidedBy,
             record.DecidedAt,
             record.RedactedSummary != "",
+            record.SensitiveRecordReference == null
+                ? null
+                : record.SensitiveRecordReference.ExpiresAt,
             record.Grant == null ? null : record.Grant.StartsAt,
             record.Grant == null ? null : record.Grant.ExpiresAt,
             record.Grant == null ? null : record.Grant.MaximumSuccessfulReads,
@@ -1385,6 +1503,14 @@ internal sealed class SensitiveAccessWorkflow(
         SensitiveAccessResolutionCandidate request,
         DateTimeOffset observedAt)
     {
+        if (request.ReferenceExpiresAt is DateTimeOffset referenceExpiresAt &&
+            referenceExpiresAt <= observedAt)
+        {
+            return request.Status == SensitiveAccessRequestStatus.Pending
+                ? SensitiveAccessStatusCodes.RequestExpired
+                : SensitiveAccessStatusCodes.GrantExpired;
+        }
+
         if (request.Status == SensitiveAccessRequestStatus.Pending)
         {
             return request.RequestExpiresAt > observedAt
@@ -1560,7 +1686,10 @@ internal sealed class SensitiveAccessWorkflow(
     private sealed record SensitiveAccessReferenceIdentity(
         string Id,
         string WorkspaceId,
-        string OwnerUserId);
+        string OwnerUserId,
+        DateTimeOffset? ExpiresAt);
+
+    private sealed record SensitiveAccessReferenceLifetime(DateTimeOffset? ExpiresAt);
 
     private sealed record SensitiveAccessOperatorRequestState(
         string Id,
@@ -1577,6 +1706,7 @@ internal sealed class SensitiveAccessWorkflow(
         string WorkspaceId,
         string OwnerUserId,
         bool RedactedOutputAvailable,
+        DateTimeOffset? ReferenceExpiresAt,
         DateTimeOffset? GrantStartsAt,
         DateTimeOffset? GrantExpiresAt,
         int? MaximumSuccessfulReads,
@@ -1594,6 +1724,7 @@ internal sealed class SensitiveAccessWorkflow(
         string? DecidedBy,
         DateTimeOffset? DecidedAt,
         bool RedactedOutputAvailable,
+        DateTimeOffset? ReferenceExpiresAt,
         DateTimeOffset? GrantStartsAt,
         DateTimeOffset? GrantExpiresAt,
         int? MaximumSuccessfulReads,

@@ -47,7 +47,9 @@ POST /api/agent/turn-summaries
 기본 API runtime은 정리 조건을 충족한 만료 자동 turn capsule도 물리적으로 정리합니다.
 기본값은 활성화, 60분 간격, batch당 최대 100개입니다. 불변 provenance로
 `turn-summary` source event와 연결된 `Ephemeral` memory 중 `LocalOnly`이고 safe-sync
-outbox 이력이 없는 항목만 대상입니다. memory 행, 암호화 payload, provenance,
+outbox 이력과 민감 record reference가 없는 항목만 대상입니다. reference가 연결된
+turn 요약은 전용 민감 접근 lifecycle cleanup 전까지 만료 후 fail-closed 상태로
+남습니다. 정리 가능한 비참조 capsule은 memory 행, 암호화 payload, provenance,
 classification, source event를 한 transaction에서 삭제합니다. 기존 audit event는
 남기고 metadata-only `turn_summary.retention.pruned` event 하나를 추가합니다.
 `Luthn__Memory__AutomaticTurnCleanupEnabled`,
@@ -76,7 +78,7 @@ record도 자동 물리 정리에서 제외합니다.
 
 원본 프로젝트 경로와 자유 형식 `sourceMetadata`는 거부합니다. 대신 제한된 `projectKey`, `taskKey`, `topicTags`와 구조화된 `provenance` 필드를 사용합니다.
 
-응답은 `summaryId`, `sourceEventId`, `classificationResultId`, `memoryItemId`, `auditEventId`, `allowsAgentContext`, `duplicate`, `classification`, `storageDecision`을 반환합니다. 공개 안전 요약은 `SharedAcrossAgents` 기억이 될 수 있고, 민감 요약은 기본 에이전트 API에서 반환하지 않습니다. `idempotencyKey`가 재시도 중복 쓰기를 막습니다.
+응답은 `summaryId`, `sourceEventId`, `classificationResultId`, `memoryItemId`, `sensitiveReferenceId`, `auditEventId`, `allowsAgentContext`, `duplicate`, `classification`, `storageDecision`을 반환합니다. 암호화 payload가 생긴 turn 요약은 부모 memory와 연결되고 같은 `expiresAt`을 공유하는 민감 reference 하나를 멱등 생성하며, 재시도는 같은 `sensitiveReferenceId`를 반환합니다. 공개 안전 요약은 `SharedAcrossAgents` 기억이 될 수 있고, 민감 요약은 기본 에이전트 API에서 반환하지 않습니다. `idempotencyKey`가 재시도 중복 쓰기를 막습니다.
 
 결정적 필드 마스킹으로 탐지된 고신뢰 민감 값을 모두 제거하면서 의미 있는 업무
 사건을 보존할 수 있으면, Luthn은 안전 투영을 다시 분류해 `SharedAcrossAgents`로
@@ -507,7 +509,10 @@ protected payload, credential, workspace id, owner id는 응답하지 않습니�
 새 호출자는 `sessionId`를 보내야 합니다. `expiresInSeconds`는 버전 없는 JSON 형식의
 호환성을 위해 유지하고 60–3600초 밖의 값은 거절하지만, 실제 request 만료는 활성 server
 정책이 결정합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한,
-재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은
+재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. turn-summary reference는
+이 값을 생략하면 저장된 공개 안전 투영이 있을 때 server가 다시 검증해 사용합니다.
+reference 만료는 요청 생성, 결정, permit/grant 사용, 결과 조회에서 모두 현재 server
+시각으로 재검사하며 항상 출력 없이 거절합니다. 거부된 승인 요약은
 metadata-only 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며
 `pending-approval`, `expired-no-output`, `denied-no-output`,
 `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를

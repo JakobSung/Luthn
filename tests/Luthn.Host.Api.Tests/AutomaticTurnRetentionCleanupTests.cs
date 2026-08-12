@@ -79,6 +79,22 @@ public sealed class AutomaticTurnRetentionCleanupTests
             Now.AddMinutes(-1),
             publicationState: ExternalPublicationState.Revoked);
         AddTurnCapsule(db, "outbox", Now.AddMinutes(-1), withOutbox: true);
+        AddTurnCapsule(db, "referenced", Now.AddMinutes(-1), sensitive: true);
+        db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
+        {
+            Id = "sensitive-referenced",
+            SourceEventId = "referenced",
+            MemoryItemId = "memory-referenced",
+            SourceSystem = "codex",
+            SourceType = "turn-summary",
+            ReceivedAt = Now.AddDays(-2),
+            ExpiresAt = Now.AddMinutes(-1),
+            ContainsSensitiveMaterial = true,
+            ReferenceLabel = "sensitive-turn-summary:referenced",
+            RedactedSummary = "Public-safe referenced summary.",
+            WorkspaceId = "default",
+            OwnerUserId = "local-owner"
+        });
         AddTurnCapsule(
             db,
             "owner-mismatch",
@@ -104,7 +120,9 @@ public sealed class AutomaticTurnRetentionCleanupTests
             .ProcessBatchAsync(Now, 100);
 
         Assert.Equal(0, result.DeletedCount);
-        Assert.Equal(11, await db.SharedMemoryItems.CountAsync());
+        Assert.Equal(12, await db.SharedMemoryItems.CountAsync());
+        Assert.True(await db.SensitiveRecordReferences.AnyAsync(
+            reference => reference.Id == "sensitive-referenced"));
         Assert.Empty(await db.AuditEvents
             .Where(record => record.Action == "turn_summary.retention.pruned")
             .ToArrayAsync());

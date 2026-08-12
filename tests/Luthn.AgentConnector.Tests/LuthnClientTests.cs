@@ -236,6 +236,7 @@ public sealed class LuthnClientTests
               "sourceEventId": "turn-summary-1",
               "classificationResultId": "classification-1",
               "memoryItemId": "memory-turn-summary-1",
+              "sensitiveReferenceId": "sensitive-turn-summary-1",
               "auditEventId": "audit-1",
               "allowsAgentContext": true,
               "duplicate": false,
@@ -272,6 +273,7 @@ public sealed class LuthnClientTests
         Assert.Contains("\"summary\"", body, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", body, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("turn-summary-1", response.SummaryId);
+        Assert.Equal("sensitive-turn-summary-1", response.SensitiveReferenceId);
         Assert.True(response.AllowsAgentContext);
         Assert.False(response.Duplicate);
     }

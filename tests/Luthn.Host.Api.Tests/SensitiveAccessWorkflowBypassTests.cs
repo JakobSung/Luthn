@@ -141,6 +141,18 @@ public sealed class SensitiveAccessWorkflowBypassTests
             CreatedAt = InitialTime.AddMinutes(-3),
             CreatedBy = "test"
         });
+        db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
+        {
+            Id = "sensitive-ref-approved-result",
+            SourceEventId = "source-approved-result",
+            SourceSystem = "local",
+            SourceType = "turn-summary",
+            ReceivedAt = InitialTime.AddMinutes(-3),
+            ContainsSensitiveMaterial = true,
+            ReferenceLabel = "sensitive-turn-summary:source-approved-result",
+            WorkspaceId = "workspace-a",
+            OwnerUserId = "owner-a"
+        });
         db.SensitiveAccessRequests.Add(new SensitiveAccessRequestRecord
         {
             Id = RequestId,

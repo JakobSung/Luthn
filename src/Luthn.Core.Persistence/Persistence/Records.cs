@@ -57,15 +57,18 @@ public sealed class SensitiveRecordReferenceRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public string SourceEventId { get; set; } = "";
+    public string? MemoryItemId { get; set; }
     public string SourceSystem { get; set; } = "";
     public string SourceType { get; set; } = "";
     public DateTimeOffset ReceivedAt { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
     public bool ContainsSensitiveMaterial { get; set; }
     public string ReferenceLabel { get; set; } = "";
     public string RedactedSummary { get; set; } = "";
     public string WorkspaceId { get; set; } = "";
     public string OwnerUserId { get; set; } = "local-owner";
     public SourceEventRecord? SourceEvent { get; set; }
+    public SharedMemoryItemRecord? MemoryItem { get; set; }
 }
 
 public enum SensitiveAccessRequestStatus
@@ -195,6 +198,7 @@ public sealed class SensitiveMemoryPayloadRecord
     public int ContractVersion { get; set; } = 1;
     public string ProtectionScheme { get; set; } = "";
     public string ProtectedPayload { get; set; } = "";
+    public DateTimeOffset? ExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

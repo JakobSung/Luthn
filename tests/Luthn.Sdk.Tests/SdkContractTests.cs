@@ -384,6 +384,7 @@ public sealed class SdkContractTests
               "sourceEventId": "turn-summary-1",
               "classificationResultId": "classification-1",
               "memoryItemId": "memory-turn-summary-1",
+              "sensitiveReferenceId": "sensitive-turn-summary-1",
               "auditEventId": "audit-1",
               "allowsAgentContext": true,
               "duplicate": false,
@@ -413,6 +414,7 @@ public sealed class SdkContractTests
         Assert.DoesNotContain("raw", json, StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(response);
         Assert.Equal("turn-summary-1", response.SummaryId);
+        Assert.Equal("sensitive-turn-summary-1", response.SensitiveReferenceId);
         Assert.True(response.AllowsAgentContext);
     }
 

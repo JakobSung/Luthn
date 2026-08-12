@@ -73,6 +73,8 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                         && !db.SafeProjectionSyncOutbox.Any(
                             outbox => outbox.WorkspaceId == memory.WorkspaceId &&
                                 outbox.LocalRecordId == memory.Id)
+                        && !db.SensitiveRecordReferences.Any(
+                            reference => reference.MemoryItemId == memory.Id)
                     orderby memory.ExpiresAt, memory.CreatedAt, memory.Id
                     select new AutomaticTurnCleanupCandidate(
                         memory.Id,

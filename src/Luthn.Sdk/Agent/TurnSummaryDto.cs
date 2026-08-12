@@ -24,6 +24,7 @@ public sealed record TurnSummaryIntakeResponseDto(
     [property: JsonPropertyName("sourceEventId")] string SourceEventId,
     [property: JsonPropertyName("classificationResultId")] string ClassificationResultId,
     [property: JsonPropertyName("memoryItemId")] string? MemoryItemId,
+    [property: JsonPropertyName("sensitiveReferenceId")] string? SensitiveReferenceId,
     [property: JsonPropertyName("auditEventId")] string AuditEventId,
     [property: JsonPropertyName("allowsAgentContext")] bool AllowsAgentContext,
     [property: JsonPropertyName("duplicate")] bool Duplicate,

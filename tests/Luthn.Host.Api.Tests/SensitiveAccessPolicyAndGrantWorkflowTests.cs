@@ -175,7 +175,8 @@ internal static class TestData
 
     internal static void AddReference(
         LuthnDbContext db,
-        string referenceId = ReferenceId) =>
+        string referenceId = ReferenceId,
+        DateTimeOffset? expiresAt = null) =>
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {
             Id = referenceId,
@@ -183,6 +184,7 @@ internal static class TestData
             SourceSystem = "local",
             SourceType = "vault",
             ReceivedAt = ObservedAt,
+            ExpiresAt = expiresAt,
             ContainsSensitiveMaterial = true,
             ReferenceLabel = $"sensitive-record:{referenceId}",
             WorkspaceId = "workspace-a",
@@ -204,8 +206,11 @@ internal static class TestData
             "agent",
             CancellationToken.None))!;
 
-    internal static void AddApprovedGrant(LuthnDbContext db)
+    internal static void AddApprovedGrant(
+        LuthnDbContext db,
+        DateTimeOffset? referenceExpiresAt = null)
     {
+        AddReference(db, expiresAt: referenceExpiresAt);
         db.SensitiveAccessPolicyRevisions.Add(new SensitiveAccessPolicyRevisionRecord
         {
             WorkspaceId = "workspace-a",
