@@ -287,6 +287,16 @@ or unavailable decisions. Expiry, detail reads, decisions, and result reads
 emit metadata-only audit events. Sensitive-access approval never implies
 external-publication approval.
 
+Expired sensitive turn-summary graphs are physically removed by the system
+retention worker only when the reference, payload, memory, source, provenance,
+workspace, owner, link, and expiry agree exactly and no safe-sync outbox exists.
+The worker uses one database transaction for relational storage and the shared
+process lifecycle gate plus one save unit for non-relational storage. Database
+constraints and transactions protect cross-process commits; the process gate is
+not presented as a distributed lock. Existing audit rows remain immutable. Each
+request is replaced by a content-free tombstone whose read contract contains
+only its id, `Expired`, and `expired-no-output`.
+
 ## Audit use and retention boundary
 
 Audit events are grouped into `Access`, `Security`, `Configuration`,

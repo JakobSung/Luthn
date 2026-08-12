@@ -404,6 +404,7 @@
                 <option value="">All</option>
                 <option value="Approved">Approved</option>
                 <option value="Denied">Denied</option>
+                <option value="Expired">Expired</option>
               </select>
             </label>
             <label>
@@ -467,18 +468,18 @@
             <dl id="accessDetailFields" class="access-detail-fields">
               <div><dt>Request</dt><dd data-access-field="id">Not selected</dd></div>
               <div><dt>Status</dt><dd data-access-field="status">—</dd></div>
-              <div><dt>Lifecycle</dt><dd data-access-field="statusCode">—</dd></div>
-              <div><dt>Requested</dt><dd data-access-field="createdAt">—</dd></div>
-              <div><dt>Expires</dt><dd data-access-field="expiresAt">—</dd></div>
-              <div><dt>Grant expires</dt><dd data-access-field="grantExpiresAt">—</dd></div>
-              <div><dt>Reads used / remaining</dt><dd data-access-field="readUsage">—</dd></div>
-              <div><dt>Request reason</dt><dd data-access-field="requestReason">—</dd></div>
-              <div><dt>Decision reason</dt><dd data-access-field="decisionReason">—</dd></div>
-              <div><dt>Decision time</dt><dd data-access-field="decidedAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Lifecycle</dt><dd data-access-field="statusCode">—</dd></div>
+              <div data-tombstone-hidden><dt>Requested</dt><dd data-access-field="createdAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Expires</dt><dd data-access-field="expiresAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Grant expires</dt><dd data-access-field="grantExpiresAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Reads used / remaining</dt><dd data-access-field="readUsage">—</dd></div>
+              <div data-tombstone-hidden><dt>Request reason</dt><dd data-access-field="requestReason">—</dd></div>
+              <div data-tombstone-hidden><dt>Decision reason</dt><dd data-access-field="decisionReason">—</dd></div>
+              <div data-tombstone-hidden><dt>Decision time</dt><dd data-access-field="decidedAt">—</dd></div>
               <div><dt>Output policy</dt><dd data-access-field="outputPolicy">—</dd></div>
-              <div><dt>Reference</dt><dd data-access-field="referenceLabel">—</dd></div>
-              <div><dt>Reference source</dt><dd data-access-field="referenceSource">—</dd></div>
-              <div class="detail-summary"><dt>Redacted summary</dt><dd data-access-field="redactedSummary">—</dd></div>
+              <div data-tombstone-hidden><dt>Reference</dt><dd data-access-field="referenceLabel">—</dd></div>
+              <div data-tombstone-hidden><dt>Reference source</dt><dd data-access-field="referenceSource">—</dd></div>
+              <div class="detail-summary" data-tombstone-hidden><dt>Redacted summary</dt><dd data-access-field="redactedSummary">—</dd></div>
             </dl>
           </div>
           <form id="accessDecisionForm" class="access-decision-form">

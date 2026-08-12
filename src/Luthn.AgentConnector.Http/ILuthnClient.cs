@@ -91,12 +91,12 @@ public interface ILuthnAgentClient
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access requests.");
 
-    Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+    Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access status reads.");
 
-    Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
+    Task<SensitiveAccessReadDto> GetSensitiveAccessResultAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access result reads.");
@@ -269,22 +269,22 @@ public interface ILuthnClient : ILuthnAgentClient
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access requests.");
 
-    Task<SensitiveAccessRequestDto> ILuthnAgentClient.GetSensitiveAccessRequestAsync(
+    Task<SensitiveAccessReadDto> ILuthnAgentClient.GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken) =>
         GetSensitiveAccessRequestAsync(id, cancellationToken);
 
-    new Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+    new Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access status reads.");
 
-    Task<SensitiveAccessResultDto> ILuthnAgentClient.GetSensitiveAccessResultAsync(
+    Task<SensitiveAccessReadDto> ILuthnAgentClient.GetSensitiveAccessResultAsync(
         string id,
         CancellationToken cancellationToken) =>
         GetSensitiveAccessResultAsync(id, cancellationToken);
 
-    new Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
+    new Task<SensitiveAccessReadDto> GetSensitiveAccessResultAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access result reads.");

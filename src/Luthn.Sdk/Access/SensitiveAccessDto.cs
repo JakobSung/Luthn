@@ -12,6 +12,8 @@ public sealed record SensitiveAccessDecisionRequestDto(
     [property: JsonPropertyName("reason")] string? Reason,
     [property: JsonPropertyName("redactedSummary")] string? RedactedSummary = null);
 
+public abstract record SensitiveAccessReadDto;
+
 public sealed record SensitiveAccessRequestDto(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("sensitiveReferenceId")] string SensitiveReferenceId,
@@ -21,7 +23,7 @@ public sealed record SensitiveAccessRequestDto(
     [property: JsonPropertyName("decidedBy")] string? DecidedBy,
     [property: JsonPropertyName("decidedAt")] DateTimeOffset? DecidedAt,
     [property: JsonPropertyName("redactedOutputAvailable")] bool RedactedOutputAvailable,
-    [property: JsonPropertyName("outputPolicy")] string OutputPolicy)
+    [property: JsonPropertyName("outputPolicy")] string OutputPolicy) : SensitiveAccessReadDto
 {
     [JsonPropertyName("sessionId")]
     public string SessionId { get; init; } = "";
@@ -97,7 +99,7 @@ public sealed record SensitiveAccessResultDto(
     [property: JsonPropertyName("redactedOutput")] string? RedactedOutput,
     [property: JsonPropertyName("payloadClass")] string PayloadClass,
     [property: JsonPropertyName("redactionState")] string RedactionState,
-    [property: JsonPropertyName("reasons")] IReadOnlyList<string> Reasons)
+    [property: JsonPropertyName("reasons")] IReadOnlyList<string> Reasons) : SensitiveAccessReadDto
 {
     [JsonPropertyName("statusCode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -123,3 +125,8 @@ public sealed record SensitiveAccessResultDto(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxReads { get; init; }
 }
+
+public sealed record SensitiveAccessTombstoneDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("outputPolicy")] string OutputPolicy) : SensitiveAccessReadDto;

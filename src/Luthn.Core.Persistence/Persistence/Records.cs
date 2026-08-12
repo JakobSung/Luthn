@@ -164,6 +164,16 @@ public sealed class SensitiveAccessGrantRecord : IWorkspaceScopedRecord
     public SensitiveAccessPolicyRevisionRecord? Policy { get; set; }
 }
 
+public sealed class SensitiveAccessTombstoneRecord : IWorkspaceScopedRecord
+{
+    public string Id { get; set; } = "";
+    public SensitiveAccessRequestStatus Status { get; set; } = SensitiveAccessRequestStatus.Expired;
+    public DateTimeOffset ExpiredAt { get; set; }
+    public DateTimeOffset CleanedAt { get; set; }
+    public string WorkspaceId { get; set; } = "";
+    public string OwnerUserId { get; set; } = "local-owner";
+}
+
 public sealed class SharedMemoryItemRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";

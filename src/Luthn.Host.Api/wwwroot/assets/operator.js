@@ -991,7 +991,9 @@ const refreshAccessRequests = async (event) => {
 
   try {
     const result = await requestJson(`/api/access-requests?${params}`);
-    const requests = Array.isArray(result.requests) ? result.requests : [];
+    const liveRequests = Array.isArray(result.requests) ? result.requests : [];
+    const tombstones = Array.isArray(result.tombstones) ? result.tombstones : [];
+    const requests = [...liveRequests, ...tombstones];
     renderAccessRows(requests);
     if (previousSelectedId && requests.some((request) => request.id === previousSelectedId)) {
       await loadAccessRequestDetail(previousSelectedId);
@@ -1132,13 +1134,19 @@ const setAccessDetailFields = (values = accessDetailDefaults) => {
 
 const updateAccessDecisionState = () => {
   const reason = $("#accessDecisionForm").reason.value.trim();
+  const isTombstone = Boolean(state.selectedAccessDetail?.isTombstone);
   const canDecide = !state.accessDecisionPending &&
+    !isTombstone &&
     state.selectedAccessDetail?.status === "Pending" &&
     state.selectedAccessDetail?.statusCode === "request-pending" &&
     Boolean(reason);
   $("#approveAccess").disabled = !canDecide;
   $("#denyAccess").disabled = !canDecide;
   $("#viewAccessAudit").disabled = !state.selectedAccessRequestId;
+  document.querySelectorAll("#accessDecisionForm label, #approveAccess, #denyAccess")
+    .forEach((element) => { element.hidden = isTombstone; });
+  document.querySelectorAll("[data-tombstone-hidden]")
+    .forEach((element) => { element.hidden = isTombstone; });
 };
 
 const clearAccessDetail = (message = "Select a request to review.") => {
@@ -1171,7 +1179,10 @@ const sanitizeAccessDetail = (detail) => ({
     boundedText(detail?.reference?.sourceSystem, 128, ""),
     boundedText(detail?.reference?.sourceType, 128, "")
   ].filter(Boolean).join(" / ") || "Unknown",
-  redactedSummary: boundedText(detail?.reference?.redactedSummary, 4000, "Not available")
+  redactedSummary: boundedText(detail?.reference?.redactedSummary, 4000, "Not available"),
+  isTombstone: detail?.status === "Expired" &&
+    detail?.outputPolicy === "expired-no-output" &&
+    !("sensitiveReferenceId" in (detail || {}))
 });
 
 const loadAccessRequestDetail = async (id) => {
@@ -1191,7 +1202,9 @@ const loadAccessRequestDetail = async (id) => {
     state.selectedAccessRequestId = id;
     state.selectedAccessDetail = safeDetail;
     setAccessDetailFields(safeDetail);
-    $("#accessDetailStatus").textContent = safeDetail.statusCode === "request-pending"
+    $("#accessDetailStatus").textContent = safeDetail.isTombstone
+      ? "Expired · content removed"
+      : safeDetail.statusCode === "request-pending"
       ? "Review metadata and enter a decision reason."
       : `Lifecycle: ${safeDetail.statusCode || safeDetail.status}`;
     document.querySelectorAll("#accessRows tr").forEach((row) => {
@@ -1223,9 +1236,9 @@ const renderAccessRows = (requests) => {
     const tr = document.createElement("tr");
     tr.dataset.requestId = request.id;
     [
-      new Date(request.createdAt).toLocaleString(),
+      request.createdAt ? new Date(request.createdAt).toLocaleString() : "Content removed",
       request.id,
-      request.sensitiveReferenceId,
+      request.sensitiveReferenceId || "Content removed",
       request.statusCode || request.status,
       request.maxReads == null
         ? request.outputPolicy || (request.redactedOutputAvailable ? "available" : "unavailable")

@@ -519,6 +519,29 @@ metadata-only 감사 사건만 만듭니다. `/result`는 명시적 출력 정�
 사용하고 원문은 반환하지 않습니다. request와 grant 시간은 server 정책으로 각각
 60–3600초 범위에 제한됩니다. 만료와 결과 조회 감사에는 결과 본문을 복사하지 않습니다.
 
+만료되는 민감 turn-summary reference가 보존 정리 시점에 도달하면 암호화 payload,
+live reference, 연결된 memory/source graph, request, decision, grant를 하나의 원자 작업으로
+제거합니다. 이후 상태·운영자 상세·결과 조회와 `Expired` 목록은 다음과 같은 content-free
+tombstone만 반환합니다.
+
+```json
+{
+  "id": "access-...",
+  "status": "Expired",
+  "outputPolicy": "expired-no-output"
+}
+```
+
+tombstone에는 reference, actor/session, 요청·결정 사유, summary, payload, ciphertext,
+result 속성이 없습니다. 기존 감사 이력은 불변으로 보존하며, cleanup은 제거된 요청마다
+결정적 metadata-only `sensitive_access.content_pruned` 사건 하나만 추가합니다. 운영자
+콘솔은 tombstone의 content·결정 control을 숨기고 metadata-only 감사 링크만 유지합니다.
+Agent나 operator가 호출할 수 있는 cleanup mutation API는 추가하지 않습니다. SDK/connector
+상태·결과 조회는 `SensitiveAccessReadDto` live-or-tombstone 계약을 반환하고, MCP는
+결정 tool을 추가하지 않은 채 실제 content-free tombstone 타입을 전달합니다.
+목록 응답은 기존 호환성을 위해 live 항목을 `requests`에 유지하고, 제거된 항목은 별도의
+강타입 `tombstones` 배열로 제공합니다.
+
 ## Cloud-neutral 동기화 계약
 
 `Luthn.Sdk`는 installation enrollment, capability negotiation, 안전 투영 batch,

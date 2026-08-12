@@ -40,6 +40,11 @@ internal interface ISensitiveAccessWorkflow
         LuthnRequestPrincipal principal,
         CancellationToken cancellationToken);
 
+    Task<SensitiveAccessTombstoneState?> ReadTombstoneAsync(
+        string id,
+        LuthnRequestPrincipal principal,
+        CancellationToken cancellationToken);
+
     Task<SensitiveAccessOperatorDetailState?> ReadOperatorDetailAsync(
         string id,
         LuthnRequestPrincipal principal,
@@ -155,7 +160,16 @@ internal sealed class SensitiveAccessWorkflow(
         }
     }
 
-    public async Task<SensitiveAccessListResult> ListRequestsAsync(
+    public Task<SensitiveAccessListResult> ListRequestsAsync(
+        string? status,
+        int take,
+        LuthnRequestPrincipal principal,
+        CancellationToken cancellationToken)
+        => WithLifecycleGateAsync(
+            () => ListRequestsCoreAsync(status, take, principal, cancellationToken),
+            cancellationToken);
+
+    private async Task<SensitiveAccessListResult> ListRequestsCoreAsync(
         string? status,
         int take,
         LuthnRequestPrincipal principal,
@@ -176,6 +190,7 @@ internal sealed class SensitiveAccessWorkflow(
             {
                 return new SensitiveAccessListResult(
                     [],
+                    [],
                     "status must be Pending, Approved, Denied, or Expired.");
             }
 
@@ -190,12 +205,36 @@ internal sealed class SensitiveAccessWorkflow(
             .Select(ToResolutionCandidateExpression())
             .ToArrayAsync(cancellationToken);
 
+        var tombstones = !string.IsNullOrWhiteSpace(status) &&
+            !string.Equals(status.Trim(), nameof(SensitiveAccessRequestStatus.Expired), StringComparison.OrdinalIgnoreCase)
+                ? []
+                : await db.SensitiveAccessTombstones
+                    .AsNoTracking()
+                    .Where(record =>
+                        record.WorkspaceId == principal.WorkspaceId &&
+                        (principal.IsOperator || record.OwnerUserId == principal.UserId))
+                    .OrderByDescending(record => record.CleanedAt)
+                    .ThenByDescending(record => record.Id)
+                    .Take(take)
+                    .Select(record => new SensitiveAccessTombstoneState(record.Id))
+                    .ToArrayAsync(cancellationToken);
+
         return new SensitiveAccessListResult(
             requests.Select(request => ToState(request, observedAt)).ToArray(),
+            tombstones,
             null);
     }
 
-    public async Task<SensitiveAccessRequestState?> CreateRequestAsync(
+    public Task<SensitiveAccessRequestState?> CreateRequestAsync(
+        SensitiveAccessRequestCreateRequest request,
+        LuthnRequestPrincipal principal,
+        string actor,
+        CancellationToken cancellationToken)
+        => WithLifecycleGateAsync(
+            () => CreateRequestCoreAsync(request, principal, actor, cancellationToken),
+            cancellationToken);
+
+    private async Task<SensitiveAccessRequestState?> CreateRequestCoreAsync(
         SensitiveAccessRequestCreateRequest request,
         LuthnRequestPrincipal principal,
         string actor,
@@ -311,7 +350,15 @@ internal sealed class SensitiveAccessWorkflow(
         }
     }
 
-    public async Task<SensitiveAccessRequestState?> ReadRequestAsync(
+    public Task<SensitiveAccessRequestState?> ReadRequestAsync(
+        string id,
+        LuthnRequestPrincipal principal,
+        CancellationToken cancellationToken)
+        => WithLifecycleGateAsync(
+            () => ReadRequestCoreAsync(id, principal, cancellationToken),
+            cancellationToken);
+
+    private async Task<SensitiveAccessRequestState?> ReadRequestCoreAsync(
         string id,
         LuthnRequestPrincipal principal,
         CancellationToken cancellationToken)
@@ -321,7 +368,29 @@ internal sealed class SensitiveAccessWorkflow(
         return request is null ? null : ToState(request, timeProvider.GetUtcNow());
     }
 
-    public async Task<SensitiveAccessOperatorDetailState?> ReadOperatorDetailAsync(
+    public Task<SensitiveAccessTombstoneState?> ReadTombstoneAsync(
+        string id,
+        LuthnRequestPrincipal principal,
+        CancellationToken cancellationToken) =>
+        db.SensitiveAccessTombstones
+            .AsNoTracking()
+            .Where(record =>
+                record.Id == id &&
+                record.WorkspaceId == principal.WorkspaceId &&
+                (principal.IsOperator || record.OwnerUserId == principal.UserId))
+            .Select(record => new SensitiveAccessTombstoneState(record.Id))
+            .SingleOrDefaultAsync(cancellationToken);
+
+    public Task<SensitiveAccessOperatorDetailState?> ReadOperatorDetailAsync(
+        string id,
+        LuthnRequestPrincipal principal,
+        string actor,
+        CancellationToken cancellationToken)
+        => WithLifecycleGateAsync(
+            () => ReadOperatorDetailCoreAsync(id, principal, actor, cancellationToken),
+            cancellationToken);
+
+    private async Task<SensitiveAccessOperatorDetailState?> ReadOperatorDetailCoreAsync(
         string id,
         LuthnRequestPrincipal principal,
         string actor,
@@ -444,7 +513,16 @@ internal sealed class SensitiveAccessWorkflow(
         };
     }
 
-    public async Task<SensitiveAccessResultState?> ReadRequestResultAsync(
+    public Task<SensitiveAccessResultState?> ReadRequestResultAsync(
+        string id,
+        LuthnRequestPrincipal principal,
+        string actor,
+        CancellationToken cancellationToken)
+        => WithLifecycleGateAsync(
+            () => ReadRequestResultCoreAsync(id, principal, actor, cancellationToken),
+            cancellationToken);
+
+    private async Task<SensitiveAccessResultState?> ReadRequestResultCoreAsync(
         string id,
         LuthnRequestPrincipal principal,
         string actor,
@@ -507,7 +585,24 @@ internal sealed class SensitiveAccessWorkflow(
         return result;
     }
 
-    public async Task<SensitiveAccessDecisionResult> DecideRequestAsync(
+    public Task<SensitiveAccessDecisionResult> DecideRequestAsync(
+        string id,
+        SensitiveAccessDecisionRequest request,
+        SensitiveAccessRequestStatus status,
+        LuthnRequestPrincipal principal,
+        string actor,
+        CancellationToken cancellationToken)
+        => WithLifecycleGateAsync(
+            () => DecideRequestCoreAsync(
+                id,
+                request,
+                status,
+                principal,
+                actor,
+                cancellationToken),
+            cancellationToken);
+
+    private async Task<SensitiveAccessDecisionResult> DecideRequestCoreAsync(
         string id,
         SensitiveAccessDecisionRequest request,
         SensitiveAccessRequestStatus status,
@@ -524,7 +619,9 @@ internal sealed class SensitiveAccessWorkflow(
                 cancellationToken);
         if (accessRequest is null)
         {
-            return SensitiveAccessDecisionResult.NotFound();
+            return await ReadTombstoneAsync(id, principal, cancellationToken) is null
+                ? SensitiveAccessDecisionResult.NotFound()
+                : SensitiveAccessDecisionResult.AlreadyDecided();
         }
 
         if (accessRequest.Status != SensitiveAccessRequestStatus.Pending)
@@ -1162,7 +1259,15 @@ internal sealed class SensitiveAccessWorkflow(
         return new ValidatedRedactedSummary(candidate, null);
     }
 
-    public async Task<SensitiveAccessExpiryMaterializationResult> MaterializeExpiriesAsync(
+    public Task<SensitiveAccessExpiryMaterializationResult> MaterializeExpiriesAsync(
+        DateTimeOffset observedAt,
+        int batchSize,
+        CancellationToken cancellationToken)
+        => WithLifecycleGateAsync(
+            () => MaterializeExpiriesCoreAsync(observedAt, batchSize, cancellationToken),
+            cancellationToken);
+
+    private async Task<SensitiveAccessExpiryMaterializationResult> MaterializeExpiriesCoreAsync(
         DateTimeOffset observedAt,
         int batchSize,
         CancellationToken cancellationToken)
@@ -1555,6 +1660,21 @@ internal sealed class SensitiveAccessWorkflow(
             ? Math.Max(0, maximumSuccessfulReads - successfulReadCount)
             : null;
 
+    private static async Task<T> WithLifecycleGateAsync<T>(
+        Func<Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        await SensitiveAccessLifecycleGate.Instance.WaitAsync(cancellationToken);
+        try
+        {
+            return await operation();
+        }
+        finally
+        {
+            SensitiveAccessLifecycleGate.Instance.Release();
+        }
+    }
+
     private async Task<SensitiveAccessPolicyRevisionRecord> GetOrCreateActivePolicyAsync(
         string workspaceId,
         string createdBy,
@@ -1781,7 +1901,10 @@ internal sealed class SensitiveAccessReadPermit
 
 internal sealed record SensitiveAccessListResult(
     IReadOnlyList<SensitiveAccessRequestState> Requests,
+    IReadOnlyList<SensitiveAccessTombstoneState> Tombstones,
     string? ValidationError);
+
+internal sealed record SensitiveAccessTombstoneState(string Id);
 
 internal sealed record SensitiveAccessPolicyUpdate(
     int RequestTimeoutSeconds,

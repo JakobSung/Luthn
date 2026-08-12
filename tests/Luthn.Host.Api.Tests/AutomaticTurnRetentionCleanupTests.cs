@@ -95,6 +95,21 @@ public sealed class AutomaticTurnRetentionCleanupTests
             WorkspaceId = "default",
             OwnerUserId = "local-owner"
         });
+        AddTurnCapsule(db, "source-intake-reference", Now.AddMinutes(-1), sensitive: true);
+        db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
+        {
+            Id = "sensitive-source-intake-reference",
+            SourceEventId = "source-intake-reference",
+            MemoryItemId = null,
+            SourceSystem = "codex",
+            SourceType = "turn-summary",
+            ReceivedAt = Now.AddDays(-2),
+            ContainsSensitiveMaterial = true,
+            ReferenceLabel = "sensitive-source-intake:source-intake-reference",
+            RedactedSummary = "Public-safe source intake summary.",
+            WorkspaceId = "default",
+            OwnerUserId = "local-owner"
+        });
         AddTurnCapsule(
             db,
             "owner-mismatch",
@@ -120,9 +135,11 @@ public sealed class AutomaticTurnRetentionCleanupTests
             .ProcessBatchAsync(Now, 100);
 
         Assert.Equal(0, result.DeletedCount);
-        Assert.Equal(12, await db.SharedMemoryItems.CountAsync());
+        Assert.Equal(13, await db.SharedMemoryItems.CountAsync());
         Assert.True(await db.SensitiveRecordReferences.AnyAsync(
             reference => reference.Id == "sensitive-referenced"));
+        Assert.True(await db.SensitiveRecordReferences.AnyAsync(
+            reference => reference.Id == "sensitive-source-intake-reference"));
         Assert.Empty(await db.AuditEvents
             .Where(record => record.Action == "turn_summary.retention.pruned")
             .ToArrayAsync());

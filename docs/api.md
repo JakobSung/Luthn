@@ -911,6 +911,32 @@ Result response:
 
 `GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Request and grant durations are independently bounded to 60–3600 seconds by server policy. Expiry records metadata-only audit, and result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy without copying the result content.
 
+When an expiring sensitive turn-summary reference reaches retention cleanup, the
+encrypted payload, live reference, linked memory/source graph, request, decision,
+and grant are removed atomically. Status, operator-detail, result, and `Expired`
+list reads then return the same content-free tombstone shape:
+
+```json
+{
+  "id": "access-...",
+  "status": "Expired",
+  "outputPolicy": "expired-no-output"
+}
+```
+
+The tombstone has no reference, actor/session, reason, decision, summary,
+payload, ciphertext, or result properties. Existing audit history remains
+immutable; cleanup adds one deterministic metadata-only
+`sensitive_access.content_pruned` event per removed request. The operator console
+hides all content and decision controls for tombstones while retaining the
+metadata-only audit link. Cleanup remains unavailable to agents and operators as
+an API mutation. SDK/connector status and result reads return the
+`SensitiveAccessReadDto` live-or-tombstone contract, and MCP forwards the actual
+content-free tombstone type without adding decision tools.
+List responses keep live entries in `requests` and expose removed entries in a
+separate strongly typed `tombstones` array so existing request consumers remain
+compatible.
+
 ## Cloud-neutral synchronization contracts
 
 `Luthn.Sdk` exposes additive version-two DTOs for installation enrollment,

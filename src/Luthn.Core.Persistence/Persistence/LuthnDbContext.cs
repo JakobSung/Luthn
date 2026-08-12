@@ -17,6 +17,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public DbSet<SensitiveAccessRequestRecord> SensitiveAccessRequests => Set<SensitiveAccessRequestRecord>();
     public DbSet<SensitiveAccessDecisionRecord> SensitiveAccessDecisions => Set<SensitiveAccessDecisionRecord>();
     public DbSet<SensitiveAccessGrantRecord> SensitiveAccessGrants => Set<SensitiveAccessGrantRecord>();
+    public DbSet<SensitiveAccessTombstoneRecord> SensitiveAccessTombstones => Set<SensitiveAccessTombstoneRecord>();
     public DbSet<SharedMemoryItemRecord> SharedMemoryItems => Set<SharedMemoryItemRecord>();
     public DbSet<SensitiveMemoryPayloadRecord> SensitiveMemoryPayloads => Set<SensitiveMemoryPayloadRecord>();
     public DbSet<CollectionProvenanceRecord> CollectionProvenance => Set<CollectionProvenanceRecord>();
@@ -280,6 +281,22 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 .WithMany()
                 .HasForeignKey(record => new { record.WorkspaceId, record.PolicyRevision })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SensitiveAccessTombstoneRecord>(entity =>
+        {
+            entity.ToTable("sensitive_access_tombstones", table =>
+            {
+                table.HasCheckConstraint("CK_sensitive_access_tombstones_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_tombstones_workspace_id", "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_tombstones_expired_status", "\"Status\" = 'Expired'");
+            });
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.Status).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => new { record.WorkspaceId, record.OwnerUserId, record.CleanedAt });
         });
 
         modelBuilder.Entity<SharedMemoryItemRecord>(entity =>
@@ -652,6 +669,18 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         {
             throw new InvalidOperationException(
                 "Sensitive access grants require a valid policy snapshot, bounded reads, and an active time window.");
+        }
+
+        var invalidTombstone = ChangeTracker.Entries<SensitiveAccessTombstoneRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (entry.Entity.Status != SensitiveAccessRequestStatus.Expired ||
+                 string.IsNullOrWhiteSpace(entry.Entity.OwnerUserId) ||
+                 entry.Entity.ExpiredAt > entry.Entity.CleanedAt));
+        if (invalidTombstone is not null)
+        {
+            throw new InvalidOperationException(
+                "Sensitive access tombstones require Expired status, owner scope, and an expiry no later than cleanup.");
         }
     }
 

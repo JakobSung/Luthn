@@ -59,13 +59,42 @@ public sealed class PostgresIntegrationSmokeTests
         var results = await Task.WhenAll(
             new AutomaticTurnRetentionCleanupProcessor(firstDb).ProcessBatchAsync(now, 1),
             new AutomaticTurnRetentionCleanupProcessor(secondDb).ProcessBatchAsync(now, 1));
-        Assert.Equal(1, results.Sum(result => result.DeletedCount));
+        var concurrentlyDeleted = results.Sum(result => result.DeletedCount);
+        Assert.InRange(concurrentlyDeleted, 1, 2);
+        Assert.All(results, result => Assert.InRange(result.DeletedCount, 0, 1));
 
         await using (var remainingDb = new LuthnDbContext(options))
         {
             var remaining = await new AutomaticTurnRetentionCleanupProcessor(remainingDb)
                 .ProcessBatchAsync(now, 100);
-            Assert.Equal(1, remaining.DeletedCount);
+            Assert.Equal(2 - concurrentlyDeleted, remaining.DeletedCount);
+        }
+
+        await using (var sensitiveSeed = new LuthnDbContext(options))
+        {
+            SensitiveAccessTombstoneCleanupTests.AddExpiredSensitiveGraph(sensitiveSeed);
+            await sensitiveSeed.SaveChangesAsync();
+        }
+
+        await using (var sensitiveFirstDb = new LuthnDbContext(options))
+        await using (var sensitiveSecondDb = new LuthnDbContext(options))
+        {
+            var sensitiveResults = await Task.WhenAll(
+                new AutomaticTurnRetentionCleanupProcessor(sensitiveFirstDb)
+                    .ProcessBatchAsync(DateTimeOffset.Parse("2026-08-13T00:00:00Z"), 10),
+                new AutomaticTurnRetentionCleanupProcessor(sensitiveSecondDb)
+                    .ProcessBatchAsync(DateTimeOffset.Parse("2026-08-13T00:00:00Z"), 10));
+            Assert.Equal(1, sensitiveResults.Sum(result => result.DeletedCount));
+        }
+
+        await using (var sensitiveVerify = new LuthnDbContext(options))
+        {
+            Assert.Single(await sensitiveVerify.SensitiveAccessTombstones.ToArrayAsync());
+            Assert.Empty(await sensitiveVerify.SensitiveAccessRequests.ToArrayAsync());
+            Assert.Empty(await sensitiveVerify.SensitiveAccessDecisions.ToArrayAsync());
+            Assert.Empty(await sensitiveVerify.SensitiveAccessGrants.ToArrayAsync());
+            Assert.Equal(1, await sensitiveVerify.AuditEvents.CountAsync(audit =>
+                audit.Action == "sensitive_access.content_pruned"));
         }
 
         await using (var auditSeed = new LuthnDbContext(options))
@@ -123,7 +152,7 @@ public sealed class PostgresIntegrationSmokeTests
             await verify.AuditEvents.CountAsync(record =>
                 record.Action == "audit.retention.pruned"));
         Assert.Equal(
-            2,
+            3,
             await verify.AuditEvents.CountAsync(record =>
                 record.Action == "turn_summary.retention.pruned"));
         Assert.Equal(

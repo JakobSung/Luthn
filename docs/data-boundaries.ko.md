@@ -227,6 +227,14 @@ provenance는 불변 수집 기원 기록입니다.
 무출력 정책을 반환합니다. 만료, 상세 조회, 결정과 결과 조회는 metadata-only 감사 사건을
 남깁니다. 민감 접근 승인이 외부 공개 승인을 의미하지는 않습니다.
 
+만료된 민감 turn-summary graph는 reference·payload·memory·source·provenance의 link,
+workspace, owner, expiry가 정확히 일치하고 safe-sync outbox가 없을 때만 system retention
+worker가 물리적으로 제거합니다. 관계형 저장소는 단일 database transaction을 사용하고,
+비관계형 저장소는 공유 process lifecycle gate와 한 번의 save unit을 사용합니다.
+cross-process commit 안전성은 database constraint와 transaction이 담당하며 process gate를
+분산 lock으로 설명하지 않습니다. 기존 감사 row는 불변으로 유지합니다. 각 request는
+`id`, `Expired`, `expired-no-output`만 읽을 수 있는 content-free tombstone으로 대체합니다.
+
 ## 감사 사용과 보존 경계
 
 감사 사건은 `Access`, `Security`, `Configuration`, `Publication`, `Ingestion`,

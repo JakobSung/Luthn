@@ -86,21 +86,21 @@ public static class SensitiveAccessEndpoints
         CancellationToken cancellationToken) =>
         await CreateRequestCore(request, workflow, httpContext, cancellationToken);
 
-    private static async Task<Results<Ok<SensitiveAccessRequestResponse>, NotFound>> ReadRequestEndpoint(
+    private static async Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestEndpoint(
         string id,
         ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
         CancellationToken cancellationToken) =>
         await ReadRequestCore(id, workflow, httpContext, cancellationToken);
 
-    private static async Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, NotFound>> ReadOperatorDetailEndpoint(
+    private static async Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadOperatorDetailEndpoint(
         string id,
         ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
         CancellationToken cancellationToken) =>
         await ReadOperatorDetailCore(id, workflow, httpContext, cancellationToken);
 
-    private static async Task<Results<Ok<SensitiveAccessResultResponse>, NotFound>> ReadRequestResultEndpoint(
+    private static async Task<Results<Ok<SensitiveAccessResultResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestResultEndpoint(
         string id,
         ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
@@ -165,7 +165,8 @@ public static class SensitiveAccessEndpoints
         }
 
         return TypedResults.Ok(new SensitiveAccessRequestsResponse(
-            result.Requests.Select(SensitiveAccessEndpointMapping.ToResponse).ToArray()));
+            result.Requests.Select(SensitiveAccessEndpointMapping.ToResponse).ToArray(),
+            result.Tombstones.Select(SensitiveAccessEndpointMapping.ToResponse).ToArray()));
     }
 
     private static async Task<Ok<SensitiveAccessPolicyResponse>> ReadPolicyCore(
@@ -232,7 +233,7 @@ public static class SensitiveAccessEndpoints
             SensitiveAccessEndpointMapping.ToResponse(created));
     }
 
-    private static async Task<Results<Ok<SensitiveAccessRequestResponse>, NotFound>> ReadRequestCore(
+    private static async Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestCore(
         string id,
         ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
@@ -242,12 +243,21 @@ public static class SensitiveAccessEndpoints
             id,
             ServiceTokenAuthorization.GetPrincipal(httpContext),
             cancellationToken);
-        return request is null
+        if (request is not null)
+        {
+            return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(request));
+        }
+
+        var tombstone = await workflow.ReadTombstoneAsync(
+            id,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
+        return tombstone is null
             ? TypedResults.NotFound()
-            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(request));
+            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(tombstone));
     }
 
-    private static async Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, NotFound>> ReadOperatorDetailCore(
+    private static async Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadOperatorDetailCore(
         string id,
         ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
@@ -260,12 +270,18 @@ public static class SensitiveAccessEndpoints
             principal,
             ServiceTokenAuthorization.GetActor(httpContext),
             cancellationToken);
-        return detail is null
+        if (detail is not null)
+        {
+            return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(detail));
+        }
+
+        var tombstone = await workflow.ReadTombstoneAsync(id, principal, cancellationToken);
+        return tombstone is null
             ? TypedResults.NotFound()
-            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(detail));
+            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(tombstone));
     }
 
-    private static async Task<Results<Ok<SensitiveAccessResultResponse>, NotFound>> ReadRequestResultCore(
+    private static async Task<Results<Ok<SensitiveAccessResultResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestResultCore(
         string id,
         ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
@@ -276,9 +292,18 @@ public static class SensitiveAccessEndpoints
             ServiceTokenAuthorization.GetPrincipal(httpContext),
             ServiceTokenAuthorization.GetActor(httpContext),
             cancellationToken);
-        return result is null
+        if (result is not null)
+        {
+            return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result));
+        }
+
+        var tombstone = await workflow.ReadTombstoneAsync(
+            id,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
+        return tombstone is null
             ? TypedResults.NotFound()
-            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result));
+            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(tombstone));
     }
 
     private static async Task<Results<
@@ -351,21 +376,21 @@ public static class SensitiveAccessEndpoints
             httpContext,
             cancellationToken);
 
-    public static Task<Results<Ok<SensitiveAccessRequestResponse>, NotFound>> ReadRequest(
+    public static Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequest(
         string id,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken) =>
         ReadRequestCore(id, CompatibilityWorkflow(db), httpContext, cancellationToken);
 
-    public static Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, NotFound>> ReadOperatorDetail(
+    public static Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadOperatorDetail(
         string id,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken) =>
         ReadOperatorDetailCore(id, CompatibilityWorkflow(db), httpContext, cancellationToken);
 
-    public static Task<Results<Ok<SensitiveAccessResultResponse>, NotFound>> ReadRequestResult(
+    public static Task<Results<Ok<SensitiveAccessResultResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestResult(
         string id,
         LuthnDbContext db,
         HttpContext httpContext,
@@ -498,6 +523,12 @@ internal static class SensitiveAccessEndpointMapping
             MaxReads = request.MaxReads,
             UsedReads = UsedReads(request.MaxReads, request.RemainingReads)
         };
+
+    internal static SensitiveAccessTombstoneResponse ToResponse(SensitiveAccessTombstoneState tombstone) =>
+        new(
+            tombstone.Id,
+            SensitiveAccessRequestStatus.Expired.ToString(),
+            "expired-no-output");
 
     internal static SensitiveAccessPolicyResponse ToResponse(SensitiveAccessPolicyState policy) =>
         new(
@@ -655,7 +686,13 @@ public sealed record SensitiveAccessDecisionRequest
 }
 
 public sealed record SensitiveAccessRequestsResponse(
-    IReadOnlyList<SensitiveAccessRequestResponse> Requests);
+    IReadOnlyList<SensitiveAccessRequestResponse> Requests,
+    IReadOnlyList<SensitiveAccessTombstoneResponse> Tombstones);
+
+public sealed record SensitiveAccessTombstoneResponse(
+    string Id,
+    string Status,
+    string OutputPolicy);
 
 public sealed record SensitiveAccessRequestResponse(
     string Id,
