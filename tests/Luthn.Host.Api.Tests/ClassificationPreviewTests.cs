@@ -891,7 +891,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     public async Task PreviewRoutesSensitiveContentToSensitiveStoreOnly()
     {
         var service = new ClassificationPreviewService(
-            new MockContentClassifier(),
+            new LocalContextualContentClassifier(),
             new PolicyEngine());
 
         var response = await service.PreviewAsync(new ClassificationPreviewRequest(
@@ -908,7 +908,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     {
         var service = new ClassificationPreviewService(
             new HybridContentClassifier(
-                new MockContentClassifier(),
+                new LocalContextualContentClassifier(),
                 new DeterministicSensitiveDataDetector()),
             new PolicyEngine());
 
@@ -927,7 +927,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     public async Task PreviewKeepsDateVersionAndOrdinaryQuantityPublic()
     {
         var response = await new ClassificationPreviewService(
-            new MockContentClassifier(),
+            new LocalContextualContentClassifier(),
             new PolicyEngine())
             .PreviewAsync(new ClassificationPreviewRequest(
                 "source-benign-numbers",
@@ -941,7 +941,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
-    public void MockProviderRequiresExplicitOptInAndNoExternalProvider()
+    public void LegacyMockProviderUsesLocalContextualClassifier()
     {
         var options = new ClassificationProviderOptions
         {
@@ -952,9 +952,9 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
 
         Assert.Equal("mock", options.ResolveProvider());
         options.EnsureMockAllowed();
-        Assert.Equal(
-            "MockContentClassifier is a deterministic local classifier. Replace it with an external provider when provider-backed classification is required.",
-            MockContentClassifier.UsageNotice);
+        var boundary = new LocalContextualContentClassifier().Boundary;
+        Assert.Equal("local-contextual", boundary.ProviderName);
+        Assert.Equal("local-only", boundary.RedactionState);
     }
 
     [Fact]

@@ -116,9 +116,9 @@ public sealed class ClassificationEvaluationCommand
     {
         IContentClassifier classifier = guarded
             ? new HybridContentClassifier(
-                new MockContentClassifier(),
+                new LocalContextualContentClassifier(),
                 new DeterministicSensitiveDataDetector())
-            : new MockContentClassifier();
+            : new LocalContextualContentClassifier();
         var policyEngine = new PolicyEngine();
         return evaluator.EvaluateAsync(
             dataset,

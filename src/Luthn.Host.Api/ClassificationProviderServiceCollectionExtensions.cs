@@ -52,10 +52,10 @@ internal static class ClassificationProviderServiceCollectionExtensions
                 return services;
             }
 
-            services.AddSingleton<MockContentClassifier>();
+            services.AddSingleton<LocalContextualContentClassifier>();
             services.AddSingleton<IContentClassifier>(provider =>
                 new HybridContentClassifier(
-                    provider.GetRequiredService<MockContentClassifier>(),
+                    provider.GetRequiredService<LocalContextualContentClassifier>(),
                     provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
             return services;
         }

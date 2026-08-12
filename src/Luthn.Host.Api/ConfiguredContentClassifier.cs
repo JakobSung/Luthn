@@ -68,7 +68,7 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
                 ClassificationProviderOptions.ProviderRequiredMessage),
             OperatorClassificationProviderKind.Mock when !_classificationOptions.AllowMock =>
                 throw new ClassificationProviderException(ClassificationProviderOptions.MockDisabledMessage),
-            OperatorClassificationProviderKind.Mock => await new MockContentClassifier().ClassifyAsync(
+            OperatorClassificationProviderKind.Mock => await new LocalContextualContentClassifier().ClassifyAsync(
                 sourceId,
                 content,
                 sourceType,
@@ -322,7 +322,7 @@ public sealed class ConfiguredContentClassifier : IContentClassifier
             OperatorClassificationProviderKind.Mock when !mockAllowed =>
                 new ClassificationProviderBoundary("mock", "local-classification-input", "mock-disabled"),
             OperatorClassificationProviderKind.Mock =>
-                new ClassificationProviderBoundary("mock", "local-classification-input", "local-only"),
+                new LocalContextualContentClassifier().Boundary,
             _ => new ClassificationProviderBoundary(
                 settings.Provider.ToString(),
                 settings.PayloadClass,

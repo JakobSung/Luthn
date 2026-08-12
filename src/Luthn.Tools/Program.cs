@@ -162,10 +162,8 @@ static async Task RunPreview(string[] args)
     var sourceId = args.ElementAtOrDefault(1) ?? "local-source";
     var content = args.ElementAtOrDefault(2) ?? "Public implementation note.";
     var service = new ClassificationPreviewService(
-        new MockContentClassifier(),
+        new LocalContextualContentClassifier(),
         new PolicyEngine());
-
-    Console.Error.WriteLine(MockContentClassifier.UsageNotice);
 
     var response = await service.PreviewAsync(new ClassificationPreviewRequest(sourceId, content, "cli"));
 

@@ -11,7 +11,7 @@ namespace Luthn.Core.Classification;
 /// </summary>
 public sealed class DeterministicSensitiveDataDetector
 {
-    public const string Version = "1";
+    public const string Version = "2";
     public const string RedactionMarker = "[redacted]";
 
     private static readonly Regex PrivateKeyPattern = CreatePattern(
@@ -37,12 +37,6 @@ public sealed class DeterministicSensitiveDataDetector
         @"(?<!\d)(?<birth>\d{6})-(?<type>[1-8])\d{6}(?!\d)");
     private static readonly Regex PaymentCardCandidatePattern = CreatePattern(
         @"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)");
-    private static readonly Regex MonetaryContextPattern = CreatePattern(
-        """(?:(?<![A-Za-z])(?:amount|amounts|revenue|revenues|salary|salaries|wage|wages|payroll|price|prices|cost|costs|profit|profits|income|earnings|compensation|budget|budgets|fee|fees)(?![A-Za-z])|금액|금전|매출|연봉|급여|월급|임금|급료|가격|판매가|매입가|비용|원가|수익|이익|소득|보수|예산|수수료|단가)""",
-        ignoreCase: true);
-    private static readonly Regex MonetaryAmountPattern = CreatePattern(
-        """(?<![A-Za-z0-9])(?:(?:[$€£¥₩]|USD|KRW|EUR|JPY|GBP)\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*(?:원|(?:만|억|천|백)\s*원|달러|dollars?|usd|유로|euros?|eur|엔|yen|jpy|파운드|pounds?|gbp|won|krw|센트|cents?))(?![A-Za-z0-9])""",
-        ignoreCase: true);
 
     public ClassificationResult Detect(PublicRecordId sourceId, string? content) =>
         Detect(sourceId, content, includeMonetaryContext: true);
@@ -85,8 +79,9 @@ public sealed class DeterministicSensitiveDataDetector
                 categories.Add("payment");
             }
 
-            if (MonetaryAmountPattern.IsMatch(content) ||
-                (includeMonetaryContext && MonetaryContextPattern.IsMatch(content)))
+            var monetary = BoundedMonetaryAnalyzer.Analyze(content);
+            if (monetary.HasAmountExpression ||
+                (includeMonetaryContext && monetary.HasSensitiveExpression))
             {
                 categories.Add("finance");
             }
@@ -146,8 +141,15 @@ public sealed class DeterministicSensitiveDataDetector
             "payment",
             ranges,
             categories);
-        AddMatches(MonetaryAmountPattern, value, "finance", ranges, categories);
-        AddMatches(MonetaryContextPattern, value, "finance", ranges, categories);
+        var monetary = BoundedMonetaryAnalyzer.Analyze(value);
+        if (monetary.HasSensitiveExpression)
+        {
+            foreach (var range in monetary.SensitiveRanges)
+            {
+                ranges.Add(new SensitiveRange(range.Start, range.Length));
+            }
+            categories.Add("finance");
+        }
 
         if (ranges.Count == 0)
         {

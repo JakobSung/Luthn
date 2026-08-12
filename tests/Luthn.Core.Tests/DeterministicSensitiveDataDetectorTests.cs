@@ -20,7 +20,16 @@ public sealed class DeterministicSensitiveDataDetectorTests
         { "견적금액은 1,000원입니다.", "finance", SensitivityLevel.Confidential },
         { "홍길동 사원의 연봉은 5,000만원입니다.", "finance", SensitivityLevel.Confidential },
         { "Annual salary is USD 12000.", "finance", SensitivityLevel.Confidential },
-        { "Revenue was $12000.", "finance", SensitivityLevel.Confidential }
+        { "Revenue was $12000.", "finance", SensitivityLevel.Confidential },
+        { "프로젝트 비용은 오천만원입니다.", "finance", SensitivityLevel.Confidential },
+        { "The fee was twelve thousand dollars.", "finance", SensitivityLevel.Confidential },
+        { "예산은 KRW 2.5m입니다.", "finance", SensitivityLevel.Confidential },
+        { "정산액은 3억 원입니다.", "finance", SensitivityLevel.Confidential },
+        { "The contract value was EUR 3bn.", "finance", SensitivityLevel.Confidential },
+        { "The bonus was £2.5m.", "finance", SensitivityLevel.Confidential },
+        { "출장비는 20,000엔입니다.", "finance", SensitivityLevel.Confidential },
+        { "지급액은 1200 JPY입니다.", "finance", SensitivityLevel.Confidential },
+        { "보너스는 ₩750k입니다.", "finance", SensitivityLevel.Confidential }
     };
 
     [Theory]
@@ -52,6 +61,13 @@ public sealed class DeterministicSensitiveDataDetectorTests
     [InlineData("홍길동 사원이 업무를 진행했다")]
     [InlineData("홍길동 사원이 공개 견적을 발행했다")]
     [InlineData("2026-08-04에 v1.2.3을 배포했고 3개 항목을 처리했다")]
+    [InlineData("USD")]
+    [InlineData("$")]
+    [InlineData("const USDValue = 12000;")]
+    [InlineData("echo $HOME")]
+    [InlineData("홍길동 조원이 업무를 진행했다")]
+    [InlineData("가격 계산 로직을 개선했다")]
+    [InlineData("예산 문서를 검토했다")]
     public void DetectorRejectsBenignNearMisses(string content)
     {
         var result = new DeterministicSensitiveDataDetector().Detect(
@@ -102,6 +118,22 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.Contains("신규 견적을 발행했다", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("1,000원", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("금액", result.Text, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+        Assert.Contains("finance", result.Categories);
+    }
+
+    [Fact]
+    public void RedactorRemovesTextualMonetaryPhraseWithoutRemovingPersonNameOrEvent()
+    {
+        const string content = "홍길동 사원이 오천만원을 확인하고 신규 견적을 발행했다.";
+
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.Contains("홍길동 사원", result.Text, StringComparison.Ordinal);
+        Assert.Contains("신규 견적을 발행했다", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("오천만원", result.Text, StringComparison.Ordinal);
         Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
         Assert.Contains("finance", result.Categories);
     }

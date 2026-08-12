@@ -708,7 +708,7 @@ public sealed class MemoryEndpointTests
     private static AgentSafeMemoryProjectionSelector CreateProjectionSelector(
         IContentClassifier? classifier = null) =>
         new(
-            classifier ?? new MockContentClassifier(),
+            classifier ?? new LocalContextualContentClassifier(),
             new DeterministicSensitiveDataDetector(),
             new PolicyEngine());
 

@@ -1,15 +1,11 @@
-using Luthn.Core.Classification;
 using Luthn.Core.Common;
 
 namespace Luthn.Core.Classification;
 
-public sealed class MockContentClassifier : IContentClassifier
+public sealed class LocalContextualContentClassifier : IContentClassifier
 {
-    public const string UsageNotice =
-        "MockContentClassifier is a deterministic local classifier. Replace it with an external provider when provider-backed classification is required.";
-
     public ClassificationProviderBoundary Boundary { get; } =
-        new("mock", "local-classification-input", "local-only");
+        new("local-contextual", "local-classification-input", "local-only");
 
     public ValueTask<ClassificationResult> ClassifyAsync(
         PublicRecordId sourceId,
@@ -17,7 +13,17 @@ public sealed class MockContentClassifier : IContentClassifier
         string? sourceType,
         CancellationToken cancellationToken = default)
     {
-        var categories = ClassificationTaxonomy.DetectCategories(content);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var categories = ClassificationTaxonomy.DetectCategories(content)
+            .Where(category => !string.Equals(category, "finance", StringComparison.OrdinalIgnoreCase))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var monetary = BoundedMonetaryAnalyzer.Analyze(content);
+        if (monetary.HasSensitiveExpression)
+        {
+            categories.Add("finance");
+        }
+
         var sensitivity = categories
             .Select(ClassificationTaxonomy.MinimumSensitivityFor)
             .Where(level => level is not null)
@@ -26,12 +32,10 @@ public sealed class MockContentClassifier : IContentClassifier
                 ? SensitivityLevel.Internal
                 : SensitivityLevel.Public)
             .Max();
-
-        var confidence = string.IsNullOrWhiteSpace(content)
-            ? 0
-            : categories.Count > 0
-                ? 0.9
-                : 0.75;
+        var confidence = DetermineConfidence(
+            content,
+            categories.Count > 0,
+            monetary.HasAmbiguousExpression);
 
         return ValueTask.FromResult(ClassificationResultNormalizer.Normalize(new ClassificationResult(
             sourceId,
@@ -39,6 +43,24 @@ public sealed class MockContentClassifier : IContentClassifier
             confidence,
             categories,
             sensitivity is SensitivityLevel.Confidential or SensitivityLevel.Restricted)));
+    }
+
+    private static double DetermineConfidence(
+        string content,
+        bool hasCategories,
+        bool hasAmbiguousMonetaryExpression)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return 0;
+        }
+
+        if (hasAmbiguousMonetaryExpression && !hasCategories)
+        {
+            return 0.5;
+        }
+
+        return hasCategories ? 0.9 : 0.75;
     }
 
     private static bool IsLikelyOperationalKnowledge(string content, string? sourceType) =>
