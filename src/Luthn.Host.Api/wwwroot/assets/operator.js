@@ -113,7 +113,7 @@ const renderSessionGuidance = () => {
   writeResult($("#providerOutput"), guidance);
   const providerForm = $("#providerForm");
   if (providerForm) {
-    providerForm.clearApiKey.checked = false;
+    providerForm.endpoint.value = "";
   }
   renderAccessRows([]);
   clearAccessDetail(guidance);
@@ -764,42 +764,16 @@ const changePublication = async (action) => {
 };
 
 const providerDefaults = {
-  Unconfigured: { model: "", endpoint: "", authHeaderName: "Authorization" },
-  Mock: { model: "", endpoint: "", authHeaderName: "Authorization" },
-  OpenAi: {
-    model: "gpt-4.1-mini",
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    authHeaderName: "Authorization"
-  },
-  Anthropic: {
-    model: "claude-sonnet-4-5",
-    endpoint: "https://api.anthropic.com/v1/messages",
-    authHeaderName: "x-api-key"
-  },
-  GoogleAi: {
-    model: "gemini-2.5-flash",
-    endpoint: "https://generativelanguage.googleapis.com/v1beta/models",
-    authHeaderName: "x-goog-api-key"
-  },
-  OpenRouter: {
-    model: "openai/gpt-4.1-mini",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    authHeaderName: "Authorization"
-  },
-  ExternalHttp: { model: "", endpoint: "", authHeaderName: "Authorization" }
+  Unconfigured: { endpoint: "" },
+  LocalDeterministic: { endpoint: "" },
+  LocalHttp: { endpoint: "http://127.0.0.1:11434/classify" }
 };
 
 const renderProviderSettings = (settings) => {
   const form = $("#providerForm");
-  const mockOption = form.provider.querySelector('option[value="Mock"]');
-  if (mockOption) {
-    mockOption.disabled = !settings.mockAllowed;
-  }
   form.provider.value = settings.provider;
-  form.model.value = settings.model || "";
   form.endpoint.value = settings.endpoint || "";
-  form.authHeaderName.value = settings.authHeaderName || "Authorization";
-  form.clearApiKey.checked = false;
+  form.endpoint.disabled = settings.provider !== "LocalHttp";
   $("#providerStatus").textContent = settings.statusDetail;
   writeResult($("#providerOutput"), settings);
 };
@@ -821,13 +795,8 @@ const refreshProviderSettings = async () => {
 const applyProviderDefaults = () => {
   const form = $("#providerForm");
   const defaults = providerDefaults[form.provider.value] || providerDefaults.Unconfigured;
-  if (!form.model.value.trim()) {
-    form.model.value = defaults.model;
-  }
-  if (!form.endpoint.value.trim()) {
-    form.endpoint.value = defaults.endpoint;
-  }
-  form.authHeaderName.value = defaults.authHeaderName;
+  form.endpoint.disabled = form.provider.value !== "LocalHttp";
+  form.endpoint.value = defaults.endpoint;
 };
 
 const saveProviderSettings = async (event) => {
@@ -835,10 +804,7 @@ const saveProviderSettings = async (event) => {
   const form = new FormData(event.currentTarget);
   const body = {
     provider: form.get("provider")?.toString(),
-    model: form.get("model")?.toString().trim(),
-    endpoint: form.get("endpoint")?.toString().trim(),
-    authHeaderName: form.get("authHeaderName")?.toString().trim(),
-    clearApiKey: form.get("clearApiKey") === "on"
+    endpoint: form.get("endpoint")?.toString().trim()
   };
 
   try {

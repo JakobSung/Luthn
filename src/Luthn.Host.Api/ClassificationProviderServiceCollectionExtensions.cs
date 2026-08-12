@@ -17,41 +17,24 @@ internal static class ClassificationProviderServiceCollectionExtensions
             configuration.GetSection("Luthn:Classification:Runtime"));
         services.AddSingleton<DeterministicSensitiveDataDetector>();
 
-        var provider = options.ResolveProvider();
+        var providerKind = options.ResolveProvider();
 
-        if (string.Equals(
-            provider,
-            ClassificationProviderOptions.UnconfiguredProvider,
-            StringComparison.OrdinalIgnoreCase))
+        if (providerKind == OperatorClassificationProviderKind.Unconfigured)
         {
             services.AddSingleton<IContentClassifier>(provider =>
                 new HybridContentClassifier(
                     new UnavailableContentClassifier(
                         ClassificationProviderOptions.ProviderRequiredMessage,
                         new ClassificationProviderBoundary(
-                            "Unconfigured",
+                            ClassificationProviderOptions.UnconfiguredProvider,
                             "classification-input",
                             "provider-unconfigured")),
                     provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
             return services;
         }
 
-        if (string.Equals(provider, "mock", StringComparison.OrdinalIgnoreCase))
+        if (providerKind == OperatorClassificationProviderKind.LocalDeterministic)
         {
-            if (!options.AllowMock)
-            {
-                services.AddSingleton<IContentClassifier>(provider =>
-                    new HybridContentClassifier(
-                        new UnavailableContentClassifier(
-                            ClassificationProviderOptions.MockDisabledMessage,
-                            new ClassificationProviderBoundary(
-                                "Mock",
-                                "local-classification-input",
-                                "mock-disabled")),
-                        provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
-                return services;
-            }
-
             services.AddSingleton<LocalContextualContentClassifier>();
             services.AddSingleton<IContentClassifier>(provider =>
                 new HybridContentClassifier(
@@ -60,22 +43,33 @@ internal static class ClassificationProviderServiceCollectionExtensions
             return services;
         }
 
-        if (string.Equals(provider, "external-http", StringComparison.OrdinalIgnoreCase))
+        if (providerKind == OperatorClassificationProviderKind.LocalHttp)
         {
-            services.AddHttpClient(ExternalHttpContentClassifier.HttpClientName, client =>
+            services.AddSingleton<IOperatorClassificationSettingsStore>(provider =>
+                new FixedClassificationSettingsStore(new OperatorClassificationProviderSettings
+                {
+                    Provider = OperatorClassificationProviderKind.LocalHttp,
+                    Endpoint = options.LocalHttp.Endpoint ?? "",
+                    PayloadClass = options.LocalHttp.PayloadClass,
+                    RedactionState = options.LocalHttp.RedactionState
+                }));
+            services.AddHttpClient(ConfiguredContentClassifier.HttpClientName, client =>
             {
                 client.Timeout = Timeout.InfiniteTimeSpan;
-            });
-            services.AddSingleton<ExternalHttpContentClassifier>();
+            })
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+                {
+                    AllowAutoRedirect = false
+                });
+            services.AddSingleton<ConfiguredContentClassifier>();
             services.AddSingleton<IContentClassifier>(provider =>
                 new HybridContentClassifier(
-                    provider.GetRequiredService<ExternalHttpContentClassifier>(),
+                    provider.GetRequiredService<ConfiguredContentClassifier>(),
                     provider.GetRequiredService<DeterministicSensitiveDataDetector>()));
             return services;
         }
 
-        throw new InvalidOperationException(
-            $"Unsupported classification provider '{provider}'. Supported values are 'unconfigured', 'mock', and 'external-http'.");
+        return services;
     }
 
     private sealed class UnavailableContentClassifier(
@@ -90,5 +84,20 @@ internal static class ClassificationProviderServiceCollectionExtensions
             string? sourceType,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromException<ClassificationResult>(new ClassificationProviderException(message));
+    }
+
+    private sealed class FixedClassificationSettingsStore(
+        OperatorClassificationProviderSettings settings) : IOperatorClassificationSettingsStore
+    {
+        public OperatorClassificationProviderSettings Current => settings;
+
+        public ValueTask<OperatorClassificationProviderSettings> ReadAsync(
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(settings);
+
+        public ValueTask<OperatorClassificationProviderSettings> SaveAsync(
+            SaveClassificationProviderConfigurationRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

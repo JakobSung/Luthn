@@ -1,49 +1,37 @@
-using System.Text.Json.Serialization;
-
 namespace Luthn.Host.Api;
 
 public sealed record ClassificationProviderOptions
 {
-    public const string UnconfiguredProvider = "unconfigured";
-    public const string MockDisabledMessage =
-        "The mock classification provider is disabled. Set Luthn:Classification:AllowMock=true only for explicit development or test use.";
+    public const string LocalDeterministicProvider = "LocalDeterministic";
+    public const string LocalHttpProvider = "LocalHttp";
+    public const string UnconfiguredProvider = "Unconfigured";
     public const string ProviderRequiredMessage =
-        "No classification provider is configured. Configure a provider in the operator console before submitting content for classification.";
+        "No supported local classification provider is configured. Choose LocalDeterministic or configure a same-device LocalHttp endpoint.";
 
-    public string Provider { get; init; } = UnconfiguredProvider;
-    public bool AllowMock { get; init; }
-    [JsonIgnore]
-    public string? Credential { get; init; }
-    public ExternalHttpClassificationProviderOptions ExternalHttp { get; init; } = new();
+    public string Provider { get; init; } = LocalDeterministicProvider;
+    public LocalHttpClassificationProviderOptions LocalHttp { get; init; } = new();
 
-    public string ResolveProvider()
+    public OperatorClassificationProviderKind ResolveProvider()
     {
-        var provider = string.IsNullOrWhiteSpace(Provider) ? UnconfiguredProvider : Provider.Trim();
-        var hasExternalProvider = !string.IsNullOrWhiteSpace(ExternalHttp.Endpoint);
-
-        if (string.Equals(provider, "mock", StringComparison.OrdinalIgnoreCase) && hasExternalProvider)
+        if (string.Equals(Provider?.Trim(), LocalDeterministicProvider, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(
-                "The mock classification provider is test and experiment only. Use 'external-http' when Luthn:Classification:ExternalHttp:Endpoint is configured.");
+            return OperatorClassificationProviderKind.LocalDeterministic;
         }
 
-        return provider;
-    }
-
-    public void EnsureMockAllowed()
-    {
-        if (!AllowMock)
+        if (string.Equals(Provider?.Trim(), LocalHttpProvider, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(MockDisabledMessage);
+            return LocalHttpEndpointValidator.TryValidate(LocalHttp.Endpoint, out _)
+                ? OperatorClassificationProviderKind.LocalHttp
+                : OperatorClassificationProviderKind.Unconfigured;
         }
+
+        return OperatorClassificationProviderKind.Unconfigured;
     }
 }
 
-public sealed record ExternalHttpClassificationProviderOptions
+public sealed record LocalHttpClassificationProviderOptions
 {
     public string? Endpoint { get; init; }
-    public string? CredentialEnvironmentVariable { get; init; }
-    public string AuthHeaderName { get; init; } = "Authorization";
     public string PayloadClass { get; init; } = "classification-input";
-    public string RedactionState { get; init; } = "external-provider-opt-in";
+    public string RedactionState { get; init; } = "same-device-local-http";
 }

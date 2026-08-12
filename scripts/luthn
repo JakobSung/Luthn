@@ -508,9 +508,7 @@ LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=l
 POSTGRES_DB=luthn
 POSTGRES_USER=luthn
 POSTGRES_HOST_AUTH_METHOD=trust
-Luthn__Classification__Provider=mock
-Luthn__Classification__AllowMock=true
-Luthn__Classification__Credential=
+Luthn__Classification__Provider=LocalDeterministic
 Luthn__Memory__AutomaticTurnRetentionDays=30
 Luthn__Memory__AutomaticTurnCleanupEnabled=true
 Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60
@@ -629,13 +627,16 @@ ensure_config_value() {
   fi
 }
 
-upgrade_legacy_classification_default() {
+normalize_classification_provider() {
   provider="$(read_config Luthn__Classification__Provider)"
-  allow_mock="$(read_config Luthn__Classification__AllowMock)"
-  if [[ "$provider" == "unconfigured" && "$allow_mock" == "false" ]]; then
-    set_config Luthn__Classification__Provider mock
-    set_config Luthn__Classification__AllowMock true
+  if [[ "$provider" != "LocalDeterministic" && "$provider" != "LocalHttp" && "$provider" != "Unconfigured" ]]; then
+    set_config Luthn__Classification__Provider Unconfigured
   fi
+  remove_config Luthn__Classification__AllowMock
+  remove_config Luthn__Classification__Credential
+  remove_config Luthn__Classification__Model
+  remove_config Luthn__Classification__AuthHeaderName
+  remove_config_prefix Luthn__Classification__ExternalHttp__
 }
 
 pull_image() {
@@ -924,25 +925,13 @@ classification_setup_pending() {
   local body="$2"
   [[ "$status_code" == "503" ]] \
     && [[ "$body" == *"classification-provider"* ]] \
-    && { [[ "$body" == *"No classification provider is configured"* ]] \
-      || [[ "$body" == *"The mock classification provider is disabled"* ]] \
-      || [[ "$body" == *"Production classification requires an operator-configured non-mock provider"* ]]; }
+    && [[ "$body" == *"No supported local classification provider is configured"* ]]
 }
 
 classification_setup_required_by_config() {
-  local provider allow_mock
-  provider="$(read_config Luthn__Classification__Provider mock)"
-  allow_mock="$(read_config Luthn__Classification__AllowMock true)"
-  if [[ "$provider" == "unconfigured" ]]; then
-    return 0
-  fi
-  if [[ "$provider" != "mock" ]]; then
-    return 1
-  fi
-  case "$allow_mock" in
-    true|True|TRUE) return 1 ;;
-    *) return 0 ;;
-  esac
+  local provider
+  provider="$(read_config Luthn__Classification__Provider LocalDeterministic)"
+  [[ "$provider" != "LocalDeterministic" && "$provider" != "LocalHttp" ]]
 }
 
 wait_for_api() {
@@ -1132,9 +1121,8 @@ install_luthn() {
     ensure_config_value POSTGRES_DB luthn
     ensure_config_value POSTGRES_USER luthn
     ensure_config_value POSTGRES_HOST_AUTH_METHOD trust
-    ensure_config_value Luthn__Classification__Provider mock
-    ensure_config_value Luthn__Classification__AllowMock true
-    upgrade_legacy_classification_default
+    ensure_config_value Luthn__Classification__Provider LocalDeterministic
+    normalize_classification_provider
     ensure_config_value Luthn__Memory__AutomaticTurnRetentionDays 30
     ensure_config_value Luthn__Memory__AutomaticTurnCleanupEnabled true
     ensure_config_value Luthn__Memory__AutomaticTurnCleanupIntervalMinutes 60

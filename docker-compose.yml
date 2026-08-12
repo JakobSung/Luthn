@@ -6,9 +6,7 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__LuthnDb: ${LUTHN_DOCKER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=luthn;Username=luthn}
-      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-mock}
-      Luthn__Classification__AllowMock: ${Luthn__Classification__AllowMock:-true}
-      Luthn__Classification__Credential: ${Luthn__Classification__Credential:-}
+      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-LocalDeterministic}
       Luthn__Memory__AutomaticTurnRetentionDays: ${Luthn__Memory__AutomaticTurnRetentionDays:-30}
       Luthn__Memory__AutomaticTurnCleanupEnabled: ${Luthn__Memory__AutomaticTurnCleanupEnabled:-true}
       Luthn__Memory__AutomaticTurnCleanupIntervalMinutes: ${Luthn__Memory__AutomaticTurnCleanupIntervalMinutes:-60}

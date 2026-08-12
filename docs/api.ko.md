@@ -162,32 +162,27 @@ PUT  /api/operator/classification-provider
 POST /api/operator/classification-provider/test
 ```
 
-현재 분류 provider 설정을 조회·저장·시험하는 운영자 전용 endpoint입니다. 세 endpoint 모두 서비스 token에 `config.write` scope가 있어야 합니다. 지원 값은 `Mock`, `ExternalHttp`, `OpenAi`, `Anthropic`, `GoogleAi`, `OpenRouter`입니다.
-
-브라우저 콘솔은 원시 provider 자격 증명을 입력받지 않습니다. server runtime secret
-환경에 `Luthn__Classification__Credential`을 설정하면 콘솔은 비밀정보가 아닌 provider
-설정과 자격 증명 삭제 여부만 전송합니다. 기존 API client를 위해 선택적 `apiKey` 요청
-필드는 계속 허용하지만 어떤 응답에도 포함하지 않습니다.
+현재 분류 provider 설정을 조회·저장·시험하는 운영자 전용 endpoint입니다. 세 endpoint 모두 서비스 token에 `config.write` scope가 있어야 합니다. 지원 값은 `LocalDeterministic`, `LocalHttp`이며 `Unconfigured`는 fail-closed system 상태입니다. `LocalHttp`는 `localhost`, loopback IP, `host.docker.internal`만 허용하고 model·credential·인증 설정을 받지 않습니다.
 
 ```json
 {
-  "provider": "ExternalHttp",
-  "model": "",
-  "endpoint": "https://provider.example/classify",
-  "authHeaderName": "Authorization",
-  "apiKey": "operator-supplied-secret",
-  "clearApiKey": false
+  "provider": "LocalHttp",
+  "endpoint": "http://host.docker.internal:11434/classify"
 }
 ```
 
-응답은 `provider`, `model`, `endpoint`, `authHeaderName`, `payloadClass`,
-`redactionState`, `hasApiKey`, `providerBoundary`,
+응답은 `provider`, 비워진 호환 필드 `model`·`authHeaderName`, `endpoint`, `payloadClass`,
+`redactionState`, `providerBoundary`,
 `localSensitiveDataGuardActive`, `localSensitiveDataGuardVersion`을 반환하고
-API key나 detector 일치값은 절대 돌려주지 않습니다. `ExternalHttp`는
-`self-hosted-capable-external-http` 경계로 표시됩니다. 시험 endpoint는 선택적
+credential이나 detector 일치값은 절대 돌려주지 않습니다. `LocalHttp`는
+`same-device-local-http` 경계로 표시되고 redirect를 거부합니다. 시험 endpoint는 선택적
 `content`, `sourceType`을 받아 현재 provider와 정책 engine을 실행하고 안전한 설정
 보기, 분류, 저장 결정을 반환합니다. 저장과 시험은 메타데이터 전용 감사 사건을
 기록합니다.
+
+기존 상용 provider, `Mock`, `ExternalHttp`, 원격 `LocalHttp` 저장/runtime 설정은
+secret을 사용하지 않고 endpoint·model·인증·credential을 비운 `Unconfigured`로
+표시합니다.
 
 ## 운영 관측 지표 내보내기
 

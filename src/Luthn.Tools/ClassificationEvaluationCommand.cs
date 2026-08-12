@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Net;
 using Luthn.AgentConnector.Http;
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
@@ -31,7 +32,11 @@ public sealed class ClassificationEvaluationCommand
             (baseUrl, bearerToken) => new LuthnClassificationPreviewClient(new LuthnClientOptions
             {
                 BaseUrl = baseUrl,
-                BearerToken = bearerToken
+                BearerToken = bearerToken,
+                ConfigureHttpMessageHandler = () => new HttpClientHandler
+                {
+                    AllowAutoRedirect = false
+                }
             }),
             Environment.GetEnvironmentVariable)
     {
@@ -58,9 +63,9 @@ public sealed class ClassificationEvaluationCommand
             var evaluator = new ClassificationGoldenEvaluator();
             var report = options.Provider switch
             {
-                EvaluationProvider.Mock => await EvaluateMockAsync(evaluator, dataset, guarded: false, cancellationToken),
-                EvaluationProvider.GuardedMock => await EvaluateMockAsync(evaluator, dataset, guarded: true, cancellationToken),
-                EvaluationProvider.ConfiguredApi => await EvaluateConfiguredApiAsync(
+                EvaluationProvider.LocalDeterministic => await EvaluateLocalAsync(evaluator, dataset, guarded: false, cancellationToken),
+                EvaluationProvider.GuardedLocal => await EvaluateLocalAsync(evaluator, dataset, guarded: true, cancellationToken),
+                EvaluationProvider.LocalHttp => await EvaluateLocalHttpAsync(
                     evaluator,
                     dataset,
                     options,
@@ -108,7 +113,7 @@ public sealed class ClassificationEvaluationCommand
         return dataset;
     }
 
-    private static Task<ClassificationEvaluationReport> EvaluateMockAsync(
+    private static Task<ClassificationEvaluationReport> EvaluateLocalAsync(
         ClassificationGoldenEvaluator evaluator,
         ClassificationGoldenDataset dataset,
         bool guarded,
@@ -122,7 +127,7 @@ public sealed class ClassificationEvaluationCommand
         var policyEngine = new PolicyEngine();
         return evaluator.EvaluateAsync(
             dataset,
-            guarded ? "guarded-mock" : "mock",
+            guarded ? "guarded-local" : "local-deterministic",
             async (goldenCase, caseCancellationToken) =>
             {
                 var classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
@@ -137,21 +142,21 @@ public sealed class ClassificationEvaluationCommand
             cancellationToken);
     }
 
-    private async Task<ClassificationEvaluationReport> EvaluateConfiguredApiAsync(
+    private async Task<ClassificationEvaluationReport> EvaluateLocalHttpAsync(
         ClassificationGoldenEvaluator evaluator,
         ClassificationGoldenDataset dataset,
         CommandOptions options,
         CancellationToken cancellationToken)
     {
-        if (!options.AllowExternalProvider)
-        {
-            throw new InvalidOperationException(
-                "configured-api evaluation requires --allow-external-provider because the configured classifier may send corpus text outside the local boundary.");
-        }
-
         if (options.ApiUrl is null)
         {
-            throw new InvalidOperationException("configured-api evaluation requires --api-url <absolute-url>.");
+            throw new InvalidOperationException("local-http evaluation requires --api-url <same-device-url>.");
+        }
+
+        if (!IsSameDeviceEndpoint(options.ApiUrl))
+        {
+            throw new InvalidOperationException(
+                "local-http evaluation URL must use HTTP or HTTPS on localhost, an IPv4/IPv6 loopback address, or host.docker.internal, without user information.");
         }
 
         string? bearerToken = null;
@@ -168,7 +173,7 @@ public sealed class ClassificationEvaluationCommand
         var client = _previewClientFactory(options.ApiUrl, bearerToken);
         return await evaluator.EvaluateAsync(
             dataset,
-            "configured-api",
+            "local-http",
             async (goldenCase, caseCancellationToken) =>
             {
                 var expectedSourceId = $"golden-{goldenCase.Id}";
@@ -241,9 +246,8 @@ public sealed class ClassificationEvaluationCommand
     {
         var datasetPath = FindDefaultDatasetPath();
         string? outputPath = null;
-        var provider = EvaluationProvider.Mock;
+        var provider = EvaluationProvider.LocalDeterministic;
         Uri? apiUrl = null;
-        var allowExternalProvider = false;
         string? tokenEnvironmentVariable = null;
 
         for (var index = 0; index < args.Count; index++)
@@ -266,9 +270,6 @@ public sealed class ClassificationEvaluationCommand
                         throw new ArgumentException("--api-url must be an absolute URL.");
                     }
                     break;
-                case "--allow-external-provider":
-                    allowExternalProvider = true;
-                    break;
                 case "--token-env":
                     tokenEnvironmentVariable = ReadValue(args, ref index, "--token-env");
                     break;
@@ -282,7 +283,6 @@ public sealed class ClassificationEvaluationCommand
             outputPath,
             provider,
             apiUrl,
-            allowExternalProvider,
             tokenEnvironmentVariable);
     }
 
@@ -300,11 +300,30 @@ public sealed class ClassificationEvaluationCommand
     private static EvaluationProvider ReadProvider(string value) =>
         value.ToLowerInvariant() switch
         {
-            "mock" => EvaluationProvider.Mock,
-            "guarded-mock" => EvaluationProvider.GuardedMock,
-            "configured-api" => EvaluationProvider.ConfiguredApi,
-            _ => throw new ArgumentException("--provider must be 'mock', 'guarded-mock', or 'configured-api'.")
+            "local-deterministic" => EvaluationProvider.LocalDeterministic,
+            "guarded-local" => EvaluationProvider.GuardedLocal,
+            "local-http" => EvaluationProvider.LocalHttp,
+            _ => throw new ArgumentException("--provider must be 'local-deterministic', 'guarded-local', or 'local-http'.")
         };
+
+    private static bool IsSameDeviceEndpoint(Uri endpoint)
+    {
+        if (!endpoint.IsAbsoluteUri ||
+            !string.IsNullOrEmpty(endpoint.UserInfo) ||
+            !string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(endpoint.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(endpoint.Host, "host.docker.internal", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return IPAddress.TryParse(endpoint.Host, out var address) && IPAddress.IsLoopback(address);
+    }
 
     private static string FindDefaultDatasetPath()
     {
@@ -322,14 +341,13 @@ public sealed class ClassificationEvaluationCommand
         string? OutputPath,
         EvaluationProvider Provider,
         Uri? ApiUrl,
-        bool AllowExternalProvider,
         string? TokenEnvironmentVariable);
 
     private enum EvaluationProvider
     {
-        Mock,
-        GuardedMock,
-        ConfiguredApi
+        LocalDeterministic,
+        GuardedLocal,
+        LocalHttp
     }
 
     private sealed class LuthnClassificationPreviewClient(LuthnClientOptions options) : IClassificationPreviewClient

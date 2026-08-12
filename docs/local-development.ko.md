@@ -138,13 +138,10 @@ user 또는 connector마다 별도 최소권한 token을 사용합니다. 같은
 
 ## 분류 Provider 설정
 
-운영자 화면의 `/api/operator/classification-provider`에서 `Mock`, `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, `External HTTP`를 선택하고 비밀정보가 아닌 model·endpoint·연결 시험을 설정할 수 있습니다. 브라우저는 provider 자격 증명을 입력받지 않습니다. 자격 증명은 server runtime secret `Luthn__Classification__Credential`로 제공하고 화면에는 존재 여부만 표시합니다. 기존 API client의 `apiKey` 요청 필드는 하위 호환을 위해 유지하지만 자격 증명을 API 응답이나 화면에 되돌려 보내지 않습니다.
-
-직접 제3자 LLM provider는 민감도 판정 전에 원문을 받습니다. 이 전송이 허용될 때만 사용하고, 원문을 통제된 경계에 남겨야 하면 `External HTTP`를 사용합니다. API key를 보내는 endpoint는 HTTPS여야 합니다. 기본 설정은 새 설치가 바로 동작하도록 로컬 `mock`을 선택합니다. `mock`은 결정적 keyword 분류기이므로 provider 기반의 안전성 또는 다국어 분류가 필요하면 외부 provider로 교체하세요. 수동으로 로컬 설정을 지정할 때는 두 값을 함께 설정할 수 있습니다.
+운영자 화면의 `/api/operator/classification-provider`에서 `LocalDeterministic` 또는 선택적 `LocalHttp`를 설정하고 연결 시험을 실행할 수 있습니다. 상용 provider, credential, model, 인증 header는 지원하지 않습니다. `LocalHttp`는 `localhost`, IPv4·IPv6 loopback, `host.docker.internal`의 절대 HTTP(S) endpoint만 허용하며 redirect는 실패 처리합니다.
 
 ```bash
-Luthn__Classification__Provider=mock
-Luthn__Classification__AllowMock=true
+Luthn__Classification__Provider=LocalDeterministic
 Luthn__Classification__Runtime__TimeoutSeconds=30
 Luthn__Classification__Runtime__MaxAttempts=2
 Luthn__Classification__Runtime__RetryDelayMilliseconds=200
@@ -154,7 +151,7 @@ Luthn__Classification__Runtime__RetryDelayMilliseconds=200
 
 ### 분류 Golden 평가
 
-버전이 지정된 한국어 중심 합성 corpus를 network 요청 없이 로컬 mock으로
+버전이 지정된 한국어 중심 합성 corpus를 network 요청 없이 `LocalDeterministic`으로
 평가합니다.
 
 ```bash
@@ -168,43 +165,38 @@ dotnet run --project src/Luthn.Tools -- classification-eval \
   --output artifacts/classification-eval.json
 ```
 
-network 요청 없이 mock 기준값과 로컬 결정론적 guard를 결합한 경로도 평가할 수
+network 요청 없이 로컬 기준값과 결정론적 guard를 결합한 경로도 평가할 수
 있습니다.
 
 ```bash
 dotnet run --project src/Luthn.Tools -- classification-eval \
-  --provider guarded-mock
+  --provider guarded-local
 ```
 
-API에 현재 설정된 분류기를 평가하려면 API를 실행하고 외부 전송 가능성을
-명시적으로 허용해야 합니다. 보호 API token 값은 command line에 넣지 말고
-환경 변수 이름만 전달합니다.
+동일 장비 Host API를 평가하려면 허용된 로컬 URL에서 API를 실행합니다. 보호 API
+token 값은 command line에 넣지 말고 환경 변수 이름만 전달합니다.
 
 ```bash
 export LUTHN_EVAL_TOKEN='<운영자가 제공한 token>'
 dotnet run --project src/Luthn.Tools -- classification-eval \
-  --provider configured-api \
+  --provider local-http \
   --api-url http://127.0.0.1:5089 \
-  --allow-external-provider \
   --token-env LUTHN_EVAL_TOKEN
 ```
 
 결과에는 corpus 원문을 넣지 않고 제한된 case ID, case별 분류·저장 경로 비교,
 불일치 합계만 기록합니다.
 
-runtime은 모든 설정된 provider 결과에 로컬 secret/PII guard 버전 `1`을
-결합합니다. `ExternalHttp`는 self-hosted 연결이 가능한 provider 경계이고,
+runtime은 모든 `LocalHttp` 결과에 로컬 결정론적 guard 버전 `1`을 결합하며,
 provider 실패를 detector 단독 저장으로 대체하지 않습니다.
 
 ```bash
-Luthn__Classification__Provider=external-http
-Luthn__Classification__ExternalHttp__Endpoint=https://provider.example/classify
-Luthn__Classification__ExternalHttp__CredentialEnvironmentVariable=LUTHN_PROVIDER_AUTH
-Luthn__Classification__ExternalHttp__AuthHeaderName=Authorization
+Luthn__Classification__Provider=LocalHttp
+Luthn__Classification__LocalHttp__Endpoint=http://host.docker.internal:11434/classify
 Luthn__OperatorConfig__Directory=/var/lib/luthn/operator
 ```
 
-설정에는 자격 증명 환경 변수 이름만 두고 값은 secret manager 또는 runtime 환경에서 제공합니다. 응답은 `sensitivity`, `confidence`, `categories`, `containsSensitiveMaterial`을 반환해야 합니다.
+기존 상용 provider, `Mock`, `ExternalHttp`, 원격 `LocalHttp` 설정은 secret을 복호화하거나 사용하지 않고 endpoint·model·인증·credential을 비운 `Unconfigured`로 전환합니다. 응답은 `sensitivity`, `confidence`, `categories`, `containsSensitiveMaterial`을 반환해야 합니다.
 
 ## PostgreSQL Migration
 

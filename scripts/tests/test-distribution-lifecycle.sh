@@ -97,9 +97,9 @@ grep -q '^Luthn__Auth__Tokens__0__IsOperator=false$' "$LUTHN_CONFIG_DIR/luthn.en
 operator_key_manifest_before="$(operator_key_manifest)"
 test -n "$operator_key_manifest_before"
 grep -q '^LUTHN_ENVIRONMENT=Production$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Classification__Provider=mock$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Classification__AllowMock=true$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Classification__Credential=$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Classification__Provider=LocalDeterministic$' "$LUTHN_CONFIG_DIR/luthn.env"
+! grep -q '^Luthn__Classification__AllowMock=' "$LUTHN_CONFIG_DIR/luthn.env"
+! grep -q '^Luthn__Classification__Credential=' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Console__TrustedLocalBridge=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnRetentionDays=30$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnCleanupEnabled=true$' "$LUTHN_CONFIG_DIR/luthn.env"
@@ -107,7 +107,7 @@ grep -q '^Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60$' "$LUTHN_CONFIG
 grep -q '^Luthn__Memory__AutomaticTurnCleanupBatchSize=100$' "$LUTHN_CONFIG_DIR/luthn.env"
 evaluation_output="$(docker run --rm "$image" classification-eval)"
 grep -q '"datasetVersion": 1' <<<"$evaluation_output"
-grep -q '"provider": "mock"' <<<"$evaluation_output"
+grep -q '"provider": "local-deterministic"' <<<"$evaluation_output"
 curl -fsS "$base_url/healthz" >/dev/null
 operator_config_body="$test_root/operator-config.json"
 operator_config_status="$(curl -sS -o "$operator_config_body" -w '%{http_code}' "$base_url/api/operator/classification-provider" \

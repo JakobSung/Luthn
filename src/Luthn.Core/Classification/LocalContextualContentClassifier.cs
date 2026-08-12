@@ -5,7 +5,7 @@ namespace Luthn.Core.Classification;
 public sealed class LocalContextualContentClassifier : IContentClassifier
 {
     public ClassificationProviderBoundary Boundary { get; } =
-        new("local-contextual", "local-classification-input", "local-only");
+        new("LocalDeterministic", "local-classification-input", "local-only");
 
     public ValueTask<ClassificationResult> ClassifyAsync(
         PublicRecordId sourceId,

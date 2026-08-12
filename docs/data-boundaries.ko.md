@@ -46,8 +46,8 @@ agent context에 나중에 나타날 수 있는 전체 투영을 분류합니다
   `incident log`. `finance`에는 금액·매출·연봉·급여·가격·비용·수익·예산·
   수수료와 이에 대응하는 영어 표현이 포함됩니다.
 
-로컬 mock은 이 taxonomy에 대응하는 제한된 한국어·영어 표지를 인식합니다.
-이는 시험·실험용 동작이며 운영 품질을 보장하지 않습니다.
+`LocalDeterministic`은 모델 process나 network 호출 없이 이 taxonomy에 대응하는
+제한된 한국어·영어·혼합 언어 신호를 인식합니다.
 
 모든 운영용 provider 결과에는 로컬 민감데이터 guard 버전 `1`을 결합합니다.
 guard는 신뢰도가 높은 private key, access token, 값이 할당된 secret, email,
@@ -57,10 +57,10 @@ guard는 신뢰도가 높은 private key, access token, 값이 할당된 secret,
 결과, log, metric, audit, persistence metadata에 넣지 않습니다. provider 오류는
 기존처럼 저장 전에 실패하고 detector 단독 허용으로 대체하지 않습니다.
 
-`ExternalHttp`는 self-hosted 연결이 가능한 분류기 경계입니다. 로컬 또는 private
-network의 AI service를 연결할 수 있고, 로컬 밖 전송은 운영자가 명시적으로
-설정해야 합니다. 로컬 guard는 정상 provider 응답 뒤에 항상 적용되며 저장 경로를
-더 제한적으로만 바꿀 수 있습니다.
+선택적 `LocalHttp`는 `localhost`, IPv4·IPv6 loopback,
+`host.docker.internal`의 절대 HTTP(S) URL만 허용합니다. 임의 host, 사설 LAN,
+공용 주소, user information, redirect는 거부합니다. 로컬 guard는 정상 응답 뒤에
+항상 적용되며 저장 경로를 더 제한적으로만 바꿀 수 있습니다.
 
 provider 결과는 정책 평가 전에 정규화합니다. 민감 category는 taxonomy의
 최소 민감도까지 올리고, `containsSensitiveMaterial`이 참이면 최소
@@ -81,11 +81,10 @@ case 식별자, 표준 category 이름, 민감도와 저장 경로 기대값의 
 false-negative·false-positive·불일치 합계만 들어가며 corpus 원문은 복사하지
 않습니다.
 
-기본 평가는 로컬의 결정적 mock만 사용하고 network 요청을 하지 않습니다.
-`--provider guarded-mock`은 API client를 만들지 않고 같은 hybrid guard 경로를
-평가합니다.
-설정된 API 평가는 corpus가 API의 설정된 분류기로 전달될 수 있으므로
-`--provider configured-api`와 `--allow-external-provider`를 모두 명시해야 합니다.
+기본 평가는 `local-deterministic`을 사용하고 network 요청을 하지 않습니다.
+`--provider guarded-local`은 API client 없이 hybrid guard 경로를 평가합니다.
+`--provider local-http --api-url <same-device-url>`은 동일 장비 Host API만 평가하며
+원격 URL과 redirect를 거부합니다.
 선택적 bearer token은 `--token-env`로 지정한 환경 변수에서만 읽고 평가 결과에는
 token 값을 출력하지 않습니다.
 
@@ -244,14 +243,12 @@ metadata-only retention 사건 하나를 남깁니다.
 
 ## Provider 경계
 
-- 새 배포 설치는 로컬 `mock` 분류기를 사용하므로 별도 provider 설정 없이 분류가 동작합니다.
-- mock 분류기는 로컬에서 자격 증명 없이 동작합니다. 설치 기본값이 `Provider=mock`과 `AllowMock=true`를 함께 설정하며, provider 기반 분류가 필요하면 운영자 설정으로 교체합니다.
-- 운영자가 설정한 provider 비밀 값은 server에만 두고, 화면/API에는 key 보유 여부만 표시합니다.
-- 외부 분류는 명시적으로 선택해야 합니다.
-- `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`는 Luthn이 민감도를 정하기 전에 분류 prompt로 원문을 받습니다. 운영자가 이 외부 전송을 허용할 때만 사용하고, 원본을 직접 호스팅 경계 안에 두어야 하면 통제 가능한 `External HTTP` provider를 사용합니다.
-- 직접 연결하는 제3자 LLM endpoint는 API key header를 보내기 전에 예상 provider host의 HTTPS URL인지 확인합니다.
+- 새 배포 설치는 자격 증명이 필요 없는 `LocalDeterministic`을 사용합니다.
+- 선택적 `LocalHttp`는 `localhost`, loopback IP, 정확한 container gateway host인 `host.docker.internal`만 허용합니다.
+- `LocalHttp`에는 model·credential·인증 설정이 없으며 redirect와 모든 원격 목적지는 실패 처리합니다.
+- 기존 상용 provider, `Mock`, `ExternalHttp`, 원격 `LocalHttp` 설정은 secret을 사용하지 않고 endpoint·model·인증·credential 값을 비운 `Unconfigured`가 됩니다.
 - provider 호출에는 payload 분류와 가림 상태를 포함하고, 감사 기록에는 경계 메타데이터와 저장 결정만 남기며 원문은 남기지 않습니다.
-- 일반 자동 시험은 운영자가 연동 시험을 명시적으로 켜지 않는 한 mock 또는 fake provider를 사용합니다.
+- 일반 자동 시험은 로컬 결정론적 분류기 또는 in-memory HTTP handler를 사용합니다.
 
 ## 외부 공개 경계
 

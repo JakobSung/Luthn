@@ -56,8 +56,9 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("Luthn Operator Console", index, StringComparison.Ordinal);
         Assert.Contains("Classification provider", index, StringComparison.Ordinal);
         Assert.Contains("Unconfigured — choose a provider", index, StringComparison.Ordinal);
-        Assert.Contains("Mock — local default", index, StringComparison.Ordinal);
-        Assert.Contains("Self-hosted / external HTTP", index, StringComparison.Ordinal);
+        Assert.Contains("LocalDeterministic — local default", index, StringComparison.Ordinal);
+        Assert.Contains("LocalHttp — same-device endpoint", index, StringComparison.Ordinal);
+        Assert.Contains("host.docker.internal", index, StringComparison.Ordinal);
         Assert.Contains("Access requests", index, StringComparison.Ordinal);
         Assert.Contains("Request review", index, StringComparison.Ordinal);
         Assert.Contains("Protected content and credentials are never loaded", index, StringComparison.Ordinal);
@@ -78,11 +79,13 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("/api/agent-connections", script, StringComparison.Ordinal);
         Assert.Contains("connection?.ownerUserId", script, StringComparison.Ordinal);
         Assert.Contains("/api/external-publication/status", script, StringComparison.Ordinal);
-        Assert.Contains("mockOption.disabled = !settings.mockAllowed", script, StringComparison.Ordinal);
+        Assert.Contains("settings.provider !== \"LocalHttp\"", script, StringComparison.Ordinal);
         Assert.Contains("settings.statusDetail", script, StringComparison.Ordinal);
         Assert.DoesNotContain("name=\"apiKey\"", index, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("form.get(\"apiKey\")", script, StringComparison.Ordinal);
-        Assert.Contains("Luthn__Classification__Credential", index, StringComparison.Ordinal);
+        Assert.DoesNotContain("Luthn__Classification__Credential", index, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenRouter", index, StringComparison.Ordinal);
+        Assert.DoesNotContain("ExternalHttp", index, StringComparison.Ordinal);
         Assert.Contains("/operator-detail", script, StringComparison.Ordinal);
         Assert.Contains("sanitizeAccessDetail", script, StringComparison.Ordinal);
         Assert.Contains("viewSelectedAccessAudit", script, StringComparison.Ordinal);
@@ -102,26 +105,40 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
-    public async Task DefaultMockProviderIsReadyWithoutExposingApiKey()
+    public void ProductionLocalHttpClientDisablesAutomaticRedirects()
+    {
+        var handlerFactory = _factory.Services.GetRequiredService<IHttpMessageHandlerFactory>();
+        HttpMessageHandler handler = handlerFactory.CreateHandler(ConfiguredContentClassifier.HttpClientName);
+        while (handler is DelegatingHandler delegatingHandler)
+        {
+            handler = delegatingHandler.InnerHandler!;
+        }
+
+        var primaryHandler = Assert.IsType<HttpClientHandler>(handler);
+        Assert.False(primaryHandler.AllowAutoRedirect);
+    }
+
+    [Fact]
+    public async Task DefaultLocalDeterministicProviderIsReady()
     {
         using var response = await _client.GetAsync("/api/operator/classification-provider");
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("Mock", body.RootElement.GetProperty("provider").GetString());
-        Assert.False(body.RootElement.GetProperty("hasApiKey").GetBoolean());
-        Assert.True(body.RootElement.GetProperty("mockAllowed").GetBoolean());
-        Assert.Equal("mock-ready", body.RootElement.GetProperty("status").GetString());
-        Assert.Equal("local-default", body.RootElement.GetProperty("providerBoundary").GetString());
+        Assert.Equal("LocalDeterministic", body.RootElement.GetProperty("provider").GetString());
+        Assert.Equal("local-deterministic-ready", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal("local-only-deterministic", body.RootElement.GetProperty("providerBoundary").GetString());
         Assert.True(body.RootElement.GetProperty("localSensitiveDataGuardActive").GetBoolean());
         Assert.Equal(
             DeterministicSensitiveDataDetector.Version,
             body.RootElement.GetProperty("localSensitiveDataGuardVersion").GetString());
         Assert.Contains(
-            "Local mock classification is ready",
+            "LocalDeterministic classification is ready",
             body.RootElement.GetProperty("statusDetail").GetString(),
             StringComparison.Ordinal);
         Assert.False(body.RootElement.TryGetProperty("apiKey", out _));
+        Assert.False(body.RootElement.TryGetProperty("hasApiKey", out _));
+        Assert.False(body.RootElement.TryGetProperty("mockAllowed", out _));
 
         using var scope = _factory.Services.CreateScope();
         Assert.IsType<HybridContentClassifier>(scope.ServiceProvider.GetRequiredService<IContentClassifier>());
@@ -145,7 +162,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
-    public async Task RuntimeGuardOverridesMockPublicFalseNegativeBeforePolicyRouting()
+    public async Task RuntimeGuardOverridesProviderPublicFalseNegativeBeforePolicyRouting()
     {
         const string submittedValue = "010-1234-5678";
         using var response = await _client.PostAsJsonAsync("/api/classification/preview", new
@@ -186,8 +203,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             builder.ConfigureAppConfiguration((_, configuration) =>
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Luthn:Classification:Provider"] = "unconfigured",
-                    ["Luthn:Classification:AllowMock"] = "false"
+                    ["Luthn:Classification:Provider"] = "Unconfigured"
                 }));
         });
         using var client = factory.CreateClient();
@@ -207,7 +223,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
 
         Assert.Equal(HttpStatusCode.OK, configurationResponse.StatusCode);
         Assert.Equal("Unconfigured", configurationBody.RootElement.GetProperty("provider").GetString());
-        Assert.False(configurationBody.RootElement.GetProperty("mockAllowed").GetBoolean());
+        Assert.False(configurationBody.RootElement.TryGetProperty("mockAllowed", out _));
         Assert.Equal("unconfigured", configurationBody.RootElement.GetProperty("status").GetString());
         Assert.Equal(
             ClassificationProviderOptions.ProviderRequiredMessage,
@@ -215,7 +231,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.ServiceUnavailable, readinessResponse.StatusCode);
         Assert.Equal("classification-provider", readinessBody.RootElement.GetProperty("dependency").GetString());
         Assert.Equal(HttpStatusCode.ServiceUnavailable, previewResponse.StatusCode);
-        Assert.Contains("No classification provider is configured", previewBody, StringComparison.Ordinal);
+        Assert.Contains(ClassificationProviderOptions.ProviderRequiredMessage, previewBody, StringComparison.Ordinal);
         Assert.DoesNotContain(submittedContent, previewBody, StringComparison.Ordinal);
 
         using var scope = factory.Services.CreateScope();
@@ -232,8 +248,15 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal("provider-unconfigured", failedAudit.RedactionState);
     }
 
-    [Fact]
-    public async Task DisallowedMockIsNotReadyAndClassificationFailsWithoutPersistingContent()
+    [Theory]
+    [InlineData("Mock")]
+    [InlineData("ExternalHttp")]
+    [InlineData("OpenAi")]
+    [InlineData("OpenRouter")]
+    [InlineData("Anthropic")]
+    [InlineData("GoogleAi")]
+    public async Task LegacyRuntimeProviderIsUnconfiguredAndClassificationFailsWithoutPersistingContent(
+        string legacyProvider)
     {
         const string submittedContent = "disabled-mock-content-must-not-be-echoed";
         using var factory = _factory.WithWebHostBuilder(builder =>
@@ -246,8 +269,9 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             builder.ConfigureAppConfiguration((_, configuration) =>
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Luthn:Classification:Provider"] = "mock",
-                    ["Luthn:Classification:AllowMock"] = "false"
+                    ["Luthn:Classification:Provider"] = legacyProvider,
+                    ["Luthn:Classification:Credential"] = "legacy-runtime-secret",
+                    ["Luthn:Classification:ExternalHttp:Endpoint"] = "https://provider.example/classify"
                 }));
         });
         using var client = factory.CreateClient();
@@ -266,13 +290,16 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         var previewBody = await previewResponse.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, configurationResponse.StatusCode);
-        Assert.Equal("Mock", configurationBody.RootElement.GetProperty("provider").GetString());
-        Assert.Equal("mock-disabled", configurationBody.RootElement.GetProperty("status").GetString());
+        Assert.Equal("Unconfigured", configurationBody.RootElement.GetProperty("provider").GetString());
+        Assert.Equal("", configurationBody.RootElement.GetProperty("model").GetString());
+        Assert.Equal("", configurationBody.RootElement.GetProperty("endpoint").GetString());
+        Assert.Equal("", configurationBody.RootElement.GetProperty("authHeaderName").GetString());
+        Assert.Equal("unconfigured", configurationBody.RootElement.GetProperty("status").GetString());
         Assert.Equal(HttpStatusCode.ServiceUnavailable, readinessResponse.StatusCode);
         Assert.Equal("classification-provider", readinessBody.RootElement.GetProperty("dependency").GetString());
-        Assert.Contains(ClassificationProviderOptions.MockDisabledMessage, readinessBody.RootElement.ToString(), StringComparison.Ordinal);
+        Assert.Contains(ClassificationProviderOptions.ProviderRequiredMessage, readinessBody.RootElement.ToString(), StringComparison.Ordinal);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, previewResponse.StatusCode);
-        Assert.Contains(ClassificationProviderOptions.MockDisabledMessage, previewBody, StringComparison.Ordinal);
+        Assert.Contains(ClassificationProviderOptions.ProviderRequiredMessage, previewBody, StringComparison.Ordinal);
         Assert.DoesNotContain(submittedContent, previewBody, StringComparison.Ordinal);
 
         using var scope = factory.Services.CreateScope();
@@ -283,14 +310,14 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(2, audits.Count);
         var invokedAudit = Assert.Single(audits, audit => audit.Action == "classification.provider.invoked");
         Assert.Equal("started", invokedAudit.Outcome);
-        Assert.Equal("mock-disabled", invokedAudit.RedactionState);
+        Assert.Equal("provider-unconfigured", invokedAudit.RedactionState);
         var failedAudit = Assert.Single(audits, audit => audit.Action == "classification.provider.failed");
         Assert.Equal("failed", failedAudit.Outcome);
-        Assert.Equal("mock-disabled", failedAudit.RedactionState);
+        Assert.Equal("provider-unconfigured", failedAudit.RedactionState);
     }
 
     [Fact]
-    public async Task OperatorProviderConfigurationRejectsMockWithoutExplicitOptIn()
+    public async Task OperatorProviderConfigurationRejectsLegacyMock()
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
@@ -298,25 +325,19 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             Guid.NewGuid().ToString("N"));
         var store = new OperatorClassificationSettingsStore(
             Options.Create(new OperatorConfigOptions { Directory = directory }),
-            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
-                new DirectoryInfo(Path.Combine(directory, "keys"))),
             new ConfigurationBuilder().Build());
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => store.SaveAsync(
             new SaveClassificationProviderConfigurationRequest(
                 "Mock",
-                null,
-                null,
-                null,
-                null,
-                ClearApiKey: true)).AsTask());
+                null)).AsTask());
 
-        Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, error.Message);
+        Assert.Contains("Unsupported classification provider 'Mock'", error.Message, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(directory, "classification-provider.json")));
     }
 
     [Fact]
-    public async Task OperatorProviderEndpointRejectsMockWithoutExplicitOptIn()
+    public async Task OperatorProviderEndpointRejectsLegacyMock()
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
@@ -330,8 +351,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             builder.ConfigureAppConfiguration((_, configuration) =>
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Luthn:Classification:Provider"] = "unconfigured",
-                    ["Luthn:Classification:AllowMock"] = "false"
+                    ["Luthn:Classification:Provider"] = "Unconfigured"
                 }));
         });
         using var client = factory.CreateClient();
@@ -339,23 +359,28 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         using var response = await client.PutAsJsonAsync("/api/operator/classification-provider", new
         {
             provider = "Mock",
-            model = "",
-            endpoint = "",
-            authHeaderName = "Authorization",
-            apiKey = "",
-            clearApiKey = true
+            endpoint = ""
         });
-        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var responseBody = await response.Content.ReadAsStringAsync();
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.True(
+            response.StatusCode == HttpStatusCode.BadRequest,
+            $"Expected BadRequest but received {(int)response.StatusCode} with body: {responseBody}");
+        using var body = JsonDocument.Parse(responseBody);
         Assert.Equal(
-            ClassificationProviderOptions.MockDisabledMessage,
+            "Unsupported classification provider 'Mock'. Choose LocalDeterministic or LocalHttp.",
             body.RootElement.GetProperty("detail").GetString());
         Assert.False(File.Exists(Path.Combine(directory, "classification-provider.json")));
     }
 
-    [Fact]
-    public async Task PersistedMockIsBlockedAfterUpgradeAndCanBeReconfigured()
+    [Theory]
+    [InlineData("Mock")]
+    [InlineData("ExternalHttp")]
+    [InlineData("OpenAi")]
+    [InlineData("OpenRouter")]
+    [InlineData("Anthropic")]
+    [InlineData("GoogleAi")]
+    public async Task PersistedLegacyProviderIsMigratedWithoutDecryptingCredential(string legacyProvider)
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
@@ -366,311 +391,189 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             Path.Combine(directory, "classification-provider.json"),
             JsonSerializer.Serialize(new
             {
-                provider = "Mock",
-                model = "",
-                endpoint = "",
+                provider = legacyProvider,
+                model = "legacy-model",
+                endpoint = "https://provider.example/classify",
                 authHeaderName = "Authorization",
-                protectedApiKey = "",
+                protectedApiKey = "not-a-valid-protected-key",
                 payloadClass = "local-classification-input",
                 redactionState = "local-only"
             }));
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Luthn:Classification:Provider"] = "unconfigured",
-                ["Luthn:Classification:AllowMock"] = "false"
+                ["Luthn:Classification:Provider"] = "Unconfigured"
             })
             .Build();
         var store = new OperatorClassificationSettingsStore(
             Options.Create(new OperatorConfigOptions { Directory = directory }),
-            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
-                new DirectoryInfo(Path.Combine(directory, "keys"))),
             configuration);
-        var classifier = new ConfiguredContentClassifier(
-            store,
-            new StaticHttpClientFactory(new HttpClient()),
-            Options.Create(new ClassificationProviderRuntimeOptions()),
-            Options.Create(new ClassificationProviderOptions()),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfiguredContentClassifier>.Instance);
-
-        Assert.Equal(OperatorClassificationProviderKind.Mock, store.Current.Provider);
-        var error = await Assert.ThrowsAsync<ClassificationProviderException>(() => classifier.ClassifyAsync(
-            new("upgrade-mock-source"),
-            "content that must not be classified by mock",
-            "note").AsTask());
+        var migrated = await store.ReadAsync();
+        var persisted = await File.ReadAllTextAsync(Path.Combine(directory, "classification-provider.json"));
         var replacement = await store.SaveAsync(new SaveClassificationProviderConfigurationRequest(
-            "ExternalHttp",
-            "",
-            "http://127.0.0.1:5099/classify",
-            "Authorization",
-            null,
-            ClearApiKey: true));
+            "LocalHttp",
+            "http://127.0.0.1:5099/classify"));
 
-        Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, error.Message);
-        Assert.Equal(OperatorClassificationProviderKind.ExternalHttp, replacement.Provider);
-        Assert.Equal(OperatorClassificationProviderKind.ExternalHttp, (await store.ReadAsync()).Provider);
+        Assert.Equal(OperatorClassificationProviderKind.Unconfigured, migrated.Provider);
+        Assert.Equal("", migrated.Endpoint);
+        Assert.Equal("", migrated.Model);
+        Assert.Equal("", migrated.AuthHeaderName);
+        Assert.False(migrated.HasApiKey);
+        Assert.Contains("\"provider\": \"Unconfigured\"", persisted, StringComparison.Ordinal);
+        Assert.DoesNotContain("not-a-valid-protected-key", persisted, StringComparison.Ordinal);
+        Assert.Equal(OperatorClassificationProviderKind.LocalHttp, replacement.Provider);
+        Assert.Equal(OperatorClassificationProviderKind.LocalHttp, (await store.ReadAsync()).Provider);
     }
 
     [Fact]
-    public async Task PersistedMockConfigurationReportsDisabledOperatorStatus()
-    {
-        var response = await OperatorConfigurationEndpoints.ReadClassificationProvider(
-            new StaticSettingsStore(new OperatorClassificationProviderSettings
-            {
-                Provider = OperatorClassificationProviderKind.Mock,
-                PayloadClass = "local-classification-input",
-                RedactionState = "local-only"
-            }),
-            Options.Create(new ClassificationProviderOptions { AllowMock = false }),
-            CancellationToken.None);
-
-        Assert.NotNull(response.Value);
-        Assert.Equal("Mock", response.Value.Provider);
-        Assert.False(response.Value.MockAllowed);
-        Assert.Equal("mock-disabled", response.Value.Status);
-        Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, response.Value.StatusDetail);
-        Assert.True(response.Value.LocalSensitiveDataGuardActive);
-        Assert.Equal(DeterministicSensitiveDataDetector.Version, response.Value.LocalSensitiveDataGuardVersion);
-    }
-
-    [Fact]
-    public async Task ExternalHttpConfigurationReportsSelfHostedCapableGuardedBoundary()
-    {
-        var response = await OperatorConfigurationEndpoints.ReadClassificationProvider(
-            new StaticSettingsStore(new OperatorClassificationProviderSettings
-            {
-                Provider = OperatorClassificationProviderKind.ExternalHttp,
-                Endpoint = "http://127.0.0.1:5099/classify",
-                PayloadClass = "classification-input",
-                RedactionState = "operator-configured-provider"
-            }),
-            Options.Create(new ClassificationProviderOptions()),
-            CancellationToken.None);
-
-        Assert.NotNull(response.Value);
-        Assert.Equal("self-hosted-capable-external-http", response.Value.ProviderBoundary);
-        Assert.True(response.Value.LocalSensitiveDataGuardActive);
-        Assert.Contains("self-hosted", response.Value.StatusDetail, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task OperatorProviderConfigurationStoresKeyServerSideOnly()
-    {
-        using var response = await _client.PutAsJsonAsync("/api/operator/classification-provider", new
-        {
-            provider = "OpenRouter",
-            model = "openai/gpt-4.1-mini",
-            endpoint = "https://openrouter.ai/api/v1/chat/completions",
-            authHeaderName = "Authorization",
-            apiKey = "sk-or-test-secret",
-            clearApiKey = false
-        });
-        var responseJson = await response.Content.ReadAsStringAsync();
-        using var body = JsonDocument.Parse(responseJson);
-        using var getResponse = await _client.GetAsync("/api/operator/classification-provider");
-        var getJson = await getResponse.Content.ReadAsStringAsync();
-        using var getBody = JsonDocument.Parse(getJson);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("OpenRouter", body.RootElement.GetProperty("provider").GetString());
-        Assert.True(body.RootElement.GetProperty("hasApiKey").GetBoolean());
-        Assert.Equal("configured", body.RootElement.GetProperty("status").GetString());
-        Assert.DoesNotContain("sk-or-test-secret", responseJson, StringComparison.Ordinal);
-        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
-        Assert.True(getBody.RootElement.GetProperty("hasApiKey").GetBoolean());
-        Assert.Equal("configured", getBody.RootElement.GetProperty("status").GetString());
-        Assert.DoesNotContain("sk-or-test-secret", getJson, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task OperatorProviderConfigurationClearsSavedKeyWhenExplicitlySwitchingToMock()
-    {
-        var directory = Path.Combine(
-            Path.GetTempPath(),
-            "luthn-operator-tests",
-            Guid.NewGuid().ToString("N"));
-        var store = new OperatorClassificationSettingsStore(
-            Options.Create(new OperatorConfigOptions { Directory = directory }),
-            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
-                new DirectoryInfo(Path.Combine(directory, "keys"))),
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Luthn:Classification:Provider"] = "mock",
-                    ["Luthn:Classification:AllowMock"] = "true"
-                })
-                .Build());
-
-        var external = await store.SaveAsync(new SaveClassificationProviderConfigurationRequest(
-            "OpenRouter",
-            "openai/gpt-4.1-mini",
-            "https://openrouter.ai/api/v1/chat/completions",
-            "Authorization",
-            "sk-or-test-secret",
-            ClearApiKey: false));
-        var mock = await store.SaveAsync(new SaveClassificationProviderConfigurationRequest(
-            "Mock",
-            null,
-            null,
-            null,
-            null,
-            ClearApiKey: false));
-
-        Assert.True(external.HasApiKey);
-        Assert.Equal(OperatorClassificationProviderKind.Mock, mock.Provider);
-        Assert.False(mock.HasApiKey);
-        Assert.False((await store.ReadAsync()).HasApiKey);
-    }
-
-    [Fact]
-    public async Task OperatorProviderConfigurationLoadsCredentialFromServerRuntimeConfiguration()
-    {
-        var directory = Path.Combine(
-            Path.GetTempPath(),
-            "luthn-operator-tests",
-            Guid.NewGuid().ToString("N"));
-        var store = new OperatorClassificationSettingsStore(
-            Options.Create(new OperatorConfigOptions { Directory = directory }),
-            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
-                new DirectoryInfo(Path.Combine(directory, "keys"))),
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Luthn:Classification:Credential"] = "server-runtime-secret"
-                })
-                .Build());
-
-        var saved = await store.SaveAsync(new SaveClassificationProviderConfigurationRequest(
-            "OpenAi",
-            "gpt-4.1-mini",
-            "https://api.openai.com/v1/chat/completions",
-            "Authorization",
-            ApiKey: null,
-            ClearApiKey: false));
-
-        Assert.True(saved.HasApiKey);
-        Assert.Equal("server-runtime-secret", saved.ApiKey);
-        Assert.True((await store.ReadAsync()).HasApiKey);
-    }
-
-    [Fact]
-    public async Task OperatorProviderFallbackLoadsCredentialFromServerRuntimeConfiguration()
-    {
-        var directory = Path.Combine(
-            Path.GetTempPath(),
-            "luthn-operator-tests",
-            Guid.NewGuid().ToString("N"));
-        var store = new OperatorClassificationSettingsStore(
-            Options.Create(new OperatorConfigOptions { Directory = directory }),
-            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
-                new DirectoryInfo(Path.Combine(directory, "keys"))),
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Luthn:Classification:Provider"] = "external-http",
-                    ["Luthn:Classification:Credential"] = "server-runtime-secret",
-                    ["Luthn:Classification:ExternalHttp:Endpoint"] = "https://provider.example/classify"
-                })
-                .Build());
-
-        var settings = await store.ReadAsync();
-
-        Assert.Equal(OperatorClassificationProviderKind.ExternalHttp, settings.Provider);
-        Assert.Equal("https://provider.example/classify", settings.Endpoint);
-        Assert.Equal("server-runtime-secret", settings.ApiKey);
-    }
-
-    [Fact]
-    public async Task OperatorProviderConfigurationCanReplaceUndecryptableApiKey()
+    public async Task PersistedRemoteLocalHttpIsMigratedToClearedUnconfigured()
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
             "luthn-operator-tests",
             Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        await File.WriteAllTextAsync(
-            Path.Combine(directory, "classification-provider.json"),
-            JsonSerializer.Serialize(new
-            {
-                provider = "OpenAi",
-                model = "gpt-4.1-mini",
-                endpoint = "https://api.openai.com/v1/chat/completions",
-                authHeaderName = "Authorization",
-                protectedApiKey = "not-a-valid-protected-key",
-                payloadClass = "classification-input",
-                redactionState = "operator-configured-provider"
-            }));
+        var path = Path.Combine(directory, "classification-provider.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+        {
+            provider = "LocalHttp",
+            model = "legacy-model",
+            endpoint = "http://192.168.1.20/classify",
+            authHeaderName = "Authorization",
+            protectedApiKey = "not-a-valid-protected-key"
+        }));
         var store = new OperatorClassificationSettingsStore(
             Options.Create(new OperatorConfigOptions { Directory = directory }),
-            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
-                new DirectoryInfo(Path.Combine(directory, "keys"))),
             new ConfigurationBuilder().Build());
+
+        var settings = await store.ReadAsync();
+        var persisted = await File.ReadAllTextAsync(path);
+
+        Assert.Equal(OperatorClassificationProviderKind.Unconfigured, settings.Provider);
+        Assert.Equal("", settings.Endpoint);
+        Assert.Equal("", settings.Model);
+        Assert.Equal("", settings.AuthHeaderName);
+        Assert.False(settings.HasApiKey);
+        Assert.Contains("\"provider\": \"Unconfigured\"", persisted, StringComparison.Ordinal);
+        Assert.DoesNotContain("192.168.1.20", persisted, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy-model", persisted, StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", persisted, StringComparison.Ordinal);
+        Assert.DoesNotContain("not-a-valid-protected-key", persisted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LocalHttpConfigurationReportsSameDeviceGuardedBoundary()
+    {
+        var response = await OperatorConfigurationEndpoints.ReadClassificationProvider(
+            new StaticSettingsStore(new OperatorClassificationProviderSettings
+            {
+                Provider = OperatorClassificationProviderKind.LocalHttp,
+                Endpoint = "http://127.0.0.1:5099/classify",
+                PayloadClass = "classification-input",
+                RedactionState = "same-device-local-http"
+            }),
+            CancellationToken.None);
+
+        Assert.NotNull(response.Value);
+        Assert.Equal("LocalHttp", response.Value.Provider);
+        Assert.Equal("local-http-ready", response.Value.Status);
+        Assert.Equal("same-device-local-http", response.Value.ProviderBoundary);
+        Assert.Contains("same-device", response.Value.StatusDetail, StringComparison.OrdinalIgnoreCase);
+        Assert.True(response.Value.LocalSensitiveDataGuardActive);
+        Assert.Equal(DeterministicSensitiveDataDetector.Version, response.Value.LocalSensitiveDataGuardVersion);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:11434/classify")]
+    [InlineData("https://127.0.0.1:11434/classify")]
+    [InlineData("http://127.12.34.56:11434/classify")]
+    [InlineData("http://[::1]:11434/classify")]
+    [InlineData("http://host.docker.internal:11434/classify")]
+    public async Task LocalHttpConfigurationAcceptsOnlyDesignedSameDeviceEndpoints(string endpoint)
+    {
+        var store = CreateSettingsStore();
 
         var saved = await store.SaveAsync(new SaveClassificationProviderConfigurationRequest(
-            "OpenAi",
-            "gpt-4.1-mini",
-            "https://api.openai.com/v1/chat/completions",
-            "Authorization",
-            "sk-new-secret",
-            ClearApiKey: false));
-        var read = await store.ReadAsync();
+            "LocalHttp",
+            endpoint));
 
-        Assert.Equal("sk-new-secret", saved.ApiKey);
-        Assert.Equal("sk-new-secret", read.ApiKey);
+        Assert.Equal(OperatorClassificationProviderKind.LocalHttp, saved.Provider);
+        Assert.Equal(new Uri(endpoint).AbsoluteUri, saved.Endpoint);
+        Assert.Equal("", saved.Model);
+        Assert.Equal("", saved.AuthHeaderName);
+        Assert.False(saved.HasApiKey);
+    }
+
+    [Theory]
+    [InlineData("http://classifier.local/classify")]
+    [InlineData("http://192.168.1.20/classify")]
+    [InlineData("http://10.0.0.20/classify")]
+    [InlineData("http://172.16.0.20/classify")]
+    [InlineData("https://8.8.8.8/classify")]
+    [InlineData("http://user@localhost:11434/classify")]
+    [InlineData("ftp://localhost/classify")]
+    [InlineData("/classify")]
+    public async Task LocalHttpConfigurationRejectsRemoteUserInfoAndNonHttpEndpoints(string endpoint)
+    {
+        var store = CreateSettingsStore();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => store.SaveAsync(
+            new SaveClassificationProviderConfigurationRequest("LocalHttp", endpoint)).AsTask());
+
+        Assert.Equal(LocalHttpEndpointValidator.ValidationMessage, error.Message);
     }
 
     [Fact]
-    public async Task OperatorProviderConfigurationRejectsUnexpectedDirectProviderHost()
+    public async Task RemoteRuntimeLocalHttpBecomesClearedUnconfiguredWithoutCredentialUse()
     {
-        var store = new OperatorClassificationSettingsStore(
-            Options.Create(new OperatorConfigOptions
-            {
-                Directory = Path.Combine(
-                    Path.GetTempPath(),
-                    "luthn-operator-tests",
-                    Guid.NewGuid().ToString("N"))
-            }),
-            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
-                new DirectoryInfo(Path.Combine(Path.GetTempPath(), "luthn-operator-test-keys", Guid.NewGuid().ToString("N")))),
-            new ConfigurationBuilder().Build());
+        var store = CreateSettingsStore(new Dictionary<string, string?>
+        {
+            ["Luthn:Classification:Provider"] = "LocalHttp",
+            ["Luthn:Classification:LocalHttp:Endpoint"] = "http://192.168.1.20/classify",
+            ["Luthn:Classification:Credential"] = "legacy-runtime-secret",
+            ["Luthn:Classification:Model"] = "legacy-model",
+            ["Luthn:Classification:AuthHeaderName"] = "X-Legacy"
+        });
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => store.SaveAsync(
-            new SaveClassificationProviderConfigurationRequest(
-                "OpenAi",
-                "gpt-4.1-mini",
-                "https://provider.example/v1/chat/completions",
-                "Authorization",
-                "sk-test-secret",
-                ClearApiKey: false)).AsTask());
+        var settings = await store.ReadAsync();
 
-        Assert.Equal("OpenAi provider endpoint host must be api.openai.com.", error.Message);
+        Assert.Equal(OperatorClassificationProviderKind.Unconfigured, settings.Provider);
+        Assert.Equal("", settings.Endpoint);
+        Assert.Equal("", settings.Model);
+        Assert.Equal("", settings.AuthHeaderName);
+        Assert.False(settings.HasApiKey);
     }
 
     [Fact]
-    public async Task OperatorProviderConfigurationRejectsPlainHttpExternalProviderWithApiKey()
+    public async Task StoredLocalHttpClearsLegacyModelCredentialAndAuthFields()
     {
+        var directory = Path.Combine(Path.GetTempPath(), "luthn-operator-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "classification-provider.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+        {
+            provider = "LocalHttp",
+            model = "legacy-model",
+            endpoint = "http://127.0.0.1:11434/classify",
+            authHeaderName = "X-Legacy",
+            protectedApiKey = "opaque-secret-that-must-not-be-used",
+            payloadClass = "classification-input",
+            redactionState = "legacy"
+        }));
         var store = new OperatorClassificationSettingsStore(
-            Options.Create(new OperatorConfigOptions
-            {
-                Directory = Path.Combine(
-                    Path.GetTempPath(),
-                    "luthn-operator-tests",
-                    Guid.NewGuid().ToString("N"))
-            }),
-            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
-                new DirectoryInfo(Path.Combine(Path.GetTempPath(), "luthn-operator-test-keys", Guid.NewGuid().ToString("N")))),
+            Options.Create(new OperatorConfigOptions { Directory = directory }),
             new ConfigurationBuilder().Build());
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => store.SaveAsync(
-            new SaveClassificationProviderConfigurationRequest(
-                "ExternalHttp",
-                "",
-                "http://provider.example/classify",
-                "Authorization",
-                "external-provider-secret",
-                ClearApiKey: false)).AsTask());
+        var settings = await store.ReadAsync();
+        var migratedJson = await File.ReadAllTextAsync(path);
 
-        Assert.Equal("External HTTP provider endpoint must be HTTPS when an API key is configured.", error.Message);
+        Assert.Equal(OperatorClassificationProviderKind.LocalHttp, settings.Provider);
+        Assert.Equal("", settings.Model);
+        Assert.Equal("", settings.AuthHeaderName);
+        Assert.False(settings.HasApiKey);
+        Assert.DoesNotContain("legacy-model", migratedJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("X-Legacy", migratedJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("opaque-secret", migratedJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -678,12 +581,8 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     {
         using var saveResponse = await _client.PutAsJsonAsync("/api/operator/classification-provider", new
         {
-            provider = "Mock",
-            model = "",
-            endpoint = "",
-            authHeaderName = "Authorization",
-            apiKey = "",
-            clearApiKey = true
+            provider = "LocalDeterministic",
+            endpoint = ""
         });
         using var testResponse = await _client.PostAsJsonAsync("/api/operator/classification-provider/test", new
         {
@@ -695,7 +594,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, testResponse.StatusCode);
         Assert.Equal("Confidential", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
-        Assert.Equal("Mock", body.RootElement.GetProperty("configuration").GetProperty("provider").GetString());
+        Assert.Equal("LocalDeterministic", body.RootElement.GetProperty("configuration").GetProperty("provider").GetString());
     }
 
     [Fact]
@@ -941,44 +840,38 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
-    public void LegacyMockProviderUsesLocalContextualClassifier()
+    public void LocalDeterministicProviderUsesLocalContextualClassifier()
     {
         var options = new ClassificationProviderOptions
         {
-            Provider = "mock",
-            AllowMock = true,
-            ExternalHttp = new ExternalHttpClassificationProviderOptions()
+            Provider = "LocalDeterministic"
         };
 
-        Assert.Equal("mock", options.ResolveProvider());
-        options.EnsureMockAllowed();
+        Assert.Equal(OperatorClassificationProviderKind.LocalDeterministic, options.ResolveProvider());
         var boundary = new LocalContextualContentClassifier().Boundary;
-        Assert.Equal("local-contextual", boundary.ProviderName);
+        Assert.Equal("LocalDeterministic", boundary.ProviderName);
         Assert.Equal("local-only", boundary.RedactionState);
     }
 
     [Fact]
-    public void ClassificationProviderDefaultsToUnconfiguredAndRejectsImplicitMock()
+    public void ClassificationProviderDefaultsToLocalDeterministic()
     {
         var options = new ClassificationProviderOptions();
 
-        Assert.Equal(ClassificationProviderOptions.UnconfiguredProvider, options.ResolveProvider());
-        var error = Assert.Throws<InvalidOperationException>(() => options.EnsureMockAllowed());
-        Assert.Equal(ClassificationProviderOptions.MockDisabledMessage, error.Message);
+        Assert.Equal(OperatorClassificationProviderKind.LocalDeterministic, options.ResolveProvider());
     }
 
     [Theory]
-    [InlineData("unconfigured", ClassificationProviderOptions.ProviderRequiredMessage)]
-    [InlineData("mock", ClassificationProviderOptions.MockDisabledMessage)]
-    public async Task ServiceCollectionKeepsRuntimeAvailableWhileProviderIsBlocked(
-        string providerName,
-        string expectedMessage)
+    [InlineData("Unconfigured")]
+    [InlineData("Mock")]
+    [InlineData("ExternalHttp")]
+    [InlineData("OpenAi")]
+    public async Task ServiceCollectionFailsClosedForUnconfiguredAndLegacyProviders(string providerName)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Luthn:Classification:Provider"] = providerName,
-                ["Luthn:Classification:AllowMock"] = "false"
+                ["Luthn:Classification:Provider"] = providerName
             })
             .Build();
         var services = new ServiceCollection();
@@ -991,44 +884,29 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             "content must not be classified",
             "note").AsTask());
 
-        Assert.Equal(expectedMessage, error.Message);
+        Assert.Equal(ClassificationProviderOptions.ProviderRequiredMessage, error.Message);
     }
 
     [Fact]
-    public void MockProviderIsRejectedWhenExternalProviderIsConfigured()
+    public void RemoteLocalHttpOptionsResolveToUnconfigured()
     {
         var options = new ClassificationProviderOptions
         {
-            Provider = "mock",
-            ExternalHttp = new ExternalHttpClassificationProviderOptions
+            Provider = "LocalHttp",
+            LocalHttp = new LocalHttpClassificationProviderOptions
             {
-                Endpoint = "https://classifier.local/classify"
+                Endpoint = "https://192.168.1.20/classify"
             }
         };
 
-        var error = Assert.Throws<InvalidOperationException>(() => options.ResolveProvider());
-
-        Assert.Equal(
-            "The mock classification provider is test and experiment only. Use 'external-http' when Luthn:Classification:ExternalHttp:Endpoint is configured.",
-            error.Message);
+        Assert.Equal(OperatorClassificationProviderKind.Unconfigured, options.ResolveProvider());
     }
 
     [Fact]
-    public async Task ExternalHttpClassifierSendsBoundaryMetadataAndMapsProviderResponse()
+    public async Task LocalHttpClassifierSendsBoundaryMetadataAndMapsProviderResponse()
     {
         using var handler = new CapturingHandler();
-        var classifier = new ExternalHttpContentClassifier(
-            new StaticHttpClientFactory(new HttpClient(handler)),
-            Options.Create(new ClassificationProviderOptions
-            {
-                Provider = "external-http",
-                ExternalHttp = new ExternalHttpClassificationProviderOptions
-                {
-                    Endpoint = "https://classifier.local/classify",
-                    PayloadClass = "classification-input",
-                    RedactionState = "external-provider-opt-in"
-                }
-            }));
+        var classifier = CreateLocalHttpClassifier(handler);
 
         var result = await classifier.ClassifyAsync(
             new("source-1"),
@@ -1044,26 +922,17 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal("source-1", handler.RequestJson.RootElement.GetProperty("sourceId").GetString());
         Assert.Equal("note", handler.RequestJson.RootElement.GetProperty("sourceType").GetString());
         Assert.Equal("classification-input", handler.RequestJson.RootElement.GetProperty("payloadClass").GetString());
-        Assert.Equal("external-provider-opt-in", handler.RequestJson.RootElement.GetProperty("redactionState").GetString());
+        Assert.Equal("same-device-local-http", handler.RequestJson.RootElement.GetProperty("redactionState").GetString());
     }
 
     [Fact]
-    public async Task ExternalHttpClassifierDropsUnsafeProviderCategories()
+    public async Task LocalHttpClassifierDropsUnsafeProviderCategories()
     {
         using var handler = new CapturingHandler
         {
             Categories = ["contract", "Customer contract raw phrase never persisted.", "payment"]
         };
-        var classifier = new ExternalHttpContentClassifier(
-            new StaticHttpClientFactory(new HttpClient(handler)),
-            Options.Create(new ClassificationProviderOptions
-            {
-                Provider = "external-http",
-                ExternalHttp = new ExternalHttpClassificationProviderOptions
-                {
-                    Endpoint = "https://classifier.local/classify"
-                }
-            }));
+        var classifier = CreateLocalHttpClassifier(handler);
 
         var result = await classifier.ClassifyAsync(
             new("source-1"),
@@ -1074,7 +943,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
-    public async Task ExternalHttpClassifierNormalizesContradictoryProviderFieldsConservatively()
+    public async Task LocalHttpClassifierNormalizesContradictoryProviderFieldsConservatively()
     {
         using var handler = new CapturingHandler
         {
@@ -1082,16 +951,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             Categories = ["Private Key"],
             ContainsSensitiveMaterial = false
         };
-        var classifier = new ExternalHttpContentClassifier(
-            new StaticHttpClientFactory(new HttpClient(handler)),
-            Options.Create(new ClassificationProviderOptions
-            {
-                Provider = "external-http",
-                ExternalHttp = new ExternalHttpClassificationProviderOptions
-                {
-                    Endpoint = "https://classifier.local/classify"
-                }
-            }));
+        var classifier = CreateLocalHttpClassifier(handler);
 
         var result = await classifier.ClassifyAsync(
             new("source-contradictory"),
@@ -1105,58 +965,63 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
     }
 
     [Fact]
-    public async Task ExternalHttpClassifierRejectsUndefinedNumericSensitivity()
+    public async Task LocalHttpClassifierRejectsUndefinedNumericSensitivity()
     {
         using var handler = new CapturingHandler
         {
             Sensitivity = "999"
         };
-        var classifier = new ExternalHttpContentClassifier(
-            new StaticHttpClientFactory(new HttpClient(handler)),
-            Options.Create(new ClassificationProviderOptions
-            {
-                Provider = "external-http",
-                ExternalHttp = new ExternalHttpClassificationProviderOptions
-                {
-                    Endpoint = "https://classifier.local/classify"
-                }
-            }));
+        var classifier = CreateLocalHttpClassifier(handler);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => classifier.ClassifyAsync(
             new("source-1"),
             "Customer contract summary.",
             "note").AsTask());
 
-        Assert.Equal("Classification provider returned unsupported sensitivity '999'.", error.Message);
+        Assert.Equal("LocalHttp classification provider returned unsupported sensitivity '999'.", error.Message);
     }
 
     [Fact]
-    public async Task GoogleAiClassifierSendsApiKeyHeaderWithoutQuerySecret()
+    public async Task LocalHttpResultCannotWeakenHybridLocalGuard()
     {
-        using var handler = new GoogleAiCapturingHandler();
-        var classifier = new ConfiguredContentClassifier(
-            new StaticSettingsStore(new OperatorClassificationProviderSettings
-            {
-                Provider = OperatorClassificationProviderKind.GoogleAi,
-                Model = "gemini-test",
-                Endpoint = "https://generativelanguage.googleapis.com/v1beta/models",
-                AuthHeaderName = "x-goog-api-key",
-                ApiKey = "google-test-secret",
-                PayloadClass = "classification-input",
-                RedactionState = "operator-configured-provider"
-            }),
-            new StaticHttpClientFactory(new HttpClient(handler)));
+        using var handler = new CapturingHandler
+        {
+            Sensitivity = "Public",
+            Categories = [],
+            ContainsSensitiveMaterial = false
+        };
+        var classifier = new HybridContentClassifier(
+            CreateLocalHttpClassifier(handler),
+            new DeterministicSensitiveDataDetector());
 
         var result = await classifier.ClassifyAsync(
-            new("source-1"),
-            "Customer contract summary.",
+            new("source-guarded"),
+            "견적금액은 1,000원입니다.",
             "note");
 
         Assert.Equal(SensitivityLevel.Confidential, result.Sensitivity);
-        Assert.Equal("https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent",
-            handler.RequestUri?.ToString());
-        Assert.DoesNotContain("google-test-secret", handler.RequestUri?.ToString(), StringComparison.Ordinal);
-        Assert.Equal("google-test-secret", handler.ApiKeyHeader);
+        Assert.Contains("finance", result.Categories);
+        Assert.True(result.ContainsSensitiveMaterial);
+        Assert.Equal(StorageDecisionKind.SensitiveDbOnly, new PolicyEngine().Decide(result).Kind);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.MovedPermanently)]
+    [InlineData(HttpStatusCode.Redirect)]
+    [InlineData(HttpStatusCode.TemporaryRedirect)]
+    [InlineData(HttpStatusCode.PermanentRedirect)]
+    public async Task LocalHttpRedirectResponsesFailClosed(HttpStatusCode statusCode)
+    {
+        using var handler = new RedirectHandler(statusCode);
+        var classifier = CreateLocalHttpClassifier(handler);
+
+        var error = await Assert.ThrowsAsync<ClassificationProviderException>(() => classifier.ClassifyAsync(
+            new("source-redirect"),
+            "Content must stay on the validated endpoint.",
+            "note").AsTask());
+
+        Assert.Equal(1, handler.Attempts);
+        Assert.Contains($"HTTP {(int)statusCode}", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1166,10 +1031,10 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         var classifier = new ConfiguredContentClassifier(
             new StaticSettingsStore(new OperatorClassificationProviderSettings
             {
-                Provider = OperatorClassificationProviderKind.ExternalHttp,
-                Endpoint = "https://classifier.local/classify",
+                Provider = OperatorClassificationProviderKind.LocalHttp,
+                Endpoint = "http://127.0.0.1:11434/classify",
                 PayloadClass = "classification-input",
-                RedactionState = "operator-configured-provider"
+                RedactionState = "same-device-local-http"
             }),
             new StaticHttpClientFactory(new HttpClient(handler)),
             Options.Create(new ClassificationProviderRuntimeOptions
@@ -1178,7 +1043,6 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
                 MaxAttempts = 2,
                 RetryDelayMilliseconds = 0
             }),
-            Options.Create(new ClassificationProviderOptions { Provider = "external-http" }),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfiguredContentClassifier>.Instance);
 
         var result = await classifier.ClassifyAsync(
@@ -1197,10 +1061,10 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         var classifier = new ConfiguredContentClassifier(
             new StaticSettingsStore(new OperatorClassificationProviderSettings
             {
-                Provider = OperatorClassificationProviderKind.ExternalHttp,
-                Endpoint = "https://classifier.local/classify",
+                Provider = OperatorClassificationProviderKind.LocalHttp,
+                Endpoint = "http://127.0.0.1:11434/classify",
                 PayloadClass = "classification-input",
-                RedactionState = "operator-configured-provider"
+                RedactionState = "same-device-local-http"
             }),
             new StaticHttpClientFactory(new HttpClient(handler)),
             Options.Create(new ClassificationProviderRuntimeOptions
@@ -1209,7 +1073,6 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
                 MaxAttempts = 1,
                 RetryDelayMilliseconds = 0
             }),
-            Options.Create(new ClassificationProviderOptions { Provider = "external-http" }),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfiguredContentClassifier>.Instance);
 
         var error = await Assert.ThrowsAsync<ClassificationProviderException>(() => classifier.ClassifyAsync(
@@ -1233,7 +1096,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             () => new HttpRequestMessage(HttpMethod.Get, "https://classifier.local/classify"),
             new ClassificationProviderRuntimeOptions { MaxAttempts = 1 },
             Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
-            "ExternalHttp",
+            "LocalHttp",
             metrics,
             cancellationSource.Token);
 
@@ -1260,7 +1123,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
                 RetryDelayMilliseconds = 250
             },
             Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
-            "ExternalHttp",
+            "LocalHttp",
             metrics,
             CancellationToken.None);
 
@@ -1272,6 +1135,42 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(["retry", "succeeded"], metrics.ProviderRequests.Select(item => item.Outcome));
     }
+
+    private static OperatorClassificationSettingsStore CreateSettingsStore(
+        IReadOnlyDictionary<string, string?>? values = null)
+    {
+        var configurationBuilder = new ConfigurationBuilder();
+        if (values is not null)
+        {
+            configurationBuilder.AddInMemoryCollection(values);
+        }
+
+        return new OperatorClassificationSettingsStore(
+            Options.Create(new OperatorConfigOptions
+            {
+                Directory = Path.Combine(
+                    Path.GetTempPath(),
+                    "luthn-operator-tests",
+                    Guid.NewGuid().ToString("N"))
+            }),
+            configurationBuilder.Build());
+    }
+
+    private static ConfiguredContentClassifier CreateLocalHttpClassifier(HttpMessageHandler handler) =>
+        new(
+            new StaticSettingsStore(new OperatorClassificationProviderSettings
+            {
+                Provider = OperatorClassificationProviderKind.LocalHttp,
+                Endpoint = "http://127.0.0.1:11434/classify",
+                PayloadClass = "classification-input",
+                RedactionState = "same-device-local-http"
+            }),
+            new StaticHttpClientFactory(new HttpClient(handler)),
+            Options.Create(new ClassificationProviderRuntimeOptions
+            {
+                MaxAttempts = 1
+            }),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfiguredContentClassifier>.Instance);
 
     private sealed class StaticSettingsStore(
         OperatorClassificationProviderSettings settings) : IOperatorClassificationSettingsStore
@@ -1305,7 +1204,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
             CancellationToken cancellationToken)
         {
             Assert.Equal(HttpMethod.Post, request.Method);
-            Assert.Equal("https://classifier.local/classify", request.RequestUri?.ToString());
+            Assert.Equal("http://127.0.0.1:11434/classify", request.RequestUri?.ToString());
 
             RequestJson = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
 
@@ -1322,45 +1221,21 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         }
     }
 
-    private sealed class GoogleAiCapturingHandler : HttpMessageHandler, IDisposable
+    private sealed class RedirectHandler(HttpStatusCode statusCode) : HttpMessageHandler, IDisposable
     {
-        public Uri? RequestUri { get; private set; }
-        public string? ApiKeyHeader { get; private set; }
+        public int Attempts { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            Assert.Equal(HttpMethod.Post, request.Method);
-            RequestUri = request.RequestUri;
-            ApiKeyHeader = request.Headers.GetValues("x-goog-api-key").Single();
-
-            var providerResult = JsonSerializer.Serialize(new
+            Attempts++;
+            return Task.FromResult(new HttpResponseMessage(statusCode)
             {
-                sensitivity = "Confidential",
-                confidence = 0.92,
-                categories = new[] { "contract" },
-                containsSensitiveMaterial = true
-            });
-
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = JsonContent.Create(new
+                Headers =
                 {
-                    candidates = new[]
-                    {
-                        new
-                        {
-                            content = new
-                            {
-                                parts = new[]
-                                {
-                                    new { text = providerResult }
-                                }
-                            }
-                        }
-                    }
-                })
+                    Location = new Uri("https://provider.example/classify")
+                }
             });
         }
     }

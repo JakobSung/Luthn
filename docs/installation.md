@@ -108,10 +108,9 @@ source-free Compose bundle, resolves `ghcr.io/jakobsung/luthn:stable` to an
 immutable digest, creates a
 local service token, starts PostgreSQL, applies migrations before API startup,
 seeds public-safe demo data, and waits until the API is healthy. A fresh install
-starts with the deterministic local `mock` classifier and `AllowMock=true`, so
-`/readyz` is ready without an external provider. It becomes `setup-required` or
-`not_ready` only if the operator changes the provider to `unconfigured` or
-disables mock classification.
+starts with `LocalDeterministic`, so `/readyz` is ready without a model process,
+credential, or network classification call. It becomes `setup-required` or
+`not_ready` when no supported local provider is configured.
 With `--connect-codex`, the same bootstrap also configures the Codex hook, MCP
 registration, and default auto-recall, then prints the required restart and
 `/hooks` Trust steps. To connect an installed Claude Code CLI instead, use
@@ -350,13 +349,12 @@ their least-privilege scopes remain compatible.
 
 ### Classification defaults
 
-New installations use the local `mock` classifier, so classification-dependent
-writes and `/readyz` work immediately without a separate provider setup. The
-mock is deterministic and local; replace it in the operator console with an
-operator-configured provider when you need provider-backed classification.
-`luthn install` and `luthn update` also replace the exact legacy default pair
-`unconfigured`/`false` with `mock`/`true`; any other configured value remains
-unchanged.
+New installations use `LocalDeterministic`, so classification-dependent writes
+and `/readyz` work immediately without a separate model runtime. `LocalHttp` is
+optional and accepts only `localhost`, loopback IP addresses, or
+`host.docker.internal`; redirects fail closed. Legacy commercial, `Mock`, and
+`ExternalHttp` runtime values migrate to `Unconfigured`, and legacy endpoint,
+model, authentication, and credential values are removed.
 
 ### Automatic turn memory retention
 

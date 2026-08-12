@@ -58,9 +58,8 @@ Category taxonomy version `1` uses stable canonical category names:
   `incident log`. The `finance` category includes monetary amounts, revenue,
   salary, price, cost, profit, budget, fee, and their Korean equivalents.
 
-The local mock recognizes bounded English and Korean marker phrases for this
-taxonomy. It remains a test and experiment classifier, not a production
-quality claim.
+`LocalDeterministic` recognizes bounded English, Korean, and mixed-language
+signals for this taxonomy without a model process or network call.
 
 Every configured operational provider is combined with local sensitive-data
 guard version `1`. The guard recognizes bounded high-confidence private-key,
@@ -72,10 +71,11 @@ matched values and excerpts are not added to classification results, logs,
 metrics, audits, or persistence metadata. Provider errors still fail before
 storage and never fall back to detector-only acceptance.
 
-`ExternalHttp` is the self-hosted-capable classifier boundary. Operators may
-point it at a local or private-network AI service; any non-local transfer is an
-explicit operator configuration decision. The local guard applies after every
-valid provider response and can only make routing more restrictive.
+Optional `LocalHttp` accepts only absolute HTTP(S) URLs on `localhost`, IPv4 or
+IPv6 loopback, or `host.docker.internal`. Arbitrary hosts, private LAN and
+public addresses, user information, and redirects are rejected. The local
+guard applies after every valid response and can only make routing more
+restrictive.
 
 Provider output is normalized before policy evaluation. A sensitive category
 raises sensitivity to at least its taxonomy minimum; `containsSensitiveMaterial`
@@ -98,11 +98,10 @@ identifiers, expected and actual classifications, routing decisions, and
 aggregate false-negative, false-positive, and mismatch counts. Raw corpus text
 is not copied into the report.
 
-Evaluation uses the local deterministic mock by default and performs no network
-request. `--provider guarded-mock` exercises the same local hybrid guard without
-creating an API client. Testing a configured API requires both `--provider configured-api` and
-the explicit `--allow-external-provider` acknowledgement because the API may
-relay corpus text to its configured classifier. An optional bearer token can be
+Evaluation uses `local-deterministic` by default and performs no network
+request. `--provider guarded-local` exercises the hybrid guard without creating
+an API client. `--provider local-http --api-url <same-device-url>` evaluates a
+local Host API and rejects remote URLs and redirects. An optional bearer token can be
 read only from the named environment variable supplied with `--token-env`; the
 token value is never included in evaluator output.
 
@@ -308,27 +307,20 @@ cleanup pass.
 
 ## Provider Boundary
 
-- Fresh packaged installs use the local `mock` classifier, so classification
-  works without a separate provider setup.
-- The mock classifier is local and credential-free. Both `Provider=mock` and
-  `AllowMock=true` are set by the installation default; replace it with an
-  operator-configured provider when provider-backed classification is required.
-- Operator-configured provider secrets are server-side only; console/API
-  responses expose only whether a key is present.
-- External classification is explicit opt-in configuration.
-- Direct third-party LLM providers (`ChatGPT API`, `Claude API`, `Google AI
-  API`, and `OpenRouter API`) receive raw source content in the classification
-  prompt before Luthn assigns sensitivity. Use them only when the operator
-  accepts that external transfer; use a controlled `External HTTP` provider when
-  raw intake content must stay in a self-hosted boundary.
-- Direct third-party LLM provider endpoints must be HTTPS URLs on the expected
-  provider host before Luthn sends the API key header.
+- Fresh packaged installs use credential-free `LocalDeterministic`.
+- `LocalHttp` is optional and limited to `localhost`, loopback IP addresses, or
+  the exact container gateway host `host.docker.internal`.
+- `LocalHttp` carries no model, credential, or authentication configuration;
+  redirects and all remote destinations fail closed.
+- Legacy commercial, `Mock`, `ExternalHttp`, and remote `LocalHttp` settings
+  become `Unconfigured` with endpoint, model, authentication, and credential
+  values cleared without secret use.
 - Provider calls carry payload class and redaction state metadata so intake
   remains auditable.
 - Audit rows record provider boundary metadata and storage decisions, not raw
   source content.
-- Normal automated tests must use mock or fake providers unless an integration
-  test is explicitly enabled by an operator.
+- Normal automated tests use local deterministic classifiers or in-memory HTTP
+  handlers.
 
 ## External Publication Boundary
 

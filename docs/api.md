@@ -319,37 +319,33 @@ POST /api/operator/classification-provider/test
 
 These operator-only endpoints read, save, and test the active classification
 provider configuration. All three require the `config.write` service-token
-scope. Supported provider values are `Mock`, `ExternalHttp`, `OpenAi`,
-`Anthropic`, `GoogleAi`, and `OpenRouter`.
-
-The browser console never accepts a raw provider credential. Configure
-`Luthn__Classification__Credential` in the server runtime secret environment;
-the console sends only non-secret provider settings and the clear-credential
-choice. The optional `apiKey` request member remains accepted for existing API
-clients, but it is never included in a response.
+scope. Supported provider values are `LocalDeterministic` and `LocalHttp`;
+`Unconfigured` is the fail-closed system state. `LocalHttp` accepts only
+`localhost`, loopback IP addresses, or `host.docker.internal`, and does not
+accept model, credential, or authentication settings.
 
 Save request:
 
 ```json
 {
-  "provider": "ExternalHttp",
-  "model": "",
-  "endpoint": "https://provider.example/classify",
-  "authHeaderName": "Authorization",
-  "apiKey": "operator-supplied-secret",
-  "clearApiKey": false
+  "provider": "LocalHttp",
+  "endpoint": "http://host.docker.internal:11434/classify"
 }
 ```
 
-Responses include `provider`, `model`, `endpoint`, `authHeaderName`,
-`payloadClass`, `redactionState`, `hasApiKey`, `providerBoundary`,
+Responses include `provider`, cleared compatibility fields `model` and
+`authHeaderName`, `endpoint`, `payloadClass`, `redactionState`, `providerBoundary`,
 `localSensitiveDataGuardActive`, and `localSensitiveDataGuardVersion`. They
-never return the API key or detector matches. `ExternalHttp` reports the
-`self-hosted-capable-external-http` boundary.
+never return credentials or detector matches. `LocalHttp` reports the
+`same-device-local-http` boundary and rejects redirects.
 The test endpoint accepts optional `content` and `sourceType`, runs the current
 provider and policy engine, and returns the safe configuration view,
 classification, and storage decision. Save and test operations write
 metadata-only audit events.
+
+Legacy commercial, `Mock`, `ExternalHttp`, and remote `LocalHttp` stored or
+runtime settings are represented as `Unconfigured`; endpoint, model,
+authentication, and credential values are cleared without secret use.
 
 ## Operational metrics export
 

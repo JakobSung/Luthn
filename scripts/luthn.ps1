@@ -462,13 +462,16 @@ function Ensure-ConfigValue {
     if (-not (Read-ConfigValue -Key $Key)) { Set-ConfigValue -Key $Key -Value $Value }
 }
 
-function Upgrade-LegacyClassificationDefault {
+function Normalize-ClassificationProvider {
     $provider = Read-ConfigValue "Luthn__Classification__Provider" ""
-    $allowMock = Read-ConfigValue "Luthn__Classification__AllowMock" ""
-    if ($provider -ceq "unconfigured" -and $allowMock -ceq "false") {
-        Set-ConfigValue "Luthn__Classification__Provider" "mock"
-        Set-ConfigValue "Luthn__Classification__AllowMock" "true"
+    if ($provider -cnotin @("LocalDeterministic", "LocalHttp", "Unconfigured")) {
+        Set-ConfigValue "Luthn__Classification__Provider" "Unconfigured"
     }
+    Remove-ConfigPrefix "Luthn__Classification__AllowMock"
+    Remove-ConfigPrefix "Luthn__Classification__Credential"
+    Remove-ConfigPrefix "Luthn__Classification__Model"
+    Remove-ConfigPrefix "Luthn__Classification__AuthHeaderName"
+    Remove-ConfigPrefix "Luthn__Classification__ExternalHttp__"
 }
 
 function Ensure-ServiceTokenScope {
@@ -957,9 +960,7 @@ function Write-InitialConfig {
         "POSTGRES_DB=luthn",
         "POSTGRES_USER=luthn",
         "POSTGRES_HOST_AUTH_METHOD=trust",
-        "Luthn__Classification__Provider=mock",
-        "Luthn__Classification__AllowMock=true",
-        "Luthn__Classification__Credential=",
+        "Luthn__Classification__Provider=LocalDeterministic",
         "Luthn__Memory__AutomaticTurnRetentionDays=30",
         "Luthn__Memory__AutomaticTurnCleanupEnabled=true",
         "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60",
@@ -1095,16 +1096,12 @@ function Test-ClassificationSetupPending {
     param([int]$StatusCode, [string]$Body)
     return $StatusCode -eq 503 -and
         $Body -match '"dependency"\s*:\s*"classification-provider"' -and
-        ($Body -match "No classification provider is configured" -or
-         $Body -match "The mock classification provider is disabled" -or
-         $Body -match "Production classification requires an operator-configured non-mock provider")
+        $Body -match "No supported local classification provider is configured"
 }
 
 function Test-ClassificationSetupRequiredByConfig {
-    $provider = Read-ConfigValue "Luthn__Classification__Provider" "mock"
-    $allowMock = Read-ConfigValue "Luthn__Classification__AllowMock" "true"
-    return $provider -ceq "unconfigured" -or
-        ($provider -ceq "mock" -and $allowMock -ine "true")
+    $provider = Read-ConfigValue "Luthn__Classification__Provider" "LocalDeterministic"
+    return $provider -cnotin @("LocalDeterministic", "LocalHttp")
 }
 
 function Wait-ForApi {
@@ -1216,9 +1213,8 @@ function Install-Luthn {
         Ensure-ConfigValue "POSTGRES_DB" "luthn"
         Ensure-ConfigValue "POSTGRES_USER" "luthn"
         Ensure-ConfigValue "POSTGRES_HOST_AUTH_METHOD" "trust"
-        Ensure-ConfigValue "Luthn__Classification__Provider" "mock"
-        Ensure-ConfigValue "Luthn__Classification__AllowMock" "true"
-        Upgrade-LegacyClassificationDefault
+        Ensure-ConfigValue "Luthn__Classification__Provider" "LocalDeterministic"
+        Normalize-ClassificationProvider
         Ensure-ConfigValue "Luthn__Memory__AutomaticTurnRetentionDays" "30"
         Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupEnabled" "true"
         Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes" "60"

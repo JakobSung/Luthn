@@ -1,7 +1,5 @@
+using System.Net;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Security.Cryptography;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api;
@@ -23,17 +21,12 @@ public interface IOperatorClassificationSettingsStore
 
 public sealed class OperatorClassificationSettingsStore(
     IOptions<OperatorConfigOptions> options,
-    IDataProtectionProvider dataProtectionProvider,
     IConfiguration configuration) : IOperatorClassificationSettingsStore
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter() },
         WriteIndented = true
     };
-
-    private readonly IDataProtector _protector =
-        dataProtectionProvider.CreateProtector("Luthn.Operator.ClassificationProvider.ApiKey.v1");
 
     private OperatorClassificationProviderSettings? _current;
 
@@ -42,30 +35,20 @@ public sealed class OperatorClassificationSettingsStore(
     public async ValueTask<OperatorClassificationProviderSettings> ReadAsync(
         CancellationToken cancellationToken = default)
     {
-        var path = SettingsPath;
-        if (!File.Exists(path))
+        if (!File.Exists(SettingsPath))
         {
-            var fallback = ReadConfiguredFallback();
-            _current = fallback;
-            return fallback;
+            return _current = ReadConfiguredFallback();
         }
 
-        await using var stream = File.OpenRead(path);
-        var persisted = await JsonSerializer.DeserializeAsync<PersistedSettings>(
-            stream,
-            SerializerOptions,
-            cancellationToken);
-
-        if (persisted is null)
+        await using var stream = File.OpenRead(SettingsPath);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var settings = NormalizePersisted(document.RootElement, out var requiresRewrite);
+        if (requiresRewrite)
         {
-            var fallback = ReadConfiguredFallback();
-            _current = fallback;
-            return fallback;
+            await PersistAsync(settings, cancellationToken);
         }
 
-        var settings = ToSettings(persisted);
-        _current = settings;
-        return settings;
+        return _current = settings;
     }
 
     public async ValueTask<OperatorClassificationProviderSettings> SaveAsync(
@@ -73,41 +56,86 @@ public sealed class OperatorClassificationSettingsStore(
         CancellationToken cancellationToken = default)
     {
         var provider = ParseProvider(request.Provider);
-        var classificationOptions = ReadClassificationOptions();
-        if (provider == OperatorClassificationProviderKind.Mock)
+        var settings = provider switch
         {
-            classificationOptions.EnsureMockAllowed();
-        }
-
-        var apiKey = await ResolveApiKeyAsync(request, provider, cancellationToken);
-
-        var settings = new OperatorClassificationProviderSettings
-        {
-            Provider = provider,
-            Model = Normalize(request.Model, DefaultModel(provider)),
-            Endpoint = Normalize(request.Endpoint, DefaultEndpoint(provider)),
-            AuthHeaderName = Normalize(request.AuthHeaderName, "Authorization"),
-            ApiKey = apiKey,
-            PayloadClass = "classification-input",
-            RedactionState = provider == OperatorClassificationProviderKind.Mock
-                ? "local-only"
-                : "operator-configured-provider"
+            OperatorClassificationProviderKind.LocalDeterministic => CreateLocalDeterministic(),
+            OperatorClassificationProviderKind.LocalHttp => CreateLocalHttp(request.Endpoint),
+            _ => throw new InvalidOperationException(ClassificationProviderOptions.ProviderRequiredMessage)
         };
 
-        Validate(settings);
-        Directory.CreateDirectory(SettingsDirectory);
-        var persisted = new PersistedSettings(
-            settings.Provider,
-            settings.Model,
-            settings.Endpoint,
-            settings.AuthHeaderName,
-            string.IsNullOrWhiteSpace(settings.ApiKey) ? "" : _protector.Protect(settings.ApiKey),
-            settings.PayloadClass,
-            settings.RedactionState);
+        await PersistAsync(settings, cancellationToken);
+        return _current = settings;
+    }
 
-        var temporaryPath = Path.Combine(
-            SettingsDirectory,
-            $".classification-provider.{Guid.NewGuid():N}.tmp");
+    private OperatorClassificationProviderSettings ReadCurrent()
+    {
+        if (!File.Exists(SettingsPath))
+        {
+            return ReadConfiguredFallback();
+        }
+
+        using var stream = File.OpenRead(SettingsPath);
+        using var document = JsonDocument.Parse(stream);
+        var settings = NormalizePersisted(document.RootElement, out var requiresRewrite);
+        if (requiresRewrite)
+        {
+            Persist(settings);
+        }
+
+        return settings;
+    }
+
+    private OperatorClassificationProviderSettings ReadConfiguredFallback()
+    {
+        var classification = configuration.GetSection("Luthn:Classification");
+        var options = classification.Get<ClassificationProviderOptions>() ?? new ClassificationProviderOptions();
+        return options.ResolveProvider() switch
+        {
+            OperatorClassificationProviderKind.LocalDeterministic => CreateLocalDeterministic(),
+            OperatorClassificationProviderKind.LocalHttp => CreateLocalHttp(options.LocalHttp.Endpoint),
+            _ => CreateUnconfigured()
+        };
+    }
+
+    private static OperatorClassificationProviderSettings NormalizePersisted(
+        JsonElement persisted,
+        out bool requiresRewrite)
+    {
+        var providerName = ReadString(persisted, "provider");
+        var endpoint = ReadString(persisted, "endpoint");
+        var hasLegacyFields = HasNonEmptyValue(persisted, "model") ||
+            HasNonEmptyValue(persisted, "authHeaderName") ||
+            HasNonEmptyValue(persisted, "protectedApiKey") ||
+            HasNonEmptyValue(persisted, "apiKey");
+
+        OperatorClassificationProviderSettings settings;
+        if (string.Equals(providerName, ClassificationProviderOptions.LocalDeterministicProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            settings = CreateLocalDeterministic();
+            requiresRewrite = hasLegacyFields || !string.IsNullOrWhiteSpace(endpoint);
+            return settings;
+        }
+
+        if (string.Equals(providerName, ClassificationProviderOptions.LocalHttpProvider, StringComparison.OrdinalIgnoreCase) &&
+            LocalHttpEndpointValidator.TryValidate(endpoint, out var validatedEndpoint))
+        {
+            settings = CreateLocalHttp(validatedEndpoint);
+            requiresRewrite = hasLegacyFields ||
+                !string.Equals(endpoint, validatedEndpoint.AbsoluteUri, StringComparison.Ordinal);
+            return settings;
+        }
+
+        settings = CreateUnconfigured();
+        requiresRewrite = !IsSanitizedUnconfigured(persisted);
+        return settings;
+    }
+
+    private async Task PersistAsync(
+        OperatorClassificationProviderSettings settings,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(SettingsDirectory);
+        var temporaryPath = TemporaryPath();
         try
         {
             await using (var stream = new FileStream(
@@ -116,255 +144,188 @@ public sealed class OperatorClassificationSettingsStore(
                 FileAccess.Write,
                 FileShare.None))
             {
-                await JsonSerializer.SerializeAsync(stream, persisted, SerializerOptions, cancellationToken);
+                await JsonSerializer.SerializeAsync(stream, ToPersisted(settings), SerializerOptions, cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
 
-            if (File.Exists(SettingsPath))
-            {
-                File.Replace(temporaryPath, SettingsPath, null);
-            }
-            else
-            {
-                File.Move(temporaryPath, SettingsPath);
-            }
+            ReplaceSettingsFile(temporaryPath);
         }
         catch
         {
             File.Delete(temporaryPath);
             throw;
         }
-
-        _current = settings;
-        return settings;
     }
 
-    private async ValueTask<string> ResolveApiKeyAsync(
-        SaveClassificationProviderConfigurationRequest request,
-        OperatorClassificationProviderKind provider,
-        CancellationToken cancellationToken)
+    private void Persist(OperatorClassificationProviderSettings settings)
     {
-        if (request.ClearApiKey || provider == OperatorClassificationProviderKind.Mock)
-        {
-            return "";
-        }
-
-        if (request.ApiKey is not null)
-        {
-            return request.ApiKey.Trim();
-        }
-
-        var existing = await ReadAsync(cancellationToken);
-        if (existing.Provider == provider && existing.HasApiKey)
-        {
-            return existing.ApiKey;
-        }
-
-        return ReadClassificationOptions().Credential?.Trim() ?? "";
-    }
-
-    private OperatorClassificationProviderSettings ReadCurrent()
-    {
-        var path = SettingsPath;
-        if (!File.Exists(path))
-        {
-            return ReadConfiguredFallback();
-        }
-
-        using var stream = File.OpenRead(path);
-        var persisted = JsonSerializer.Deserialize<PersistedSettings>(stream, SerializerOptions);
-        return persisted is null
-            ? ReadConfiguredFallback()
-            : ToSettings(persisted);
-    }
-
-    private OperatorClassificationProviderSettings ReadConfiguredFallback()
-    {
-        var options = ReadClassificationOptions();
-        var provider = options.ResolveProvider();
-
-        if (string.Equals(provider, "external-http", StringComparison.OrdinalIgnoreCase))
-        {
-            return new OperatorClassificationProviderSettings
-            {
-                Provider = OperatorClassificationProviderKind.ExternalHttp,
-                Endpoint = options.ExternalHttp.Endpoint ?? "",
-                AuthHeaderName = Normalize(options.ExternalHttp.AuthHeaderName, "Authorization"),
-                ApiKey = options.Credential?.Trim() ?? "",
-                PayloadClass = Normalize(options.ExternalHttp.PayloadClass, "classification-input"),
-                RedactionState = Normalize(options.ExternalHttp.RedactionState, "external-provider-opt-in")
-            };
-        }
-
-        if (string.Equals(
-            provider,
-            ClassificationProviderOptions.UnconfiguredProvider,
-            StringComparison.OrdinalIgnoreCase))
-        {
-            return new OperatorClassificationProviderSettings
-            {
-                Provider = OperatorClassificationProviderKind.Unconfigured,
-                PayloadClass = "classification-input",
-                RedactionState = "provider-unconfigured"
-            };
-        }
-
-        return new OperatorClassificationProviderSettings
-        {
-            Provider = OperatorClassificationProviderKind.Mock,
-            PayloadClass = "local-classification-input",
-            RedactionState = "local-only"
-        };
-    }
-
-    private ClassificationProviderOptions ReadClassificationOptions() =>
-        configuration
-            .GetSection("Luthn:Classification")
-            .Get<ClassificationProviderOptions>() ?? new ClassificationProviderOptions();
-
-    private OperatorClassificationProviderSettings ToSettings(PersistedSettings persisted) =>
-        new()
-        {
-            Provider = persisted.Provider,
-            Model = persisted.Model,
-            Endpoint = persisted.Endpoint,
-            AuthHeaderName = Normalize(persisted.AuthHeaderName, "Authorization"),
-            ApiKey = Unprotect(persisted.ProtectedApiKey),
-            PayloadClass = Normalize(persisted.PayloadClass, "classification-input"),
-            RedactionState = Normalize(persisted.RedactionState, "operator-configured-provider")
-        };
-
-    private string SettingsDirectory => Path.GetFullPath(options.Value.Directory);
-    private string SettingsPath => Path.Combine(SettingsDirectory, "classification-provider.json");
-
-    private string Unprotect(string protectedApiKey)
-    {
-        if (string.IsNullOrWhiteSpace(protectedApiKey))
-        {
-            return "";
-        }
-
+        Directory.CreateDirectory(SettingsDirectory);
+        var temporaryPath = TemporaryPath();
         try
         {
-            return _protector.Unprotect(protectedApiKey);
+            using (var stream = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None))
+            {
+                JsonSerializer.Serialize(stream, ToPersisted(settings), SerializerOptions);
+                stream.Flush();
+            }
+
+            ReplaceSettingsFile(temporaryPath);
         }
-        catch (Exception error) when (error is CryptographicException or FormatException)
+        catch
         {
-            throw new InvalidOperationException(
-                "Stored classification provider API key could not be decrypted. Re-enter the key in the operator console.",
-                error);
+            File.Delete(temporaryPath);
+            throw;
         }
     }
 
-    private static OperatorClassificationProviderKind ParseProvider(string value)
+    private static OperatorClassificationProviderKind ParseProvider(string? value)
     {
-        if (Enum.TryParse<OperatorClassificationProviderKind>(
-            value,
-            ignoreCase: true,
-            out var provider)
-            && Enum.IsDefined(provider)
-            && provider != OperatorClassificationProviderKind.Unconfigured)
+        if (string.Equals(value?.Trim(), ClassificationProviderOptions.LocalDeterministicProvider, StringComparison.OrdinalIgnoreCase))
         {
-            return provider;
+            return OperatorClassificationProviderKind.LocalDeterministic;
+        }
+
+        if (string.Equals(value?.Trim(), ClassificationProviderOptions.LocalHttpProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            return OperatorClassificationProviderKind.LocalHttp;
         }
 
         throw new InvalidOperationException(
-            $"Unsupported classification provider '{value}'. Choose a configured provider instead of the Unconfigured system state.");
+            $"Unsupported classification provider '{value}'. Choose LocalDeterministic or LocalHttp.");
     }
 
-    private static void Validate(OperatorClassificationProviderSettings settings)
+    private static OperatorClassificationProviderSettings CreateLocalDeterministic() =>
+        new()
+        {
+            Provider = OperatorClassificationProviderKind.LocalDeterministic,
+            PayloadClass = "local-classification-input",
+            RedactionState = "local-only"
+        };
+
+    private static OperatorClassificationProviderSettings CreateLocalHttp(string? endpoint)
     {
-        if (settings.Provider == OperatorClassificationProviderKind.Unconfigured)
+        if (!LocalHttpEndpointValidator.TryValidate(endpoint, out var validatedEndpoint, out var error))
         {
-            throw new InvalidOperationException(ClassificationProviderOptions.ProviderRequiredMessage);
+            throw new InvalidOperationException(error);
         }
 
-        if (settings.Provider == OperatorClassificationProviderKind.Mock)
-        {
-            return;
-        }
-
-        if (settings.Provider == OperatorClassificationProviderKind.ExternalHttp)
-        {
-            if (!Uri.TryCreate(settings.Endpoint, UriKind.Absolute, out var endpoint))
-            {
-                throw new InvalidOperationException("External HTTP provider endpoint must be an absolute URL.");
-            }
-            if (settings.HasApiKey && endpoint.Scheme != Uri.UriSchemeHttps)
-            {
-                throw new InvalidOperationException(
-                    "External HTTP provider endpoint must be HTTPS when an API key is configured.");
-            }
-            return;
-        }
-
-        ValidateDirectProviderEndpoint(settings);
-
-        if (!settings.HasApiKey)
-        {
-            throw new InvalidOperationException($"{settings.Provider} provider requires an API key.");
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.Model))
-        {
-            throw new InvalidOperationException($"{settings.Provider} provider requires a model.");
-        }
+        return CreateLocalHttp(validatedEndpoint);
     }
 
-    private static void ValidateDirectProviderEndpoint(OperatorClassificationProviderSettings settings)
+    private static OperatorClassificationProviderSettings CreateLocalHttp(Uri endpoint) =>
+        new()
+        {
+            Provider = OperatorClassificationProviderKind.LocalHttp,
+            Endpoint = endpoint.AbsoluteUri,
+            PayloadClass = "classification-input",
+            RedactionState = "same-device-local-http"
+        };
+
+    private static OperatorClassificationProviderSettings CreateUnconfigured() =>
+        new()
+        {
+            Provider = OperatorClassificationProviderKind.Unconfigured,
+            PayloadClass = "classification-input",
+            RedactionState = "provider-unconfigured"
+        };
+
+    private static PersistedSettings ToPersisted(OperatorClassificationProviderSettings settings) =>
+        new(
+            settings.Provider.ToString(),
+            settings.Endpoint,
+            "",
+            "",
+            "",
+            settings.PayloadClass,
+            settings.RedactionState);
+
+    private static string ReadString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()?.Trim() ?? ""
+            : "";
+
+    private static bool HasNonEmptyValue(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind != JsonValueKind.Null &&
+        property.ValueKind != JsonValueKind.Undefined &&
+        (property.ValueKind != JsonValueKind.String || !string.IsNullOrWhiteSpace(property.GetString()));
+
+    private static bool IsSanitizedUnconfigured(JsonElement element) =>
+        string.Equals(
+            ReadString(element, "provider"),
+            ClassificationProviderOptions.UnconfiguredProvider,
+            StringComparison.OrdinalIgnoreCase) &&
+        string.IsNullOrWhiteSpace(ReadString(element, "endpoint")) &&
+        !HasNonEmptyValue(element, "model") &&
+        !HasNonEmptyValue(element, "authHeaderName") &&
+        !HasNonEmptyValue(element, "protectedApiKey") &&
+        !HasNonEmptyValue(element, "apiKey");
+
+    private string SettingsDirectory => Path.GetFullPath(options.Value.Directory);
+    private string SettingsPath => Path.Combine(SettingsDirectory, "classification-provider.json");
+    private string TemporaryPath() => Path.Combine(
+        SettingsDirectory,
+        $".classification-provider.{Guid.NewGuid():N}.tmp");
+
+    private void ReplaceSettingsFile(string temporaryPath)
     {
-        if (!Uri.TryCreate(settings.Endpoint, UriKind.Absolute, out var endpoint) ||
-            endpoint.Scheme != Uri.UriSchemeHttps)
+        if (File.Exists(SettingsPath))
         {
-            throw new InvalidOperationException(
-                $"{settings.Provider} provider endpoint must be an HTTPS absolute URL.");
+            File.Replace(temporaryPath, SettingsPath, null);
         }
-
-        var allowedHosts = settings.Provider switch
+        else
         {
-            OperatorClassificationProviderKind.OpenAi => ["api.openai.com"],
-            OperatorClassificationProviderKind.Anthropic => ["api.anthropic.com"],
-            OperatorClassificationProviderKind.GoogleAi => ["generativelanguage.googleapis.com"],
-            OperatorClassificationProviderKind.OpenRouter => ["openrouter.ai"],
-            _ => Array.Empty<string>()
-        };
-        if (!allowedHosts.Contains(endpoint.Host, StringComparer.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"{settings.Provider} provider endpoint host must be {string.Join(", ", allowedHosts)}.");
+            File.Move(temporaryPath, SettingsPath);
         }
     }
-
-    private static string DefaultModel(OperatorClassificationProviderKind provider) =>
-        provider switch
-        {
-            OperatorClassificationProviderKind.OpenAi => "gpt-4.1-mini",
-            OperatorClassificationProviderKind.Anthropic => "claude-sonnet-4-5",
-            OperatorClassificationProviderKind.GoogleAi => "gemini-2.5-flash",
-            OperatorClassificationProviderKind.OpenRouter => "openai/gpt-4.1-mini",
-            _ => ""
-        };
-
-    private static string DefaultEndpoint(OperatorClassificationProviderKind provider) =>
-        provider switch
-        {
-            OperatorClassificationProviderKind.ExternalHttp => "",
-            OperatorClassificationProviderKind.OpenAi => "https://api.openai.com/v1/chat/completions",
-            OperatorClassificationProviderKind.Anthropic => "https://api.anthropic.com/v1/messages",
-            OperatorClassificationProviderKind.GoogleAi => "https://generativelanguage.googleapis.com/v1beta/models",
-            OperatorClassificationProviderKind.OpenRouter => "https://openrouter.ai/api/v1/chat/completions",
-            _ => ""
-        };
-
-    private static string Normalize(string? value, string fallback) =>
-        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
     private sealed record PersistedSettings(
-        OperatorClassificationProviderKind Provider,
-        string Model,
+        string Provider,
         string Endpoint,
+        string Model,
         string AuthHeaderName,
         string ProtectedApiKey,
         string PayloadClass,
         string RedactionState);
+}
+
+internal static class LocalHttpEndpointValidator
+{
+    public const string ValidationMessage =
+        "LocalHttp endpoint must be an absolute HTTP or HTTPS URL on localhost, an IPv4/IPv6 loopback address, or host.docker.internal, without user information.";
+
+    public static bool TryValidate(string? value, out Uri endpoint) =>
+        TryValidate(value, out endpoint, out _);
+
+    public static bool TryValidate(string? value, out Uri endpoint, out string error)
+    {
+        error = ValidationMessage;
+        endpoint = null!;
+        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var candidate) ||
+            !string.Equals(candidate.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(candidate.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrEmpty(candidate.UserInfo) ||
+            !IsSameDeviceHost(candidate.Host))
+        {
+            return false;
+        }
+
+        endpoint = candidate;
+        return true;
+    }
+
+    private static bool IsSameDeviceHost(string host)
+    {
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(host, "host.docker.internal", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address);
+    }
 }

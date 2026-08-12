@@ -140,12 +140,11 @@ public sealed class ConsoleSessionSecurityTests
 
         using var rejected = await client.PutAsJsonAsync("/api/operator/classification-provider", new
         {
-            provider = "Mock",
-            clearApiKey = true
+            provider = "LocalDeterministic"
         });
         using var allowedRequest = new HttpRequestMessage(HttpMethod.Put, "/api/operator/classification-provider")
         {
-            Content = JsonContent.Create(new { provider = "Mock", clearApiKey = true })
+            Content = JsonContent.Create(new { provider = "LocalDeterministic" })
         };
         allowedRequest.Headers.Add(ConsoleAccessOptions.AntiforgeryHeaderName, csrf);
         using var allowed = await client.SendAsync(allowedRequest);

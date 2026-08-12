@@ -599,14 +599,9 @@ public sealed class PostgresIntegrationSmokeTests
             Options.Create(new LuthnAuthOptions()),
             Options.Create(new LuthnIdentityOptions()),
             Options.Create(new LuthnHostOperationalOptions()),
-            Options.Create(new ClassificationProviderOptions
-            {
-                Provider = "mock",
-                AllowMock = true
-            }),
             new StaticSettingsStore(new OperatorClassificationProviderSettings
             {
-                Provider = OperatorClassificationProviderKind.Mock
+                Provider = OperatorClassificationProviderKind.LocalDeterministic
             }),
             protectionState,
             CancellationToken.None);
