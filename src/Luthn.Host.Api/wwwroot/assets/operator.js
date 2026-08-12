@@ -8,6 +8,7 @@ const state = {
   selectedAccessDetail: null,
   accessDetailRequestSequence: 0,
   accessDecisionPending: false,
+  accessPolicyPending: false,
   auditEvents: [],
   auditNextCursor: "",
   auditBaseQuery: "",
@@ -265,6 +266,7 @@ const connectLocalAccess = async () => {
     refreshAgentConnections();
     refreshSyncStatus();
     refreshProviderSettings();
+    refreshAccessPolicy();
     refreshAccessRequests();
     refreshAudit();
   } catch (error) {
@@ -369,6 +371,7 @@ const loginToCloud = async () => {
     refreshAgentConnections();
     refreshSyncStatus();
     refreshProviderSettings();
+    refreshAccessPolicy();
     refreshAccessRequests();
     refreshAudit();
   } catch (error) {
@@ -1039,8 +1042,66 @@ const refreshAccessRequests = async (event) => {
   }
 };
 
+const renderAccessPolicy = (policy) => {
+  const form = $("#accessPolicyForm");
+  if (!form) {
+    return;
+  }
+  form.requestTimeoutMinutes.value = (policy?.requestTimeoutSeconds || 600) / 60;
+  form.grantDurationMinutes.value = (policy?.grantDurationSeconds || 600) / 60;
+  form.maximumSuccessfulReads.value = policy?.maximumSuccessfulReads || 1;
+  $("#accessPolicyStatus").textContent = policy?.revision
+    ? `Revision ${policy.revision} · ${formatTimestamp(policy.createdAt)}`
+    : "Policy unavailable";
+  $("#saveAccessPolicy").disabled = state.accessPolicyPending;
+};
+
+const refreshAccessPolicy = async () => {
+  try {
+    renderAccessPolicy(await requestJson("/api/access-requests/policy", { cache: "no-store" }));
+  } catch (error) {
+    $("#accessPolicyStatus").textContent = hasConsoleSession()
+      ? `Policy unavailable: ${error.message}`
+      : "Console login is required to configure sensitive access.";
+  }
+};
+
+const saveAccessPolicy = async (event) => {
+  event?.preventDefault();
+  const form = $("#accessPolicyForm");
+  if (!form.reportValidity() || state.accessPolicyPending) {
+    return;
+  }
+
+  state.accessPolicyPending = true;
+  $("#saveAccessPolicy").disabled = true;
+  $("#accessPolicyStatus").textContent = "Saving policy…";
+  try {
+    const policy = await requestJson("/api/access-requests/policy", {
+      method: "PUT",
+      body: JSON.stringify({
+        requestTimeoutSeconds: Math.round(Number(form.requestTimeoutMinutes.value) * 60),
+        grantDurationSeconds: Math.round(Number(form.grantDurationMinutes.value) * 60),
+        maximumSuccessfulReads: Number(form.maximumSuccessfulReads.value)
+      })
+    });
+    renderAccessPolicy(policy);
+    setAction("access policy updated", `revision ${policy.revision}`);
+  } catch (error) {
+    $("#accessPolicyStatus").textContent = `Policy update failed: ${error.message}`;
+    setAction("access policy failed", error.message);
+  } finally {
+    state.accessPolicyPending = false;
+    $("#saveAccessPolicy").disabled = false;
+  }
+};
+
 const decideAccessRequest = async (id, decision) => {
-  if (state.accessDecisionPending || !state.selectedAccessDetail || state.selectedAccessRequestId !== id || state.selectedAccessDetail.status !== "Pending") {
+  if (state.accessDecisionPending ||
+      !state.selectedAccessDetail ||
+      state.selectedAccessRequestId !== id ||
+      state.selectedAccessDetail.status !== "Pending" ||
+      state.selectedAccessDetail.statusCode !== "request-pending") {
     return;
   }
 
@@ -1082,8 +1143,11 @@ const decideAccessRequest = async (id, decision) => {
 const accessDetailDefaults = {
   id: "Not selected",
   status: "—",
+  statusCode: "—",
   createdAt: "—",
   expiresAt: "—",
+  grantExpiresAt: "—",
+  readUsage: "—",
   requestReason: "—",
   decisionReason: "—",
   decidedAt: "—",
@@ -1102,7 +1166,10 @@ const setAccessDetailFields = (values = accessDetailDefaults) => {
 
 const updateAccessDecisionState = () => {
   const reason = $("#accessDecisionForm").reason.value.trim();
-  const canDecide = !state.accessDecisionPending && state.selectedAccessDetail?.status === "Pending" && Boolean(reason);
+  const canDecide = !state.accessDecisionPending &&
+    state.selectedAccessDetail?.status === "Pending" &&
+    state.selectedAccessDetail?.statusCode === "request-pending" &&
+    Boolean(reason);
   $("#approveAccess").disabled = !canDecide;
   $("#denyAccess").disabled = !canDecide;
   $("#viewAccessAudit").disabled = !state.selectedAccessRequestId;
@@ -1122,8 +1189,13 @@ const clearAccessDetail = (message = "Select a request to review.") => {
 const sanitizeAccessDetail = (detail) => ({
   id: boundedText(detail?.id, 128, "Unknown request"),
   status: boundedText(detail?.status, 32),
+  statusCode: boundedText(detail?.statusCode, 64),
   createdAt: formatTimestamp(detail?.createdAt),
-  expiresAt: formatTimestamp(detail?.expiresAt),
+  expiresAt: formatTimestamp(detail?.requestExpiresAt || detail?.expiresAt),
+  grantExpiresAt: detail?.grantExpiresAt ? formatTimestamp(detail.grantExpiresAt) : "Not granted",
+  readUsage: detail?.maxReads == null
+    ? "Not granted"
+    : `${detail.usedReads || 0} used · ${detail.remainingReads || 0} remaining · ${detail.maxReads} max`,
   requestReason: boundedText(detail?.requestReason, 1000, "Not provided"),
   decisionReason: boundedText(detail?.decisionReason, 1000, "Not decided"),
   decidedAt: detail?.decidedAt ? formatTimestamp(detail.decidedAt) : "Not decided",
@@ -1153,9 +1225,9 @@ const loadAccessRequestDetail = async (id) => {
     state.selectedAccessRequestId = id;
     state.selectedAccessDetail = safeDetail;
     setAccessDetailFields(safeDetail);
-    $("#accessDetailStatus").textContent = safeDetail.status === "Pending"
+    $("#accessDetailStatus").textContent = safeDetail.statusCode === "request-pending"
       ? "Review metadata and enter a decision reason."
-      : `Decision complete: ${safeDetail.status}`;
+      : `Lifecycle: ${safeDetail.statusCode || safeDetail.status}`;
     document.querySelectorAll("#accessRows tr").forEach((row) => {
       row.setAttribute("aria-selected", row.dataset.requestId === id ? "true" : "false");
     });
@@ -1188,8 +1260,10 @@ const renderAccessRows = (requests) => {
       new Date(request.createdAt).toLocaleString(),
       request.id,
       request.sensitiveReferenceId,
-      request.status,
-      request.outputPolicy || (request.redactedOutputAvailable ? "available" : "unavailable")
+      request.statusCode || request.status,
+      request.maxReads == null
+        ? request.outputPolicy || (request.redactedOutputAvailable ? "available" : "unavailable")
+        : `${request.remainingReads || 0}/${request.maxReads} reads remaining`
     ].forEach((value) => {
       const td = document.createElement("td");
       td.textContent = value || "";
@@ -1343,6 +1417,7 @@ $("#providerForm").addEventListener("submit", saveProviderSettings);
 $("#providerForm").provider.addEventListener("change", applyProviderDefaults);
 $("#testProvider").addEventListener("click", testProviderSettings);
 $("#accessForm").addEventListener("submit", refreshAccessRequests);
+$("#accessPolicyForm").addEventListener("submit", saveAccessPolicy);
 $("#accessDecisionForm").reason.addEventListener("input", updateAccessDecisionState);
 $("#approveAccess").addEventListener("click", () => decideAccessRequest(state.selectedAccessRequestId, "approve"));
 $("#denyAccess").addEventListener("click", () => decideAccessRequest(state.selectedAccessRequestId, "deny"));
@@ -1382,6 +1457,7 @@ const initializeConsole = async () => {
     refreshAgentConnections();
     refreshSyncStatus();
     refreshProviderSettings();
+    refreshAccessPolicy();
     refreshAccessRequests();
     refreshAudit();
   } else {

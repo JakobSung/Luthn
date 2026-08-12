@@ -556,6 +556,35 @@ button.nav-tab.active {
   gap: 12px;
 }
 
+.access-policy-form {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 16px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.access-policy-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.access-policy-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.access-policy-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+}
+
 .audit-page-actions {
   display: flex;
   justify-content: flex-end;
@@ -928,6 +957,7 @@ tbody tr:last-child td {
   .provider-grid,
   .audit-filter,
   .access-filter,
+  .access-policy-fields,
   .check-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -988,6 +1018,7 @@ tbody tr:last-child td {
   .provider-grid,
   .audit-filter,
   .access-filter,
+  .access-policy-fields,
   .access-detail-fields,
   .check-list {
     grid-template-columns: 1fr;

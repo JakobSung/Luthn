@@ -38,7 +38,7 @@ public sealed class ConsoleSessionSecurityTests
         Assert.Contains("samesite=strict", candidateCookie, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("LuthnConsoleCandidate", initialBody.RootElement.GetRawText(), StringComparison.Ordinal);
         Assert.Equal(HttpStatusCode.NoContent, arm.StatusCode);
-        Assert.Equal(0, (await arm.Content.ReadAsByteArrayAsync()).Length);
+        Assert.Empty(await arm.Content.ReadAsByteArrayAsync());
         Assert.Equal("create-local-session", armedBody.RootElement.GetProperty("nextAction").GetString());
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         Assert.Equal("LocalAuto", createdBody.RootElement.GetProperty("mode").GetString());

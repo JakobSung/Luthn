@@ -366,6 +366,8 @@ GET /api/wiki/proposals/{id}
 
 ```http
 GET  /api/access-requests?status=Pending&limit=25
+GET  /api/access-requests/policy
+PUT  /api/access-requests/policy
 POST /api/access-requests
 GET  /api/access-requests/{id}
 GET  /api/access-requests/{id}/operator-detail
@@ -383,6 +385,119 @@ metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관�
 생성·조회에는 `access.request` scope가 필요합니다. MCP는 생성·상태·결과만 제공하며
 승인·거절 도구를 노출하지 않습니다.
 
+### 권한과 정책 계약
+
+로컬/self-hosted 운영자 기능은 검토, 결정, 정책 설정 권한을 분리합니다.
+
+| Scope | 허용되는 민감 접근 작업 |
+| --- | --- |
+| `access.request` | owner 범위 요청 생성과 현재 상태 또는 제한된 결과의 동기 조회 |
+| `access.review` | 인증된 workspace 안의 요청 목록과 운영자 상세 조회 |
+| `access.decide` | 만료되지 않은 Pending 요청 승인·반려. 하위 호환을 위해 review를 포함하지만 정책 설정 권한은 포함하지 않음 |
+| `access.configure` | workspace 공통 승인 대기시간, 승인 결과 노출시간, 최대 성공 조회 횟수 조회·개정. 검토·결정 권한은 포함하지 않음 |
+
+새 service token은 두 정책 route 모두 `access.configure`를 사용합니다. 기존 로컬 console
+session의 `config.write`는 호환성 연결로만 허용하며 review나 decide 권한을 부여하지
+않습니다.
+
+기본 정책은 승인 대기시간 600초, 이와 분리된 승인 결과 grant 600초, 성공 결과 조회
+1회입니다. 두 시간값의 허용범위는 60–3600초이고 최대 성공 조회 횟수는 1–10회입니다.
+무제한 값은 없습니다. 잘못되거나 권한 없는 정책 변경은 fail-closed 처리합니다. 각
+revision은 server가 관리하고 이후 수명주기에만 적용되며 기존 request나 grant를
+연장하거나 복원하지 않습니다.
+
+정책 변경 요청:
+
+```json
+{
+  "requestTimeoutSeconds": 600,
+  "grantDurationSeconds": 600,
+  "maximumSuccessfulReads": 1
+}
+```
+
+정책 응답:
+
+```json
+{
+  "revision": 3,
+  "requestTimeoutSeconds": 600,
+  "grantDurationSeconds": 600,
+  "maximumSuccessfulReads": 1,
+  "createdAt": "2026-07-04T00:00:00Z"
+}
+```
+
+`GET /api/access-requests/policy`와 `PUT /api/access-requests/policy`는 workspace 범위를
+강제하고 `Cache-Control: no-store`로 응답하며 제한된 정책 metadata만 노출합니다. 변경이
+성공하면 기존 revision을 덮어쓰지 않고 새 revision을 생성합니다.
+
+요청 생성 시 활성 승인 대기시간과 정책 revision을 snapshot하고 계산된 만료시각을
+`requestExpiresAt`으로 노출합니다. 승인 시점에는 당시의 grant 노출시간, 최대 성공 조회
+횟수, 정책 revision을 별도의 `grantExpiresAt`과 조회 제한 상태에 snapshot합니다. 두
+만료시각의 의미는 다릅니다.
+request expiry는 결정 가능 시간을 끝내고 grant expiry는 승인 결과의 사용 가능 시간을
+끝냅니다. 백그라운드 만료 materialization이 아직 실행되지 않았어도 모든 결정과 결과
+조회에서 현재 server 시각과 원자적 조회 counter를 다시 검사합니다. 상태 조회와 결과가
+없는 응답은 성공 조회를 소비하지 않고, 승인된 제한 결과를 실제 반환할 때만 1회를
+소비합니다.
+
+`expiresInSeconds`는 기존 create JSON 형식의 호환성을 위해 계속 받고 범위도 검사하지만,
+현재 요청 수명을 caller가 정하는 권한은 아닙니다. 활성 server 정책이 snapshot될 실제
+request expiry를 결정합니다. `sessionId`를 생략하면 기존과 같이 server가 `legacy-...`
+식별자를 생성합니다.
+
+### 로컬 동기 수명주기 조회
+
+`status`는 저장된 요청 결정 상태(`Pending`, `Approved`, `Denied`, `Expired`)이고,
+추가 필드 `statusCode`는 현재 server 시각의 request/grant/read 수명주기를 나타냅니다.
+
+| `statusCode` | 의미와 결과 동작 |
+| --- | --- |
+| `request-created` | 새 Pending 요청을 생성함 |
+| `request-pending` | 같은 owner/workspace/reference의 Pending 요청이 유효하여 기존 요청을 재사용함 |
+| `request-denied` | 요청이 반려되어 결과를 반환하지 않음 |
+| `request-expired` | 결정 가능 시간이 만료되어 결과를 반환하지 않음 |
+| `grant-active` | 승인 grant가 만료되지 않았고 조회 횟수가 남아 있어 결과 endpoint가 검토된 제한 결과를 반환할 수 있음 |
+| `grant-expired` | 승인 결과 grant가 만료되어 결과를 반환하지 않음 |
+| `grant-consumed` | 성공 조회 횟수를 모두 사용하여 결과를 반환하지 않음 |
+| `result-returned` | 이번 결과 호출이 승인된 제한 결과를 반환하고 성공 조회 1회를 원자적으로 소비함 |
+
+목록, request, operator detail, result 응답에는 적용 가능한 경우 `requestExpiresAt`,
+`grantExpiresAt`, `remainingReads`, `maxReads`, `usedReads`가 추가됩니다. `usedReads`는
+최대 횟수와 남은 횟수의 차이로 server가 계산한 제한된 값입니다. server가 정한 같은
+workspace, owner, 민감 reference로 create를 반복하면 중복 요청을 만들지 않고 기존
+Pending 요청이나 active grant를 반환합니다. terminal 상태는 새 요청을 조용히 만들지
+않고 그대로 반환하며, 이후의 별도 명시적 create 요청에서 새 Pending 수명주기를 시작할
+수 있습니다.
+
+이는 로컬 동기 재조회 계약입니다. Agent는 기존 create/status/result 작업을 다시 호출할
+때만 승인, 반려, 만료, 소진 상태를 확인합니다. SignalR, SSE, WebSocket, webhook, email,
+Slack, mobile push 또는 Agent의 선제 메시지는 보내지 않습니다. `grant-active`를 받은
+Agent는 같은 사용자 turn에서 기존 result 작업을 이어서 호출할 수 있습니다. 승인 결과는
+Cloud, Cloud safe-projection sync 또는 외부 공개 outbox로 전송하지 않습니다. Cloud 결과
+relay와 Cloud 관리자 route는 이 계약의 일부가 아닙니다.
+
+### Workflow, 감사, 우회 차단 경계
+
+`SensitiveAccessWorkflow`만 request resolution, 결정, 정책 revision, grant, 만료, 조회
+counter를 조회하거나 변경할 수 있는 application 경계입니다. 승인 결과 조회에는 이
+Workflow가 발급한 직렬화 불가능한 일회성 내부 permit도 필요합니다. permit은 HTTP, SDK,
+MCP, 로그, 감사, cache, Cloud 계약에 노출하지 않습니다. Agent용 API/MCP에는 approve,
+deny, 정책/grant 변경, permit, 원본 Vault/source 조회 작업이 없습니다.
+
+백그라운드 만료 materializer도 Workflow 소유 system operation을 호출하며 request나 grant
+row를 직접 변경하지 않습니다. materialization은 멱등이고 수명주기 근거를 기록하지만,
+동기 조회와 결정이 항상 현재 server 시각과 counter를 다시 검사하므로 authorization
+경계로 사용하지 않습니다.
+
+직접 payload 조회, 민감 상태 직접 변경, 잘못된 상태 전이, scope 불일치, 만료 grant,
+소진된 조회 제한, 잘못되거나 재사용된 permit은 결과와 비인가 상태 변경 없이 fail-closed
+처리합니다. 요청 재사용, 결정, 정책 revision, grant 생성·만료·소진, 결과 조회, 만료
+materialization, 우회 차단은 제한된 metadata-only audit와 저카디널리티 metric을
+남깁니다. prompt·reason 본문, reference label, redacted output 본문, credential, secret,
+owner path, workspace/owner 화면 식별자, 민감 원문은 포함하지 않습니다.
+
 `GET /api/access-requests/{id}/operator-detail`은 로컬 또는 self-hosted Hub
 콘솔을 위한 별도 `access.review` 계약입니다. 요청·결정 사유와 민감 참조에 이미
 저장된 label, source metadata, redacted summary만 반환합니다. 응답은
@@ -394,7 +509,15 @@ metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관�
 `sensitive_access.operator_detail_read` 감사 사건을 남깁니다. 원본 source/Vault,
 protected payload, credential, workspace id, owner id는 응답하지 않습니다.
 
-새 호출자는 `sessionId`와 60–3600초 범위의 `expiresInSeconds`를 보내야 합니다. 만료 필드 도입 전의 버전 없는 계약과 호환하기 위해 두 값을 생략한 기존 호출에는 서버가 `legacy-...` session id와 600초 만료를 부여합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한, 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은 메타데이터 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며 `pending-approval`, `expired-no-output`, `denied-no-output`, `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를 사용하고 원문은 반환하지 않습니다. 만료는 `sensitive_access.expired` 메타데이터 감사 사건으로 기록되며 결과 조회는 `sensitive_access.result_read` 감사 사건을 만듭니다.
+새 호출자는 `sessionId`를 보내야 합니다. `expiresInSeconds`는 버전 없는 JSON 형식의
+호환성을 위해 유지하고 60–3600초 밖의 값은 거절하지만, 실제 request 만료는 활성 server
+정책이 결정합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한,
+재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은
+metadata-only 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며
+`pending-approval`, `expired-no-output`, `denied-no-output`,
+`approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를
+사용하고 원문은 반환하지 않습니다. request와 grant 시간은 server 정책으로 각각
+60–3600초 범위에 제한됩니다. 만료와 결과 조회 감사에는 결과 본문을 복사하지 않습니다.
 
 ## Cloud-neutral 동기화 계약
 
@@ -549,7 +672,7 @@ transcript, credential, 원본 source, Vault payload, 보호 memory를 감사 �
 dotnet run --project src/Luthn.Tools -- token-digest --stdin
 ```
 
-지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.review`, `access.decide`, `audit.read`, `metrics.read`, `hub.ingress.write`, `hub.ingress.operate`, `*`.
+지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.review`, `access.decide`, `access.configure`, `audit.read`, `metrics.read`, `hub.ingress.write`, `hub.ingress.operate`, `*`.
 
 ## 중앙 OSS Hub ingress (선택 활성화)
 

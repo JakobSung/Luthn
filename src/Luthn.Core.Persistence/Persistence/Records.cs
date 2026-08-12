@@ -82,6 +82,34 @@ public enum SensitiveAccessDecisionKind
     Denied
 }
 
+public static class SensitiveAccessPolicyLimits
+{
+    public const int DefaultRequestTimeoutSeconds = 600;
+    public const int DefaultGrantDurationSeconds = 600;
+    public const int DefaultMaximumSuccessfulReads = 1;
+    public const int MinimumDurationSeconds = 60;
+    public const int MaximumDurationSeconds = 3600;
+    public const int MinimumSuccessfulReads = 1;
+    public const int MaximumSuccessfulReads = 10;
+
+    public static bool IsValidDuration(int seconds) =>
+        seconds is >= MinimumDurationSeconds and <= MaximumDurationSeconds;
+
+    public static bool IsValidMaximumSuccessfulReads(int maximumSuccessfulReads) =>
+        maximumSuccessfulReads is >= MinimumSuccessfulReads and <= MaximumSuccessfulReads;
+}
+
+public sealed class SensitiveAccessPolicyRevisionRecord : IWorkspaceScopedRecord
+{
+    public string WorkspaceId { get; set; } = "";
+    public int Revision { get; set; } = 1;
+    public int RequestTimeoutSeconds { get; set; } = SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds;
+    public int GrantDurationSeconds { get; set; } = SensitiveAccessPolicyLimits.DefaultGrantDurationSeconds;
+    public int MaximumSuccessfulReads { get; set; } = SensitiveAccessPolicyLimits.DefaultMaximumSuccessfulReads;
+    public DateTimeOffset CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = "";
+}
+
 public sealed class SensitiveAccessRequestRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
@@ -98,7 +126,11 @@ public sealed class SensitiveAccessRequestRecord : IWorkspaceScopedRecord
     public DateTimeOffset? DecidedAt { get; set; }
     public string WorkspaceId { get; set; } = "";
     public string OwnerUserId { get; set; } = "local-owner";
+    public int PolicyRevision { get; set; } = 1;
+    public int RequestTimeoutSeconds { get; set; } = SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds;
     public SensitiveRecordReferenceRecord? SensitiveRecordReference { get; set; }
+    public SensitiveAccessPolicyRevisionRecord? Policy { get; set; }
+    public SensitiveAccessGrantRecord? Grant { get; set; }
 }
 
 public sealed class SensitiveAccessDecisionRecord
@@ -112,6 +144,21 @@ public sealed class SensitiveAccessDecisionRecord
     public string PayloadClass { get; set; } = "";
     public string RedactionState { get; set; } = "";
     public SensitiveAccessRequestRecord? SensitiveAccessRequest { get; set; }
+}
+
+public sealed class SensitiveAccessGrantRecord : IWorkspaceScopedRecord
+{
+    public string SensitiveAccessRequestId { get; set; } = "";
+    public string WorkspaceId { get; set; } = "";
+    public string OwnerUserId { get; set; } = "local-owner";
+    public int PolicyRevision { get; set; } = 1;
+    public int GrantDurationSeconds { get; set; } = SensitiveAccessPolicyLimits.DefaultGrantDurationSeconds;
+    public DateTimeOffset StartsAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public int MaximumSuccessfulReads { get; set; } = SensitiveAccessPolicyLimits.DefaultMaximumSuccessfulReads;
+    public int SuccessfulReadCount { get; set; }
+    public SensitiveAccessRequestRecord? SensitiveAccessRequest { get; set; }
+    public SensitiveAccessPolicyRevisionRecord? Policy { get; set; }
 }
 
 public sealed class SharedMemoryItemRecord : IWorkspaceScopedRecord
