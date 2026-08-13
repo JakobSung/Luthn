@@ -54,6 +54,7 @@ public sealed class McpToolBoundaryTests
             "submit_search_feedback",
             "get_shared_memory_item",
             "create_sensitive_access_request",
+            "request_protected_information_access",
             "get_sensitive_access_request",
             "get_sensitive_access_result"
         ], names);
@@ -478,6 +479,26 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task ProtectedInformationToolUsesSafeCorrelationAndHumanFacingResponse()
+    {
+        var client = new FakeLuthnClient();
+        using var args = JsonDocument.Parse(
+            """{"memoryItemId":"memory-safe-1","reason":"Confirm the earlier amount."}""");
+
+        var response = Assert.IsType<ProtectedInformationAccessResponseDto>(
+            await new RequestProtectedInformationAccessTool(client).InvokeAsync(args.RootElement));
+
+        Assert.Equal("memory-safe-1", client.LastProtectedInformationRequest!.MemoryItemId);
+        Assert.Equal("requested", response.Status);
+        Assert.DoesNotContain("SensitiveRecordReference", response.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("memoryItemId", response.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("request_protected_information_access", response.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(LuthnMcpToolRegistry.AllowedToolNames, name =>
+            name.Contains("approve", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("deny", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task SensitiveAccessStatusAlwaysReadsCurrentServerState()
     {
         var client = new FakeLuthnClient();
@@ -615,6 +636,7 @@ public sealed class McpToolBoundaryTests
         public Exception? ContextPackException { get; init; }
         public Exception? TelemetryException { get; init; }
         public bool ReturnSensitiveAccessTombstone { get; init; }
+        public ProtectedInformationAccessRequestDto? LastProtectedInformationRequest { get; private set; }
 
         public async Task<ContextPackDto> GetContextPackAsync(
             IReadOnlyList<string> coreTags,
@@ -757,6 +779,17 @@ public sealed class McpToolBoundaryTests
                 SessionId = request.SessionId,
                 ExpiresAt = DateTimeOffset.UnixEpoch.AddMinutes(10)
             });
+
+        public Task<ProtectedInformationAccessResponseDto> RequestProtectedInformationAccessAsync(
+            ProtectedInformationAccessRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            LastProtectedInformationRequest = request;
+            return Task.FromResult(new ProtectedInformationAccessResponseDto(
+                "requested",
+                "A confirmation request is ready for the owner to review.",
+                "access-1"));
+        }
 
         public Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
             string id,

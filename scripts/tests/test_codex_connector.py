@@ -235,6 +235,15 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
                 "memory titles, content, IDs, queries, scores, sources", installed
             )
             self.assertIn("normal assistant response or final response", installed)
+            self.assertIn("Protected information confirmation", installed)
+            self.assertIn("specific detail that is not present", installed)
+            self.assertIn("safe recall contains no", installed)
+            self.assertIn("request_protected_information_access", installed)
+            self.assertIn("`memoryItemId` set to that item's", installed)
+            self.assertIn("`id` and a short, non-sensitive reason", installed)
+            self.assertIn("Never put the user's raw question", installed)
+            self.assertIn("internal type names, field names", installed)
+            self.assertIn("only a trusted operator can approve or deny it", installed)
             self.assertIn("Agent memory mutation boundary", installed)
             self.assertIn(
                 "Never delete, modify, overwrite, approve, or deny Luthn memory",
@@ -288,6 +297,24 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             self.assertIn("bounded to `maxItems`: 20", instruction)
             self.assertIn("could not verify the requested context", instruction)
             self.assertIn("Do not substitute local memory files", instruction)
+
+    def test_protected_information_confirmation_contract_is_shared(self):
+        instructions = [
+            CONNECTOR.AUTO_RECALL_INSTRUCTION,
+            CONNECTOR.CLAUDE_AUTO_RECALL_INSTRUCTION,
+        ]
+
+        for instruction in instructions:
+            self.assertIn("Protected information confirmation", instruction)
+            self.assertIn("specific detail that is not present", instruction)
+            self.assertIn("safe recall contains no", instruction)
+            self.assertIn("request_protected_information_access", instruction)
+            self.assertIn("`memoryItemId` set to that item's", instruction)
+            self.assertIn("`id` and a short, non-sensitive reason", instruction)
+            self.assertIn("Never put the user's raw question", instruction)
+            self.assertIn("Do not guess between multiple possible items", instruction)
+            self.assertIn("type names, field names", instruction)
+            self.assertIn("only a trusted operator can approve or deny it", instruction)
 
     def test_install_preserves_instruction_symlink(self):
         with tempfile.TemporaryDirectory() as directory:

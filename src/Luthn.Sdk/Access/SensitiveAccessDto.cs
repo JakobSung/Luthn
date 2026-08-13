@@ -8,6 +8,15 @@ public sealed record SensitiveAccessCreateRequestDto(
     [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("expiresInSeconds")] int ExpiresInSeconds);
 
+public sealed record ProtectedInformationAccessRequestDto(
+    [property: JsonPropertyName("memoryItemId")] string MemoryItemId,
+    [property: JsonPropertyName("reason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
+
+public sealed record ProtectedInformationAccessResponseDto(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("requestId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestId = null);
+
 public sealed record SensitiveAccessDecisionRequestDto(
     [property: JsonPropertyName("reason")] string? Reason,
     [property: JsonPropertyName("redactedSummary")] string? RedactedSummary = null);

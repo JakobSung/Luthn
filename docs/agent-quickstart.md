@@ -176,6 +176,7 @@ create_shared_memory
 query_shared_memory
 submit_search_feedback
 get_shared_memory_item
+request_protected_information_access
 create_sensitive_access_request
 get_sensitive_access_request
 get_sensitive_access_result
@@ -183,10 +184,22 @@ get_sensitive_access_result
 
 Raw Vault dumps, unrestricted source reads, and private-record export tools are
 not part of the default agent surface. The connector provisions the
-`access.request` scope for the three metadata-only request tools above and the
+`access.request` scope for the four metadata-only request tools above and the
 `metrics.write` scope for bounded cache observations and explicit feedback, but MCP
 does not expose approval or denial. Private details require the separate trusted
 operator decision path.
+
+When the user asks for a specific detail missing from one relevant recalled
+safe item, including a detail that may have been protected or omitted, the
+managed Codex and Claude instructions tell the agent to use that safe item's ID
+with `request_protected_information_access`. Luthn resolves the
+related protected record inside the server-derived owner and workspace, then
+creates or reuses the existing bounded request. Before approval, this flow
+returns no protected value or derived sensitive output. The agent should explain
+only that confirmation is needed, that a request is ready for operator review,
+or that no current protected information could be matched. Internal type names,
+field names, reference IDs, tool names, and raw tool errors must not appear in
+the user-facing answer.
 
 `submit_search_feedback` accepts only a `retrievalId` returned by Luthn and a
 `helpful` or `unhelpful` judgment. It does not accept a query, result body, or

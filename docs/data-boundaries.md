@@ -279,6 +279,15 @@ operator surface, not an agent surface: it may contain an existing safe label,
 source metadata, and a redacted summary, but never raw Vault/source content,
 protected payloads, credentials, workspace identity, or owner identity.
 
+An agent may also start the same lifecycle from one safe recalled memory item.
+The resolve route accepts only that safe item ID plus an optional bounded,
+non-sensitive reason. The server derives owner and workspace from the caller,
+requires one current protected record linked to that item, and then delegates to
+the existing request creation and reuse rules. It does not return the protected
+record reference, raw content, inferred sensitive details, or an unrestricted
+candidate list. Missing and expired links fail with a human-readable no-output
+status. Creating the request never grants access or decision authority.
+
 An operator must inspect that detail and record an explicit approve or deny
 reason. Approval can retain a bounded `redactedSummary` only after the server
 reclassifies it as public and agent-safe. The result contract returns that

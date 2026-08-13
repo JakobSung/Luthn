@@ -425,7 +425,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("search_safe_context") -and [IO.File]::ReadAllText($codexInstructionsFile).Contains("could not verify the requested context")) "Codex instructions should define bounded recall fallback"
     $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
-    Assert-True ($connectorState.connectorVersion -ceq "4") "Windows connector state should record the managed template version"
+    Assert-True ($connectorState.connectorVersion -ceq "5") "Windows connector state should record the managed template version"
     Assert-True ($connectorState.helperDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the selected CLI digest"
     Assert-True ($connectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the managed template digest"
     Assert-True ($connectorState.hookInstalled -and $connectorState.autoRecall) "connector state should record default auto-recall"
@@ -576,7 +576,7 @@ esac
     $version = $versionResult.Output | ConvertFrom-Json
     Assert-True ($version.installedImageReference -ceq $resolvedOfficialImage) "version should report the immutable installed image reference"
     Assert-True ($version.updateChannel -ceq "ghcr.io/jakobsung/luthn:stable") "version should report the selected update channel"
-    Assert-True ($version.cliTemplateVersion -ceq "4" -and $version.connectorTemplateVersion -ceq "4") "version should report CLI and connector template versions"
+    Assert-True ($version.cliTemplateVersion -ceq "4" -and $version.connectorTemplateVersion -ceq "5") "version should report CLI and connector template versions"
     Assert-True ($version.mcpSchemaVersion -ceq "0.1.0") "version should fall back to the legacy MCP server version when the image label and schemaVersion field are absent"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($tokenFile))) "version JSON must not expose the service token"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($operatorTokenFile))) "version JSON must not expose the operator token"
@@ -942,7 +942,7 @@ esac
     Assert-True ($connectorUpdate.Output -match "Restart required: Luthn MCP compatibility changed") "connector template changes should require a Codex host restart"
     Assert-True ($connectorUpdate.Output -match "Agent notice: restart the current Codex host before invoking Luthn tools again\.") "connector template changes should emit the bounded agent notice"
     $reconciledConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
-    Assert-True ($reconciledConnectorState.connectorVersion -ceq "4") "successful update should record the current connector template version"
+    Assert-True ($reconciledConnectorState.connectorVersion -ceq "5") "successful update should record the current connector template version"
     Assert-True ($reconciledConnectorState.helperDigest -cmatch "^[0-9a-f]{64}$" -and $reconciledConnectorState.helperDigest -cne ("0" * 64)) "successful update should replace a same-version stale helper digest"
     Assert-True ($reconciledConnectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "successful update should record the current managed template digest"
     $reconciledHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
@@ -1050,7 +1050,7 @@ esac
     $legacyRollback = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:legacy")
     Assert-True ($legacyRollback.ExitCode -eq 0) "update should roll back to a pre-manifest Windows runtime: $($legacyRollback.Output)"
     $legacyConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
-    Assert-True ($legacyConnectorState.connectorVersion -ceq "4") "legacy rollback should retain version-only connector state"
+    Assert-True ($legacyConnectorState.connectorVersion -ceq "5") "legacy rollback should retain version-only connector state"
     Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "helperDigest")) "legacy rollback state should not require a helper digest"
     Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "templateDigest")) "legacy rollback state should not require a template digest"
 

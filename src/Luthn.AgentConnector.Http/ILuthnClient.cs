@@ -91,6 +91,11 @@ public interface ILuthnAgentClient
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access requests.");
 
+    Task<ProtectedInformationAccessResponseDto> RequestProtectedInformationAccessAsync(
+        ProtectedInformationAccessRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information confirmation requests.");
+
     Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default) =>
@@ -268,6 +273,16 @@ public interface ILuthnClient : ILuthnAgentClient
         SensitiveAccessCreateRequestDto request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access requests.");
+
+    Task<ProtectedInformationAccessResponseDto> ILuthnAgentClient.RequestProtectedInformationAccessAsync(
+        ProtectedInformationAccessRequestDto request,
+        CancellationToken cancellationToken) =>
+        RequestProtectedInformationAccessAsync(request, cancellationToken);
+
+    new Task<ProtectedInformationAccessResponseDto> RequestProtectedInformationAccessAsync(
+        ProtectedInformationAccessRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information confirmation requests.");
 
     Task<SensitiveAccessReadDto> ILuthnAgentClient.GetSensitiveAccessRequestAsync(
         string id,

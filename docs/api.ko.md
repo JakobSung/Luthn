@@ -366,6 +366,7 @@ GET  /api/access-requests?status=Pending&limit=25
 GET  /api/access-requests/policy
 PUT  /api/access-requests/policy
 POST /api/access-requests
+POST /api/access-requests/resolve
 GET  /api/access-requests/{id}
 GET  /api/access-requests/{id}/operator-detail
 GET  /api/access-requests/{id}/result
@@ -381,6 +382,22 @@ payload는 반환하지 않습니다. 요청자는 server가 정한 자기 owner
 metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관리할 수 있습니다.
 생성·조회에는 `access.request` scope가 필요합니다. MCP는 생성·상태·결과만 제공하며
 승인·거절 도구를 노출하지 않습니다.
+
+`POST /api/access-requests/resolve`는 공개 안전 memory 항목에서 기존 확인 요청
+lifecycle로 연결하는 에이전트 안전 경계입니다.
+
+```json
+{
+  "memoryItemId": "memory-item-...",
+  "reason": "사용자가 요청한 보호된 세부 정보를 확인합니다."
+}
+```
+
+선택적인 사유는 길이가 제한되며 사용자의 원문 질문이나 민감한 값을 포함하면 안 됩니다.
+server는 인증된 owner와 workspace 안에서만 관련 보호 정보를 해석하고, 사람이 이해할 수
+있는 `message`와 함께 `requested`, `not-found`, `expired` 중 하나를 반환합니다.
+`requestId`는 `requested`일 때만 포함하고 보호 정보 참조나 내용은 반환하지 않습니다.
+`requested`는 새 요청 생성뿐 아니라 기존 pending/active 요청의 안전한 재사용도 의미합니다.
 
 ### 권한과 정책 계약
 

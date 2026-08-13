@@ -94,6 +94,13 @@ public static class LuthnMcpToolRegistry
                 IntegerProperty("expiresInSeconds", "Bounded request lifetime in seconds.", 3_600, 60)
             ], ["sensitiveReferenceId", "reason", "sessionId", "expiresInSeconds"])),
         new(
+            "request_protected_information_access",
+            "Ask the owner to confirm access to protected information related to a safe memory item. This tool cannot approve or deny requests.",
+            ToolSchema([
+                StringProperty("memoryItemId", "The id of the single safe recalled memory item.", 128),
+                StringProperty("reason", "Optional bounded explanation of what the user wants to confirm.", 1_000)
+            ], ["memoryItemId"])),
+        new(
             "get_sensitive_access_request",
             "Read the metadata-only status of a sensitive-access request.",
             ToolSchema([StringProperty("id", "Sensitive access request id.")], ["id"])),
@@ -123,6 +130,7 @@ public static class LuthnMcpToolRegistry
             new SubmitSearchFeedbackTool(client),
             new GetSharedMemoryItemTool(client),
             new CreateSensitiveAccessRequestTool(client),
+            new RequestProtectedInformationAccessTool(client),
             new GetSensitiveAccessRequestTool(client),
             new GetSensitiveAccessResultTool(client)
         ];
@@ -149,12 +157,23 @@ public static class LuthnMcpToolRegistry
         return schema;
     }
 
-    private static KeyValuePair<string, object> StringProperty(string name, string description) =>
-        new(name, new Dictionary<string, object>
+    private static KeyValuePair<string, object> StringProperty(
+        string name,
+        string description,
+        int? maximumLength = null)
+    {
+        var schema = new Dictionary<string, object>
         {
             ["type"] = "string",
             ["description"] = description
-        });
+        };
+        if (maximumLength is not null)
+        {
+            schema["maxLength"] = maximumLength.Value;
+        }
+
+        return new(name, schema);
+    }
 
     private static KeyValuePair<string, object> BoundedStringProperty(
         string name,
