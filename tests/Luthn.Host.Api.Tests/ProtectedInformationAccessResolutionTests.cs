@@ -1,12 +1,59 @@
 using Luthn.Core.Classification;
+using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
+using Luthn.Core.Policy;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
 namespace Luthn.Host.Api.Tests;
 
 public sealed class ProtectedInformationAccessResolutionTests
 {
+    [Fact]
+    public async Task SharedMemoryWriteWithProtectedProjectionCreatesReviewableRequest()
+    {
+        await using var db = TestData.CreateDbContext();
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            new CreateMemoryItemRequest
+            {
+                Title = "홍길동 견적 메모",
+                SafeSummary = "홍길동 사원의 주소는 person@example.com이고 신규 견적을 발행했다.",
+                CoreTags = ["sales", "quote"],
+                Visibility = MemoryVisibility.SharedAcrossAgents
+            },
+            new AgentSafeMemoryProjectionSelector(
+                new LocalContextualContentClassifier(),
+                new DeterministicSensitiveDataDetector(),
+                new PolicyEngine()),
+            TestSensitiveMemoryProtection.Create(),
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result).Value!;
+        Assert.True(created.AllowsAgentContext);
+        Assert.Equal(SensitivityLevel.Public, created.Sensitivity);
+        var memoryItemId = created.Id;
+        var principal = new LuthnRequestPrincipal(
+            LuthnIdentityOptions.DefaultSingleOwnerUserId,
+            WorkspaceIds.Default,
+            LuthnActorKind.Agent,
+            "agent",
+            IsOperator: false);
+        var workflow = TestData.CreateWorkflow(db, new ManualTimeProvider(DateTimeOffset.UtcNow));
+
+        var resolution = await ResolveAsync(workflow, memoryItemId, principal);
+
+        Assert.Equal(ProtectedInformationAccessStatuses.Requested, resolution.Status);
+        Assert.NotNull(resolution.RequestId);
+        var reference = await db.SensitiveRecordReferences.SingleAsync();
+        Assert.Equal(memoryItemId, reference.MemoryItemId);
+        Assert.Equal(
+            reference.Id,
+            (await db.SensitiveAccessRequests.SingleAsync()).SensitiveRecordReferenceId);
+    }
+
     [Fact]
     public async Task SafeMemoryCorrelationCreatesAndReusesReviewableRequest()
     {
