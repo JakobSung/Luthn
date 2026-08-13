@@ -7,7 +7,7 @@ internal static class BoundedMonetaryAnalyzer
     private const int MaximumContextGap = 32;
 
     private const string NumericQuantity =
-        @"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:\s*(?:bn|k|m|b|천|만|억|조){1,2})?";
+        @"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:\s*(?:bn|k|m|b|십|백|천|만|억|조){1,2})?";
     private const string EnglishNumberWord =
         @"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)";
     private const string EnglishTextQuantity =
@@ -22,11 +22,11 @@ internal static class BoundedMonetaryAnalyzer
         $@"(?:{NumericQuantity}|{EnglishTextQuantity}|{AmbiguousKoreanTextQuantity})";
     private const string CurrencyCode = @"(?:USD|KRW|EUR|JPY|GBP|CNY|RMB)";
     private const string CurrencyName =
-        @"(?:원|달러|유로|엔|파운드|위안|dollars?|won|euros?|yen|pounds?|yuan|renminbi)";
+        @"(?:원|달러|유로|엔|파운드|위안|센트|cents?|dollars?|won|euros?|yen|pounds?|yuan|renminbi)";
     private const string CurrencySymbol = @"[$€£¥₩]";
 
     private static readonly Regex PrefixedCurrencyAmountPattern = CreatePattern(
-        $@"(?:(?<![A-Za-z0-9_]){CurrencySymbol}\s*{AnyQuantity}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_]){CurrencyCode}(?![A-Za-z_])\s+{AnyQuantity}(?![A-Za-z0-9_]))");
+        $@"(?:(?<![A-Za-z0-9_]){CurrencySymbol}\s*{AnyQuantity}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_]){CurrencyCode}(?![A-Za-z_])\s*{AnyQuantity}(?![A-Za-z0-9_]))");
     private static readonly Regex SuffixedCurrencyAmountPattern = CreatePattern(
         $@"(?<![A-Za-z0-9_]){AnyQuantity}\s*(?:{CurrencySymbol}|{CurrencyCode}|{CurrencyName})(?![A-Za-z_])");
     private static readonly Regex KoreanTextCurrencyAmountPattern = CreatePattern(
