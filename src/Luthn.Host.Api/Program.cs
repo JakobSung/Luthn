@@ -71,7 +71,8 @@ builder.Services.AddHttpClient(ConfiguredContentClassifier.HttpClientName, clien
 })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
-        AllowAutoRedirect = false
+        AllowAutoRedirect = false,
+        UseProxy = false
     });
 builder.Services.AddScoped<ConfiguredContentClassifier>();
 builder.Services.AddSingleton<DeterministicSensitiveDataDetector>();

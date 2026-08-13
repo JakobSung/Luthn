@@ -22,11 +22,11 @@ internal static class BoundedMonetaryAnalyzer
         $@"(?:{NumericQuantity}|{EnglishTextQuantity}|{AmbiguousKoreanTextQuantity})";
     private const string CurrencyCode = @"(?:USD|KRW|EUR|JPY|GBP|CNY|RMB)";
     private const string CurrencyName =
-        @"(?:원|달러|유로|엔|파운드|위안|dollars?|won|euros?|yen|pounds?|yuan|renminbi)";
+        @"(?:원|달러|유로|엔|파운드|위안|센트|dollars?|won|euros?|yen|pounds?|yuan|renminbi|cents?)";
     private const string CurrencySymbol = @"[$€£¥₩]";
 
     private static readonly Regex PrefixedCurrencyAmountPattern = CreatePattern(
-        $@"(?:(?<![A-Za-z0-9_]){CurrencySymbol}\s*{AnyQuantity}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_]){CurrencyCode}(?![A-Za-z_])\s+{AnyQuantity}(?![A-Za-z0-9_]))");
+        $@"(?:(?<![A-Za-z0-9_]){CurrencySymbol}\s*{AnyQuantity}(?![A-Za-z0-9_])|(?<![A-Za-z0-9_]){CurrencyCode}(?![A-Za-z_])(?:\s+|(?=\d)){AnyQuantity}(?![A-Za-z0-9_]))");
     private static readonly Regex SuffixedCurrencyAmountPattern = CreatePattern(
         $@"(?<![A-Za-z0-9_]){AnyQuantity}\s*(?:{CurrencySymbol}|{CurrencyCode}|{CurrencyName})(?![A-Za-z_])");
     private static readonly Regex KoreanTextCurrencyAmountPattern = CreatePattern(
@@ -53,7 +53,11 @@ internal static class BoundedMonetaryAnalyzer
         AddMatches(PrefixedCurrencyAmountPattern, content, sensitiveRanges);
         AddMatches(SuffixedCurrencyAmountPattern, content, sensitiveRanges);
         AddMatches(KoreanTextCurrencyAmountPattern, content, sensitiveRanges);
-        var exactAmountRanges = sensitiveRanges.ToArray();
+        var exactAmountRanges = sensitiveRanges
+            .OrderBy(range => range.Start)
+            .ThenBy(range => range.End)
+            .ToArray();
+        var exactAmountLookup = new MonetaryRangeLookup(exactAmountRanges);
 
         var strongContexts = Matches(StrongMonetaryContextPattern, content);
         var compositeContexts = Matches(CompositeMonetaryContextPattern, content);
@@ -65,15 +69,16 @@ internal static class BoundedMonetaryAnalyzer
             .ToArray();
         foreach (var context in weakContexts)
         {
-            if (exactAmountRanges.Any(amount => IsBoundedPair(content, context, amount)))
+            if (exactAmountLookup.HasBoundedMatch(content, context))
             {
                 sensitiveRanges.Add(context);
             }
         }
 
+        var weakContextLookup = new MonetaryRangeLookup(weakContexts);
         var ambiguous = Matches(AmbiguousQuantityPattern, content)
-            .Where(quantity => !IsCoveredBy(quantity, exactAmountRanges))
-            .Any(quantity => weakContexts.Any(context => IsBoundedPair(content, context, quantity)));
+            .Where(quantity => !exactAmountLookup.Covers(quantity))
+            .Any(quantity => weakContextLookup.HasBoundedMatch(content, quantity));
 
         return new BoundedMonetaryAnalysis(
             sensitiveRanges.Count > 0,
@@ -125,6 +130,106 @@ internal static class BoundedMonetaryAnalyzer
             pattern,
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
             TimeSpan.FromMilliseconds(100));
+
+    private sealed class MonetaryRangeLookup
+    {
+        private readonly MonetaryRange[] _byStart;
+        private readonly MonetaryRange[] _byEnd;
+        private readonly int[] _maximumEndByStartPrefix;
+
+        public MonetaryRangeLookup(IEnumerable<MonetaryRange> ranges)
+        {
+            _byStart = ranges
+                .OrderBy(range => range.Start)
+                .ThenBy(range => range.End)
+                .ToArray();
+            _byEnd = _byStart
+                .OrderBy(range => range.End)
+                .ThenBy(range => range.Start)
+                .ToArray();
+            _maximumEndByStartPrefix = new int[_byStart.Length];
+            var maximumEnd = 0;
+            for (var index = 0; index < _byStart.Length; index++)
+            {
+                maximumEnd = Math.Max(maximumEnd, _byStart[index].End);
+                _maximumEndByStartPrefix[index] = maximumEnd;
+            }
+        }
+
+        public bool Covers(MonetaryRange candidate)
+        {
+            var insertionIndex = LowerBoundByStart(candidate.Start + 1);
+            return insertionIndex > 0 &&
+                _maximumEndByStartPrefix[insertionIndex - 1] >= candidate.End;
+        }
+
+        public bool HasBoundedMatch(string content, MonetaryRange candidate)
+        {
+            var precedingIndex = LowerBoundByEnd(candidate.Start - MaximumContextGap);
+            for (var index = precedingIndex;
+                 index < _byEnd.Length && _byEnd[index].End <= candidate.Start;
+                 index++)
+            {
+                if (IsBoundedPair(content, candidate, _byEnd[index]))
+                {
+                    return true;
+                }
+            }
+
+            var followingIndex = LowerBoundByStart(candidate.End);
+            for (var index = followingIndex;
+                 index < _byStart.Length && _byStart[index].Start <= candidate.End + MaximumContextGap;
+                 index++)
+            {
+                if (IsBoundedPair(content, candidate, _byStart[index]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private int LowerBoundByStart(int value)
+        {
+            var low = 0;
+            var high = _byStart.Length;
+            while (low < high)
+            {
+                var middle = low + ((high - low) / 2);
+                if (_byStart[middle].Start < value)
+                {
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle;
+                }
+            }
+
+            return low;
+        }
+
+        private int LowerBoundByEnd(int value)
+        {
+            var low = 0;
+            var high = _byEnd.Length;
+            while (low < high)
+            {
+                var middle = low + ((high - low) / 2);
+                if (_byEnd[middle].End < value)
+                {
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle;
+                }
+            }
+
+            return low;
+        }
+    }
 }
 
 internal sealed record BoundedMonetaryAnalysis(

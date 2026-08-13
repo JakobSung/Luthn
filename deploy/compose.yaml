@@ -37,6 +37,7 @@ services:
       ASPNETCORE_ENVIRONMENT: ${LUTHN_ENVIRONMENT:-Production}
       ConnectionStrings__LuthnDb: *luthn-database
       Luthn__Classification__Provider: ${Luthn__Classification__Provider:-LocalDeterministic}
+      Luthn__Classification__LocalHttp__Endpoint: ${Luthn__Classification__LocalHttp__Endpoint:-}
       Luthn__Memory__AutomaticTurnRetentionDays: ${Luthn__Memory__AutomaticTurnRetentionDays:-30}
       Luthn__Memory__AutomaticTurnCleanupEnabled: ${Luthn__Memory__AutomaticTurnCleanupEnabled:-true}
       Luthn__Memory__AutomaticTurnCleanupIntervalMinutes: ${Luthn__Memory__AutomaticTurnCleanupIntervalMinutes:-60}
@@ -86,6 +87,8 @@ services:
       Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-config.write}
     ports:
       - "127.0.0.1:${LUTHN_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
       interval: 5s

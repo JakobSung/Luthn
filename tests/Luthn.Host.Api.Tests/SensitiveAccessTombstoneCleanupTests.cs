@@ -182,6 +182,12 @@ public sealed class SensitiveAccessTombstoneCleanupTests
         var listResponse = Assert.IsType<Ok<SensitiveAccessRequestsResponse>>(list.Result).Value!;
         Assert.Empty(listResponse.Requests);
         AssertContentFree(Assert.Single(listResponse.Tombstones));
+        Assert.Equal(1, await db.AuditEvents.CountAsync(audit =>
+            audit.Action == "sensitive_access.operator_detail_read" &&
+            audit.SubjectId == RequestId));
+        Assert.Equal(1, await db.AuditEvents.CountAsync(audit =>
+            audit.Action == "sensitive_access.result_read" &&
+            audit.SubjectId == RequestId));
         var workflow = new SensitiveAccessWorkflow(
             db,
             NullOperationalMetrics.Instance,

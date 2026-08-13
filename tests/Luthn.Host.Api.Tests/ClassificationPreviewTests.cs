@@ -116,6 +116,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
 
         var primaryHandler = Assert.IsType<HttpClientHandler>(handler);
         Assert.False(primaryHandler.AllowAutoRedirect);
+        Assert.False(primaryHandler.UseProxy);
     }
 
     [Fact]

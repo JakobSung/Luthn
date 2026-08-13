@@ -20,6 +20,9 @@ public sealed class DeterministicSensitiveDataDetectorTests
         { "견적금액은 1,000원입니다.", "finance", SensitivityLevel.Confidential },
         { "홍길동 사원의 연봉은 5,000만원입니다.", "finance", SensitivityLevel.Confidential },
         { "Annual salary is USD 12000.", "finance", SensitivityLevel.Confidential },
+        { "Revenue was KRW12000.", "finance", SensitivityLevel.Confidential },
+        { "Refund due: 50 cents.", "finance", SensitivityLevel.Confidential },
+        { "환불 예정액은 500센트입니다.", "finance", SensitivityLevel.Confidential },
         { "Revenue was $12000.", "finance", SensitivityLevel.Confidential },
         { "프로젝트 비용은 오천만원입니다.", "finance", SensitivityLevel.Confidential },
         { "The fee was twelve thousand dollars.", "finance", SensitivityLevel.Confidential },
@@ -119,6 +122,20 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.DoesNotContain("1,000원", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("금액", result.Text, StringComparison.Ordinal);
         Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+        Assert.Contains("finance", result.Categories);
+    }
+
+    [Theory]
+    [InlineData("Revenue was KRW12000", "KRW12000")]
+    [InlineData("Refund due: 50 cents", "50 cents")]
+    [InlineData("환불 예정액은 500센트입니다.", "500센트")]
+    public void RedactorRemovesCompactAndCentDenominatedAmounts(string content, string amount)
+    {
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.DoesNotContain(amount, result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("finance", result.Categories);
     }
 

@@ -161,6 +161,47 @@ public sealed class SensitiveAccessResolutionTests
 public sealed class SensitiveAccessLifecycleStatusTests
 {
     [Fact]
+    public async Task ReferenceExpiryPreservesDeniedStatus()
+    {
+        await using var db = TestData.CreateDbContext();
+        TestData.AddReference(db, expiresAt: TestData.ObservedAt.AddMinutes(1));
+        await db.SaveChangesAsync();
+        var time = new ManualTimeProvider(TestData.ObservedAt);
+        var workflow = TestData.CreateWorkflow(db, time);
+        var request = await workflow.CreateRequestAsync(
+            new SensitiveAccessRequestCreateRequest
+            {
+                SensitiveReferenceId = TestData.ReferenceId,
+                Reason = "deny before reference expiry",
+                SessionId = "denied-reference-expiry"
+            },
+            TestData.Principal,
+            "agent",
+            CancellationToken.None);
+        await workflow.DecideRequestAsync(
+            request!.Id,
+            new SensitiveAccessDecisionRequest { Reason = "denied" },
+            SensitiveAccessRequestStatus.Denied,
+            TestData.OperatorPrincipal,
+            "operator",
+            CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(2));
+
+        var status = await workflow.ReadRequestAsync(
+            request.Id,
+            TestData.Principal,
+            CancellationToken.None);
+        var result = await workflow.ReadRequestResultAsync(
+            request.Id,
+            TestData.Principal,
+            "agent",
+            CancellationToken.None);
+
+        Assert.Equal(SensitiveAccessStatusCodes.RequestDenied, status!.StatusCode);
+        Assert.Equal(SensitiveAccessStatusCodes.RequestDenied, result!.StatusCode);
+    }
+
+    [Fact]
     public async Task ReferenceExpiryInvalidatesPermitGrantAndResult()
     {
         await using var db = TestData.CreateDbContext();

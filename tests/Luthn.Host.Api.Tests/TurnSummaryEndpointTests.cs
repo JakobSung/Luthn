@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
@@ -544,6 +546,56 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
+    public async Task TurnSummaryRetryFindsLegacyPreOwnerScopedIdempotencyId()
+    {
+        const string idempotencyKey = "summary-legacy-retry";
+        var legacyId = CreateLegacyExplicitSummaryId("default", idempotencyKey);
+        using var factory = CreateFactory();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            db.SourceEvents.Add(new SourceEventRecord
+            {
+                Id = legacyId,
+                SourceSystem = "codex",
+                SourceType = "turn-summary",
+                ReceivedAt = DateTimeOffset.UtcNow,
+                ContentDigest = "sha256:legacy",
+                WorkspaceId = "default",
+                OwnerUserId = "local-owner"
+            });
+            db.ClassificationResults.Add(new ClassificationResultRecord
+            {
+                Id = $"classification-{legacyId}",
+                SourceEventId = legacyId,
+                Sensitivity = SensitivityLevel.Public,
+                Confidence = 1,
+                StorageDecision = StorageDecisionKind.WikiCandidate
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-legacy-retry",
+            turnId = "turn-legacy-retry",
+            sourceAgent = "codex",
+            summary = "Legacy public summary retry.",
+            coreTags = new[] { "legacy" },
+            idempotencyKey
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(body.RootElement.GetProperty("duplicate").GetBoolean());
+        Assert.Equal(legacyId, body.RootElement.GetProperty("summaryId").GetString());
+        using var verifyScope = factory.Services.CreateScope();
+        var verify = verifyScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(1, await verify.SourceEvents.CountAsync());
+    }
+
+    [Fact]
     public async Task ExpiredAutomaticTurnSummaryIsExcludedFromRecall()
     {
         using var factory = CreateFactory();
@@ -679,6 +731,15 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         }
 
         return count;
+    }
+
+    private static string CreateLegacyExplicitSummaryId(string workspaceId, string idempotencyKey)
+    {
+        var stableInput = string.Concat(
+            new[] { "explicit", workspaceId, idempotencyKey }
+                .Select(part => $"{part.Length}:{part}"));
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(stableInput));
+        return $"turn-summary-{Convert.ToHexString(digest).ToLowerInvariant()[..32]}";
     }
 
     private sealed class CapturingPublicClassifier : IContentClassifier

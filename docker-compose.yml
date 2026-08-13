@@ -7,6 +7,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__LuthnDb: ${LUTHN_DOCKER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=luthn;Username=luthn}
       Luthn__Classification__Provider: ${Luthn__Classification__Provider:-LocalDeterministic}
+      Luthn__Classification__LocalHttp__Endpoint: ${Luthn__Classification__LocalHttp__Endpoint:-}
       Luthn__Memory__AutomaticTurnRetentionDays: ${Luthn__Memory__AutomaticTurnRetentionDays:-30}
       Luthn__Memory__AutomaticTurnCleanupEnabled: ${Luthn__Memory__AutomaticTurnCleanupEnabled:-true}
       Luthn__Memory__AutomaticTurnCleanupIntervalMinutes: ${Luthn__Memory__AutomaticTurnCleanupIntervalMinutes:-60}
@@ -52,6 +53,8 @@ services:
       Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-config.write}
     ports:
       - "127.0.0.1:8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
