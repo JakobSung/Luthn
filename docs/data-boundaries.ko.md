@@ -221,6 +221,14 @@ provenance는 불변 수집 기원 기록입니다.
 있으며 원본 Vault/source, protected payload, credential, workspace·owner identity는
 포함하지 않습니다.
 
+에이전트는 안전하게 회상된 memory 항목 하나에서 같은 검토 lifecycle을 시작할 수도
+있습니다. 해석 route는 그 안전 항목 ID와 선택적인 짧은 비민감 사유만 받습니다.
+server는 호출자에게서 owner와 workspace를 정하고, 그 항목에 연결된 현재 유효한 보호
+정보가 하나일 때만 기존 요청 생성·재사용 규칙으로 넘깁니다. 보호 정보 참조 ID, 원문,
+추론된 민감 세부 내용, 무제한 후보 목록은 반환하지 않습니다. 연결 정보가 없거나
+만료되었으면 내용을 노출하지 않는 쉬운 상태 문구를 반환합니다. 요청 생성은 접근 승인이나
+결정 권한을 부여하지 않습니다.
+
 운영자는 상세를 확인한 뒤 명시적 승인·반려 사유를 기록해야 합니다. 승인은 server가
 다시 분류해 공개·agent-safe라고 확인한 제한된 `redactedSummary`만 보존할 수 있습니다.
 결과 계약은 검토된 summary 또는 pending·expired·denied·unavailable에 대한 명시적

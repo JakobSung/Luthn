@@ -42,6 +42,28 @@ public sealed class SdkContractTests
     }
 
     [Fact]
+    public void ProtectedInformationAccessContractIsAdditiveAndContentFree()
+    {
+        var request = JsonSerializer.Serialize(
+            new ProtectedInformationAccessRequestDto("memory-safe-1", "Confirm the earlier amount."));
+        var response = JsonSerializer.Serialize(
+            new ProtectedInformationAccessResponseDto(
+                "requested",
+                "A confirmation request is ready for the owner to review.",
+                "access-1"));
+
+        Assert.Equal(
+            """{"memoryItemId":"memory-safe-1","reason":"Confirm the earlier amount."}""",
+            request);
+        Assert.Equal(
+            """{"status":"requested","message":"A confirmation request is ready for the owner to review.","requestId":"access-1"}""",
+            response);
+        Assert.DoesNotContain("sensitiveReferenceId", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("redactedOutput", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("payload", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void SafeProjectionSyncEnvelopeUsesVersionedPublicSafeContract()
     {
         var envelope = new SafeProjectionSyncEnvelopeDto(

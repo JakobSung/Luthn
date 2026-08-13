@@ -581,6 +581,36 @@ public sealed class LuthnClientTests
     }
 
     [Fact]
+    public async Task RequestProtectedInformationAccessPostsSafeCorrelationOnly()
+    {
+        using var handler = new CapturingHandler("""
+            {
+              "status": "requested",
+              "message": "A confirmation request is ready for the owner to review.",
+              "requestId": "access-1"
+            }
+            """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
+        var client = new LuthnClient(http);
+
+        var response = await client.RequestProtectedInformationAccessAsync(
+            new ProtectedInformationAccessRequestDto(
+                "memory-safe-1",
+                "Confirm the earlier amount."));
+        var body = await handler.RequestContent!.ReadAsStringAsync();
+
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal("/api/access-requests/resolve", handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal(
+            """{"memoryItemId":"memory-safe-1","reason":"Confirm the earlier amount."}""",
+            body);
+        Assert.Equal("requested", response.Status);
+        Assert.Equal("access-1", response.RequestId);
+        Assert.DoesNotContain("sensitiveReferenceId", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("raw", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GetSensitiveAccessRequestReadsMetadataOnlyStatus()
     {
         using var handler = new CapturingHandler("""
@@ -682,6 +712,7 @@ public sealed class LuthnClientTests
         Assert.Contains("GetSharedMemoryItemAsync", methodNames);
         Assert.Contains("GetSensitiveAccessResultAsync", methodNames);
         Assert.Contains("CreateSensitiveAccessRequestAsync", methodNames);
+        Assert.Contains("RequestProtectedInformationAccessAsync", methodNames);
         Assert.Contains("GetSensitiveAccessRequestAsync", methodNames);
         Assert.Contains("ApproveSensitiveAccessRequestAsync", methodNames);
         Assert.Contains("DenySensitiveAccessRequestAsync", methodNames);

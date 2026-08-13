@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
 using Luthn.Core.Context;
@@ -163,23 +165,62 @@ public static class MemoryEndpoints
                     ? null
                     : request.SourceSessionId.Trim())
             : null;
+        SensitiveMemoryPayloadRecord? protectedPayload = null;
         if (projection.RetainsEncryptedOriginal && allowsAgentContext)
         {
-            db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.ProtectOriginalForSafeProjection(
+            protectedPayload = SensitiveMemoryPersistence.ProtectOriginalForSafeProjection(
                 record,
                 originalPayload!,
                 payloadProtector,
                 projectionSelector.SensitiveDataDetector,
-                createdAt));
+                createdAt);
         }
         else if (SensitiveMemoryPersistence.RequiresProtection(record))
         {
             var payload = originalPayload ?? SensitiveMemoryPersistence.FromRecord(record);
-            db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.Protect(
+            protectedPayload = SensitiveMemoryPersistence.Protect(
                 record,
                 payload,
                 payloadProtector,
-                createdAt));
+                createdAt);
+        }
+
+        if (protectedPayload is not null)
+        {
+            db.SensitiveMemoryPayloads.Add(protectedPayload);
+        }
+
+        if (protectedPayload is not null &&
+            allowsAgentContext &&
+            record.Sensitivity == SensitivityLevel.Public)
+        {
+            var sourceEventId = $"source-{memoryId}";
+            db.SourceEvents.Add(new SourceEventRecord
+            {
+                Id = sourceEventId,
+                SourceSystem = "shared-memory",
+                SourceType = "memory-item",
+                ReceivedAt = createdAt,
+                ContentDigest = ComputeSha256Digest($"{request.Title}\n{request.SafeSummary}"),
+                ContainsSensitiveMaterial = true,
+                WorkspaceId = principal.WorkspaceId,
+                OwnerUserId = principal.UserId
+            });
+            db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
+            {
+                Id = $"sensitive-{memoryId}",
+                SourceEventId = sourceEventId,
+                MemoryItemId = memoryId,
+                SourceSystem = "shared-memory",
+                SourceType = "memory-item",
+                ReceivedAt = createdAt,
+                ExpiresAt = record.ExpiresAt,
+                ContainsSensitiveMaterial = true,
+                ReferenceLabel = $"sensitive-memory-item:{memoryId}",
+                RedactedSummary = record.SafeSummary,
+                WorkspaceId = principal.WorkspaceId,
+                OwnerUserId = principal.UserId
+            });
         }
 
         db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
@@ -203,6 +244,9 @@ public static class MemoryEndpoints
 
         return TypedResults.Created($"/api/memory/items/{memoryId}", response);
     }
+
+    private static string ComputeSha256Digest(string content) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
 
     public static async Task<Results<Ok<MemoryItemResponse>, NotFound>> ReadMemoryItem(
         string id,

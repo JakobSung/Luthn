@@ -155,7 +155,7 @@ import subprocess
 import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "version":
-    print("4")
+    print("5")
     raise SystemExit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == "helper-digest":
@@ -344,6 +344,14 @@ grep -q 'Never send a raw workspace path' "$codex_home/AGENTS.md"
 grep -q 'at most once per user turn' "$codex_home/AGENTS.md"
 grep -q 'memory titles, content, IDs, queries, scores, sources' "$codex_home/AGENTS.md"
 grep -q 'normal assistant response or final response' "$codex_home/AGENTS.md"
+grep -q 'Protected information confirmation' "$codex_home/AGENTS.md"
+grep -q 'specific detail that is not present' "$codex_home/AGENTS.md"
+grep -q 'request_protected_information_access' "$codex_home/AGENTS.md"
+grep -q '\`memoryItemId\` set to that item' "$codex_home/AGENTS.md"
+grep -q '\`id\` and a short, non-sensitive reason' "$codex_home/AGENTS.md"
+grep -q "Never put the user's raw question" "$codex_home/AGENTS.md"
+grep -q 'type names, field names' "$codex_home/AGENTS.md"
+grep -q 'only a trusted operator can approve or deny it' "$codex_home/AGENTS.md"
 hook_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
 recall_hash="$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')"
 run_luthn connect codex >/dev/null
@@ -534,11 +542,11 @@ echo "[12/18] missing helper self-heals from the installed runtime revision"
 rm -f "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
 [[ -x "$tmp_root/connector-helper.py" ]]
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "5" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
 expected_helper_digest="$(awk -F= '$1 == "HELPER_DIGEST" { print $2 }' "$state_dir/connectors/codex.env")"
 printf '\n# same-version stale helper\n' >>"$tmp_root/connector-helper.py"
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "5" ]]
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" != "$expected_helper_digest" ]]
 run_luthn connect codex >/dev/null
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" == "$expected_helper_digest" ]]
@@ -555,7 +563,7 @@ raise SystemExit(1)
 EOF
 chmod 0700 "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "5" ]]
 cp "$tmp_root/connector-helper-fixture.py" "$tmp_root/connector-helper.py"
 run_luthn disconnect codex >/dev/null
 run_luthn connection status codex >/dev/null
@@ -819,7 +827,7 @@ EOF
   [[ "$reconcile_output" == *"Restart required: Luthn MCP compatibility changed"* ]]
   [[ "$reconcile_output" == *"Agent notice: restart the current Codex host before invoking Luthn tools again."* ]]
 )
-grep -q '^CONNECTOR_VERSION=4$' "$reconcile_state/connectors/codex.env"
+grep -q '^CONNECTOR_VERSION=5$' "$reconcile_state/connectors/codex.env"
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
 import sys
@@ -839,7 +847,7 @@ import sys
 path = sys.argv[1]
 content = open(path, encoding="utf-8").read()
 with open(path, "w", encoding="utf-8") as stream:
-    stream.write(content.replace("CONNECTOR_VERSION=4\n", "CONNECTOR_VERSION=1\n"))
+    stream.write(content.replace("CONNECTOR_VERSION=5\n", "CONNECTOR_VERSION=1\n"))
 PY
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
@@ -997,7 +1005,7 @@ EOF
     case "$2" in
       org.opencontainers.image.revision) printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
       org.opencontainers.image.version) printf '%s' main ;;
-      io.luthn.mcp-schema.version) printf '%s' 3 ;;
+      io.luthn.mcp-schema.version) printf '%s' 4 ;;
     esac
   }
   read_remote_image_metadata() {
@@ -1024,8 +1032,8 @@ assert set(version) == {
 }
 assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
 assert version["cliTemplateVersion"] == "4"
-assert version["connectorTemplateVersion"] == "4"
-assert version["mcpSchemaVersion"] == "3"
+assert version["connectorTemplateVersion"] == "5"
+assert version["mcpSchemaVersion"] == "4"
 assert update["status"] == "current"
 assert update["candidateRevision"] == "a" * 40
 assert available["status"] == "update-available"

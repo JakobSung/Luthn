@@ -677,6 +677,7 @@ GET /api/access-requests?status=Pending&limit=25
 GET /api/access-requests/policy
 PUT /api/access-requests/policy
 POST /api/access-requests
+POST /api/access-requests/resolve
 GET /api/access-requests/{id}
 GET /api/access-requests/{id}/operator-detail
 GET /api/access-requests/{id}/result
@@ -685,6 +686,24 @@ POST /api/access-requests/{id}/deny
 ```
 
 These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references, with an optional bounded redacted output after server reclassification. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and operator detail require `access.review`; approval and denial require the separate trusted `access.decide` scope. For existing clients, `access.decide` also implies review. An explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
+
+`POST /api/access-requests/resolve` is the agent-safe bridge from a public safe
+memory item to the existing request lifecycle. It accepts:
+
+```json
+{
+  "memoryItemId": "memory-item-...",
+  "reason": "Confirm a protected detail requested by the user."
+}
+```
+
+The optional reason is bounded and must not contain the raw question or any
+sensitive value. The server resolves only within the authenticated owner and
+workspace and returns `requested`, `not-found`, or `expired` with a
+human-readable `message`. `requestId` is present only for `requested`; no
+protected record reference or content is returned. A `requested` response may
+represent a newly created request or safe reuse of the existing pending/active
+request.
 
 ### Authorization and policy contract
 

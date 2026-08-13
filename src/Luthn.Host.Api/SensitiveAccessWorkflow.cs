@@ -35,6 +35,12 @@ internal interface ISensitiveAccessWorkflow
         string actor,
         CancellationToken cancellationToken);
 
+    Task<ProtectedInformationAccessResolution> ResolveProtectedInformationAccessAsync(
+        ProtectedInformationAccessRequest request,
+        LuthnRequestPrincipal principal,
+        string actor,
+        CancellationToken cancellationToken);
+
     Task<SensitiveAccessRequestState?> ReadRequestAsync(
         string id,
         LuthnRequestPrincipal principal,
@@ -235,6 +241,80 @@ internal sealed class SensitiveAccessWorkflow(
         => WithLifecycleGateAsync(
             () => CreateRequestCoreAsync(request, principal, actor, cancellationToken),
             cancellationToken);
+
+    public Task<ProtectedInformationAccessResolution> ResolveProtectedInformationAccessAsync(
+        ProtectedInformationAccessRequest request,
+        LuthnRequestPrincipal principal,
+        string actor,
+        CancellationToken cancellationToken) =>
+        WithLifecycleGateAsync(
+            () => ResolveProtectedInformationAccessCoreAsync(
+                request,
+                principal,
+                actor,
+                cancellationToken),
+            cancellationToken);
+
+    private async Task<ProtectedInformationAccessResolution> ResolveProtectedInformationAccessCoreAsync(
+        ProtectedInformationAccessRequest request,
+        LuthnRequestPrincipal principal,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var memoryItemId = request.MemoryItemId.Trim();
+        var observedAt = timeProvider.GetUtcNow();
+        var candidates = await db.SensitiveRecordReferences
+            .AsNoTracking()
+            .Where(reference =>
+                reference.MemoryItemId == memoryItemId &&
+                reference.WorkspaceId == principal.WorkspaceId &&
+                reference.OwnerUserId == principal.UserId &&
+                reference.ContainsSensitiveMaterial &&
+                reference.MemoryItem != null &&
+                reference.MemoryItem.WorkspaceId == principal.WorkspaceId &&
+                reference.MemoryItem.OwnerUserId == principal.UserId &&
+                reference.MemoryItem.AllowsAgentContext &&
+                reference.MemoryItem.Sensitivity == SensitivityLevel.Public)
+            .OrderByDescending(reference => reference.ReceivedAt)
+            .ThenBy(reference => reference.Id)
+            .Take(2)
+            .Select(reference => new ProtectedInformationReferenceCandidate(
+                reference.Id,
+                reference.ExpiresAt,
+                reference.MemoryItem!.ExpiresAt == reference.ExpiresAt &&
+                    db.SensitiveMemoryPayloads.Any(payload =>
+                        payload.MemoryItemId == memoryItemId &&
+                        payload.ExpiresAt == reference.ExpiresAt)))
+            .ToArrayAsync(cancellationToken);
+
+        if (candidates.Length != 1)
+        {
+            return ProtectedInformationAccessResolution.NotFound();
+        }
+
+        var candidate = candidates[0];
+        if (!candidate.HasAlignedProtectedPayload || candidate.ExpiresAt <= observedAt)
+        {
+            return ProtectedInformationAccessResolution.Expired();
+        }
+
+        var created = await CreateRequestCoreAsync(
+            new SensitiveAccessRequestCreateRequest
+            {
+                SensitiveReferenceId = candidate.SensitiveReferenceId,
+                Reason = string.IsNullOrWhiteSpace(request.Reason)
+                    ? ProtectedInformationAccessMessages.DefaultReason
+                    : request.Reason.Trim(),
+                SessionId = ""
+            },
+            principal,
+            actor,
+            cancellationToken);
+
+        return created is null
+            ? ProtectedInformationAccessResolution.Expired()
+            : ProtectedInformationAccessResolution.Requested(created.Id);
+    }
 
     private async Task<SensitiveAccessRequestState?> CreateRequestCoreAsync(
         SensitiveAccessRequestCreateRequest request,
@@ -1977,6 +2057,54 @@ internal sealed record SensitiveAccessRequestState(
     public DateTimeOffset? GrantExpiresAt { get; init; }
     public int? RemainingReads { get; init; }
     public int? MaxReads { get; init; }
+}
+
+internal sealed record ProtectedInformationReferenceCandidate(
+    string SensitiveReferenceId,
+    DateTimeOffset? ExpiresAt,
+    bool HasAlignedProtectedPayload);
+
+internal sealed record ProtectedInformationAccessResolution(
+    string Status,
+    string Message,
+    string? RequestId)
+{
+    internal static ProtectedInformationAccessResolution Requested(string requestId) =>
+        new(
+            ProtectedInformationAccessStatuses.Requested,
+            ProtectedInformationAccessMessages.Requested,
+            requestId);
+
+    internal static ProtectedInformationAccessResolution NotFound() =>
+        new(
+            ProtectedInformationAccessStatuses.NotFound,
+            ProtectedInformationAccessMessages.NotFound,
+            null);
+
+    internal static ProtectedInformationAccessResolution Expired() =>
+        new(
+            ProtectedInformationAccessStatuses.Expired,
+            ProtectedInformationAccessMessages.Expired,
+            null);
+}
+
+internal static class ProtectedInformationAccessStatuses
+{
+    internal const string Requested = "requested";
+    internal const string NotFound = "not-found";
+    internal const string Expired = "expired";
+}
+
+internal static class ProtectedInformationAccessMessages
+{
+    internal const string DefaultReason =
+        "Please confirm the protected information related to the user's question.";
+    internal const string Requested =
+        "A confirmation request is ready for the owner to review. Ask the owner to confirm it, then check again.";
+    internal const string NotFound =
+        "No related protected information was found. Please clarify which earlier information you mean and try again.";
+    internal const string Expired =
+        "The related protected information is no longer available, so a confirmation request cannot be created.";
 }
 
 internal sealed record SensitiveAccessOperatorDecisionState(

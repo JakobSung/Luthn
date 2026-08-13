@@ -32,6 +32,10 @@ public static class SensitiveAccessEndpoints
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("CreateSensitiveAccessRequest");
 
+        requests.MapPost("/resolve", ResolveProtectedInformationAccessEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessRequest)
+            .WithName("ResolveProtectedInformationAccess");
+
         requests.MapGet("/{id}", ReadRequestEndpoint)
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("ReadSensitiveAccessRequest");
@@ -85,6 +89,31 @@ public static class SensitiveAccessEndpoints
         HttpContext httpContext,
         CancellationToken cancellationToken) =>
         await CreateRequestCore(request, workflow, httpContext, cancellationToken);
+
+    private static async Task<Results<
+        Ok<ProtectedInformationAccessResponse>,
+        BadRequest<ProblemDetails>>> ResolveProtectedInformationAccessEndpoint(
+        ProtectedInformationAccessRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var validationError = ValidateProtectedInformationAccessRequest(request);
+        if (validationError is not null)
+        {
+            return TypedResults.BadRequest(validationError);
+        }
+
+        var resolution = await workflow.ResolveProtectedInformationAccessAsync(
+            request,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        return TypedResults.Ok(new ProtectedInformationAccessResponse(
+            resolution.Status,
+            resolution.Message,
+            resolution.RequestId));
+    }
 
     private static async Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestEndpoint(
         string id,
@@ -498,6 +527,29 @@ public static class SensitiveAccessEndpoints
         return null;
     }
 
+    private static ProblemDetails? ValidateProtectedInformationAccessRequest(
+        ProtectedInformationAccessRequest request)
+    {
+        const string title = "Invalid confirmation request.";
+        var memoryItemIdError = ApiValidation.ValidateRequiredText(
+            request.MemoryItemId,
+            "memoryItemId",
+            ApiValidation.PublicRecordIdMaxLength,
+            title);
+        if (memoryItemIdError is not null)
+        {
+            return memoryItemIdError;
+        }
+
+        return string.IsNullOrWhiteSpace(request.Reason)
+            ? null
+            : ApiValidation.ValidateRequiredText(
+                request.Reason,
+                "reason",
+                ApiValidation.ReasonMaxLength,
+                title);
+    }
+
     private static ProblemDetails CreateValidationProblem(string detail) =>
         ApiValidation.CreateProblem("Invalid sensitive access request.", detail);
 }
@@ -685,6 +737,17 @@ public sealed record SensitiveAccessRequestCreateRequest
     public string SessionId { get; init; } = "";
     public int? ExpiresInSeconds { get; init; }
 }
+
+public sealed record ProtectedInformationAccessRequest
+{
+    public string MemoryItemId { get; init; } = "";
+    public string? Reason { get; init; }
+}
+
+public sealed record ProtectedInformationAccessResponse(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("requestId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestId);
 
 public sealed record SensitiveAccessDecisionRequest
 {
