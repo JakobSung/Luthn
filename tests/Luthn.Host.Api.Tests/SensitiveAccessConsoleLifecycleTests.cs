@@ -23,10 +23,15 @@ public sealed class SensitiveAccessConsoleLifecycleTests
         Assert.Contains("data-access-field=\"statusCode\"", html, StringComparison.Ordinal);
         Assert.Contains("data-access-field=\"grantExpiresAt\"", html, StringComparison.Ordinal);
         Assert.Contains("data-access-field=\"readUsage\"", html, StringComparison.Ordinal);
+        Assert.Contains("<option value=\"Expired\">Expired</option>", html, StringComparison.Ordinal);
+        Assert.Contains("data-tombstone-hidden", html, StringComparison.Ordinal);
 
         Assert.Contains("/api/access-requests/policy", script, StringComparison.Ordinal);
         Assert.Contains("state.selectedAccessDetail?.statusCode === \"request-pending\"", script, StringComparison.Ordinal);
         Assert.Contains("detail.usedReads", script, StringComparison.Ordinal);
+        Assert.Contains("Expired · content removed", script, StringComparison.Ordinal);
+        Assert.Contains("element.hidden = isTombstone", script, StringComparison.Ordinal);
+        Assert.Contains("!(\"sensitiveReferenceId\" in (detail || {}))", script, StringComparison.Ordinal);
         Assert.Contains("requestTimeoutSeconds || 600) / 60", script, StringComparison.Ordinal);
         Assert.Contains("grantDurationSeconds || 600) / 60", script, StringComparison.Ordinal);
         Assert.Contains(

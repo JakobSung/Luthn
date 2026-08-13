@@ -289,7 +289,7 @@ public sealed class LuthnClient : ILuthnClient
         return await SendJsonAsync<SensitiveAccessRequestDto>(httpRequest, cancellationToken);
     }
 
-    public async Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+    public async Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default)
     {
@@ -299,10 +299,10 @@ public sealed class LuthnClient : ILuthnClient
         }
 
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/access-requests/{Uri.EscapeDataString(id)}");
-        return await SendJsonAsync<SensitiveAccessRequestDto>(request, cancellationToken);
+        return await SendSensitiveAccessReadAsync<SensitiveAccessRequestDto>(request, cancellationToken);
     }
 
-    public async Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
+    public async Task<SensitiveAccessReadDto> GetSensitiveAccessResultAsync(
         string id,
         CancellationToken cancellationToken = default)
     {
@@ -315,7 +315,7 @@ public sealed class LuthnClient : ILuthnClient
             HttpMethod.Get,
             $"/api/access-requests/{Uri.EscapeDataString(id)}/result");
 
-        return await SendJsonAsync<SensitiveAccessResultDto>(request, cancellationToken);
+        return await SendSensitiveAccessReadAsync<SensitiveAccessResultDto>(request, cancellationToken);
     }
 
     [Obsolete("Approval is an operator-only capability. Use the trusted access-decision API directly.")]
@@ -365,6 +365,31 @@ public sealed class LuthnClient : ILuthnClient
 
         var value = await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
         return value ?? throw new InvalidOperationException("Luthn API returned an empty response.");
+    }
+
+    private async Task<SensitiveAccessReadDto> SendSensitiveAccessReadAsync<TLive>(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+        where TLive : SensitiveAccessReadDto
+    {
+        _configureRequest?.Invoke(request);
+        using var response = await _http.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var document = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync(cancellationToken),
+            cancellationToken: cancellationToken);
+        var root = document.RootElement;
+        if (root.TryGetProperty("outputPolicy", out var outputPolicy) &&
+            outputPolicy.GetString() == "expired-no-output" &&
+            !root.TryGetProperty("sensitiveReferenceId", out _))
+        {
+            return root.Deserialize<SensitiveAccessTombstoneDto>(JsonOptions)
+                ?? throw new InvalidOperationException("Luthn API returned an empty tombstone response.");
+        }
+
+        return root.Deserialize<TLive>(JsonOptions)
+            ?? throw new InvalidOperationException("Luthn API returned an empty sensitive access response.");
     }
 
     private static HttpClient CreateHttpClient(LuthnClientOptions options)

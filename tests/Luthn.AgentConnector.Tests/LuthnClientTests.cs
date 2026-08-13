@@ -1,5 +1,6 @@
 using System.Net;
 using System.Reflection;
+using System.Text.Json;
 using Luthn.AgentConnector.Http;
 using Luthn.Sdk.Access;
 using Luthn.Sdk.Agent;
@@ -236,6 +237,7 @@ public sealed class LuthnClientTests
               "sourceEventId": "turn-summary-1",
               "classificationResultId": "classification-1",
               "memoryItemId": "memory-turn-summary-1",
+              "sensitiveReferenceId": "sensitive-turn-summary-1",
               "auditEventId": "audit-1",
               "allowsAgentContext": true,
               "duplicate": false,
@@ -272,6 +274,7 @@ public sealed class LuthnClientTests
         Assert.Contains("\"summary\"", body, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", body, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("turn-summary-1", response.SummaryId);
+        Assert.Equal("sensitive-turn-summary-1", response.SensitiveReferenceId);
         Assert.True(response.AllowsAgentContext);
         Assert.False(response.Duplicate);
     }
@@ -531,7 +534,8 @@ public sealed class LuthnClientTests
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
         var client = new LuthnClient(http);
 
-        var response = await client.GetSensitiveAccessResultAsync("access-1");
+        var response = Assert.IsType<SensitiveAccessResultDto>(
+            await client.GetSensitiveAccessResultAsync("access-1"));
 
         Assert.Equal(HttpMethod.Get, handler.Request!.Method);
         Assert.Equal("/api/access-requests/access-1/result", handler.Request.RequestUri!.AbsolutePath);
@@ -597,12 +601,37 @@ public sealed class LuthnClientTests
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
         var client = new LuthnClient(http);
 
-        var response = await client.GetSensitiveAccessRequestAsync("access-1");
+        var response = Assert.IsType<SensitiveAccessRequestDto>(
+            await client.GetSensitiveAccessRequestAsync("access-1"));
 
         Assert.Equal(HttpMethod.Get, handler.Request!.Method);
         Assert.Equal("/api/access-requests/access-1", handler.Request.RequestUri!.AbsolutePath);
         Assert.Equal("pending-approval", response.OutputPolicy);
         Assert.DoesNotContain("vault", handler.Request.RequestUri.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SensitiveAccessReadsReturnContentFreeTombstoneContract()
+    {
+        using var handler = new CapturingHandler("""
+            {
+              "id": "access-expired",
+              "status": "Expired",
+              "outputPolicy": "expired-no-output"
+            }
+            """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
+        var client = new LuthnClient(http);
+
+        var response = Assert.IsType<SensitiveAccessTombstoneDto>(
+            await client.GetSensitiveAccessRequestAsync("access-expired"));
+
+        Assert.Equal("Expired", response.Status);
+        Assert.Equal("expired-no-output", response.OutputPolicy);
+        var json = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain("sensitiveReferenceId", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("reason", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("summary", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -726,10 +755,10 @@ public sealed class LuthnClientTests
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        Task<SensitiveAccessResultDto> ILuthnClient.GetSensitiveAccessResultAsync(
+        Task<SensitiveAccessReadDto> ILuthnClient.GetSensitiveAccessResultAsync(
             string id,
             CancellationToken cancellationToken) =>
-            Task.FromResult(new SensitiveAccessResultDto(
+            Task.FromResult<SensitiveAccessReadDto>(new SensitiveAccessResultDto(
                 id,
                 "sensitive-ref-legacy",
                 "Approved",

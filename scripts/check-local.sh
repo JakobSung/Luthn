@@ -58,7 +58,7 @@ ready_status="$(curl -sS -o "$ready_body" -w '%{http_code}' "$base_url/readyz")"
 cat "$ready_body"
 if [[ "$ready_status" != "200" ]]; then
   if grep -q 'classification-provider' "$ready_body" &&
-    grep -Eq 'No classification provider is configured|The mock classification provider is disabled|Production classification requires an operator-configured non-mock provider' "$ready_body"; then
+    grep -q 'No supported local classification provider is configured' "$ready_body"; then
     classification_ready=false
     echo
     echo "warning: readiness is not_ready until an operator classification provider is configured."

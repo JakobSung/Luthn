@@ -3,6 +3,7 @@ using System;
 using Luthn.Core.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Luthn.Core.Persistence.Persistence.Migrations
 {
     [DbContext(typeof(LuthnDbContext))]
-    partial class LuthnDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260812142856_AddExpiringSensitiveTurnSummaryReferences")]
+    partial class AddExpiringSensitiveTurnSummaryReferences
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -860,47 +863,6 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                             t.HasCheckConstraint("CK_sensitive_access_requests_request_timeout", "\"RequestTimeoutSeconds\" BETWEEN 60 AND 3600");
 
                             t.HasCheckConstraint("CK_sensitive_access_requests_workspace_id", "\"WorkspaceId\" <> ''");
-                        });
-                });
-
-            modelBuilder.Entity("Luthn.Core.Persistence.SensitiveAccessTombstoneRecord", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTimeOffset>("CleanedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("ExpiredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("OwnerUserId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("WorkspaceId")
-                        .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("character varying(160)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("WorkspaceId", "OwnerUserId", "CleanedAt");
-
-                    b.ToTable("sensitive_access_tombstones", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_sensitive_access_tombstones_expired_status", "\"Status\" = 'Expired'");
-
-                            t.HasCheckConstraint("CK_sensitive_access_tombstones_owner_user_id", "\"OwnerUserId\" <> ''");
-
-                            t.HasCheckConstraint("CK_sensitive_access_tombstones_workspace_id", "\"WorkspaceId\" <> ''");
                         });
                 });
 

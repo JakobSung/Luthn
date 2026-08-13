@@ -134,7 +134,7 @@ public sealed class HubIngressWorkerTests
                 $"sustained decision {index}"));
         db.HubIngressQueue.AddRange(tenNormalUsers.Concat(fiftyUsers));
         await db.SaveChangesAsync();
-        var processor = CreateProcessor(db, protector, new MockContentClassifier(), new HubIngressOptions
+        var processor = CreateProcessor(db, protector, new LocalContextualContentClassifier(), new HubIngressOptions
         {
             WorkerBatchSize = 20,
             WorkerPerWorkspaceBatchLimit = 1
@@ -168,7 +168,7 @@ public sealed class HubIngressWorkerTests
             CreateRecord(protector, "a-2", "workspace-a", "second decision"),
             CreateRecord(protector, "b-1", "workspace-b", "other decision"));
         await db.SaveChangesAsync();
-        var processor = CreateProcessor(db, protector, new MockContentClassifier(), new HubIngressOptions
+        var processor = CreateProcessor(db, protector, new LocalContextualContentClassifier(), new HubIngressOptions
         {
             WorkerBatchSize = 2,
             WorkerPerWorkspaceBatchLimit = 1
@@ -202,7 +202,7 @@ public sealed class HubIngressWorkerTests
         record.LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
         db.HubIngressQueue.Add(record);
         await db.SaveChangesAsync();
-        var processor = CreateProcessor(db, protector, new MockContentClassifier(), new HubIngressOptions());
+        var processor = CreateProcessor(db, protector, new LocalContextualContentClassifier(), new HubIngressOptions());
 
         var result = await processor.ProcessBatchAsync();
 
@@ -245,7 +245,7 @@ public sealed class HubIngressWorkerTests
         Assert.Equal("Pending", replay.State);
         Assert.Equal(0, (await db.HubIngressQueue.SingleAsync()).AttemptCount);
 
-        var succeeding = CreateProcessor(db, protector, new MockContentClassifier(), options);
+        var succeeding = CreateProcessor(db, protector, new LocalContextualContentClassifier(), options);
         var completed = await succeeding.ProcessBatchAsync();
         Assert.Equal(1, completed.CompletedCount);
         Assert.Equal(HubIngressQueueState.Completed, (await db.HubIngressQueue.SingleAsync()).State);
@@ -261,7 +261,7 @@ public sealed class HubIngressWorkerTests
         record.ProtectionScheme = "unknown:v9";
         db.HubIngressQueue.Add(record);
         await db.SaveChangesAsync();
-        var processor = CreateProcessor(db, protector, new MockContentClassifier(), new HubIngressOptions());
+        var processor = CreateProcessor(db, protector, new LocalContextualContentClassifier(), new HubIngressOptions());
 
         var result = await processor.ProcessBatchAsync();
         var failed = await db.HubIngressQueue.SingleAsync();
@@ -352,7 +352,7 @@ public sealed class HubIngressWorkerTests
         {
             _started.TrySetResult();
             await _released.Task.WaitAsync(cancellationToken);
-            return await new MockContentClassifier().ClassifyAsync(
+            return await new LocalContextualContentClassifier().ClassifyAsync(
                 sourceId,
                 content,
                 sourceType,
@@ -376,7 +376,7 @@ public sealed class HubIngressWorkerTests
         {
             var index = Interlocked.Increment(ref _index) - 1;
             timeProvider.Advance(durations[index]);
-            return await new MockContentClassifier().ClassifyAsync(
+            return await new LocalContextualContentClassifier().ClassifyAsync(
                 sourceId,
                 content,
                 sourceType,

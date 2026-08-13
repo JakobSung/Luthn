@@ -76,4 +76,27 @@ public sealed class SensitiveAccessLifecycleContractTests
         Assert.Equal("metadata-only", result.PayloadClass);
         Assert.Contains("\"usedReads\":1", JsonSerializer.Serialize(result), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TombstoneContractStructurallyOmitsContentBearingProperties()
+    {
+        var tombstone = new SensitiveAccessTombstoneDto(
+            "access-expired",
+            "Expired",
+            "expired-no-output");
+
+        var properties = typeof(SensitiveAccessTombstoneDto)
+            .GetProperties()
+            .Select(property => property.Name)
+            .ToArray();
+        var json = JsonSerializer.Serialize(tombstone);
+
+        Assert.Equal(["Id", "Status", "OutputPolicy"], properties);
+        Assert.DoesNotContain("reference", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("reason", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("decision", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("summary", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("payload", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cipher", json, StringComparison.OrdinalIgnoreCase);
+    }
 }

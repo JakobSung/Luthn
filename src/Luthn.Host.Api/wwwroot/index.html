@@ -300,37 +300,20 @@
               Provider
               <select name="provider">
                 <option value="Unconfigured" disabled>Unconfigured — choose a provider</option>
-                <option value="Mock">Mock — local default</option>
-                <option value="OpenAi">ChatGPT API</option>
-                <option value="Anthropic">Claude API</option>
-                <option value="GoogleAi">Google AI API</option>
-                <option value="OpenRouter">OpenRouter API</option>
-                <option value="ExternalHttp">Self-hosted / external HTTP</option>
+                <option value="LocalDeterministic">LocalDeterministic — local default</option>
+                <option value="LocalHttp">LocalHttp — same-device endpoint</option>
               </select>
             </label>
             <label>
-              Model
-              <input name="model" placeholder="gpt-4.1-mini">
-            </label>
-            <label>
-              Endpoint
-              <input name="endpoint" placeholder="Provider default">
-            </label>
-            <label>
-              Auth header
-              <input name="authHeaderName" value="Authorization">
+              Same-device endpoint
+              <input name="endpoint" placeholder="http://127.0.0.1:11434/classify">
             </label>
           </div>
-          <div class="form-grid provider-grid">
-            <p class="field-help">
-              Provider credentials are loaded only from the server runtime secret
-              <code>Luthn__Classification__Credential</code>. They are never entered in this browser.
-            </p>
-            <label class="checkbox-row">
-              <input name="clearApiKey" type="checkbox">
-              Remove the saved server-side credential
-            </label>
-          </div>
+          <p class="field-help">
+            LocalHttp accepts only localhost, loopback IP addresses, or
+            <code>host.docker.internal</code>. Redirects and all other hosts are rejected.
+            LocalDeterministic never sends source content to another process.
+          </p>
           <div class="row-actions provider-actions">
             <button type="submit">Save provider</button>
             <span id="providerStatus" class="inline-status">Loading provider configuration.</span>
@@ -421,6 +404,7 @@
                 <option value="">All</option>
                 <option value="Approved">Approved</option>
                 <option value="Denied">Denied</option>
+                <option value="Expired">Expired</option>
               </select>
             </label>
             <label>
@@ -484,18 +468,18 @@
             <dl id="accessDetailFields" class="access-detail-fields">
               <div><dt>Request</dt><dd data-access-field="id">Not selected</dd></div>
               <div><dt>Status</dt><dd data-access-field="status">—</dd></div>
-              <div><dt>Lifecycle</dt><dd data-access-field="statusCode">—</dd></div>
-              <div><dt>Requested</dt><dd data-access-field="createdAt">—</dd></div>
-              <div><dt>Expires</dt><dd data-access-field="expiresAt">—</dd></div>
-              <div><dt>Grant expires</dt><dd data-access-field="grantExpiresAt">—</dd></div>
-              <div><dt>Reads used / remaining</dt><dd data-access-field="readUsage">—</dd></div>
-              <div><dt>Request reason</dt><dd data-access-field="requestReason">—</dd></div>
-              <div><dt>Decision reason</dt><dd data-access-field="decisionReason">—</dd></div>
-              <div><dt>Decision time</dt><dd data-access-field="decidedAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Lifecycle</dt><dd data-access-field="statusCode">—</dd></div>
+              <div data-tombstone-hidden><dt>Requested</dt><dd data-access-field="createdAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Expires</dt><dd data-access-field="expiresAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Grant expires</dt><dd data-access-field="grantExpiresAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Reads used / remaining</dt><dd data-access-field="readUsage">—</dd></div>
+              <div data-tombstone-hidden><dt>Request reason</dt><dd data-access-field="requestReason">—</dd></div>
+              <div data-tombstone-hidden><dt>Decision reason</dt><dd data-access-field="decisionReason">—</dd></div>
+              <div data-tombstone-hidden><dt>Decision time</dt><dd data-access-field="decidedAt">—</dd></div>
               <div><dt>Output policy</dt><dd data-access-field="outputPolicy">—</dd></div>
-              <div><dt>Reference</dt><dd data-access-field="referenceLabel">—</dd></div>
-              <div><dt>Reference source</dt><dd data-access-field="referenceSource">—</dd></div>
-              <div class="detail-summary"><dt>Redacted summary</dt><dd data-access-field="redactedSummary">—</dd></div>
+              <div data-tombstone-hidden><dt>Reference</dt><dd data-access-field="referenceLabel">—</dd></div>
+              <div data-tombstone-hidden><dt>Reference source</dt><dd data-access-field="referenceSource">—</dd></div>
+              <div class="detail-summary" data-tombstone-hidden><dt>Redacted summary</dt><dd data-access-field="redactedSummary">—</dd></div>
             </dl>
           </div>
           <form id="accessDecisionForm" class="access-decision-form">

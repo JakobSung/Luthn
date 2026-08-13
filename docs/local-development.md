@@ -152,7 +152,7 @@ curl http://localhost:8080/readyz
 It also reports first-run configuration checks for service tokens,
 classification provider readiness, and transport hardening. In production,
 readiness is not considered complete when no active service token is configured.
-The repository Compose defaults to the local `mock` provider.
+The repository Compose defaults to `LocalDeterministic`.
 
 The Docker stack also serves the operator console at `http://localhost:8080/`.
 
@@ -233,33 +233,17 @@ and make `/readyz` fail when no other active token is available.
 
 ## Classification provider configuration
 
-The operator console can configure the active classification provider at
-`/api/operator/classification-provider`. Self-host operators can select `Mock`,
-`ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, or `External
-HTTP`, enter non-secret provider settings, and run a provider test from the
-console. The browser never accepts provider credentials. Supply them to the
-server through the runtime secret `Luthn__Classification__Credential`; the
-console reports only whether a credential is present. Existing API clients may
-still use the additive `apiKey` request field for backward compatibility, but
-credentials are never returned by the API or rendered into the console.
+The operator console configures `LocalDeterministic` or optional `LocalHttp` at
+`/api/operator/classification-provider` and can run a provider test. Commercial
+providers, credentials, model names, and authentication headers are not
+supported. `LocalHttp` accepts only absolute HTTP(S) endpoints on `localhost`,
+IPv4 or IPv6 loopback, or `host.docker.internal`; redirects fail closed.
 
-Direct third-party LLM providers receive raw source content in the classification
-prompt before Luthn knows the content sensitivity. Configure `ChatGPT API`,
-`Claude API`, `Google AI API`, or `OpenRouter API` only when that provider
-transfer is acceptable for the deployment. Use `External HTTP` for a self-hosted
-or otherwise controlled classifier boundary. Direct third-party provider
-endpoints must be HTTPS URLs on the expected provider host before Luthn sends an
-API key header.
-
-The packaged and Compose runtime defaults to the local `mock` provider so a new
-installation works immediately. `mock` is a deterministic keyword classifier,
-not a provider-backed safety or multilingual classification system. Replace it
-with an operator-configured provider when that capability is required. A manual
-local override can set both values:
+The packaged and Compose runtime defaults to `LocalDeterministic`, so a new
+installation works immediately without a model process or network call:
 
 ```bash
-Luthn__Classification__Provider=mock
-Luthn__Classification__AllowMock=true
+Luthn__Classification__Provider=LocalDeterministic
 ```
 
 Provider HTTP calls use bounded runtime defaults so a stalled classifier does
@@ -288,7 +272,7 @@ next `pgvector` or DB-backed candidate-selection slice.
 
 ### Classification golden evaluation
 
-Run the versioned synthetic Korean-majority corpus against the local mock with
+Run the versioned synthetic Korean-majority corpus against `LocalDeterministic` with
 no network request:
 
 ```bash
@@ -302,53 +286,43 @@ dotnet run --project src/Luthn.Tools -- classification-eval \
   --output artifacts/classification-eval.json
 ```
 
-Exercise the local deterministic guard combined with the mock baseline, still
+Exercise the local deterministic guard combined with the local baseline, still
 without making a network request:
 
 ```bash
 dotnet run --project src/Luthn.Tools -- classification-eval \
-  --provider guarded-mock
+  --provider guarded-local
 ```
 
-To evaluate the API's currently configured classifier, start the API and opt in
-explicitly to the possible external transfer. Pass only an environment variable
-name for a protected API token; do not place the token value on the command
-line:
+To evaluate a same-device Host API, start it on an allowed local URL. Pass only
+an environment variable name for a protected API token; do not place the token
+value on the command line:
 
 ```bash
 export LUTHN_EVAL_TOKEN='<operator-provided-token>'
 dotnet run --project src/Luthn.Tools -- classification-eval \
-  --provider configured-api \
+  --provider local-http \
   --api-url http://127.0.0.1:5089 \
-  --allow-external-provider \
   --token-env LUTHN_EVAL_TOKEN
 ```
 
 The report intentionally omits corpus text and reports bounded case IDs,
 per-case classification/routing comparisons, and aggregate mismatch counts.
 
-The runtime combines every configured provider result with local secret/PII
-guard version `1`. `ExternalHttp` is the self-hosted-capable provider boundary;
-provider failures remain fail-closed and do not fall back to detector-only
-storage.
-
-External classification is opt-in and uses the `external-http` provider. When
-`Luthn__Classification__ExternalHttp__Endpoint` is configured, the API must not
-run the mock provider; set `Luthn__Classification__Provider=external-http`.
-The provider receives the source id, source type, content, payload class, and
-redaction state, and must return sensitivity, confidence, categories, and
-whether sensitive material was detected. `External HTTP` may use plain HTTP only
-for credential-free local or private-network smoke flows; if an API key is
-configured, the endpoint must be HTTPS.
+The runtime combines every `LocalHttp` result with local deterministic guard
+version `1`. Provider failures remain fail-closed and do not fall back to
+detector-only storage. The local endpoint receives source id, source type,
+content, payload class, and redaction state, and returns sensitivity,
+confidence, categories, and `containsSensitiveMaterial`.
 
 ```bash
-Luthn__Classification__Provider=external-http
-Luthn__Classification__ExternalHttp__Endpoint=https://provider.example/classify
-Luthn__Classification__ExternalHttp__CredentialEnvironmentVariable=LUTHN_PROVIDER_AUTH
-Luthn__Classification__ExternalHttp__AuthHeaderName=Authorization
+Luthn__Classification__Provider=LocalHttp
+Luthn__Classification__LocalHttp__Endpoint=http://host.docker.internal:11434/classify
 ```
 
-Only the environment variable name is configured in Luthn settings. The value itself must come from the operator environment or secret manager and must not be committed. If the credential environment variable name is omitted, the provider call is sent without an auth header, which keeps fake-provider tests and local smoke flows credential-free.
+Legacy commercial, `Mock`, `ExternalHttp`, and remote `LocalHttp` settings become
+`Unconfigured`; endpoint, model, authentication, and credential fields are
+cleared without decrypting or using secrets.
 
 Operator console settings are stored under `.luthn/operator` by default. Override
 that location with:

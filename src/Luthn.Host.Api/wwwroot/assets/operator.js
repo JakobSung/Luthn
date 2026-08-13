@@ -113,7 +113,7 @@ const renderSessionGuidance = () => {
   writeResult($("#providerOutput"), guidance);
   const providerForm = $("#providerForm");
   if (providerForm) {
-    providerForm.clearApiKey.checked = false;
+    providerForm.endpoint.value = "";
   }
   renderAccessRows([]);
   clearAccessDetail(guidance);
@@ -764,42 +764,16 @@ const changePublication = async (action) => {
 };
 
 const providerDefaults = {
-  Unconfigured: { model: "", endpoint: "", authHeaderName: "Authorization" },
-  Mock: { model: "", endpoint: "", authHeaderName: "Authorization" },
-  OpenAi: {
-    model: "gpt-4.1-mini",
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    authHeaderName: "Authorization"
-  },
-  Anthropic: {
-    model: "claude-sonnet-4-5",
-    endpoint: "https://api.anthropic.com/v1/messages",
-    authHeaderName: "x-api-key"
-  },
-  GoogleAi: {
-    model: "gemini-2.5-flash",
-    endpoint: "https://generativelanguage.googleapis.com/v1beta/models",
-    authHeaderName: "x-goog-api-key"
-  },
-  OpenRouter: {
-    model: "openai/gpt-4.1-mini",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    authHeaderName: "Authorization"
-  },
-  ExternalHttp: { model: "", endpoint: "", authHeaderName: "Authorization" }
+  Unconfigured: { endpoint: "" },
+  LocalDeterministic: { endpoint: "" },
+  LocalHttp: { endpoint: "http://127.0.0.1:11434/classify" }
 };
 
 const renderProviderSettings = (settings) => {
   const form = $("#providerForm");
-  const mockOption = form.provider.querySelector('option[value="Mock"]');
-  if (mockOption) {
-    mockOption.disabled = !settings.mockAllowed;
-  }
   form.provider.value = settings.provider;
-  form.model.value = settings.model || "";
   form.endpoint.value = settings.endpoint || "";
-  form.authHeaderName.value = settings.authHeaderName || "Authorization";
-  form.clearApiKey.checked = false;
+  form.endpoint.disabled = settings.provider !== "LocalHttp";
   $("#providerStatus").textContent = settings.statusDetail;
   writeResult($("#providerOutput"), settings);
 };
@@ -821,13 +795,8 @@ const refreshProviderSettings = async () => {
 const applyProviderDefaults = () => {
   const form = $("#providerForm");
   const defaults = providerDefaults[form.provider.value] || providerDefaults.Unconfigured;
-  if (!form.model.value.trim()) {
-    form.model.value = defaults.model;
-  }
-  if (!form.endpoint.value.trim()) {
-    form.endpoint.value = defaults.endpoint;
-  }
-  form.authHeaderName.value = defaults.authHeaderName;
+  form.endpoint.disabled = form.provider.value !== "LocalHttp";
+  form.endpoint.value = defaults.endpoint;
 };
 
 const saveProviderSettings = async (event) => {
@@ -835,10 +804,7 @@ const saveProviderSettings = async (event) => {
   const form = new FormData(event.currentTarget);
   const body = {
     provider: form.get("provider")?.toString(),
-    model: form.get("model")?.toString().trim(),
-    endpoint: form.get("endpoint")?.toString().trim(),
-    authHeaderName: form.get("authHeaderName")?.toString().trim(),
-    clearApiKey: form.get("clearApiKey") === "on"
+    endpoint: form.get("endpoint")?.toString().trim()
   };
 
   try {
@@ -1025,7 +991,9 @@ const refreshAccessRequests = async (event) => {
 
   try {
     const result = await requestJson(`/api/access-requests?${params}`);
-    const requests = Array.isArray(result.requests) ? result.requests : [];
+    const liveRequests = Array.isArray(result.requests) ? result.requests : [];
+    const tombstones = Array.isArray(result.tombstones) ? result.tombstones : [];
+    const requests = [...liveRequests, ...tombstones];
     renderAccessRows(requests);
     if (previousSelectedId && requests.some((request) => request.id === previousSelectedId)) {
       await loadAccessRequestDetail(previousSelectedId);
@@ -1166,13 +1134,19 @@ const setAccessDetailFields = (values = accessDetailDefaults) => {
 
 const updateAccessDecisionState = () => {
   const reason = $("#accessDecisionForm").reason.value.trim();
+  const isTombstone = Boolean(state.selectedAccessDetail?.isTombstone);
   const canDecide = !state.accessDecisionPending &&
+    !isTombstone &&
     state.selectedAccessDetail?.status === "Pending" &&
     state.selectedAccessDetail?.statusCode === "request-pending" &&
     Boolean(reason);
   $("#approveAccess").disabled = !canDecide;
   $("#denyAccess").disabled = !canDecide;
   $("#viewAccessAudit").disabled = !state.selectedAccessRequestId;
+  document.querySelectorAll("#accessDecisionForm label, #approveAccess, #denyAccess")
+    .forEach((element) => { element.hidden = isTombstone; });
+  document.querySelectorAll("[data-tombstone-hidden]")
+    .forEach((element) => { element.hidden = isTombstone; });
 };
 
 const clearAccessDetail = (message = "Select a request to review.") => {
@@ -1205,7 +1179,10 @@ const sanitizeAccessDetail = (detail) => ({
     boundedText(detail?.reference?.sourceSystem, 128, ""),
     boundedText(detail?.reference?.sourceType, 128, "")
   ].filter(Boolean).join(" / ") || "Unknown",
-  redactedSummary: boundedText(detail?.reference?.redactedSummary, 4000, "Not available")
+  redactedSummary: boundedText(detail?.reference?.redactedSummary, 4000, "Not available"),
+  isTombstone: detail?.status === "Expired" &&
+    detail?.outputPolicy === "expired-no-output" &&
+    !("sensitiveReferenceId" in (detail || {}))
 });
 
 const loadAccessRequestDetail = async (id) => {
@@ -1225,7 +1202,9 @@ const loadAccessRequestDetail = async (id) => {
     state.selectedAccessRequestId = id;
     state.selectedAccessDetail = safeDetail;
     setAccessDetailFields(safeDetail);
-    $("#accessDetailStatus").textContent = safeDetail.statusCode === "request-pending"
+    $("#accessDetailStatus").textContent = safeDetail.isTombstone
+      ? "Expired · content removed"
+      : safeDetail.statusCode === "request-pending"
       ? "Review metadata and enter a decision reason."
       : `Lifecycle: ${safeDetail.statusCode || safeDetail.status}`;
     document.querySelectorAll("#accessRows tr").forEach((row) => {
@@ -1257,9 +1236,9 @@ const renderAccessRows = (requests) => {
     const tr = document.createElement("tr");
     tr.dataset.requestId = request.id;
     [
-      new Date(request.createdAt).toLocaleString(),
+      request.createdAt ? new Date(request.createdAt).toLocaleString() : "Content removed",
       request.id,
-      request.sensitiveReferenceId,
+      request.sensitiveReferenceId || "Content removed",
       request.statusCode || request.status,
       request.maxReads == null
         ? request.outputPolicy || (request.redactedOutputAvailable ? "available" : "unavailable")

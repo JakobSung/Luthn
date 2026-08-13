@@ -140,12 +140,11 @@ public sealed class ConsoleSessionSecurityTests
 
         using var rejected = await client.PutAsJsonAsync("/api/operator/classification-provider", new
         {
-            provider = "Mock",
-            clearApiKey = true
+            provider = "LocalDeterministic"
         });
         using var allowedRequest = new HttpRequestMessage(HttpMethod.Put, "/api/operator/classification-provider")
         {
-            Content = JsonContent.Create(new { provider = "Mock", clearApiKey = true })
+            Content = JsonContent.Create(new { provider = "LocalDeterministic" })
         };
         allowedRequest.Headers.Add(ConsoleAccessOptions.AntiforgeryHeaderName, csrf);
         using var allowed = await client.SendAsync(allowedRequest);
@@ -185,7 +184,7 @@ public sealed class ConsoleSessionSecurityTests
         Assert.DoesNotContain("decisionToken", index, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("name=\"apiKey\"", index, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("form.get(\"apiKey\")", script, StringComparison.Ordinal);
-        Assert.Contains("Luthn__Classification__Credential", index, StringComparison.Ordinal);
+        Assert.DoesNotContain("Luthn__Classification__Credential", index, StringComparison.Ordinal);
         Assert.DoesNotContain("sessionStorage", script, StringComparison.Ordinal);
         Assert.DoesNotContain("localStorage", script, StringComparison.Ordinal);
         Assert.Contains("/api/operator/session/local", script, StringComparison.Ordinal);

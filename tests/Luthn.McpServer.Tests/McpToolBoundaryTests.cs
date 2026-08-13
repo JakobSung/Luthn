@@ -455,10 +455,21 @@ public sealed class McpToolBoundaryTests
         var created = await new CreateSensitiveAccessRequestTool(client).InvokeAsync(createArgs.RootElement);
         var status = await new GetSensitiveAccessRequestTool(client).InvokeAsync(idArgs.RootElement);
         var result = await new GetSensitiveAccessResultTool(client).InvokeAsync(idArgs.RootElement);
+        var tombstoneClient = new FakeLuthnClient { ReturnSensitiveAccessTombstone = true };
+        var expiredStatus = await new GetSensitiveAccessRequestTool(tombstoneClient)
+            .InvokeAsync(idArgs.RootElement);
+        var expiredResult = await new GetSensitiveAccessResultTool(tombstoneClient)
+            .InvokeAsync(idArgs.RootElement);
 
         Assert.IsType<SensitiveAccessRequestDto>(created);
         Assert.IsType<SensitiveAccessRequestDto>(status);
         Assert.IsType<SensitiveAccessResultDto>(result);
+        Assert.IsType<SensitiveAccessTombstoneDto>(expiredStatus);
+        Assert.IsType<SensitiveAccessTombstoneDto>(expiredResult);
+        var tombstoneJson = JsonSerializer.Serialize(expiredStatus);
+        Assert.DoesNotContain("reference", tombstoneJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("reason", tombstoneJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("summary", tombstoneJson, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("create_sensitive_access_request", LuthnMcpToolRegistry.AllowedToolNames);
         Assert.Contains("get_sensitive_access_request", LuthnMcpToolRegistry.AllowedToolNames);
         Assert.Contains("get_sensitive_access_result", LuthnMcpToolRegistry.AllowedToolNames);
@@ -603,6 +614,7 @@ public sealed class McpToolBoundaryTests
         public TimeSpan ContextPackDelay { get; init; }
         public Exception? ContextPackException { get; init; }
         public Exception? TelemetryException { get; init; }
+        public bool ReturnSensitiveAccessTombstone { get; init; }
 
         public async Task<ContextPackDto> GetContextPackAsync(
             IReadOnlyList<string> coreTags,
@@ -712,10 +724,12 @@ public sealed class McpToolBoundaryTests
                 [MemoryItem()]));
         }
 
-        public Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
+        public Task<SensitiveAccessReadDto> GetSensitiveAccessResultAsync(
             string id,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(new SensitiveAccessResultDto(
+            Task.FromResult<SensitiveAccessReadDto>(ReturnSensitiveAccessTombstone
+                ? new SensitiveAccessTombstoneDto(id, "Expired", "expired-no-output")
+                : new SensitiveAccessResultDto(
                 id,
                 "sensitive-ref-1",
                 "Approved",
@@ -744,12 +758,18 @@ public sealed class McpToolBoundaryTests
                 ExpiresAt = DateTimeOffset.UnixEpoch.AddMinutes(10)
             });
 
-        public Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+        public Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
             string id,
             CancellationToken cancellationToken = default)
         {
             SensitiveAccessStatusCallCount++;
-            return Task.FromResult(new SensitiveAccessRequestDto(
+            if (ReturnSensitiveAccessTombstone)
+            {
+                return Task.FromResult<SensitiveAccessReadDto>(
+                    new SensitiveAccessTombstoneDto(id, "Expired", "expired-no-output"));
+            }
+
+            return Task.FromResult<SensitiveAccessReadDto>(new SensitiveAccessRequestDto(
                 id,
                 "sensitive-ref-1",
                 "Pending",

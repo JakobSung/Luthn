@@ -60,7 +60,10 @@ The default API runtime also prunes eligible expired automatic turn capsules.
 Cleanup is enabled by default, runs every 60 minutes, and processes at most 100
 records per batch. It deletes only `Ephemeral` memory linked by immutable
 provenance to a `turn-summary` source event when the memory remains `LocalOnly`
-and has no safe-sync outbox history. The memory row, encrypted payload,
+and has no safe-sync outbox history or sensitive-record reference. Referenced
+turn summaries remain fail-closed after expiry until the dedicated sensitive
+access lifecycle cleanup processes them. For eligible unreferenced capsules,
+the memory row, encrypted payload,
 provenance, classification, and source event are removed in one transaction.
 Prior audit events remain and one metadata-only
 `turn_summary.retention.pruned` event records the cleanup. Configure the loop
@@ -102,6 +105,7 @@ Response:
   "sourceEventId": "turn-summary-...",
   "classificationResultId": "classification-turn-summary-...",
   "memoryItemId": "memory-turn-summary-...",
+  "sensitiveReferenceId": "sensitive-turn-summary-...",
   "auditEventId": "audit-...",
   "allowsAgentContext": true,
   "duplicate": false,
@@ -132,7 +136,10 @@ safe projection and may store it as `SharedAcrossAgents`. The response
 classification and storage decision describe the selected safe projection,
 while the source event remains marked as containing sensitive material and the
 original title, summary, metadata, and session identifier remain only in the
-owner-scoped encrypted payload. Incomplete, still-sensitive, or meaningless
+owner-scoped encrypted payload. Every encrypted turn summary also receives one
+idempotent `sensitiveReferenceId` linked to the parent memory item. The
+reference and encrypted payload share the memory expiry; retries return the
+same reference without duplicate rows. Incomplete, still-sensitive, or meaningless
 redactions keep the whole turn summary behind the private inert boundary.
 
 ## Agent connection observations
@@ -319,37 +326,33 @@ POST /api/operator/classification-provider/test
 
 These operator-only endpoints read, save, and test the active classification
 provider configuration. All three require the `config.write` service-token
-scope. Supported provider values are `Mock`, `ExternalHttp`, `OpenAi`,
-`Anthropic`, `GoogleAi`, and `OpenRouter`.
-
-The browser console never accepts a raw provider credential. Configure
-`Luthn__Classification__Credential` in the server runtime secret environment;
-the console sends only non-secret provider settings and the clear-credential
-choice. The optional `apiKey` request member remains accepted for existing API
-clients, but it is never included in a response.
+scope. Supported provider values are `LocalDeterministic` and `LocalHttp`;
+`Unconfigured` is the fail-closed system state. `LocalHttp` accepts only
+`localhost`, loopback IP addresses, or `host.docker.internal`, and does not
+accept model, credential, or authentication settings.
 
 Save request:
 
 ```json
 {
-  "provider": "ExternalHttp",
-  "model": "",
-  "endpoint": "https://provider.example/classify",
-  "authHeaderName": "Authorization",
-  "apiKey": "operator-supplied-secret",
-  "clearApiKey": false
+  "provider": "LocalHttp",
+  "endpoint": "http://host.docker.internal:11434/classify"
 }
 ```
 
-Responses include `provider`, `model`, `endpoint`, `authHeaderName`,
-`payloadClass`, `redactionState`, `hasApiKey`, `providerBoundary`,
+Responses include `provider`, cleared compatibility fields `model` and
+`authHeaderName`, `endpoint`, `payloadClass`, `redactionState`, `providerBoundary`,
 `localSensitiveDataGuardActive`, and `localSensitiveDataGuardVersion`. They
-never return the API key or detector matches. `ExternalHttp` reports the
-`self-hosted-capable-external-http` boundary.
+never return credentials or detector matches. `LocalHttp` reports the
+`same-device-local-http` boundary and rejects redirects.
 The test endpoint accepts optional `content` and `sourceType`, runs the current
 provider and policy engine, and returns the safe configuration view,
 classification, and storage decision. Save and test operations write
 metadata-only audit events.
+
+Legacy commercial, `Mock`, `ExternalHttp`, and remote `LocalHttp` stored or
+runtime settings are represented as `Unconfigured`; endpoint, model,
+authentication, and credential values are cleared without secret use.
 
 ## Operational metrics export
 
@@ -871,7 +874,7 @@ Response shape includes request/decision metadata only:
 }
 ```
 
-Approving or denying records decision metadata and audit events. Approval does not create a raw content read path. An approval request may include `redactedSummary`; the server enforces the 4000-character storage limit, reclassifies it, and stores it only when it is public agent-safe. Rejected approval summaries create metadata-only audit events. Approved result delivery is limited to the reviewed summary stored by the approval decision.
+Approving or denying records decision metadata and audit events. Approval does not create a raw content read path. An approval request may include `redactedSummary`; the server enforces the 4000-character storage limit, reclassifies it, and stores it only when it is public agent-safe. For a turn-summary reference, omitting this field revalidates and uses the reference's stored public-safe projection when one exists. Rejected approval summaries create metadata-only audit events. Approved result delivery is limited to that server-validated summary. Reference expiry is rechecked during request creation, decision, permit/grant use, and result reads; expiry always produces no output.
 
 Approval request with reviewed output:
 
@@ -907,6 +910,32 @@ Result response:
 ```
 
 `GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Request and grant durations are independently bounded to 60–3600 seconds by server policy. Expiry records metadata-only audit, and result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy without copying the result content.
+
+When an expiring sensitive turn-summary reference reaches retention cleanup, the
+encrypted payload, live reference, linked memory/source graph, request, decision,
+and grant are removed atomically. Status, operator-detail, result, and `Expired`
+list reads then return the same content-free tombstone shape:
+
+```json
+{
+  "id": "access-...",
+  "status": "Expired",
+  "outputPolicy": "expired-no-output"
+}
+```
+
+The tombstone has no reference, actor/session, reason, decision, summary,
+payload, ciphertext, or result properties. Existing audit history remains
+immutable; cleanup adds one deterministic metadata-only
+`sensitive_access.content_pruned` event per removed request. The operator console
+hides all content and decision controls for tombstones while retaining the
+metadata-only audit link. Cleanup remains unavailable to agents and operators as
+an API mutation. SDK/connector status and result reads return the
+`SensitiveAccessReadDto` live-or-tombstone contract, and MCP forwards the actual
+content-free tombstone type without adding decision tools.
+List responses keep live entries in `requests` and expose removed entries in a
+separate strongly typed `tombstones` array so existing request consumers remain
+compatible.
 
 ## Cloud-neutral synchronization contracts
 

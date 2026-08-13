@@ -14,10 +14,10 @@ public sealed class ClassificationEvaluationCommandTests
     };
 
     [Fact]
-    public async Task DefaultMockProducesKnownBaselineWithoutRawCorpusText()
+    public async Task DefaultLocalDeterministicProducesKnownBaselineWithoutRawCorpusText()
     {
         var command = new ClassificationEvaluationCommand(
-            (_, _) => throw new InvalidOperationException("The default mock path must not create an API client."),
+            (_, _) => throw new InvalidOperationException("The default local path must not create an API client."),
             _ => null);
         using var output = new StringWriter();
         using var error = new StringWriter();
@@ -27,7 +27,7 @@ public sealed class ClassificationEvaluationCommandTests
         Assert.Equal(0, exitCode);
         Assert.Empty(error.ToString());
         var report = DeserializeReport(output.ToString());
-        Assert.Equal("mock", report.Provider);
+        Assert.Equal("local-deterministic", report.Provider);
         Assert.Equal(26, report.Summary.TotalCount);
         Assert.Equal(20, report.Summary.PassedCount);
         Assert.Equal(5, report.Summary.FalseNegativeCount);
@@ -43,20 +43,20 @@ public sealed class ClassificationEvaluationCommandTests
     }
 
     [Fact]
-    public async Task GuardedMockExercisesHybridRoutingLocallyWithoutRawValues()
+    public async Task GuardedLocalExercisesHybridRoutingLocallyWithoutRawValues()
     {
         var command = new ClassificationEvaluationCommand(
-            (_, _) => throw new InvalidOperationException("The guarded mock path must not create an API client."),
+            (_, _) => throw new InvalidOperationException("The guarded local path must not create an API client."),
             _ => null);
         using var output = new StringWriter();
         using var error = new StringWriter();
 
-        var exitCode = await command.ExecuteAsync(["--provider", "guarded-mock"], output, error);
+        var exitCode = await command.ExecuteAsync(["--provider", "guarded-local"], output, error);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(error.ToString());
         var report = DeserializeReport(output.ToString());
-        Assert.Equal("guarded-mock", report.Provider);
+        Assert.Equal("guarded-local", report.Provider);
         Assert.Equal(26, report.Summary.TotalCount);
         Assert.Equal(24, report.Summary.PassedCount);
         Assert.All(
@@ -74,7 +74,7 @@ public sealed class ClassificationEvaluationCommandTests
         try
         {
             var command = new ClassificationEvaluationCommand(
-                (_, _) => throw new InvalidOperationException("The mock path must not create an API client."),
+                (_, _) => throw new InvalidOperationException("The local path must not create an API client."),
                 _ => null);
             using var output = new StringWriter();
             using var error = new StringWriter();
@@ -94,7 +94,7 @@ public sealed class ClassificationEvaluationCommandTests
     }
 
     [Fact]
-    public async Task ConfiguredApiRequiresExplicitExternalProviderOptIn()
+    public async Task LocalHttpRejectsRemoteApiUrlBeforeCreatingClient()
     {
         var factoryCalled = false;
         var command = new ClassificationEvaluationCommand(
@@ -110,19 +110,19 @@ public sealed class ClassificationEvaluationCommandTests
         var exitCode = await command.ExecuteAsync(
             [
                 "--dataset", DatasetPath,
-                "--provider", "configured-api",
-                "--api-url", "http://127.0.0.1:5089"
+                "--provider", "local-http",
+                "--api-url", "https://provider.example"
             ],
             output,
             error);
 
         Assert.Equal(2, exitCode);
         Assert.False(factoryCalled);
-        Assert.Contains("requires --allow-external-provider", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("must use HTTP or HTTPS on localhost", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ConfiguredApiMapsPerfectResponsesAndNeverPrintsToken()
+    public async Task LocalHttpMapsPerfectResponsesAndNeverPrintsToken()
     {
         const string tokenName = "LUTHN_EVAL_TEST_TOKEN";
         const string tokenValue = "do-not-print-this-token";
@@ -144,9 +144,8 @@ public sealed class ClassificationEvaluationCommandTests
         var exitCode = await command.ExecuteAsync(
             [
                 "--dataset", DatasetPath,
-                "--provider", "configured-api",
+                "--provider", "local-http",
                 "--api-url", "http://127.0.0.1:5089",
-                "--allow-external-provider",
                 "--token-env", tokenName
             ],
             output,
@@ -158,14 +157,14 @@ public sealed class ClassificationEvaluationCommandTests
         Assert.Equal(tokenValue, capturedToken);
         Assert.Equal(26, client.CallCount);
         var report = DeserializeReport(output.ToString());
-        Assert.Equal("configured-api", report.Provider);
+        Assert.Equal("local-http", report.Provider);
         Assert.Equal(26, report.Summary.PassedCount);
         Assert.DoesNotContain(tokenValue, output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(tokenValue, error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ConfiguredApiRejectsResponseForAnotherSourceId()
+    public async Task LocalHttpRejectsResponseForAnotherSourceId()
     {
         var dataset = await LoadDatasetAsync();
         var client = new PerfectPreviewClient(dataset, "golden-another-case");
@@ -176,9 +175,8 @@ public sealed class ClassificationEvaluationCommandTests
         var exitCode = await command.ExecuteAsync(
             [
                 "--dataset", DatasetPath,
-                "--provider", "configured-api",
-                "--api-url", "http://127.0.0.1:5089",
-                "--allow-external-provider"
+                "--provider", "local-http",
+                "--api-url", "http://127.0.0.1:5089"
             ],
             output,
             error);

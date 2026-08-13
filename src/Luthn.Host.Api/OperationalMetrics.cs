@@ -120,7 +120,11 @@ public sealed class OperationalMetrics : IOperationalMetrics
             .Select(pair => new SearchFeedbackMetricSnapshot(pair.Key, pair.Value))
             .ToArray());
 
-    private static string BoundProvider(string provider) => provider switch { "ExternalHttp" or "OpenAi" or "OpenRouter" or "Anthropic" or "GoogleAi" => provider, _ => "other" };
+    private static string BoundProvider(string provider) => provider switch
+    {
+        "LocalDeterministic" or "LocalHttp" or "Unconfigured" => provider,
+        _ => "other"
+    };
     private static string BoundProviderOutcome(string outcome) => outcome switch { "succeeded" or "http_failure" or "timeout" or "http_exception" or "retry" or "canceled" => outcome, _ => "other" };
     private static string BoundAccessOutcome(string outcome) => outcome switch { "approved" or "denied" => outcome, _ => "other" };
     private static string BoundAccessLifecycleEvent(string eventName) => eventName switch

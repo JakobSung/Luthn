@@ -21,10 +21,6 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var operatorConfigDirectory = builder.Configuration["Luthn:OperatorConfig:Directory"] ?? ".luthn/operator";
-var classificationOptions = builder.Configuration
-    .GetSection("Luthn:Classification")
-    .Get<ClassificationProviderOptions>() ?? new ClassificationProviderOptions();
-classificationOptions.ResolveProvider();
 var hostOptions = builder.Configuration
     .GetSection("Luthn:Host")
     .Get<LuthnHostOperationalOptions>() ?? new LuthnHostOperationalOptions();
@@ -69,10 +65,14 @@ builder.Services.AddOptions<AuditRetentionOptions>()
 builder.Services.AddScoped<IAuditRetentionCleanupProcessor, AuditRetentionCleanupProcessor>();
 builder.Services.AddHostedService<AuditRetentionCleanupHostedService>();
 builder.Services.Configure<ClassificationProviderRuntimeOptions>(builder.Configuration.GetSection("Luthn:Classification:Runtime"));
-builder.Services.AddHttpClient(nameof(ConfiguredContentClassifier), client =>
+builder.Services.AddHttpClient(ConfiguredContentClassifier.HttpClientName, client =>
 {
     client.Timeout = Timeout.InfiniteTimeSpan;
-});
+})
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false
+    });
 builder.Services.AddScoped<ConfiguredContentClassifier>();
 builder.Services.AddSingleton<DeterministicSensitiveDataDetector>();
 builder.Services.AddScoped<IContentClassifier>(provider =>

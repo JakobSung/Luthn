@@ -25,14 +25,26 @@ public sealed class ClassificationContractTests
         { "source-sensitive-boolean", 0.8, [], true, SensitivityLevel.Confidential }
     };
 
+    public static TheoryData<string> LocalMonetaryNearMisses => new()
+    {
+        { "USD" },
+        { "$" },
+        { "const USDValue = 12000;" },
+        { "echo $HOME" },
+        { "홍길동 조원이 업무를 진행했다." },
+        { "가격 계산 로직을 개선했다." },
+        { "The budget includes 5 sections." },
+        { "The price calculation handled 5 cases." }
+    };
+
     [Theory]
     [MemberData(nameof(KoreanFirstGoldenCases))]
-    public async Task MockClassifierMatchesBoundedKoreanEnglishAndMixedGoldenCases(
+    public async Task LocalClassifierMatchesBoundedKoreanEnglishAndMixedGoldenCases(
         string content,
         SensitivityLevel expectedSensitivity,
         string expectedCategory)
     {
-        var result = await new MockContentClassifier().ClassifyAsync(
+        var result = await new LocalContextualContentClassifier().ClassifyAsync(
             new PublicRecordId("golden-case"),
             content,
             "note");
@@ -90,9 +102,9 @@ public sealed class ClassificationContractTests
     [InlineData("Internal runbook steps.")]
     [InlineData("Internal implementation details.")]
     [InlineData("Internal architecture decision.")]
-    public async Task MockClassifierPreservesOperationalKnowledgeAsInternal(string content)
+    public async Task LocalClassifierPreservesOperationalKnowledgeAsInternal(string content)
     {
-        var result = await new MockContentClassifier().ClassifyAsync(
+        var result = await new LocalContextualContentClassifier().ClassifyAsync(
             new PublicRecordId("operational-note"),
             content,
             "note");
@@ -100,6 +112,31 @@ public sealed class ClassificationContractTests
         Assert.Equal(SensitivityLevel.Internal, result.Sensitivity);
         Assert.False(result.ContainsSensitiveMaterial);
         Assert.False(new PolicyEngine().Decide(result).AllowsAgentContext);
+    }
+
+    [Fact]
+    public void LocalClassifierDeclaresLocalOnlyBoundary()
+    {
+        var boundary = new LocalContextualContentClassifier().Boundary;
+
+        Assert.Equal("LocalDeterministic", boundary.ProviderName);
+        Assert.Equal("local-classification-input", boundary.PayloadClass);
+        Assert.Equal("local-only", boundary.RedactionState);
+    }
+
+    [Theory]
+    [MemberData(nameof(LocalMonetaryNearMisses))]
+    public async Task LocalClassifierLeavesOrdinaryMonetaryNearMissesPublic(string content)
+    {
+        var result = await new LocalContextualContentClassifier().ClassifyAsync(
+            new PublicRecordId("monetary-near-miss"),
+            content,
+            "note");
+
+        Assert.Equal(SensitivityLevel.Public, result.Sensitivity);
+        Assert.Empty(result.Categories);
+        Assert.False(result.ContainsSensitiveMaterial);
+        Assert.Equal(StorageDecisionKind.WikiCandidate, new PolicyEngine().Decide(result).Kind);
     }
 
     [Fact]
