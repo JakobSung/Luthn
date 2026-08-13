@@ -119,7 +119,7 @@ public sealed class ClassificationContractTests
     {
         var boundary = new LocalContextualContentClassifier().Boundary;
 
-        Assert.Equal("local-contextual", boundary.ProviderName);
+        Assert.Equal("LocalDeterministic", boundary.ProviderName);
         Assert.Equal("local-classification-input", boundary.PayloadClass);
         Assert.Equal("local-only", boundary.RedactionState);
     }
