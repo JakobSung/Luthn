@@ -7,7 +7,7 @@ internal static class BoundedMonetaryAnalyzer
     private const int MaximumContextGap = 32;
 
     private const string NumericQuantity =
-        @"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:\s*(?:bn|k|m|b|천|만|억|조){1,2})?";
+        @"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:\s*(?:bn|k|m|b|십|백|천|만|억|조){1,2})?";
     private const string EnglishNumberWord =
         @"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)";
     private const string EnglishTextQuantity =

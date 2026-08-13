@@ -23,6 +23,8 @@ public sealed class DeterministicSensitiveDataDetectorTests
         { "Revenue was KRW12000.", "finance", SensitivityLevel.Confidential },
         { "Refund due: 50 cents.", "finance", SensitivityLevel.Confidential },
         { "환불 예정액은 500센트입니다.", "finance", SensitivityLevel.Confidential },
+        { "The invoice total is USD12000.", "finance", SensitivityLevel.Confidential },
+        { "The invoice total is KRW5000.", "finance", SensitivityLevel.Confidential },
         { "Revenue was $12000.", "finance", SensitivityLevel.Confidential },
         { "프로젝트 비용은 오천만원입니다.", "finance", SensitivityLevel.Confidential },
         { "The fee was twelve thousand dollars.", "finance", SensitivityLevel.Confidential },
@@ -32,7 +34,11 @@ public sealed class DeterministicSensitiveDataDetectorTests
         { "The bonus was £2.5m.", "finance", SensitivityLevel.Confidential },
         { "출장비는 20,000엔입니다.", "finance", SensitivityLevel.Confidential },
         { "지급액은 1200 JPY입니다.", "finance", SensitivityLevel.Confidential },
-        { "보너스는 ₩750k입니다.", "finance", SensitivityLevel.Confidential }
+        { "보너스는 ₩750k입니다.", "finance", SensitivityLevel.Confidential },
+        { "Balance: 50 cents.", "finance", SensitivityLevel.Confidential },
+        { "잔액은 50센트입니다.", "finance", SensitivityLevel.Confidential },
+        { "정산액은 5백원입니다.", "finance", SensitivityLevel.Confidential },
+        { "정산액은 5백 원입니다.", "finance", SensitivityLevel.Confidential }
     };
 
     [Theory]
@@ -151,6 +157,24 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.Contains("홍길동 사원", result.Text, StringComparison.Ordinal);
         Assert.Contains("신규 견적을 발행했다", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("오천만원", result.Text, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+        Assert.Contains("finance", result.Categories);
+    }
+
+    [Theory]
+    [InlineData("USD12000")]
+    [InlineData("KRW5000")]
+    [InlineData("50 cents")]
+    [InlineData("50센트")]
+    [InlineData("5백원")]
+    [InlineData("5백 원")]
+    public void RedactorRemovesPreviouslySupportedCompactMonetaryFormats(string content)
+    {
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.DoesNotContain(content, result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
         Assert.Contains("finance", result.Categories);
     }
