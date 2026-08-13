@@ -56,7 +56,7 @@ public sealed class ConsoleLifecycleTests
         csrf = Assert.Single(session.Headers.GetValues(ConsoleAccessOptions.AntiforgeryHeaderName));
         using var configRequest = new HttpRequestMessage(HttpMethod.Put, "/api/operator/classification-provider")
         {
-            Content = new StringContent("{\"provider\":\"Mock\",\"clearApiKey\":true}", Encoding.UTF8, "application/json")
+            Content = new StringContent("{\"provider\":\"LocalDeterministic\"}", Encoding.UTF8, "application/json")
         };
         configRequest.Headers.Add(ConsoleAccessOptions.AntiforgeryHeaderName, csrf);
         using var configWrite = await client.SendAsync(configRequest);

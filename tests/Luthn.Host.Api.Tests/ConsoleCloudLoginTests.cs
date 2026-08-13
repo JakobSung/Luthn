@@ -217,7 +217,7 @@ public sealed class ConsoleCloudLoginTests
         var csrf = Assert.Single(login.Headers.GetValues(ConsoleAccessOptions.AntiforgeryHeaderName));
         using var request = new HttpRequestMessage(HttpMethod.Put, "/api/operator/classification-provider")
         {
-            Content = new StringContent("{\"provider\":\"Mock\",\"clearApiKey\":true}", Encoding.UTF8, "application/json")
+            Content = new StringContent("{\"provider\":\"LocalDeterministic\"}", Encoding.UTF8, "application/json")
         };
         request.Headers.Add(ConsoleAccessOptions.AntiforgeryHeaderName, csrf);
 
