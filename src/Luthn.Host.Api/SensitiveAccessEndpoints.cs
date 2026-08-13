@@ -275,7 +275,12 @@ public static class SensitiveAccessEndpoints
             return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(detail));
         }
 
-        var tombstone = await workflow.ReadTombstoneAsync(id, principal, cancellationToken);
+        var tombstone = await workflow.ReadTombstoneAsync(
+            id,
+            principal,
+            cancellationToken,
+            ServiceTokenAuthorization.GetActor(httpContext),
+            "sensitive_access.operator_detail_read");
         return tombstone is null
             ? TypedResults.NotFound()
             : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(tombstone));
@@ -300,7 +305,9 @@ public static class SensitiveAccessEndpoints
         var tombstone = await workflow.ReadTombstoneAsync(
             id,
             ServiceTokenAuthorization.GetPrincipal(httpContext),
-            cancellationToken);
+            cancellationToken,
+            ServiceTokenAuthorization.GetActor(httpContext),
+            "sensitive_access.result_read");
         return tombstone is null
             ? TypedResults.NotFound()
             : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(tombstone));

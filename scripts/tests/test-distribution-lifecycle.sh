@@ -162,6 +162,7 @@ connection_list="$(curl -fsS "$base_url/api/agent-connections" \
 grep -q '"state":"Active"' <<<"$connection_list"
 
 sensitive_reference_id="lifecycle-sensitive-reference"
+upgraded_sensitive_reference_id="lifecycle-upgraded-sensitive-reference"
 docker compose \
   --project-name "$LUTHN_PROJECT_NAME" \
   --env-file "$LUTHN_CONFIG_DIR/luthn.env" \
@@ -171,15 +172,18 @@ BEGIN;
 INSERT INTO source_events
   ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial", "OwnerUserId", "WorkspaceId")
 VALUES
-  ('lifecycle-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-fixture', true, 'local-owner', 'default');
+  ('lifecycle-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-fixture', true, 'local-owner', 'default'),
+  ('lifecycle-upgraded-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-upgraded-fixture', true, 'local-owner', 'default');
 INSERT INTO collection_provenance
   ("Id", "ContractVersion", "SourceEventId", "AuthenticatedActor", "ActorTrust", "ClaimsTrust", "AuthenticatedUserId", "ReceivedAt", "WorkspaceId")
 VALUES
-  ('provenance-lifecycle-sensitive-source', 1, 'lifecycle-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now(), 'default');
+  ('provenance-lifecycle-sensitive-source', 1, 'lifecycle-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now(), 'default'),
+  ('provenance-lifecycle-upgraded-sensitive-source', 1, 'lifecycle-upgraded-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now(), 'default');
 INSERT INTO sensitive_record_references
   ("Id", "SourceEventId", "SourceSystem", "SourceType", "ReceivedAt", "ContainsSensitiveMaterial", "ReferenceLabel", "RedactedSummary", "OwnerUserId", "WorkspaceId")
 VALUES
-  ('lifecycle-sensitive-reference', 'lifecycle-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-sensitive-source', 'Public-safe lifecycle summary.', 'local-owner', 'default');
+  ('lifecycle-sensitive-reference', 'lifecycle-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-sensitive-source', 'Public-safe lifecycle summary.', 'local-owner', 'default'),
+  ('lifecycle-upgraded-sensitive-reference', 'lifecycle-upgraded-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-upgraded-sensitive-source', 'Public-safe upgraded lifecycle summary.', 'local-owner', 'default');
 COMMIT;
 SQL
 access_request="$(curl -fsS -X POST "$base_url/api/access-requests" \
@@ -341,7 +345,7 @@ grep -q 'Lifecycle sentinel' <<<"$context_output"
 upgraded_access_request="$(curl -fsS -X POST "$base_url/api/access-requests" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_after" \
-  --data "{\"sensitiveReferenceId\":\"$sensitive_reference_id\",\"reason\":\"Verify the upgraded operator credential.\",\"sessionId\":\"distribution-upgraded-operator\",\"expiresInSeconds\":600}")"
+  --data "{\"sensitiveReferenceId\":\"$upgraded_sensitive_reference_id\",\"reason\":\"Verify the upgraded operator credential.\",\"sessionId\":\"distribution-upgraded-operator\",\"expiresInSeconds\":600}")"
 upgraded_access_request_id="$(printf '%s' "$upgraded_access_request" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 test -n "$upgraded_access_request_id"
 operator_request_list="$(curl -fsS "$base_url/api/access-requests" \

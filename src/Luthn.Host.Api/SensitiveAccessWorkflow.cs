@@ -43,7 +43,9 @@ internal interface ISensitiveAccessWorkflow
     Task<SensitiveAccessTombstoneState?> ReadTombstoneAsync(
         string id,
         LuthnRequestPrincipal principal,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? actor = null,
+        string? auditAction = null);
 
     Task<SensitiveAccessOperatorDetailState?> ReadOperatorDetailAsync(
         string id,
@@ -368,11 +370,14 @@ internal sealed class SensitiveAccessWorkflow(
         return request is null ? null : ToState(request, timeProvider.GetUtcNow());
     }
 
-    public Task<SensitiveAccessTombstoneState?> ReadTombstoneAsync(
+    public async Task<SensitiveAccessTombstoneState?> ReadTombstoneAsync(
         string id,
         LuthnRequestPrincipal principal,
-        CancellationToken cancellationToken) =>
-        db.SensitiveAccessTombstones
+        CancellationToken cancellationToken,
+        string? actor = null,
+        string? auditAction = null)
+    {
+        var tombstone = await db.SensitiveAccessTombstones
             .AsNoTracking()
             .Where(record =>
                 record.Id == id &&
@@ -380,6 +385,25 @@ internal sealed class SensitiveAccessWorkflow(
                 (principal.IsOperator || record.OwnerUserId == principal.UserId))
             .Select(record => new SensitiveAccessTombstoneState(record.Id))
             .SingleOrDefaultAsync(cancellationToken);
+        if (tombstone is null || actor is null || auditAction is null)
+        {
+            return tombstone;
+        }
+
+        var isResultRead = auditAction == "sensitive_access.result_read";
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            auditAction,
+            tombstone.Id,
+            "metadata-only",
+            isResultRead ? "expired-no-output" : "operator-detail-read-no-content",
+            timeProvider.GetUtcNow(),
+            subjectType: "sensitive_access_request",
+            outcome: isResultRead ? "unavailable" : "read"));
+        await db.SaveChangesAsync(cancellationToken);
+        return tombstone;
+    }
 
     public Task<SensitiveAccessOperatorDetailState?> ReadOperatorDetailAsync(
         string id,
@@ -688,6 +712,11 @@ internal sealed class SensitiveAccessWorkflow(
         referenceLifetime = await ReadReferenceLifetimeAsync(accessRequest, cancellationToken);
         if (!IsActive(referenceLifetime, observedAt))
         {
+            if (!isRelational)
+            {
+                NonRelationalDecisionLock.Release();
+            }
+
             return SensitiveAccessDecisionResult.AlreadyDecided();
         }
         var decisionRecord = new SensitiveAccessDecisionRecord
@@ -1609,7 +1638,8 @@ internal sealed class SensitiveAccessWorkflow(
         DateTimeOffset observedAt)
     {
         if (request.ReferenceExpiresAt is DateTimeOffset referenceExpiresAt &&
-            referenceExpiresAt <= observedAt)
+            referenceExpiresAt <= observedAt &&
+            request.Status is SensitiveAccessRequestStatus.Pending or SensitiveAccessRequestStatus.Approved)
         {
             return request.Status == SensitiveAccessRequestStatus.Pending
                 ? SensitiveAccessStatusCodes.RequestExpired

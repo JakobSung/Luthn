@@ -69,6 +69,24 @@ public static class TurnSummaryEndpoints
                     record.WorkspaceId == principal.WorkspaceId &&
                     record.OwnerUserId == principal.UserId,
                 cancellationToken);
+        if (existingSource is null)
+        {
+            var legacySourceEventId = CreateLegacyStableSummaryId(
+                request,
+                contentDigest,
+                principal.WorkspaceId);
+            existingSource = await db.SourceEvents
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    record => record.Id == legacySourceEventId &&
+                        record.WorkspaceId == principal.WorkspaceId &&
+                        record.OwnerUserId == principal.UserId,
+                    cancellationToken);
+            if (existingSource is not null)
+            {
+                sourceEventId = legacySourceEventId;
+            }
+        }
         if (existingSource is not null)
         {
             var existing = await BuildExistingResponseAsync(
@@ -568,6 +586,24 @@ public static class TurnSummaryEndpoints
                 request.TurnRange?.Trim(),
                 contentDigest)
             : EncodeStableKeyParts("explicit", workspaceId, ownerUserId, request.IdempotencyKey.Trim());
+        return $"turn-summary-{HashFragment(stableInput)}";
+    }
+
+    private static string CreateLegacyStableSummaryId(
+        TurnSummaryIntakeRequest request,
+        string contentDigest,
+        string workspaceId)
+    {
+        var stableInput = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? EncodeStableKeyParts(
+                "derived",
+                workspaceId,
+                request.SourceAgent.Trim(),
+                request.SessionId.Trim(),
+                request.TurnId?.Trim(),
+                request.TurnRange?.Trim(),
+                contentDigest)
+            : EncodeStableKeyParts("explicit", workspaceId, request.IdempotencyKey.Trim());
         return $"turn-summary-{HashFragment(stableInput)}";
     }
 
