@@ -343,6 +343,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     [Theory]
     [InlineData("한샘 매출은 1,000만원입니다.", "매출")]
     [InlineData("한샘 견적금액은 1,000만원이고 api key=abcdefghijklmnop", "견적")]
+    [InlineData("견적 업무. 직원 연봉은 1,000만원입니다.", "견적")]
     public async Task QuotationFallbackKeepsIneligibleSensitiveContentPrivate(
         string originalSummary,
         string query)

@@ -35,6 +35,8 @@ internal static class BoundedMonetaryAnalyzer
         """(?:(?<![A-Za-z])(?:finance|financial\s+records?|revenue|revenues|salary|salaries|wage|wages|payroll|profit|profits|income|earnings|compensation)(?![A-Za-z])|재무|금융\s*정보|매출(?:액)?|판매액|연봉|급여|월급|임금|급료|수익|이익|소득|보수)""");
     private static readonly Regex CompositeMonetaryContextPattern = CreatePattern(
         """(?:(?<![A-Za-z])(?:quote|invoice|payment|contract)\s+(?:amount|value)(?![A-Za-z])|(?:견적|계약|결제|청구)\s*금액)""");
+    private static readonly Regex QuotationContextPattern = CreatePattern(
+        """(?:(?<![A-Za-z])(?:quote|quotation)(?:\s+(?:amount|value))?(?![A-Za-z])|견적(?:\s*금액)?)""");
     private static readonly Regex WeakMonetaryContextPattern = CreatePattern(
         """(?:(?<![A-Za-z])(?:amount|amounts|price|prices|cost|costs|budget|budgets|fee|fees)(?![A-Za-z])|금액|금전|가격|판매가|매입가|비용|원가|예산|수수료|단가)""");
     private static readonly Regex AmbiguousQuantityPattern = CreatePattern(
@@ -85,6 +87,23 @@ internal static class BoundedMonetaryAnalyzer
             exactAmountRanges.Length > 0,
             ambiguous,
             sensitiveRanges);
+    }
+
+    public static bool HasBoundedQuotationAmount(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return false;
+        }
+
+        var amountRanges = new List<MonetaryRange>();
+        AddMatches(PrefixedCurrencyAmountPattern, content, amountRanges);
+        AddMatches(SuffixedCurrencyAmountPattern, content, amountRanges);
+        AddMatches(KoreanTextCurrencyAmountPattern, content, amountRanges);
+        var amountLookup = new MonetaryRangeLookup(amountRanges);
+
+        return Matches(QuotationContextPattern, content)
+            .Any(context => amountLookup.HasBoundedMatch(content, context));
     }
 
     private static IReadOnlyList<MonetaryRange> Matches(Regex pattern, string content) =>

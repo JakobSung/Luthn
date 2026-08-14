@@ -2,7 +2,6 @@ using Luthn.Core.Classification;
 using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Luthn.Core.Policy;
-using Luthn.Core.Search;
 
 namespace Luthn.Host.Api;
 
@@ -202,7 +201,7 @@ public sealed class AgentSafeMemoryProjectionSelector(
     {
         if (originalClassification.Sensitivity == SensitivityLevel.Restricted ||
             !originalClassification.Categories.Contains("finance", StringComparer.OrdinalIgnoreCase) ||
-            !HasQuotationSignal(candidate))
+            !HasBoundedQuotationAmount(candidate))
         {
             return null;
         }
@@ -217,12 +216,11 @@ public sealed class AgentSafeMemoryProjectionSelector(
             cancellationToken);
     }
 
-    private static bool HasQuotationSignal(AgentSafeMemoryProjectionCandidate candidate)
+    private bool HasBoundedQuotationAmount(AgentSafeMemoryProjectionCandidate candidate)
     {
         foreach (var value in new[] { candidate.Title, candidate.SafeSummary })
         {
-            if (value.Contains("견적", StringComparison.Ordinal) ||
-                SafeSearchText.Tokenize(value).Overlaps(["quote", "quotation"]))
+            if (sensitiveDataDetector.HasBoundedQuotationAmount(value))
             {
                 return true;
             }

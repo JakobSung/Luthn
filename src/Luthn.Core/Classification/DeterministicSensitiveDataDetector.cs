@@ -53,6 +53,9 @@ public sealed class DeterministicSensitiveDataDetector
     public ClassificationResult Detect(PublicRecordId sourceId, string? content) =>
         Detect(sourceId, content, includeMonetaryContext: true);
 
+    public bool HasBoundedQuotationAmount(string? content) =>
+        BoundedMonetaryAnalyzer.HasBoundedQuotationAmount(content);
+
     private ClassificationResult Detect(
         PublicRecordId sourceId,
         string? content,
