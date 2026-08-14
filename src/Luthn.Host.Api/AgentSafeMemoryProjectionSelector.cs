@@ -10,7 +10,7 @@ public sealed class AgentSafeMemoryProjectionSelector(
     DeterministicSensitiveDataDetector sensitiveDataDetector,
     IPolicyEngine policyEngine)
 {
-    internal const string QuotationFallbackTitle = "보호된 견적 정보";
+    internal const string QuotationFallbackTitle = "보호된 견적 정보 (quote)";
     internal const string QuotationFallbackSummary = "확인 후 열람할 수 있는 견적 정보가 있습니다.";
 
     private static readonly string[] MeaningfulEventMarkers =

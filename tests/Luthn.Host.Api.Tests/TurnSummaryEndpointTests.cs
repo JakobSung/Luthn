@@ -263,11 +263,11 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
-    public async Task ShortQuotationCreatesFixedSafeProjectionAndProtectedAccessRequest()
+    public async Task EnglishShortQuotationWithoutQuoteTagCreatesSearchableSafeProjection()
     {
-        const string vendor = "한샘 가구";
-        const string amount = "1,000만원";
-        const string originalSummary = $"{vendor} 견적금액은 {amount}입니다.";
+        const string vendor = "Acme";
+        const string amount = "$1,000";
+        const string originalSummary = $"{vendor} quote amount is {amount}.";
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
@@ -277,7 +277,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             turnId = "turn-1",
             sourceAgent = "codex",
             summary = originalSummary,
-            coreTags = new[] { "sales", "quote" },
+            coreTags = new[] { "sales" },
             idempotencyKey = "summary-short-quotation"
         });
         var intakeJson = await intake.Content.ReadAsStringAsync();
@@ -293,7 +293,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
 
         using var search = await client.PostAsJsonAsync("/api/agent/context-packs", new
         {
-            query = $"{vendor} 견적",
+            query = $"{vendor} quote",
             maxItems = 10
         });
         var searchJson = await search.Content.ReadAsStringAsync();
