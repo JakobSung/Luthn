@@ -120,7 +120,7 @@ assert handler["command"] == "python3", handler
 assert handler["args"][1:] == [
     "claude-hook-run", "--base-url", "http://127.0.0.1:1", "--token-file",
     f"{sys.argv[2]}/service-token", "--excluded-token-file",
-    f"{sys.argv[2]}/operator-token", "--connector-version", "5",
+    f"{sys.argv[2]}/operator-token", "--connector-version", "6",
 ], handler
 PY
 grep -q '<!-- luthn:auto-recall:start -->' "$claude_home/CLAUDE.md"
