@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "taxonomyVersion": "1",
+  "taxonomyVersion": "2",
   "cases": [
     {
       "id": "ko-public-install",
