@@ -425,7 +425,7 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("search_safe_context") -and [IO.File]::ReadAllText($codexInstructionsFile).Contains("could not verify the requested context")) "Codex instructions should define bounded recall fallback"
     $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
-    Assert-True ($connectorState.connectorVersion -ceq "5") "Windows connector state should record the managed template version"
+    Assert-True ($connectorState.connectorVersion -ceq "6") "Windows connector state should record the managed template version"
     Assert-True ($connectorState.helperDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the selected CLI digest"
     Assert-True ($connectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the managed template digest"
     Assert-True ($connectorState.hookInstalled -and $connectorState.autoRecall) "connector state should record default auto-recall"

@@ -12,6 +12,10 @@ public sealed class DeterministicSensitiveDataDetectorTests
         { "token ghp_1234567890abcdefghijklmnopqrstuvwxyz", "access key", SensitivityLevel.Restricted },
         { "AWS access AKIA1234567890ABCDEF", "access key", SensitivityLevel.Restricted },
         { "API 키 = abcdefghijklmnop12345678", "access key", SensitivityLevel.Restricted },
+        { "client_secret = client-secret-value-123", "credential", SensitivityLevel.Restricted },
+        { "JWT eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature-value-123", "credential", SensitivityLevel.Restricted },
+        { "postgresql://app:password@example.internal:5432/app", "credential", SensitivityLevel.Restricted },
+        { "protected handle 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "access handle", SensitivityLevel.Restricted },
         { "비밀번호: correct-horse-battery-staple", "credential", SensitivityLevel.Restricted },
         { "담당자 person@example.com", "email", SensitivityLevel.Confidential },
         { "연락처 010-1234-5678", "personal identifier", SensitivityLevel.Confidential },
@@ -112,6 +116,21 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.Contains("personal identifier", result.Categories);
         Assert.Contains("payment", result.Categories);
         Assert.Contains("credential", result.Categories);
+    }
+
+    [Theory]
+    [InlineData("client_secret=client-secret-value-123", "client-secret-value-123")]
+    [InlineData("JWT: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature-value-123", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature-value-123")]
+    [InlineData("postgresql://app:password@example.internal:5432/app", "postgresql://app:password@example.internal:5432/app")]
+    [InlineData("protected handle 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]
+    public void RedactorRemovesCredentialAndProtectedAccessHandleShapes(string content, string secret)
+    {
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.DoesNotContain(secret, result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
     }
 
     [Fact]

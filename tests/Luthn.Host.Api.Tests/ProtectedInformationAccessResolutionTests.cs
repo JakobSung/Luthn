@@ -6,11 +6,61 @@ using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Luthn.Host.Api.Tests;
 
 public sealed class ProtectedInformationAccessResolutionTests
 {
+    [Fact]
+    public async Task FailedProtectedReadAuditDoesNotConsumeGrantRead()
+    {
+        var interceptor = new FailProtectedReadAuditInterceptor();
+        var options = new DbContextOptionsBuilder<LuthnDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var db = new LuthnDbContext(options);
+        var protector = TestSensitiveMemoryProtection.Create();
+        AddDecryptableProtectedMemory(
+            db,
+            protector,
+            "memory-atomic-read",
+            "원문 메모",
+            "승인된 원문입니다.");
+        await db.SaveChangesAsync();
+        var workflow = CreateProtectedWorkflow(db, protector);
+        var resolution = await ResolveAsync(workflow, "memory-atomic-read", TestData.Principal);
+        var approved = await workflow.DecideRequestAsync(
+            resolution.RequestId!,
+            new SensitiveAccessDecisionRequest(),
+            SensitiveAccessRequestStatus.Approved,
+            TestData.OperatorPrincipal,
+            "operator",
+            CancellationToken.None);
+        Assert.Equal(SensitiveAccessDecisionOutcome.Succeeded, approved.Outcome);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.ReadProtectedInformationResultAsync(
+                resolution.AccessHandle!,
+                TestData.Principal,
+                "agent",
+                CancellationToken.None));
+
+        db.ChangeTracker.Clear();
+        interceptor.Disable();
+        var retry = await workflow.ReadProtectedInformationResultAsync(
+            resolution.AccessHandle!,
+            TestData.Principal,
+            "agent",
+            CancellationToken.None);
+
+        Assert.True(retry.ContentAvailable);
+        Assert.Equal(1, (await db.SensitiveAccessGrants.SingleAsync()).SuccessfulReadCount);
+        Assert.Single(await db.AuditEvents.Where(record =>
+            record.Action == "sensitive_access.protected_result_read").ToArrayAsync());
+    }
+
     [Fact]
     public async Task ApprovedProtectedMemoryReturnsExactOriginalOnlyToBoundRequester()
     {
@@ -480,5 +530,27 @@ public sealed class ProtectedInformationAccessResolutionTests
             WorkspaceId = TestData.Principal.WorkspaceId,
             OwnerUserId = TestData.Principal.UserId
         });
+    }
+
+    private sealed class FailProtectedReadAuditInterceptor : SaveChangesInterceptor
+    {
+        private bool _enabled = true;
+
+        internal void Disable() => _enabled = false;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_enabled && eventData.Context is LuthnDbContext db &&
+                db.AuditEvents.Local.Any(record =>
+                    record.Action == "sensitive_access.protected_result_read"))
+            {
+                throw new InvalidOperationException("simulated protected read audit failure");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }

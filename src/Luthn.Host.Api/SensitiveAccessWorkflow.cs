@@ -861,7 +861,11 @@ internal sealed class SensitiveAccessWorkflow(
                 lifecycle.MaximumSuccessfulReads);
         }
 
-        var reservation = await ReserveGrantReadAsync(candidate.Id, principal, cancellationToken);
+        var reservation = await CommitProtectedReadAsync(
+            candidate.Id,
+            principal,
+            actor,
+            cancellationToken);
         if (!reservation.Succeeded)
         {
             var current = await ReadProtectedAccessCandidateAsync(
@@ -893,25 +897,8 @@ internal sealed class SensitiveAccessWorkflow(
         var refreshedLifecycle = refreshed.ToLifecycleCandidate();
         if (reservation.Consumed)
         {
-            await AuditLifecycleOnceAsync(
-                candidate.Id,
-                principal,
-                actor: "luthn-sensitive-access-workflow",
-                action: "sensitive_access.grant_consumed",
-                subjectType: "sensitive_access_grant",
-                outcome: "consumed",
-                redactionState: "bounded-grant-consumed",
-                metricEvent: "grant_consumed",
-                cancellationToken);
+            metrics.RecordSensitiveAccessLifecycle("grant_consumed");
         }
-
-        await AuditProtectedResultAsync(
-            candidate.Id,
-            principal,
-            actor,
-            SensitiveAccessStatusCodes.ProtectedResultReturned,
-            "returned",
-            cancellationToken);
         metrics.RecordSensitiveAccessLifecycle("protected_result_returned");
         return ProtectedInformationResultState.Returned(
             payload.Title,
@@ -976,10 +963,123 @@ internal sealed class SensitiveAccessWorkflow(
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task<SensitiveAccessGrantReadReservation> CommitProtectedReadAsync(
+        string requestId,
+        LuthnRequestPrincipal principal,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        if (db.Database.IsRelational())
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            var reservation = await ReserveGrantReadAsync(
+                requestId,
+                principal,
+                cancellationToken,
+                holdNonRelationalLock: false,
+                persistNonRelational: false);
+            if (!reservation.Succeeded)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return reservation;
+            }
+
+            await AppendProtectedReadAuditsAsync(
+                requestId,
+                principal,
+                actor,
+                reservation,
+                cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return reservation;
+        }
+
+        await NonRelationalGrantReadLock.WaitAsync(cancellationToken);
+        try
+        {
+            var reservation = await ReserveGrantReadAsync(
+                requestId,
+                principal,
+                cancellationToken,
+                holdNonRelationalLock: false,
+                persistNonRelational: false);
+            if (!reservation.Succeeded)
+            {
+                return reservation;
+            }
+
+            await AppendProtectedReadAuditsAsync(
+                requestId,
+                principal,
+                actor,
+                reservation,
+                cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            return reservation;
+        }
+        finally
+        {
+            NonRelationalGrantReadLock.Release();
+        }
+    }
+
+    private async Task AppendProtectedReadAuditsAsync(
+        string requestId,
+        LuthnRequestPrincipal principal,
+        string actor,
+        SensitiveAccessGrantReadReservation reservation,
+        CancellationToken cancellationToken)
+    {
+        await LifecycleAuditLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (reservation.Consumed)
+            {
+                var auditId = LifecycleAuditId(
+                    "sensitive_access.grant_consumed",
+                    principal.WorkspaceId,
+                    requestId);
+                if (!await db.AuditEvents.AsNoTracking().AnyAsync(
+                        audit => audit.Id == auditId,
+                        cancellationToken))
+                {
+                    db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                        principal,
+                        "luthn-sensitive-access-workflow",
+                        "sensitive_access.grant_consumed",
+                        requestId,
+                        "metadata-only",
+                        "bounded-grant-consumed",
+                        timeProvider.GetUtcNow(),
+                        subjectType: "sensitive_access_grant",
+                        outcome: "consumed",
+                        id: auditId));
+                }
+            }
+
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "sensitive_access.protected_result_read",
+                requestId,
+                "metadata-only",
+                $"{SensitiveAccessStatusCodes.ProtectedResultReturned}-no-content",
+                timeProvider.GetUtcNow(),
+                subjectType: "sensitive_access_request",
+                outcome: "returned"));
+        }
+        finally
+        {
+            LifecycleAuditLock.Release();
+        }
+    }
+
     private static bool IsCredentialCategory(string category) =>
         category.Equals("credential", StringComparison.OrdinalIgnoreCase) ||
         category.Equals("private key", StringComparison.OrdinalIgnoreCase) ||
-        category.Equals("access key", StringComparison.OrdinalIgnoreCase);
+        category.Equals("access key", StringComparison.OrdinalIgnoreCase) ||
+        category.Equals("access handle", StringComparison.OrdinalIgnoreCase);
 
     public Task<SensitiveAccessDecisionResult> DecideRequestAsync(
         string id,
@@ -1428,7 +1528,9 @@ internal sealed class SensitiveAccessWorkflow(
     private async Task<SensitiveAccessGrantReadReservation> ReserveGrantReadAsync(
         string requestId,
         LuthnRequestPrincipal principal,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool holdNonRelationalLock = true,
+        bool persistNonRelational = true)
     {
         var observedAt = timeProvider.GetUtcNow();
         if (db.Database.IsRelational())
@@ -1464,7 +1566,10 @@ internal sealed class SensitiveAccessWorkflow(
             return new SensitiveAccessGrantReadReservation(true, consumed);
         }
 
-        await NonRelationalGrantReadLock.WaitAsync(cancellationToken);
+        if (holdNonRelationalLock)
+        {
+            await NonRelationalGrantReadLock.WaitAsync(cancellationToken);
+        }
         try
         {
             var grant = await db.SensitiveAccessGrants
@@ -1498,14 +1603,20 @@ internal sealed class SensitiveAccessWorkflow(
             }
 
             grant.SuccessfulReadCount++;
-            await db.SaveChangesAsync(cancellationToken);
+            if (persistNonRelational)
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
             return new SensitiveAccessGrantReadReservation(
                 true,
                 grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads);
         }
         finally
         {
-            NonRelationalGrantReadLock.Release();
+            if (holdNonRelationalLock)
+            {
+                NonRelationalGrantReadLock.Release();
+            }
         }
     }
 

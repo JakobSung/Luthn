@@ -129,6 +129,40 @@ public sealed class MemoryEndpointTests
     }
 
     [Fact]
+    public async Task MemoryWriteKeepsEchoedProtectedAccessHandleOutOfAgentContext()
+    {
+        await using var db = CreateDbContext();
+        const string accessHandle = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        var result = await MemoryEndpoints.CreateMemoryItem(
+            new CreateMemoryItemRequest
+            {
+                Title = "Protected access handle echoed",
+                SafeSummary = $"The protected access handle was requested: {accessHandle}",
+                CoreTags = ["security"],
+                Visibility = MemoryVisibility.SharedAcrossAgents
+            },
+            CreateProjectionSelector(),
+            TestSensitiveMemoryProtection.Create(),
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<Created<MemoryItemResponse>>(result.Result);
+        Assert.False(created.Value!.AllowsAgentContext);
+        Assert.Equal(SensitiveMemoryPersistence.ProtectedTitle, created.Value.Title);
+        Assert.Equal(SensitiveMemoryPersistence.ProtectedSummary, created.Value.SafeSummary);
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(
+            await db.SharedMemoryItems.AsNoTracking().SingleAsync()));
+
+        var read = await MemoryEndpoints.ReadMemoryItem(
+            created.Value.Id,
+            db,
+            new DefaultHttpContext(),
+            CancellationToken.None);
+        Assert.IsType<NotFound>(read.Result);
+    }
+
+    [Fact]
     public async Task MemoryWriteDowngradesClassifierSensitiveSummaryToPrivateBoundary()
     {
         await using var db = CreateDbContext();
