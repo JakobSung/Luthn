@@ -263,6 +263,128 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
+    public async Task EnglishShortQuotationWithoutQuoteTagCreatesSearchableSafeProjection()
+    {
+        const string vendor = "Acme";
+        const string amount = "$1,000";
+        const string originalSummary = $"{vendor} quote amount is {amount}.";
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var intake = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-short-quotation",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = originalSummary,
+            coreTags = new[] { "sales" },
+            idempotencyKey = "summary-short-quotation"
+        });
+        var intakeJson = await intake.Content.ReadAsStringAsync();
+        using var intakeBody = JsonDocument.Parse(intakeJson);
+
+        Assert.Equal(HttpStatusCode.Created, intake.StatusCode);
+        Assert.True(intakeBody.RootElement.GetProperty("allowsAgentContext").GetBoolean());
+        Assert.Equal(
+            "Public",
+            intakeBody.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.DoesNotContain(vendor, intakeJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(amount, intakeJson, StringComparison.Ordinal);
+
+        using var search = await client.PostAsJsonAsync("/api/agent/context-packs", new
+        {
+            query = $"{vendor} quote",
+            maxItems = 10
+        });
+        var searchJson = await search.Content.ReadAsStringAsync();
+        using var searchBody = JsonDocument.Parse(searchJson);
+        var item = Assert.Single(searchBody.RootElement.GetProperty("items").EnumerateArray());
+        var memoryItemId = item.GetProperty("id").GetString()!;
+
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        Assert.Equal(AgentSafeMemoryProjectionSelector.QuotationFallbackTitle, item.GetProperty("title").GetString());
+        Assert.Equal(
+            AgentSafeMemoryProjectionSelector.QuotationFallbackSummary,
+            item.GetProperty("safeSummary").GetString());
+        Assert.DoesNotContain(vendor, searchJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(amount, searchJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(originalSummary, searchJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("sensitiveReferenceId", searchJson, StringComparison.OrdinalIgnoreCase);
+
+        using var resolution = await client.PostAsJsonAsync("/api/access-requests/resolve", new
+        {
+            memoryItemId,
+            reason = "견적 정보 확인"
+        });
+        using var resolutionBody = await JsonDocument.ParseAsync(await resolution.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, resolution.StatusCode);
+        Assert.Equal("requested", resolutionBody.RootElement.GetProperty("status").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(resolutionBody.RootElement.GetProperty("requestId").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(resolutionBody.RootElement.GetProperty("accessHandle").GetString()));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var source = await db.SourceEvents.SingleAsync();
+        var memory = await db.SharedMemoryItems.SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.SingleAsync();
+        var request = await db.SensitiveAccessRequests.SingleAsync();
+
+        Assert.True(source.ContainsSensitiveMaterial);
+        Assert.True(memory.AllowsAgentContext);
+        Assert.Equal(AgentSafeMemoryProjectionSelector.QuotationFallbackTitle, memory.Title);
+        Assert.Equal(AgentSafeMemoryProjectionSelector.QuotationFallbackSummary, memory.SafeSummary);
+        Assert.Equal(SensitiveAccessRequestStatus.Pending, request.Status);
+        var protector = factory.Services.GetRequiredService<ISensitiveMemoryPayloadProtector>();
+        var plaintext = protector.Unprotect(memory.Id, encrypted.ProtectedPayload);
+        Assert.Equal(originalSummary, plaintext.SafeSummary);
+    }
+
+    [Theory]
+    [InlineData("한샘 매출은 1,000만원입니다.", "매출")]
+    [InlineData("한샘 견적금액은 1,000만원이고 api key=abcdefghijklmnop", "견적")]
+    [InlineData("견적 업무. 직원 연봉은 1,000만원입니다.", "견적")]
+    public async Task QuotationFallbackKeepsIneligibleSensitiveContentPrivate(
+        string originalSummary,
+        string query)
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var intake = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = $"session-private-{Guid.NewGuid():N}",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = originalSummary,
+            coreTags = new[] { "finance", "quote" },
+            idempotencyKey = $"summary-private-{Guid.NewGuid():N}"
+        });
+        using var intakeBody = await JsonDocument.ParseAsync(await intake.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, intake.StatusCode);
+        Assert.False(intakeBody.RootElement.GetProperty("allowsAgentContext").GetBoolean());
+
+        using var search = await client.PostAsJsonAsync("/api/agent/context-packs", new
+        {
+            query,
+            maxItems = 10
+        });
+        using var searchBody = await JsonDocument.ParseAsync(await search.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        Assert.Empty(searchBody.RootElement.GetProperty("items").EnumerateArray());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var memory = await db.SharedMemoryItems.SingleAsync();
+        Assert.Equal(MemoryVisibility.PrivateToOwner, memory.Visibility);
+        Assert.False(memory.AllowsAgentContext);
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(memory));
+        Assert.Empty(await db.SensitiveAccessRequests.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task ReturnedSensitiveReferenceReusesPendingRequestAndReturnsOnlySafeProjection()
     {
         const string sensitiveEmail = "person@example.com";

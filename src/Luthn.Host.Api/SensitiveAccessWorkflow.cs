@@ -971,27 +971,52 @@ internal sealed class SensitiveAccessWorkflow(
     {
         if (db.Database.IsRelational())
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-            var reservation = await ReserveGrantReadAsync(
-                requestId,
-                principal,
-                cancellationToken,
-                holdNonRelationalLock: false,
-                persistNonRelational: false);
-            if (!reservation.Succeeded)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return reservation;
-            }
+            var reservation = SensitiveAccessGrantReadReservation.Rejected;
+            var strategy = db.Database.CreateExecutionStrategy();
+            await strategy.ExecuteInTransactionAsync(
+                async operationCancellationToken =>
+                {
+                    db.ChangeTracker.Clear();
+                    reservation = await ReserveGrantReadAsync(
+                        requestId,
+                        principal,
+                        operationCancellationToken,
+                        holdNonRelationalLock: false,
+                        persistNonRelational: false);
+                    if (!reservation.Succeeded)
+                    {
+                        return;
+                    }
 
-            await AppendProtectedReadAuditsAsync(
-                requestId,
-                principal,
-                actor,
-                reservation,
+                    await AppendProtectedReadAuditsAsync(
+                        requestId,
+                        principal,
+                        actor,
+                        reservation,
+                        operationCancellationToken);
+                    await db.SaveChangesAsync(
+                        acceptAllChangesOnSuccess: false,
+                        operationCancellationToken);
+                },
+                async operationCancellationToken =>
+                {
+                    if (!reservation.Succeeded)
+                    {
+                        return true;
+                    }
+
+                    var auditId = ProtectedReadAuditId(
+                        principal.WorkspaceId,
+                        requestId,
+                        reservation.SuccessfulReadCount);
+                    return await db.AuditEvents
+                        .AsNoTracking()
+                        .AnyAsync(
+                            audit => audit.Id == auditId,
+                            operationCancellationToken);
+                },
                 cancellationToken);
-            await db.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            db.ChangeTracker.AcceptAllChanges();
             return reservation;
         }
 
@@ -1058,16 +1083,26 @@ internal sealed class SensitiveAccessWorkflow(
                 }
             }
 
-            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
-                principal,
-                actor,
-                "sensitive_access.protected_result_read",
+            var protectedReadAuditId = ProtectedReadAuditId(
+                principal.WorkspaceId,
                 requestId,
-                "metadata-only",
-                $"{SensitiveAccessStatusCodes.ProtectedResultReturned}-no-content",
-                timeProvider.GetUtcNow(),
-                subjectType: "sensitive_access_request",
-                outcome: "returned"));
+                reservation.SuccessfulReadCount);
+            if (!await db.AuditEvents.AsNoTracking().AnyAsync(
+                    audit => audit.Id == protectedReadAuditId,
+                    cancellationToken))
+            {
+                db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                    principal,
+                    actor,
+                    "sensitive_access.protected_result_read",
+                    requestId,
+                    "metadata-only",
+                    $"{SensitiveAccessStatusCodes.ProtectedResultReturned}-no-content",
+                    timeProvider.GetUtcNow(),
+                    subjectType: "sensitive_access_request",
+                    outcome: "returned",
+                    id: protectedReadAuditId));
+            }
         }
         finally
         {
@@ -1555,15 +1590,22 @@ internal sealed class SensitiveAccessWorkflow(
                 return SensitiveAccessGrantReadReservation.Rejected;
             }
 
-            var consumed = await db.SensitiveAccessGrants
+            var grant = await db.SensitiveAccessGrants
                 .AsNoTracking()
-                .AnyAsync(grant =>
+                .Where(grant =>
                     grant.SensitiveAccessRequestId == requestId &&
                     grant.WorkspaceId == principal.WorkspaceId &&
-                    grant.OwnerUserId == principal.UserId &&
-                    grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads,
-                    cancellationToken);
-            return new SensitiveAccessGrantReadReservation(true, consumed);
+                    grant.OwnerUserId == principal.UserId)
+                .Select(grant => new
+                {
+                    grant.SuccessfulReadCount,
+                    grant.MaximumSuccessfulReads
+                })
+                .SingleAsync(cancellationToken);
+            return new SensitiveAccessGrantReadReservation(
+                true,
+                grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads,
+                grant.SuccessfulReadCount);
         }
 
         if (holdNonRelationalLock)
@@ -1609,7 +1651,8 @@ internal sealed class SensitiveAccessWorkflow(
             }
             return new SensitiveAccessGrantReadReservation(
                 true,
-                grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads);
+                grant.SuccessfulReadCount >= grant.MaximumSuccessfulReads,
+                grant.SuccessfulReadCount);
         }
         finally
         {
@@ -1688,6 +1731,15 @@ internal sealed class SensitiveAccessWorkflow(
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"{action}\n{workspaceId}\n{subjectId}"));
         return $"audit-sensitive-{Convert.ToHexString(digest).ToLowerInvariant()}";
     }
+
+    private static string ProtectedReadAuditId(
+        string workspaceId,
+        string requestId,
+        int successfulReadCount) =>
+        LifecycleAuditId(
+            "sensitive_access.protected_result_read",
+            workspaceId,
+            $"{requestId}:{successfulReadCount}");
 
     private static string CreateStableRequestId(
         SensitiveAccessReferenceIdentity reference,
@@ -2495,9 +2547,12 @@ internal sealed class SensitiveAccessWorkflow(
         string WorkspaceId,
         string OwnerUserId);
 
-    private sealed record SensitiveAccessGrantReadReservation(bool Succeeded, bool Consumed)
+    private sealed record SensitiveAccessGrantReadReservation(
+        bool Succeeded,
+        bool Consumed,
+        int SuccessfulReadCount)
     {
-        public static readonly SensitiveAccessGrantReadReservation Rejected = new(false, false);
+        public static readonly SensitiveAccessGrantReadReservation Rejected = new(false, false, 0);
     }
 
     private sealed record ValidatedRedactedSummary(
