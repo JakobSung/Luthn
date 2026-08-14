@@ -136,7 +136,7 @@ luthn update check --json
 luthn doctor --json
 ```
 
-Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를 보고합니다. 운영자 화면은 <http://127.0.0.1:8080/>이며 API port는 기본적으로 loopback에만 연결됩니다. 화면은 민감 접근 요청과 외부 공개 결정을 처리하는 로컬 승인 정본입니다. Host API를 통해 제한된 운영자 상세를 읽고 명시적 결정 사유를 요구하며 server가 재검증한 redacted summary만 반환할 수 있습니다. 원본 Vault/source는 표시하지 않습니다. 감사 센터는 제한된 filter와 export로 결정·실패·설정·ingress·publication·보존을 metadata-only로 조사하며 원문 조회나 database 관리 화면이 아닙니다.
+Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를 보고합니다. 운영자 화면은 <http://127.0.0.1:8080/>이며 API port는 기본적으로 loopback에만 연결됩니다. 화면은 민감 접근 요청과 외부 공개 결정을 처리하는 로컬 승인 정본입니다. Host API를 통해 제한된 운영자 상세를 읽고 명시적 결정 사유를 요구합니다. 기존 승인은 server가 재검증한 redacted summary를 반환할 수 있습니다. protected-memory 승인은 1~60분(기본 60분), 1~3회(기본 1회)를 선택하지만 보호된 title·summary는 요청자에게만 전달되고 콘솔에는 표시되지 않습니다. 자격증명과 key는 절대 전달하지 않습니다. 감사 센터는 제한된 filter와 export로 결정·실패·설정·ingress·publication·보존을 metadata-only로 조사하며 원문 조회나 database 관리 화면이 아닙니다.
 
 ### 콘솔 접근과 메뉴
 
@@ -282,7 +282,7 @@ Claude Code 연결은 사용자 범위의 `luthn` MCP 등록, Luthn 소유 Stop 
 Luthn이 소유한 hook, 자동 회상 블록, 일치하는 MCP 등록과 비밀이 아닌 소유
 상태만 제거하며 관계없는 Claude 설정과 MCP 등록은 보존합니다.
 
-예상 MCP tool은 `get_context_pack`, `search_safe_context`, `get_wiki_proposal`, `classify_preview`, `create_shared_memory`, `query_shared_memory`, `get_shared_memory_item`, `create_sensitive_access_request`, `get_sensitive_access_request`, `get_sensitive_access_result`입니다. 기본 connector token에는 `access.request`가 포함되어 새 설치와 update 뒤 요청·상태·결과 도구가 바로 동작합니다. 승인·거절은 MCP 밖의 신뢰된 운영자 경로에 남습니다. Agent 설정에 대해서는 운영자 화면이 관측 surface로만 동작하며 host agent를 설치·재구성·Trust·해제하지 않습니다. 승인·감사 section은 별도로 Host API를 사용하고 database에 직접 접근하지 않습니다.
+예상 MCP tool은 `get_context_pack`, `search_safe_context`, `get_wiki_proposal`, `classify_preview`, `create_shared_memory`, `query_shared_memory`, `get_shared_memory_item`, `request_protected_information_access`, `get_protected_information_result`, `create_sensitive_access_request`, `get_sensitive_access_request`, `get_sensitive_access_result`입니다. 기본 connector token에는 `access.request`가 포함되어 새 설치와 update 뒤 제한된 요청·상태·결과 도구가 바로 동작합니다. 승인·거절은 MCP 밖의 신뢰된 운영자 경로에 남습니다. 요청자 handle은 Agent가 표시하거나 저장하면 안 됩니다. Agent 설정에 대해서는 운영자 화면이 관측 surface로만 동작하며 host agent를 설치·재구성·Trust·해제하지 않습니다. 승인·감사 section은 별도로 Host API를 사용하고 database에 직접 접근하지 않습니다.
 
 ## 비밀 값
 

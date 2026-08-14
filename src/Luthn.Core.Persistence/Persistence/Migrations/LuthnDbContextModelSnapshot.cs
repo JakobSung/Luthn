@@ -779,6 +779,20 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<string>("AccessHandleDigest")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("AccessMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasDefaultValue("RedactedSummary");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -809,6 +823,13 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("RequesterBindingDigest")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasDefaultValue("");
 
                     b.Property<int>("RequestTimeoutSeconds")
                         .HasColumnType("integer");
@@ -844,6 +865,10 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("SensitiveRecordReferenceId");
+
+                    b.HasIndex("WorkspaceId", "OwnerUserId", "AccessHandleDigest")
+                        .IsUnique()
+                        .HasFilter("\"AccessMode\" = 'ProtectedMemory' AND \"AccessHandleDigest\" <> ''");
 
                     b.HasIndex("WorkspaceId", "PolicyRevision");
 

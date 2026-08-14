@@ -262,6 +262,11 @@ public sealed class PersistenceContractTests
             migration => migration.EndsWith(
                 "_AddSensitiveAccessTombstones",
                 StringComparison.Ordinal));
+        Assert.Contains(
+            migrations,
+            migration => migration.EndsWith(
+                "_AddRequesterBoundProtectedMemoryAccess",
+                StringComparison.Ordinal));
     }
 
     [Fact]
@@ -300,6 +305,14 @@ public sealed class PersistenceContractTests
         Assert.Contains("IX_wiki_proposals_AllowsAgentContext_Sensitivity_CreatedAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_sensitive_access_requests_Status_UpdatedAt", script, StringComparison.Ordinal);
         Assert.Contains("RedactedSummary", script, StringComparison.Ordinal);
+        Assert.Contains("AccessMode", script, StringComparison.Ordinal);
+        Assert.Contains("AccessHandleDigest", script, StringComparison.Ordinal);
+        Assert.Contains("RequesterBindingDigest", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "IX_sensitive_access_requests_WorkspaceId_OwnerUserId_AccessHandleDigest",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains("DEFAULT 'RedactedSummary'", script, StringComparison.Ordinal);
         Assert.Contains("UPDATE sensitive_access_requests AS request", script, StringComparison.Ordinal);
         Assert.Contains("SET \"RedactedSummary\" = reference.\"RedactedSummary\"", script, StringComparison.Ordinal);
         Assert.Contains("request.\"Status\" = 'Approved'", script, StringComparison.Ordinal);

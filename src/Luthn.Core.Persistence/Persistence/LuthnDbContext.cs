@@ -214,12 +214,21 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.SessionId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.RequestReason).HasMaxLength(1000).IsRequired();
             entity.Property(record => record.RedactedSummary).HasMaxLength(4000).IsRequired();
+            entity.Property(record => record.AccessMode)
+                .HasConversion<string>()
+                .HasMaxLength(64)
+                .HasDefaultValue(SensitiveAccessMode.RedactedSummary);
+            entity.Property(record => record.AccessHandleDigest).HasMaxLength(80).HasDefaultValue("");
+            entity.Property(record => record.RequesterBindingDigest).HasMaxLength(80).HasDefaultValue("");
             entity.Property(record => record.Status).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.DecidedBy).HasMaxLength(128);
             entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new { record.Status, record.ExpiresAt, record.UpdatedAt });
             entity.HasIndex(record => new { record.WorkspaceId, record.Status, record.UpdatedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.OwnerUserId, record.AccessHandleDigest })
+                .IsUnique()
+                .HasFilter("\"AccessMode\" = 'ProtectedMemory' AND \"AccessHandleDigest\" <> ''");
             entity.HasOne(record => record.SensitiveRecordReference)
                 .WithMany()
                 .HasForeignKey(record => record.SensitiveRecordReferenceId)
@@ -648,11 +657,17 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             .FirstOrDefault(entry =>
                 entry.State is EntityState.Added or EntityState.Modified &&
                 (entry.Entity.PolicyRevision < 1 ||
-                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.RequestTimeoutSeconds)));
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.RequestTimeoutSeconds) ||
+                 (entry.Entity.AccessMode == SensitiveAccessMode.ProtectedMemory &&
+                    (!IsSha256Digest(entry.Entity.AccessHandleDigest) ||
+                     !IsSha256Digest(entry.Entity.RequesterBindingDigest))) ||
+                 (entry.Entity.AccessMode == SensitiveAccessMode.RedactedSummary &&
+                    (!string.IsNullOrEmpty(entry.Entity.AccessHandleDigest) ||
+                     !string.IsNullOrEmpty(entry.Entity.RequesterBindingDigest)))));
         if (invalidRequestSnapshot is not null)
         {
             throw new InvalidOperationException(
-                "Sensitive access requests require a valid policy revision and request timeout snapshot.");
+                "Sensitive access requests require a valid policy snapshot and access-mode binding metadata.");
         }
 
         var invalidGrant = ChangeTracker.Entries<SensitiveAccessGrantRecord>()
@@ -683,6 +698,12 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 "Sensitive access tombstones require Expired status, owner scope, and an expiry no later than cleanup.");
         }
     }
+
+    private static bool IsSha256Digest(string value) =>
+        value.Length == 71 &&
+        value.StartsWith("sha256:", StringComparison.Ordinal) &&
+        value.AsSpan(7).ToString().All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private void RejectProvenanceUpdates()
     {

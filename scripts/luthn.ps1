@@ -13,8 +13,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:LuthnWindowsCliVersion = "4"
-$script:CodexConnectorTemplateVersion = "5"
-$script:McpSchemaVersion = "4"
+$script:CodexConnectorTemplateVersion = "6"
+$script:McpSchemaVersion = "5"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
 $script:RootDir = if ($env:LUTHN_WINDOWS_ROOT) {
     $env:LUTHN_WINDOWS_ROOT
@@ -133,6 +133,15 @@ type names, field names, reference identifiers, MCP tool names, or raw tool
 errors in the user-facing response. Creating a request does not grant access;
 only a trusted operator can approve or deny it.
 
+Keep any returned access handle private in the current task context. Never
+display it, quote it, place it in recall metadata, or save it as memory. After
+the owner confirms approval, call ``get_protected_information_result`` with
+that handle. A successful call consumes one approved read. Answer only the
+specific detail the user requested and do not repeat unrelated protected
+content. If the handle is no longer available, create a new confirmation
+request instead of guessing. Credential, access-key, and private-key material
+is never available even after approval.
+
 ## Agent memory mutation boundary
 
 Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
@@ -182,6 +191,15 @@ current protected information could be matched. Never show or repeat internal
 type names, field names, reference identifiers, MCP tool names, or raw tool
 errors in the user-facing response. Creating a request does not grant access;
 only a trusted operator can approve or deny it.
+
+Keep any returned access handle private in the current task context. Never
+display it, quote it, place it in recall metadata, or save it as memory. After
+the owner confirms approval, call ``get_protected_information_result`` with
+that handle. A successful call consumes one approved read. Answer only the
+specific detail the user requested and do not repeat unrelated protected
+content. If the handle is no longer available, create a new confirmation
+request instead of guessing. Credential, access-key, and private-key material
+is never available even after approval.
 
 ## Agent memory mutation boundary
 

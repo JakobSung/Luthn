@@ -93,9 +93,11 @@ agent connections, see the [detailed installation guide](docs/installation.md).
 ## Data Boundary
 
 Raw customer records, private messages, credentials, and unredacted operational
-data stay behind the private boundary. Agents receive only policy-approved safe
-projections such as reviewed summaries, redacted references, and approved
-project context. External publication is a separate, explicit approval path.
+data stay behind the private boundary by default. Agents normally receive only
+policy-approved safe projections. A separate requester-bound approval can reveal
+the encrypted original title and summary for a limited time and read count;
+credentials and keys are never revealed. External publication remains a separate,
+explicit approval path.
 
 Read [Data boundaries](docs/data-boundaries.md) for classification examples,
 provider-transfer implications, agent visibility, and publication rules.
@@ -106,8 +108,12 @@ The local operator console is the authority for sensitive-data decisions in
 both personal Local mode and the opt-in central OSS Hub mode. A request is
 reviewed with bounded purpose, session, expiry, and safe reference metadata;
 the operator must inspect the detail and provide an explicit reason before
-approving or denying it. Approval can return only a server-validated,
-redacted summary. It never opens a raw Vault/source read path.
+approving or denying it. Legacy requests can return only a server-validated
+redacted summary. Protected-memory requests can return the encrypted original
+title and summary only to the requester holding the one-time capability, for a
+bounded duration (60 minutes by default) and 1–3 reads (one by default).
+Credentials, access keys, and private keys are always blocked, and the console
+never loads the protected value.
 
 Sensitive-access approval and external-publication approval are separate
 decisions. The console uses Host API contracts, never direct database access,

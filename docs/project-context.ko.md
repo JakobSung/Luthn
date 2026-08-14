@@ -64,8 +64,9 @@ runtime 프로젝트는 `Luthn.Core`, `Luthn.Core.Persistence`, `Luthn.Host.Api`
 
 - 구현된 지식 모형에는 `Core`, 맥락 선택에는 `coreTags`를 사용합니다.
 - 원본 Vault/source 조회 route, connector method, MCP tool을 기본으로 추가하지 않습니다.
-- 민감 접근·감사 응답은 기본적으로 metadata-only로 유지합니다. 유일한 제한적 출력
-  예외는 민감 접근 결과 계약에서 운영자가 승인하고 server가 재검증한 redacted summary입니다.
+- 민감 접근·감사 응답은 기본적으로 metadata-only로 유지합니다. 제한적 출력 예외는
+  server가 재검증한 기존 redacted summary와 명시적 승인 뒤 요청자에게만 반환하는
+  protected-memory title·summary입니다. 자격증명과 key는 예외가 아닙니다.
 - 민감하거나 agent에 보이지 않는 shared-memory 사용자 필드는 인증된 보호 payload 저장소에 두고 key ring은 PostgreSQL 밖에 둡니다. 암호문을 agent, sync, publication, audit, log, metric 계약으로 노출하지 않습니다.
 - 모든 새 source event 또는 shared-memory item과 함께 버전이 지정된 불변 수집 출처 레코드 하나를 원자적으로 저장합니다. 호출자 주장은 서버가 확인한 actor·owner identity와 구분하고, 출처정보는 권한 있는 same-owner reader 또는 명시적 운영자에게만 제공합니다.
 - owner identity는 server가 정하는 인가 상태입니다. 모든 agent-safe 영속 query, ranking, idempotency key, publication, 민감 접근, retrieval cache는 반환하거나 재사용하기 전에 owner로 분리합니다.

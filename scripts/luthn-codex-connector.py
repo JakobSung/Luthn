@@ -25,7 +25,7 @@ HOOK_MARKER = "luthn.agent-connector.v1"
 CLAUDE_HOOK_MARKER = "luthn.claude-agent-connector.v1"
 HOOK_STATUS_MESSAGE = "Luthn 메모리 저장 예약 중…"
 CLAUDE_HOOK_STATUS_MESSAGE = "Saving Luthn memory…"
-CONNECTOR_TEMPLATE_VERSION = "5"
+CONNECTOR_TEMPLATE_VERSION = "6"
 INSTRUCTION_START_MARKER = "<!-- luthn:auto-recall:start -->"
 INSTRUCTION_END_MARKER = "<!-- luthn:auto-recall:end -->"
 MAX_HOOK_INPUT_BYTES = 256 * 1024
@@ -104,6 +104,15 @@ or repeat internal type names, field names, reference identifiers, MCP tool
 names, or raw tool errors in the user-facing response. Creating a request does
 not grant access; only a trusted operator can approve or deny it.
 
+Keep any returned access handle private in the current task context. Never
+display it, quote it, place it in recall metadata, or save it as memory. After
+the owner confirms approval, call `get_protected_information_result` with that
+handle. A successful call consumes one approved read. Answer only the specific
+detail the user requested and do not repeat unrelated protected content. If
+the handle is no longer available, create a new confirmation request instead
+of guessing. Credential, access-key, and private-key material is never
+available even after approval.
+
 ## Agent memory mutation boundary
 
 Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
@@ -167,6 +176,15 @@ current protected information could be matched. Never show or repeat internal
 type names, field names, reference identifiers, MCP tool names, or raw tool
 errors in the user-facing response. Creating a request does not grant access;
 only a trusted operator can approve or deny it.
+
+Keep any returned access handle private in the current task context. Never
+display it, quote it, place it in recall metadata, or save it as memory. After
+the owner confirms approval, call `get_protected_information_result` with that
+handle. A successful call consumes one approved read. Answer only the specific
+detail the user requested and do not repeat unrelated protected content. If
+the handle is no longer available, create a new confirmation request instead
+of guessing. Credential, access-key, and private-key material is never
+available even after approval.
 
 ## Agent memory mutation boundary
 

@@ -301,6 +301,18 @@ public sealed class LuthnClient : ILuthnClient
         return await SendJsonAsync<ProtectedInformationAccessResponseDto>(httpRequest, cancellationToken);
     }
 
+    public async Task<ProtectedInformationResultDto> GetProtectedInformationResultAsync(
+        ProtectedInformationResultRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/access-requests/protected-result")
+        {
+            Content = JsonContent.Create(request, options: JsonOptions)
+        };
+        return await SendJsonAsync<ProtectedInformationResultDto>(httpRequest, cancellationToken);
+    }
+
     public async Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default)

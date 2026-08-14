@@ -224,16 +224,20 @@ provenance는 불변 수집 기원 기록입니다.
 에이전트는 안전하게 회상된 memory 항목 하나에서 같은 검토 lifecycle을 시작할 수도
 있습니다. 해석 route는 그 안전 항목 ID와 선택적인 짧은 비민감 사유만 받습니다.
 server는 호출자에게서 owner와 workspace를 정하고, 그 항목에 연결된 현재 유효한 보호
-정보가 하나일 때만 기존 요청 생성·재사용 규칙으로 넘깁니다. 보호 정보 참조 ID, 원문,
-추론된 민감 세부 내용, 무제한 후보 목록은 반환하지 않습니다. 연결 정보가 없거나
-만료되었으면 내용을 노출하지 않는 쉬운 상태 문구를 반환합니다. 요청 생성은 접근 승인이나
-결정 권한을 부여하지 않습니다.
+정보가 하나일 때 요청자 전용 새 요청을 만듭니다. 응답의 opaque access handle은 요청한
+task 안에서만 보관하며 server에는 digest만 저장합니다. 보호 정보 참조 ID, 원문, 추론된
+민감 세부 내용, 무제한 후보 목록은 반환하지 않습니다. 연결 정보가 없거나 만료되었으면
+내용을 노출하지 않는 쉬운 상태 문구를 반환합니다. 요청 생성은 접근 승인이나 결정 권한을
+부여하지 않습니다.
 
-운영자는 상세를 확인한 뒤 명시적 승인·반려 사유를 기록해야 합니다. 승인은 server가
+운영자는 상세를 확인한 뒤 명시적 승인·반려 사유를 기록해야 합니다. 기존 승인은 server가
 다시 분류해 공개·agent-safe라고 확인한 제한된 `redactedSummary`만 보존할 수 있습니다.
-결과 계약은 검토된 summary 또는 pending·expired·denied·unavailable에 대한 명시적
-무출력 정책을 반환합니다. 만료, 상세 조회, 결정과 결과 조회는 metadata-only 감사 사건을
-남깁니다. 민감 접근 승인이 외부 공개 승인을 의미하지는 않습니다.
+protected-memory 승인은 60~3600초(기본 3600초), 성공 조회 1~3회(기본 1회)를 설정합니다.
+보호 결과는 인증된 요청자 binding과 opaque handle이 모두 일치할 때만 저장된 원본
+title·summary를 반환합니다. 자격증명·access key·private key는 조회 횟수를 소비하지 않고
+항상 차단합니다. 운영자 화면·로그·감사·cache·Cloud 계약에는 handle이나 보호 값을 넣지
+않습니다. 만료, 상세 조회, 결정과 결과 조회는 metadata-only 감사 사건을 남깁니다.
+민감 접근 승인이 외부 공개 승인을 의미하지는 않습니다.
 
 만료된 민감 turn-summary graph는 reference·payload·memory·source·provenance의 link,
 workspace, owner, expiry가 정확히 일치하고 safe-sync outbox가 없을 때만 system retention

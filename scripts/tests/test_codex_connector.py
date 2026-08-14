@@ -244,6 +244,9 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             self.assertIn("Never put the user's raw question", installed)
             self.assertIn("internal type names, field names", installed)
             self.assertIn("only a trusted operator can approve or deny it", installed)
+            self.assertIn("get_protected_information_result", installed)
+            self.assertIn("Keep any returned access handle private", installed)
+            self.assertIn("Credential, access-key, and private-key material is never", installed)
             self.assertIn("Agent memory mutation boundary", installed)
             self.assertIn(
                 "Never delete, modify, overwrite, approve, or deny Luthn memory",
@@ -315,6 +318,10 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             self.assertIn("Do not guess between multiple possible items", instruction)
             self.assertIn("type names, field names", instruction)
             self.assertIn("only a trusted operator can approve or deny it", instruction)
+            self.assertIn("get_protected_information_result", instruction)
+            self.assertIn("Keep any returned access handle private", instruction)
+            self.assertIn("Answer only the specific", instruction)
+            self.assertIn("Credential, access-key, and private-key material is never", instruction)
 
     def test_install_preserves_instruction_symlink(self):
         with tempfile.TemporaryDirectory() as directory:

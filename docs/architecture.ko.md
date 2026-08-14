@@ -35,8 +35,11 @@ VaultRecord -> KnowledgeItem로 요약 -> WikiDocument로 투영
 민감 접근은 에이전트 기능이 아니라 통제된 운영자 흐름입니다. 요청에는 제한된 목적,
 session과 만료가 들어갑니다. Local/Hub 운영자 화면은 기존 안전 참조 metadata와
 redacted summary만 가진 별도 상세 투영을 읽고, 명시적 승인·반려 사유를 기록합니다.
-승인 결과도 server가 재검증한 redacted summary만 포함할 수 있으며 원본 Vault/source와
-protected payload에는 조회 route를 만들지 않습니다.
+기존 승인 결과는 server가 재검증한 redacted summary만 포함합니다. 추가된 protected-memory
+모드는 요청자 전용 opaque capability를 발급하고, 승인 뒤 제한된 시간과 횟수 동안 저장된
+원본 title·summary만 복호화해 요청자에게 반환합니다. 운영자 화면에는 이 내용이 표시되지
+않습니다. 자격증명·access key·private key는 항상 차단하며 제한 없는 Vault/source 조회
+route는 만들지 않습니다.
 
 외부 공개 승인은 민감 접근 승인과 별도입니다. 감사 사건은 요청·결정·결과 조회,
 분류·provider 결과, 설정 변경, 수집·처리와 보존 정리를 metadata-only로 기록합니다.

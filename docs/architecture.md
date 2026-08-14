@@ -100,9 +100,12 @@ Sensitive access is a controlled operator workflow, not an agent capability. A
 request carries a bounded purpose, session, and expiry. The Local/Hub operator
 console reads a separate detail projection containing only existing safe
 reference metadata and a redacted summary, then records an explicit approve or
-deny reason. An approved result can contain only a server-validated redacted
-summary; raw Vault/source content and protected payloads never receive a read
-route.
+deny reason. Legacy approved results contain only a server-validated redacted
+summary. The additive protected-memory mode issues a requester-bound opaque
+capability and, after approval, decrypts only the stored original title and
+summary for a bounded duration and read count. The operator console never loads
+that content. Credential, access-key, and private-key categories are blocked
+unconditionally, and unrestricted Vault/source read routes remain absent.
 
 External-publication approval is a separate decision from sensitive-access
 approval. Audit events record the request, decision, result read, classification

@@ -264,7 +264,7 @@ public sealed class SdkContractTests
             .ToArray();
         var expectedProperties = new[]
         {
-            "id", "sensitiveReferenceId", "status", "requestedBy", "sessionId",
+            "id", "sensitiveReferenceId", "accessMode", "status", "requestedBy", "sessionId",
             "requestReason", "createdAt", "expiresAt", "decision", "decidedBy",
             "decidedAt", "decisionReason", "redactedOutputAvailable", "outputPolicy",
             "reference", "payloadClass", "redactionState"
@@ -283,6 +283,7 @@ public sealed class SdkContractTests
         Assert.DoesNotContain("protectedPayload", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("vault", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("RedactedSummary", document.RootElement.GetProperty("accessMode").GetString());
     }
 
     [Fact]

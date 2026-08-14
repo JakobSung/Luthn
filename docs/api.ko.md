@@ -367,6 +367,7 @@ GET  /api/access-requests/policy
 PUT  /api/access-requests/policy
 POST /api/access-requests
 POST /api/access-requests/resolve
+POST /api/access-requests/protected-result
 GET  /api/access-requests/{id}
 GET  /api/access-requests/{id}/operator-detail
 GET  /api/access-requests/{id}/result
@@ -374,8 +375,10 @@ POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-기존 민감 참조에 대한 metadata-only 요청을 만들고 결정하며, server 재분류를 통과한 제한된 redacted output을 선택적으로 반환합니다. 원본 Vault/source
-payload는 반환하지 않습니다. 요청자는 server가 정한 자기 owner의 요청만 생성·조회할
+두 가지 additive mode를 지원합니다. 기존 요청은 server 재분류를 통과한 제한된 redacted
+output을 선택적으로 반환합니다. protected-memory 요청은 요청자 전용 승인 뒤 암호화해
+저장한 원본 title·summary만 반환할 수 있으며 자격증명과 key는 항상 차단합니다. 요청자는
+server가 정한 자기 owner의 요청만 생성·조회할
 수 있습니다. 목록·운영자 상세에는 `access.review`, 승인·반려에는 별도의 신뢰된
 `access.decide`가 필요합니다. 기존 client의 하위 호환을 위해 `access.decide`는 조회도
 포함합니다. 명시적 운영자는
@@ -396,8 +399,11 @@ lifecycle로 연결하는 에이전트 안전 경계입니다.
 선택적인 사유는 길이가 제한되며 사용자의 원문 질문이나 민감한 값을 포함하면 안 됩니다.
 server는 인증된 owner와 workspace 안에서만 관련 보호 정보를 해석하고, 사람이 이해할 수
 있는 `message`와 함께 `requested`, `not-found`, `expired` 중 하나를 반환합니다.
-`requestId`는 `requested`일 때만 포함하고 보호 정보 참조나 내용은 반환하지 않습니다.
-`requested`는 새 요청 생성뿐 아니라 기존 pending/active 요청의 안전한 재사용도 의미합니다.
+`requestId`와 새 64자 소문자 hexadecimal `accessHandle`은 `requested`일 때만 포함하고 보호
+정보 참조나 내용은 반환하지 않습니다. server에는 handle의 SHA-256 digest만 저장합니다.
+handle은 요청한 task 안에서만 보관하고 사용자 출력·로그·감사·cache·recall metadata·
+Cloud sync·운영자 응답에 넣으면 안 됩니다. 잃어버리면 새 요청을 만들어야 합니다.
+resolve와 protected-result 응답은 `Cache-Control: no-store`, `Pragma: no-cache`를 사용합니다.
 
 ### 권한과 정책 계약
 
@@ -405,7 +411,7 @@ server는 인증된 owner와 workspace 안에서만 관련 보호 정보를 해�
 
 | Scope | 허용되는 민감 접근 작업 |
 | --- | --- |
-| `access.request` | owner 범위 요청 생성과 현재 상태 또는 제한된 결과의 동기 조회 |
+| `access.request` | owner 범위 요청 생성과 현재 상태, 기존 제한 결과 또는 요청자 전용 보호 결과의 동기 조회 |
 | `access.review` | 인증된 workspace 안의 요청 목록과 운영자 상세 조회 |
 | `access.decide` | 만료되지 않은 Pending 요청 승인·반려. 하위 호환을 위해 review를 포함하지만 정책 설정 권한은 포함하지 않음 |
 | `access.configure` | workspace 공통 승인 대기시간, 승인 결과 노출시간, 최대 성공 조회 횟수 조회·개정. 검토·결정 권한은 포함하지 않음 |
@@ -414,11 +420,11 @@ server는 인증된 owner와 workspace 안에서만 관련 보호 정보를 해�
 session의 `config.write`는 호환성 연결로만 허용하며 review나 decide 권한을 부여하지
 않습니다.
 
-기본 정책은 승인 대기시간 600초, 이와 분리된 승인 결과 grant 600초, 성공 결과 조회
-1회입니다. 두 시간값의 허용범위는 60–3600초이고 최대 성공 조회 횟수는 1–10회입니다.
-무제한 값은 없습니다. 잘못되거나 권한 없는 정책 변경은 fail-closed 처리합니다. 각
-revision은 server가 관리하고 이후 수명주기에만 적용되며 기존 request나 grant를
-연장하거나 복원하지 않습니다.
+기존 정책은 승인 대기시간 600초, 이와 분리된 승인 결과 grant 600초, 성공 결과 조회
+1회가 기본입니다. 기존 두 시간값은 60–3600초, 기존 최대 성공 조회 횟수는 1–10회입니다.
+protected-memory 승인은 요청마다 별도로 3600초·1회가 기본이며 60–3600초·1–3회만
+허용합니다. 무제한 값은 없습니다. 잘못되거나 권한 없는 변경은 fail-closed 처리하고 기존
+request나 grant를 연장하거나 복원하지 않습니다.
 
 정책 변경 요청:
 
@@ -476,6 +482,10 @@ request expiry를 결정합니다. `sessionId`를 생략하면 기존과 같이 
 | `grant-expired` | 승인 결과 grant가 만료되어 결과를 반환하지 않음 |
 | `grant-consumed` | 성공 조회 횟수를 모두 사용하여 결과를 반환하지 않음 |
 | `result-returned` | 이번 결과 호출이 승인된 제한 결과를 반환하고 성공 조회 1회를 원자적으로 소비함 |
+| `protected-result-returned` | 요청자 전용 호출이 원본 title·summary를 반환하고 성공 조회 1회를 원자적으로 소비함 |
+| `protected-result-not-found` | handle과 인증된 요청자 binding이 일치하지 않아 내용을 반환하지 않음 |
+| `protected-result-unavailable` | 보호 payload를 안전하게 열 수 없어 내용을 반환하지 않음 |
+| `credential-blocked` | 자격증명·access key·private key를 감지해 조회 횟수 소비 없이 차단함 |
 
 목록, request, operator detail, result 응답에는 적용 가능한 경우 `requestExpiresAt`,
 `grantExpiresAt`, `remainingReads`, `maxReads`, `usedReads`가 추가됩니다. `usedReads`는
@@ -495,10 +505,12 @@ relay와 Cloud 관리자 route는 이 계약의 일부가 아닙니다.
 ### Workflow, 감사, 우회 차단 경계
 
 `SensitiveAccessWorkflow`만 request resolution, 결정, 정책 revision, grant, 만료, 조회
-counter를 조회하거나 변경할 수 있는 application 경계입니다. 승인 결과 조회에는 이
-Workflow가 발급한 직렬화 불가능한 일회성 내부 permit도 필요합니다. permit은 HTTP, SDK,
-MCP, 로그, 감사, cache, Cloud 계약에 노출하지 않습니다. Agent용 API/MCP에는 approve,
-deny, 정책/grant 변경, permit, 원본 Vault/source 조회 작업이 없습니다.
+counter를 조회하거나 변경할 수 있는 application 경계입니다. 기존 승인 결과 조회에는 이
+Workflow가 발급한 직렬화 불가능한 일회성 내부 permit이 필요합니다. protected-memory
+조회에는 인증된 요청자 binding과 opaque handle이 모두 필요하며 plaintext handle은
+저장하지 않습니다. permit과 handle은 로그·감사·cache·Cloud·운영자 계약에 노출하지
+않습니다. Agent용 API/MCP에는 approve, deny, 정책/grant 변경, 제한 없는 Vault/source
+조회나 자격증명 조회 작업이 없습니다.
 
 백그라운드 만료 materializer도 Workflow 소유 system operation을 호출하며 request나 grant
 row를 직접 변경하지 않습니다. materialization은 멱등이고 수명주기 근거를 기록하지만,
@@ -525,9 +537,11 @@ protected payload, credential, workspace id, owner id는 응답하지 않습니�
 
 새 호출자는 `sessionId`를 보내야 합니다. `expiresInSeconds`는 버전 없는 JSON 형식의
 호환성을 위해 유지하고 60–3600초 밖의 값은 거절하지만, 실제 request 만료는 활성 server
-정책이 결정합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한,
+정책이 결정합니다. 기존 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한,
 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. turn-summary reference는
 이 값을 생략하면 저장된 공개 안전 투영이 있을 때 server가 다시 검증해 사용합니다.
+protected-memory 승인은 `redactedSummary`를 거절하고 대신 보호 범위 안의 선택적
+`grantDurationSeconds`, `maximumSuccessfulReads`를 받습니다.
 reference 만료는 요청 생성, 결정, permit/grant 사용, 결과 조회에서 모두 현재 server
 시각으로 재검사하며 항상 출력 없이 거절합니다. 거부된 승인 요약은
 metadata-only 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며
@@ -535,6 +549,40 @@ metadata-only 감사 사건만 만듭니다. `/result`는 명시적 출력 정�
 `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를
 사용하고 원문은 반환하지 않습니다. request와 grant 시간은 server 정책으로 각각
 60–3600초 범위에 제한됩니다. 만료와 결과 조회 감사에는 결과 본문을 복사하지 않습니다.
+
+protected-memory 승인과 결과 예시:
+
+```json
+{
+  "reason": "요청자에게 공개하도록 승인합니다.",
+  "grantDurationSeconds": 3600,
+  "maximumSuccessfulReads": 1
+}
+```
+
+```http
+POST /api/access-requests/protected-result
+Cache-Control: no-store
+
+{"accessHandle":"<64자 소문자 hexadecimal>"}
+```
+
+```json
+{
+  "status": "protected-result-returned",
+  "contentAvailable": true,
+  "title": "견적",
+  "content": "승인된 견적 금액은 10억입니다.",
+  "grantExpiresAt": "2026-08-14T01:00:00Z",
+  "remainingReads": 0,
+  "maxReads": 1,
+  "reasons": ["Approved protected memory was returned to the original requester."]
+}
+```
+
+보호 결과 endpoint는 `POST`, `Cache-Control: no-store`이며 내용을 성공적으로 반환할 때만
+조회 1회를 소비합니다. 저장된 원본 title·summary만 복호화하고 tag·provenance·session
+metadata·자격증명·access key·private key는 반환하지 않습니다.
 
 만료되는 민감 turn-summary reference가 보존 정리 시점에 도달하면 암호화 payload,
 live reference, 연결된 memory/source graph, request, decision, grant를 하나의 원자 작업으로

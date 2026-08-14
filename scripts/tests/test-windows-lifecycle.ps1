@@ -576,7 +576,7 @@ esac
     $version = $versionResult.Output | ConvertFrom-Json
     Assert-True ($version.installedImageReference -ceq $resolvedOfficialImage) "version should report the immutable installed image reference"
     Assert-True ($version.updateChannel -ceq "ghcr.io/jakobsung/luthn:stable") "version should report the selected update channel"
-    Assert-True ($version.cliTemplateVersion -ceq "4" -and $version.connectorTemplateVersion -ceq "5") "version should report CLI and connector template versions"
+    Assert-True ($version.cliTemplateVersion -ceq "4" -and $version.connectorTemplateVersion -ceq "6") "version should report CLI and connector template versions"
     Assert-True ($version.mcpSchemaVersion -ceq "0.1.0") "version should fall back to the legacy MCP server version when the image label and schemaVersion field are absent"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($tokenFile))) "version JSON must not expose the service token"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($operatorTokenFile))) "version JSON must not expose the operator token"

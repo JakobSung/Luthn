@@ -95,9 +95,10 @@ Runtime projects:
 - Use `coreTags` for Core-filtered context selection.
 - Do not add raw Vault/source read routes, connector methods, or MCP tools by
   default.
-- Keep sensitive-access and audit responses metadata-only by default. The only
-  limited output exception is the explicit operator-approved, server-validated
-  redacted summary returned by the sensitive-access result contract.
+- Keep sensitive-access and audit responses metadata-only by default. Limited
+  output exceptions are the server-validated legacy redacted summary and the
+  requester-bound protected-memory title/summary after explicit approval.
+  Credentials and keys are never an exception.
 - Keep sensitive or non-agent-visible shared-memory user fields in the
   authenticated protected payload store. Keep its key ring outside PostgreSQL,
   and never expose ciphertext through agent, sync, publication, audit, log, or

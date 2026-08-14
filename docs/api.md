@@ -678,6 +678,7 @@ GET /api/access-requests/policy
 PUT /api/access-requests/policy
 POST /api/access-requests
 POST /api/access-requests/resolve
+POST /api/access-requests/protected-result
 GET /api/access-requests/{id}
 GET /api/access-requests/{id}/operator-detail
 GET /api/access-requests/{id}/result
@@ -685,7 +686,7 @@ POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-These endpoints create and decide metadata-only sensitive-access requests for existing sensitive record references, with an optional bounded redacted output after server reclassification. They require configured bearer service-token scopes in production/self-host mode and do not return raw Vault/source payloads. A requester can create and read requests only for its server-derived owner. Listing and operator detail require `access.review`; approval and denial require the separate trusted `access.decide` scope. For existing clients, `access.decide` also implies review. An explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
+These endpoints support two additive modes. Legacy requests may return an optional bounded redacted output after server reclassification. Protected-memory requests may return only the encrypted original title and summary after a requester-bound approval; credentials and keys are always blocked. They require configured bearer service-token scopes in production/self-host mode. A requester can create and read requests only for its server-derived owner. Listing and operator detail require `access.review`; approval and denial require the separate trusted `access.decide` scope. For existing clients, `access.decide` also implies review. An explicitly configured operator may administer another owner's request while audit records keep only bounded metadata. Create/read operations require `access.request`. The MCP server exposes only create, status, and result operations—never approval or denial.
 
 `POST /api/access-requests/resolve` is the agent-safe bridge from a public safe
 memory item to the existing request lifecycle. It accepts:
@@ -700,10 +701,13 @@ memory item to the existing request lifecycle. It accepts:
 The optional reason is bounded and must not contain the raw question or any
 sensitive value. The server resolves only within the authenticated owner and
 workspace and returns `requested`, `not-found`, or `expired` with a
-human-readable `message`. `requestId` is present only for `requested`; no
-protected record reference or content is returned. A `requested` response may
-represent a newly created request or safe reuse of the existing pending/active
-request.
+human-readable `message`. `requestId` and a fresh 64-character lowercase
+hexadecimal `accessHandle` are present only for `requested`; no protected record
+reference or content is returned. Only a SHA-256 digest of the handle is stored.
+The handle must stay inside the requesting task and must not enter user-visible
+output, logs, audit, cache, recall metadata, Cloud sync, or operator responses.
+Losing it requires a new request. Resolve and protected-result responses use
+`Cache-Control: no-store` and `Pragma: no-cache`.
 
 ### Authorization and policy contract
 
@@ -712,7 +716,7 @@ configuration as separate capabilities:
 
 | Scope | Allowed sensitive-access operations |
 | --- | --- |
-| `access.request` | Create an owner-scoped request and synchronously read its current status or bounded result. |
+| `access.request` | Create an owner-scoped request and synchronously read its current status, legacy bounded result, or requester-bound protected result. |
 | `access.review` | List requests and read operator detail inside the authenticated workspace. |
 | `access.decide` | Approve or deny a non-expired Pending request. It also implies review for compatibility, but not policy configuration. |
 | `access.configure` | Read and revise the workspace-wide request timeout, grant duration, and maximum successful reads. It does not imply review or decision authority. |
@@ -721,12 +725,13 @@ New service tokens use `access.configure` for both policy routes. Existing local
 console sessions that already carry `config.write` are accepted only as a
 compatibility bridge; this does not grant review or decision authority.
 
-The default policy is a 600-second request timeout, a separate 600-second
-approved-result grant, and one successful result read. Both durations accept
-60–3600 seconds; maximum successful reads accepts 1–10. There is no unlimited
-value. Invalid or unauthorized policy changes fail closed. Each revision is
-server-owned, applies prospectively, and never extends or restores an existing
-request or grant.
+The legacy policy defaults to a 600-second request timeout, a separate
+600-second approved-result grant, and one successful result read. Both legacy
+durations accept 60–3600 seconds; legacy maximum reads accepts 1–10.
+Protected-memory approval has a separate per-request policy: 3600 seconds and
+one successful read by default, with 60–3600 seconds and 1–3 reads allowed.
+There is no unlimited value. Invalid or unauthorized changes fail closed and
+never extend or restore an existing request or grant.
 
 Policy update:
 
@@ -787,6 +792,10 @@ lifecycle observed at server time:
 | `grant-expired` | The approved-result grant expired; no result is returned. |
 | `grant-consumed` | All successful reads were used; no result is returned. |
 | `result-returned` | This result call returned the approved bounded output and atomically consumed one successful read. |
+| `protected-result-returned` | The requester-bound result call returned the original title and summary and atomically consumed one successful read. |
+| `protected-result-not-found` | The handle and authenticated requester binding did not match; no content is returned. |
+| `protected-result-unavailable` | The protected payload could not be safely opened; no content is returned. |
+| `credential-blocked` | Credential, access-key, or private-key material was detected and no read was consumed. |
 
 List, request, operator-detail, and result responses add `requestExpiresAt`,
 `grantExpiresAt`, `remainingReads`, `maxReads`, and `usedReads` when applicable.
@@ -810,10 +819,12 @@ this contract.
 
 `SensitiveAccessWorkflow` is the only application boundary allowed to resolve or
 mutate requests, decisions, policy revisions, grants, expiry, and read counters.
-Approved output reads additionally require its non-serializable, one-time internal
-permit. The permit is never exposed in HTTP, SDK, MCP, logs, audit, cache, or Cloud
-contracts. Agent-facing API/MCP surfaces do not expose approve, deny, policy/grant
-mutation, permit, or raw Vault/source read operations.
+Legacy approved-output reads additionally require a non-serializable, one-time
+internal permit. Protected-memory reads instead require both the authenticated
+requester binding and the opaque access handle; only its digest is persisted.
+Neither permit nor plaintext handle is exposed in logs, audit, cache, Cloud, or
+operator contracts. Agent-facing API/MCP surfaces do not expose approve, deny,
+policy/grant mutation, unrestricted Vault/source reads, or credential reads.
 
 The background expiry materializer also invokes a Workflow-owned system
 operation; it does not write request or grant rows directly. Materialization is
@@ -893,7 +904,7 @@ Response shape includes request/decision metadata only:
 }
 ```
 
-Approving or denying records decision metadata and audit events. Approval does not create a raw content read path. An approval request may include `redactedSummary`; the server enforces the 4000-character storage limit, reclassifies it, and stores it only when it is public agent-safe. For a turn-summary reference, omitting this field revalidates and uses the reference's stored public-safe projection when one exists. Rejected approval summaries create metadata-only audit events. Approved result delivery is limited to that server-validated summary. Reference expiry is rechecked during request creation, decision, permit/grant use, and result reads; expiry always produces no output.
+Approving or denying records decision metadata and audit events. A legacy approval request may include `redactedSummary`; the server enforces the 4000-character storage limit, reclassifies it, and stores it only when it is public agent-safe. A protected-memory approval rejects `redactedSummary` and instead accepts optional `grantDurationSeconds` and `maximumSuccessfulReads` within the protected limits. Reference expiry is rechecked during request creation, decision, grant use, and result reads; expiry always produces no output. The operator detail and decision responses never include the access handle or protected value.
 
 Approval request with reviewed output:
 
@@ -929,6 +940,41 @@ Result response:
 ```
 
 `GET /api/access-requests/{id}/result` is the explicit output policy contract. It requires the request scope and never returns raw Vault/source content. Pending requests use `pending-approval`; expired requests use `expired-no-output`; denied requests use `denied-no-output`; approved requests use `approved-redacted-output-available` only when bounded server-validated output is available, otherwise `approved-redacted-output-unavailable`. Request and grant durations are independently bounded to 60–3600 seconds by server policy. Expiry records metadata-only audit, and result reads create `sensitive_access.result_read` audit events whose payload and redaction fields mirror the returned result policy without copying the result content.
+
+Protected-memory approval and result:
+
+```json
+{
+  "reason": "Approved for the requester.",
+  "grantDurationSeconds": 3600,
+  "maximumSuccessfulReads": 1
+}
+```
+
+```http
+POST /api/access-requests/protected-result
+Cache-Control: no-store
+
+{"accessHandle":"<64 lowercase hex characters>"}
+```
+
+```json
+{
+  "status": "protected-result-returned",
+  "contentAvailable": true,
+  "title": "Quote",
+  "content": "The approved quote amount is 1 billion KRW.",
+  "grantExpiresAt": "2026-08-14T01:00:00Z",
+  "remainingReads": 0,
+  "maxReads": 1,
+  "reasons": ["Approved protected memory was returned to the original requester."]
+}
+```
+
+The protected result endpoint is `POST`, returns `Cache-Control: no-store`, and
+consumes one read only when content is successfully returned. It decrypts only
+the stored original title and summary. It never returns tags, provenance,
+session metadata, credentials, access keys, or private keys.
 
 When an expiring sensitive turn-summary reference reaches retention cleanup, the
 encrypted payload, live reference, linked memory/source graph, request, decision,
@@ -1197,6 +1243,8 @@ credentials, prompts, transcripts, and local paths.
 ## Vault boundary
 
 Raw Vault reads are intentionally not exposed. The implemented restricted-access
-workflow requires operator approval and audit logging before returning the
-limited, server-validated redacted output described above; an approval never
-returns the protected Vault payload itself.
+workflow requires operator approval and audit logging. Legacy results return the
+limited, server-validated redacted output described above. The requester-bound
+protected-memory result can decrypt only the stored original title and summary;
+it is not an unrestricted Vault/source route and never returns credentials,
+keys, tags, provenance, or arbitrary protected payload fields.

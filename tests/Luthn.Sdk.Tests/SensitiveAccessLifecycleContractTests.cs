@@ -99,4 +99,31 @@ public sealed class SensitiveAccessLifecycleContractTests
         Assert.DoesNotContain("payload", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cipher", json, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void ProtectedMemoryContractsCarryOnlyHandleOrBoundedResultFields()
+    {
+        var request = new ProtectedInformationResultRequestDto(new string('a', 64));
+        var result = JsonSerializer.Deserialize<ProtectedInformationResultDto>("""
+            {
+              "status": "protected-result-returned",
+              "contentAvailable": true,
+              "title": "견적",
+              "content": "승인된 견적 금액은 10억입니다.",
+              "grantExpiresAt": "2026-08-14T01:00:00Z",
+              "remainingReads": 0,
+              "maxReads": 1,
+              "reasons": ["Approved protected memory was returned to the original requester."]
+            }
+            """);
+
+        Assert.Equal("""{"accessHandle":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}""",
+            JsonSerializer.Serialize(request));
+        Assert.True(result!.ContentAvailable);
+        Assert.Equal("견적", result.Title);
+        Assert.Equal("승인된 견적 금액은 10억입니다.", result.Content);
+        Assert.DoesNotContain("reference", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("provenance", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("session", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
+    }
 }

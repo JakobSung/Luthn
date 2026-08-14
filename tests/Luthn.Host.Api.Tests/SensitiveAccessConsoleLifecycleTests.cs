@@ -23,12 +23,30 @@ public sealed class SensitiveAccessConsoleLifecycleTests
         Assert.Contains("data-access-field=\"statusCode\"", html, StringComparison.Ordinal);
         Assert.Contains("data-access-field=\"grantExpiresAt\"", html, StringComparison.Ordinal);
         Assert.Contains("data-access-field=\"readUsage\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-access-field=\"accessMode\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-access-protected-control", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "name=\"protectedGrantDurationMinutes\" type=\"number\" min=\"1\" max=\"60\" value=\"60\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "name=\"protectedMaximumSuccessfulReads\" type=\"number\" min=\"1\" max=\"3\" value=\"1\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Protected content and credentials are never loaded into this console.",
+            html,
+            StringComparison.Ordinal);
         Assert.Contains("<option value=\"Expired\">Expired</option>", html, StringComparison.Ordinal);
         Assert.Contains("data-tombstone-hidden", html, StringComparison.Ordinal);
 
         Assert.Contains("/api/access-requests/policy", script, StringComparison.Ordinal);
         Assert.Contains("state.selectedAccessDetail?.statusCode === \"request-pending\"", script, StringComparison.Ordinal);
         Assert.Contains("detail.usedReads", script, StringComparison.Ordinal);
+        Assert.Contains("state.selectedAccessDetail?.accessMode === \"ProtectedMemory\"", script, StringComparison.Ordinal);
+        Assert.Contains("protectedGrantDurationMinutes", script, StringComparison.Ordinal);
+        Assert.Contains("protectedMaximumSuccessfulReads", script, StringComparison.Ordinal);
+        Assert.Contains("maximumSuccessfulReads: Number(form.get(\"protectedMaximumSuccessfulReads\"))", script, StringComparison.Ordinal);
         Assert.Contains("Expired · content removed", script, StringComparison.Ordinal);
         Assert.Contains("element.hidden = isTombstone", script, StringComparison.Ordinal);
         Assert.Contains("!(\"sensitiveReferenceId\" in (detail || {}))", script, StringComparison.Ordinal);
@@ -47,6 +65,7 @@ public sealed class SensitiveAccessConsoleLifecycleTests
         Assert.Contains("access.policyTitle", translations, StringComparison.Ordinal);
         Assert.Contains("민감 접근 설정", translations, StringComparison.Ordinal);
         Assert.DoesNotContain("rawContent", html + script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("accessHandle", html + script, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FindRepositoryRoot()
