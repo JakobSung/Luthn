@@ -56,6 +56,7 @@ public sealed class McpToolBoundaryTests
             "create_sensitive_access_request",
             "request_protected_information_access",
             "get_protected_information_result",
+            "wait_for_protected_information_access",
             "get_sensitive_access_request",
             "get_sensitive_access_result"
         ], names);
@@ -518,6 +519,45 @@ public sealed class McpToolBoundaryTests
     }
 
     [Fact]
+    public async Task ProtectedInformationWaitToolPassesBoundedRequestAndReturnsStatusOnly()
+    {
+        var client = new FakeLuthnClient();
+        var accessHandle = new string('a', 64);
+        using var args = JsonDocument.Parse($$"""{"accessHandle":"{{accessHandle}}","maxWaitSeconds":5,"pollIntervalMs":100}""");
+
+        var response = Assert.IsType<ProtectedInformationAccessWaitResponseDto>(
+            await new WaitForProtectedInformationAccessTool(client).InvokeAsync(args.RootElement));
+
+        Assert.Equal(accessHandle, client.LastProtectedInformationWaitRequest?.AccessHandle);
+        Assert.Equal(5, client.LastProtectedInformationWaitRequest?.MaxWaitSeconds);
+        Assert.Equal(100, client.LastProtectedInformationWaitRequest?.PollIntervalMs);
+        Assert.Equal(1, client.ProtectedInformationWaitCallCount);
+        Assert.Equal("approved", response.Status);
+        var serialized = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain("accessHandle", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(accessHandle, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("content", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProtectedInformationWaitToolMapsCancellationWithoutCallingConnector()
+    {
+        var client = new FakeLuthnClient();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var args = JsonDocument.Parse("{\"accessHandle\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}");
+
+        var response = Assert.IsType<ProtectedInformationAccessWaitResponseDto>(
+            await new WaitForProtectedInformationAccessTool(client).InvokeAsync(
+                args.RootElement,
+                cancellation.Token));
+
+        Assert.Equal("cancelled", response.Status);
+        Assert.Equal(0, client.ProtectedInformationWaitCallCount);
+        Assert.DoesNotContain("accessHandle", JsonSerializer.Serialize(response), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task SensitiveAccessStatusAlwaysReadsCurrentServerState()
     {
         var client = new FakeLuthnClient();
@@ -599,6 +639,16 @@ public sealed class McpToolBoundaryTests
         Assert.Equal(64, accessHandle.GetProperty("maxLength").GetInt32());
         Assert.Equal("^[0-9a-f]{64}$", accessHandle.GetProperty("pattern").GetString());
 
+        var protectedWaitTool = toolsJson.RootElement
+            .GetProperty("result")
+            .GetProperty("tools")
+            .EnumerateArray()
+            .First(item => item.GetProperty("name").GetString() == "wait_for_protected_information_access");
+        var waitProperties = protectedWaitTool.GetProperty("inputSchema").GetProperty("properties");
+        Assert.False(protectedWaitTool.GetProperty("inputSchema").GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal(60, waitProperties.GetProperty("maxWaitSeconds").GetProperty("maximum").GetInt32());
+        Assert.Equal(100, waitProperties.GetProperty("pollIntervalMs").GetProperty("minimum").GetInt32());
+
         var feedbackTool = toolsJson.RootElement
             .GetProperty("result")
             .GetProperty("tools")
@@ -669,7 +719,11 @@ public sealed class McpToolBoundaryTests
         public Exception? TelemetryException { get; init; }
         public bool ReturnSensitiveAccessTombstone { get; init; }
         public ProtectedInformationAccessRequestDto? LastProtectedInformationRequest { get; private set; }
+        public ProtectedInformationAccessWaitRequestDto? LastProtectedInformationWaitRequest { get; private set; }
         public ProtectedInformationResultRequestDto? LastProtectedInformationResultRequest { get; private set; }
+        public int ProtectedInformationWaitCallCount { get; private set; }
+        public ProtectedInformationAccessWaitResponseDto ProtectedInformationWaitResult { get; init; } =
+            new("approved", "The owner approved the protected information request.");
 
         public async Task<ContextPackDto> GetContextPackAsync(
             IReadOnlyList<string> coreTags,
@@ -839,6 +893,15 @@ public sealed class McpToolBoundaryTests
                 0,
                 1,
                 ["Approved protected memory was returned to the original requester."]));
+        }
+
+        public Task<ProtectedInformationAccessWaitResponseDto> WaitForProtectedInformationAccessAsync(
+            ProtectedInformationAccessWaitRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            LastProtectedInformationWaitRequest = request;
+            ProtectedInformationWaitCallCount++;
+            return Task.FromResult(ProtectedInformationWaitResult);
         }
 
         public Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(

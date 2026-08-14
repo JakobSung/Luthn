@@ -101,6 +101,11 @@ public interface ILuthnAgentClient
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement protected information result reads.");
 
+    Task<ProtectedInformationAccessWaitResponseDto> WaitForProtectedInformationAccessAsync(
+        ProtectedInformationAccessWaitRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information access waits.");
+
     Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default) =>
@@ -298,6 +303,16 @@ public interface ILuthnClient : ILuthnAgentClient
         ProtectedInformationResultRequestDto request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement protected information result reads.");
+
+    Task<ProtectedInformationAccessWaitResponseDto> ILuthnAgentClient.WaitForProtectedInformationAccessAsync(
+        ProtectedInformationAccessWaitRequestDto request,
+        CancellationToken cancellationToken) =>
+        WaitForProtectedInformationAccessAsync(request, cancellationToken);
+
+    new Task<ProtectedInformationAccessWaitResponseDto> WaitForProtectedInformationAccessAsync(
+        ProtectedInformationAccessWaitRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information access waits.");
 
     Task<SensitiveAccessReadDto> ILuthnAgentClient.GetSensitiveAccessRequestAsync(
         string id,

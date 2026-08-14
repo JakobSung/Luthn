@@ -48,6 +48,13 @@ internal interface ISensitiveAccessWorkflow
         string actor,
         CancellationToken cancellationToken);
 
+    Task<ProtectedInformationAccessWaitState> WaitForProtectedInformationAccessAsync(
+        string accessHandle,
+        TimeSpan maximumWait,
+        TimeSpan pollInterval,
+        LuthnRequestPrincipal principal,
+        CancellationToken cancellationToken);
+
     Task<SensitiveAccessRequestState?> ReadRequestAsync(
         string id,
         LuthnRequestPrincipal principal,
@@ -732,6 +739,92 @@ internal sealed class SensitiveAccessWorkflow(
                 actor,
                 cancellationToken),
             cancellationToken);
+
+    public async Task<ProtectedInformationAccessWaitState> WaitForProtectedInformationAccessAsync(
+        string accessHandle,
+        TimeSpan maximumWait,
+        TimeSpan pollInterval,
+        LuthnRequestPrincipal principal,
+        CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maximumWait, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(pollInterval, TimeSpan.Zero);
+
+        var deadline = timeProvider.GetUtcNow().Add(maximumWait);
+        try
+        {
+            while (true)
+            {
+                var state = await WithLifecycleGateAsync(
+                    () => ReadProtectedInformationAccessWaitStateCoreAsync(
+                        accessHandle,
+                        principal,
+                        cancellationToken),
+                    cancellationToken);
+                if (state.Status != ProtectedInformationAccessWaitStatuses.Pending)
+                {
+                    return state;
+                }
+
+                var remaining = deadline - timeProvider.GetUtcNow();
+                if (remaining <= TimeSpan.Zero)
+                {
+                    return ProtectedInformationAccessWaitState.TimedOut();
+                }
+
+                await Task.Delay(
+                    pollInterval < remaining ? pollInterval : remaining,
+                    timeProvider,
+                    cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return ProtectedInformationAccessWaitState.Cancelled();
+        }
+    }
+
+    private async Task<ProtectedInformationAccessWaitState> ReadProtectedInformationAccessWaitStateCoreAsync(
+        string accessHandle,
+        LuthnRequestPrincipal principal,
+        CancellationToken cancellationToken)
+    {
+        var handleDigest = ComputeOpaqueDigest(accessHandle);
+        var requesterBindingDigest = ComputeRequesterBindingDigest(principal);
+        var candidate = await ReadProtectedAccessCandidateAsync(
+            handleDigest,
+            requesterBindingDigest,
+            principal,
+            cancellationToken);
+        if (candidate is null)
+        {
+            return ProtectedInformationAccessWaitState.NotFound();
+        }
+
+        await ExpirePendingRequestsAsync(candidate.Id, principal, cancellationToken);
+        candidate = await ReadProtectedAccessCandidateAsync(
+            handleDigest,
+            requesterBindingDigest,
+            principal,
+            cancellationToken);
+        if (candidate is null)
+        {
+            return ProtectedInformationAccessWaitState.NotFound();
+        }
+
+        var statusCode = ResolveStatusCode(
+            candidate.ToLifecycleCandidate(),
+            timeProvider.GetUtcNow());
+        return statusCode switch
+        {
+            SensitiveAccessStatusCodes.GrantActive => ProtectedInformationAccessWaitState.Approved(),
+            SensitiveAccessStatusCodes.RequestDenied => ProtectedInformationAccessWaitState.Denied(),
+            SensitiveAccessStatusCodes.RequestExpired or
+                SensitiveAccessStatusCodes.GrantExpired or
+                SensitiveAccessStatusCodes.GrantConsumed => ProtectedInformationAccessWaitState.Expired(),
+            _ => ProtectedInformationAccessWaitState.Pending()
+        };
+    }
 
     private async Task<ProtectedInformationResultState> ReadProtectedInformationResultCoreAsync(
         string accessHandle,
@@ -2690,6 +2783,57 @@ internal static class ProtectedInformationAccessMessages
         "No related protected information was found. Please clarify which earlier information you mean and try again.";
     internal const string Expired =
         "The related protected information is no longer available, so a confirmation request cannot be created.";
+}
+
+internal sealed record ProtectedInformationAccessWaitState(
+    string Status,
+    string Message)
+{
+    internal static ProtectedInformationAccessWaitState Pending() =>
+        new(
+            ProtectedInformationAccessWaitStatuses.Pending,
+            "The protected information request is still waiting for the owner.");
+
+    internal static ProtectedInformationAccessWaitState Approved() =>
+        new(
+            ProtectedInformationAccessWaitStatuses.Approved,
+            "The owner approved access. The protected information can now be read through the existing result step.");
+
+    internal static ProtectedInformationAccessWaitState Denied() =>
+        new(
+            ProtectedInformationAccessWaitStatuses.Denied,
+            "The owner denied the protected information request.");
+
+    internal static ProtectedInformationAccessWaitState Expired() =>
+        new(
+            ProtectedInformationAccessWaitStatuses.Expired,
+            "The protected information request expired before it could be used.");
+
+    internal static ProtectedInformationAccessWaitState TimedOut() =>
+        new(
+            ProtectedInformationAccessWaitStatuses.TimedOut,
+            "The bounded wait ended before the owner made a decision. Waiting again will not consume an approved read.");
+
+    internal static ProtectedInformationAccessWaitState Cancelled() =>
+        new(
+            ProtectedInformationAccessWaitStatuses.Cancelled,
+            "The wait was cancelled. No protected information was opened.");
+
+    internal static ProtectedInformationAccessWaitState NotFound() =>
+        new(
+            ProtectedInformationAccessWaitStatuses.NotFound,
+            "No requester-bound protected information request was found.");
+}
+
+internal static class ProtectedInformationAccessWaitStatuses
+{
+    internal const string Pending = "pending";
+    internal const string Approved = "approved";
+    internal const string Denied = "denied";
+    internal const string Expired = "expired";
+    internal const string TimedOut = "timed-out";
+    internal const string Cancelled = "cancelled";
+    internal const string NotFound = "not-found";
 }
 
 internal sealed record SensitiveAccessOperatorDecisionState(

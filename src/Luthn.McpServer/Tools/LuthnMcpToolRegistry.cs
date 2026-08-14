@@ -112,6 +112,19 @@ public static class LuthnMcpToolRegistry
                     minimumLength: 64)
             ], ["accessHandle"], allowAdditionalProperties: false)),
         new(
+            "wait_for_protected_information_access",
+            "Wait for the requester-bound protected information lifecycle status without reading protected content or consuming an approved use.",
+            ToolSchema([
+                BoundedStringProperty(
+                    "accessHandle",
+                    "Opaque requester-only access handle returned by the confirmation request.",
+                    64,
+                    "^[0-9a-f]{64}$",
+                    minimumLength: 64),
+                IntegerProperty("maxWaitSeconds", "Maximum bounded wait in seconds.", 60, 1),
+                IntegerProperty("pollIntervalMs", "Polling interval in milliseconds.", 5_000, 100)
+            ], ["accessHandle"], allowAdditionalProperties: false)),
+        new(
             "get_sensitive_access_request",
             "Read the metadata-only status of a sensitive-access request.",
             ToolSchema([StringProperty("id", "Sensitive access request id.")], ["id"])),
@@ -143,6 +156,7 @@ public static class LuthnMcpToolRegistry
             new CreateSensitiveAccessRequestTool(client),
             new RequestProtectedInformationAccessTool(client),
             new GetProtectedInformationResultTool(client),
+            new WaitForProtectedInformationAccessTool(client),
             new GetSensitiveAccessRequestTool(client),
             new GetSensitiveAccessResultTool(client)
         ];

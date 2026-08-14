@@ -21,6 +21,15 @@ public sealed record ProtectedInformationAccessResponseDto(
 public sealed record ProtectedInformationResultRequestDto(
     [property: JsonPropertyName("accessHandle")] string AccessHandle);
 
+public sealed record ProtectedInformationAccessWaitRequestDto(
+    [property: JsonPropertyName("accessHandle")] string AccessHandle,
+    [property: JsonPropertyName("maxWaitSeconds")] int MaxWaitSeconds = 30,
+    [property: JsonPropertyName("pollIntervalMs")] int PollIntervalMs = 250);
+
+public sealed record ProtectedInformationAccessWaitResponseDto(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message);
+
 public sealed record ProtectedInformationResultDto(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("contentAvailable")] bool ContentAvailable,

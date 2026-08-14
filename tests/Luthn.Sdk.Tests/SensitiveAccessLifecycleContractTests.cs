@@ -104,6 +104,10 @@ public sealed class SensitiveAccessLifecycleContractTests
     public void ProtectedMemoryContractsCarryOnlyHandleOrBoundedResultFields()
     {
         var request = new ProtectedInformationResultRequestDto(new string('a', 64));
+        var waitRequest = new ProtectedInformationAccessWaitRequestDto(new string('a', 64), 5, 100);
+        var waitResponse = new ProtectedInformationAccessWaitResponseDto(
+            "approved",
+            "The owner approved the protected information request.");
         var result = JsonSerializer.Deserialize<ProtectedInformationResultDto>("""
             {
               "status": "protected-result-returned",
@@ -119,6 +123,14 @@ public sealed class SensitiveAccessLifecycleContractTests
 
         Assert.Equal("""{"accessHandle":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}""",
             JsonSerializer.Serialize(request));
+        Assert.Equal(
+            """{"accessHandle":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maxWaitSeconds":5,"pollIntervalMs":100}""",
+            JsonSerializer.Serialize(waitRequest));
+        Assert.Equal(
+            """{"status":"approved","message":"The owner approved the protected information request."}""",
+            JsonSerializer.Serialize(waitResponse));
+        Assert.DoesNotContain("accessHandle", JsonSerializer.Serialize(waitResponse), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("content", JsonSerializer.Serialize(waitResponse), StringComparison.OrdinalIgnoreCase);
         Assert.True(result!.ContentAvailable);
         Assert.Equal("견적", result.Title);
         Assert.Equal("승인된 견적 금액은 10억입니다.", result.Content);

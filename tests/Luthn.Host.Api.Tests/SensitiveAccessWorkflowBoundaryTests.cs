@@ -13,7 +13,7 @@ public sealed class SensitiveAccessWorkflowBoundaryTests
             .Where(method => method.Name.EndsWith("Endpoint", StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(11, endpointHandlers.Length);
+        Assert.Equal(12, endpointHandlers.Length);
         Assert.All(endpointHandlers, handler =>
         {
             Assert.Contains(handler.GetParameters(), parameter =>
