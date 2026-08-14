@@ -778,15 +778,15 @@ internal static class SensitiveAccessEndpointMapping
                 _ => "pending-approval"
             }
             : status switch
-        {
-            SensitiveAccessRequestStatus.Approved when redactedOutputAvailable =>
-                "approved-redacted-output-available",
-            SensitiveAccessRequestStatus.Approved =>
-                "approved-redacted-output-unavailable",
-            SensitiveAccessRequestStatus.Denied => "denied-no-output",
-            SensitiveAccessRequestStatus.Expired => "expired-no-output",
-            _ => "pending-approval"
-        };
+            {
+                SensitiveAccessRequestStatus.Approved when redactedOutputAvailable =>
+                    "approved-redacted-output-available",
+                SensitiveAccessRequestStatus.Approved =>
+                    "approved-redacted-output-unavailable",
+                SensitiveAccessRequestStatus.Denied => "denied-no-output",
+                SensitiveAccessRequestStatus.Expired => "expired-no-output",
+                _ => "pending-approval"
+            };
 
     private static string BoundRedactedOutput(string value)
     {
