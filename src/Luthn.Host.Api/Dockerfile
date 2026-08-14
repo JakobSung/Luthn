@@ -23,7 +23,8 @@ COPY --from=build /out/mcp ./mcp/
 COPY LICENSE /licenses/AGPL-3.0.txt
 COPY LICENSES/Apache-2.0.txt /licenses/Apache-2.0.txt
 COPY docker/luthn-container /usr/local/bin/luthn-container
-RUN chmod 0755 /usr/local/bin/luthn-container \
+RUN sed -i 's/\r$//' /usr/local/bin/luthn-container \
+    && chmod 0755 /usr/local/bin/luthn-container \
     && mkdir -p /var/lib/luthn/operator \
     && chown -R app:app /app /var/lib/luthn
 USER app

@@ -94,6 +94,78 @@ public sealed class SensitiveAccessPolicyPersistenceTests
         Assert.Contains("ALTER COLUMN \"RequestTimeoutSeconds\" DROP DEFAULT", script, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task PersistsRequesterBoundProtectedMemoryRequestMetadataWithoutPlaintextHandle()
+    {
+        await using var db = CreateInMemoryDbContext();
+        var observedAt = DateTimeOffset.Parse("2026-08-14T00:00:00Z");
+        db.SensitiveAccessRequests.Add(new SensitiveAccessRequestRecord
+        {
+            Id = "access-protected-a",
+            SensitiveRecordReferenceId = "reference-a",
+            RequestedBy = "agent",
+            SessionId = "requester-session",
+            RequestReason = "confirm amount",
+            AccessMode = SensitiveAccessMode.ProtectedMemory,
+            AccessHandleDigest = "sha256:" + new string('a', 64),
+            RequesterBindingDigest = "sha256:" + new string('b', 64),
+            CreatedAt = observedAt,
+            ExpiresAt = observedAt.AddMinutes(10),
+            UpdatedAt = observedAt,
+            WorkspaceId = "workspace-a",
+            OwnerUserId = "owner-a",
+            PolicyRevision = 1,
+            RequestTimeoutSeconds = 600
+        });
+
+        await db.SaveChangesAsync();
+
+        var stored = await db.SensitiveAccessRequests.SingleAsync();
+        Assert.Equal(SensitiveAccessMode.ProtectedMemory, stored.AccessMode);
+        Assert.StartsWith("sha256:", stored.AccessHandleDigest, StringComparison.Ordinal);
+        Assert.Equal(71, stored.AccessHandleDigest.Length);
+        Assert.DoesNotContain(new string('c', 64), stored.AccessHandleDigest, StringComparison.Ordinal);
+        var index = db.Model.FindEntityType(typeof(SensitiveAccessRequestRecord))!
+            .GetIndexes()
+            .Single(candidate => candidate.Properties.Select(property => property.Name).SequenceEqual([
+                nameof(SensitiveAccessRequestRecord.WorkspaceId),
+                nameof(SensitiveAccessRequestRecord.OwnerUserId),
+                nameof(SensitiveAccessRequestRecord.AccessHandleDigest)
+            ]));
+        Assert.NotNull(index);
+        Assert.True(index.IsUnique);
+        Assert.Contains("ProtectedMemory", index.GetFilter(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RejectsProtectedMemoryRequestWithoutOpaqueDigestBindings()
+    {
+        await using var db = CreateInMemoryDbContext();
+        var observedAt = DateTimeOffset.Parse("2026-08-14T00:00:00Z");
+        db.SensitiveAccessRequests.Add(new SensitiveAccessRequestRecord
+        {
+            Id = "access-protected-invalid",
+            SensitiveRecordReferenceId = "reference-a",
+            RequestedBy = "agent",
+            SessionId = "requester-session",
+            RequestReason = "confirm amount",
+            AccessMode = SensitiveAccessMode.ProtectedMemory,
+            AccessHandleDigest = "plaintext-handle",
+            RequesterBindingDigest = "",
+            CreatedAt = observedAt,
+            ExpiresAt = observedAt.AddMinutes(10),
+            UpdatedAt = observedAt,
+            WorkspaceId = "workspace-a",
+            OwnerUserId = "owner-a",
+            PolicyRevision = 1,
+            RequestTimeoutSeconds = 600
+        });
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+
+        Assert.Contains("access-mode binding metadata", error.Message, StringComparison.Ordinal);
+    }
+
     private static LuthnDbContext CreateInMemoryDbContext() =>
         new(new DbContextOptionsBuilder<LuthnDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))

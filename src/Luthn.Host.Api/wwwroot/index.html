@@ -53,7 +53,7 @@
         <div class="orientation-copy">
           <p class="eyebrow" data-i18n="orientation.eyebrow">Start here</p>
           <h2 id="orientationTitle" data-i18n="orientation.title">Use the console by task</h2>
-          <p data-i18n="orientation.description">This console is for operators. Start with access setup, then choose one workflow. Agents never receive approval or raw protected content.</p>
+          <p data-i18n="orientation.description">This console is for operators. Start with access setup, then choose one workflow. Approved protected memory is delivered only to the bound requester; credentials are never delivered.</p>
         </div>
         <ol class="orientation-steps">
           <li>
@@ -468,6 +468,7 @@
             <dl id="accessDetailFields" class="access-detail-fields">
               <div><dt>Request</dt><dd data-access-field="id">Not selected</dd></div>
               <div><dt>Status</dt><dd data-access-field="status">—</dd></div>
+              <div data-tombstone-hidden><dt>Access mode</dt><dd data-access-field="accessMode">—</dd></div>
               <div data-tombstone-hidden><dt>Lifecycle</dt><dd data-access-field="statusCode">—</dd></div>
               <div data-tombstone-hidden><dt>Requested</dt><dd data-access-field="createdAt">—</dd></div>
               <div data-tombstone-hidden><dt>Expires</dt><dd data-access-field="expiresAt">—</dd></div>
@@ -488,10 +489,21 @@
               Decision reason
               <textarea name="reason" rows="3" maxlength="1000" required placeholder="Required for approve or deny"></textarea>
             </label>
-            <label>
+            <label data-access-redacted-control>
               Reviewed output
               <textarea name="redactedSummary" rows="3" maxlength="4000" placeholder="Optional public-safe output for approvals only"></textarea>
             </label>
+            <div data-access-protected-control hidden>
+              <p class="security-note">Approval releases the encrypted memory title and summary only to the requester that holds the private access handle. Credentials remain blocked.</p>
+              <label>
+                Approval duration (minutes)
+                <input name="protectedGrantDurationMinutes" type="number" min="1" max="60" value="60" required>
+              </label>
+              <label>
+                Maximum successful reads
+                <input name="protectedMaximumSuccessfulReads" type="number" min="1" max="3" value="1" required>
+              </label>
+            </div>
             <div class="row-actions">
               <button id="approveAccess" type="button" disabled>Approve</button>
               <button id="denyAccess" type="button" class="secondary" disabled>Deny</button>

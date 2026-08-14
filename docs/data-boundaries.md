@@ -282,19 +282,25 @@ protected payloads, credentials, workspace identity, or owner identity.
 An agent may also start the same lifecycle from one safe recalled memory item.
 The resolve route accepts only that safe item ID plus an optional bounded,
 non-sensitive reason. The server derives owner and workspace from the caller,
-requires one current protected record linked to that item, and then delegates to
-the existing request creation and reuse rules. It does not return the protected
-record reference, raw content, inferred sensitive details, or an unrestricted
-candidate list. Missing and expired links fail with a human-readable no-output
-status. Creating the request never grants access or decision authority.
+requires one current protected record linked to that item, and creates a fresh
+requester-bound request. The response includes an opaque access handle that must
+remain inside the requesting task; only its digest is persisted. It does not
+return the protected record reference, content, inferred sensitive details, or
+an unrestricted candidate list. Missing and expired links fail with a
+human-readable no-output status. Creating the request never grants access or
+decision authority.
 
 An operator must inspect that detail and record an explicit approve or deny
-reason. Approval can retain a bounded `redactedSummary` only after the server
-reclassifies it as public and agent-safe. The result contract returns that
-reviewed summary or an explicit no-output policy for pending, expired, denied,
-or unavailable decisions. Expiry, detail reads, decisions, and result reads
-emit metadata-only audit events. Sensitive-access approval never implies
-external-publication approval.
+reason. Legacy approval can retain a bounded `redactedSummary` only after the
+server reclassifies it as public and agent-safe. Protected-memory approval sets
+a 60–3600 second grant (3600 by default) and 1–3 successful reads (one by
+default). The protected result is returned only when both the authenticated
+requester binding and opaque handle match. It contains only the encrypted
+original title and summary; credentials, access keys, and private keys are
+blocked without consuming a read. The operator console, logs, audit, cache, and
+Cloud contracts never receive the handle or protected value. Expiry, detail
+reads, decisions, and result reads emit metadata-only audit events.
+Sensitive-access approval never implies external-publication approval.
 
 Expired sensitive turn-summary graphs are physically removed by the system
 retention worker only when the reference, payload, memory, source, provenance,

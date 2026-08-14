@@ -55,6 +55,7 @@ public sealed class McpToolBoundaryTests
             "get_shared_memory_item",
             "create_sensitive_access_request",
             "request_protected_information_access",
+            "get_protected_information_result",
             "get_sensitive_access_request",
             "get_sensitive_access_result"
         ], names);
@@ -490,12 +491,30 @@ public sealed class McpToolBoundaryTests
 
         Assert.Equal("memory-safe-1", client.LastProtectedInformationRequest!.MemoryItemId);
         Assert.Equal("requested", response.Status);
+        Assert.Equal(new string('a', 64), response.AccessHandle);
         Assert.DoesNotContain("SensitiveRecordReference", response.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("memoryItemId", response.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("request_protected_information_access", response.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(LuthnMcpToolRegistry.AllowedToolNames, name =>
             name.Contains("approve", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("deny", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ProtectedInformationResultToolPassesOnlyOpaqueHandle()
+    {
+        var client = new FakeLuthnClient();
+        var accessHandle = new string('a', 64);
+        using var args = JsonDocument.Parse($$"""{"accessHandle":"{{accessHandle}}"}""");
+
+        var response = Assert.IsType<ProtectedInformationResultDto>(
+            await new GetProtectedInformationResultTool(client).InvokeAsync(args.RootElement));
+
+        Assert.Equal(accessHandle, client.LastProtectedInformationResultRequest?.AccessHandle);
+        Assert.True(response.ContentAvailable);
+        Assert.Equal("퍼시스 견적", response.Title);
+        Assert.Equal("퍼시스 가구회사에 견적 10억을 제시했어.", response.Content);
+        Assert.Contains("get_protected_information_result", LuthnMcpToolRegistry.AllowedToolNames);
     }
 
     [Fact]
@@ -567,6 +586,19 @@ public sealed class McpToolBoundaryTests
         Assert.Equal(60, expiry.GetProperty("minimum").GetInt32());
         Assert.Equal(3_600, expiry.GetProperty("maximum").GetInt32());
 
+        var protectedResultTool = toolsJson.RootElement
+            .GetProperty("result")
+            .GetProperty("tools")
+            .EnumerateArray()
+            .First(item => item.GetProperty("name").GetString() == "get_protected_information_result");
+        var accessHandle = protectedResultTool
+            .GetProperty("inputSchema")
+            .GetProperty("properties")
+            .GetProperty("accessHandle");
+        Assert.Equal(64, accessHandle.GetProperty("minLength").GetInt32());
+        Assert.Equal(64, accessHandle.GetProperty("maxLength").GetInt32());
+        Assert.Equal("^[0-9a-f]{64}$", accessHandle.GetProperty("pattern").GetString());
+
         var feedbackTool = toolsJson.RootElement
             .GetProperty("result")
             .GetProperty("tools")
@@ -637,6 +669,7 @@ public sealed class McpToolBoundaryTests
         public Exception? TelemetryException { get; init; }
         public bool ReturnSensitiveAccessTombstone { get; init; }
         public ProtectedInformationAccessRequestDto? LastProtectedInformationRequest { get; private set; }
+        public ProtectedInformationResultRequestDto? LastProtectedInformationResultRequest { get; private set; }
 
         public async Task<ContextPackDto> GetContextPackAsync(
             IReadOnlyList<string> coreTags,
@@ -788,7 +821,24 @@ public sealed class McpToolBoundaryTests
             return Task.FromResult(new ProtectedInformationAccessResponseDto(
                 "requested",
                 "A confirmation request is ready for the owner to review.",
-                "access-1"));
+                "access-1",
+                new string('a', 64)));
+        }
+
+        public Task<ProtectedInformationResultDto> GetProtectedInformationResultAsync(
+            ProtectedInformationResultRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            LastProtectedInformationResultRequest = request;
+            return Task.FromResult(new ProtectedInformationResultDto(
+                "protected-result-returned",
+                true,
+                "퍼시스 견적",
+                "퍼시스 가구회사에 견적 10억을 제시했어.",
+                DateTimeOffset.UnixEpoch.AddHours(1),
+                0,
+                1,
+                ["Approved protected memory was returned to the original requester."]));
         }
 
         public Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(

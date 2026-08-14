@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\Luthn.Host.Api\Luthn.Host.Api.csproj" />
     <ProjectReference Include="..\..\src\Luthn.Core\Luthn.Core.csproj" />
     <ProjectReference Include="..\..\src\Luthn.Core.Persistence\Luthn.Core.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\Luthn.Sdk\Luthn.Sdk.csproj" />
   </ItemGroup>
 
 </Project>

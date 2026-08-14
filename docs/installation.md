@@ -304,8 +304,11 @@ Open the operator console at <http://127.0.0.1:8080/>. PostgreSQL is kept on the
 internal Compose network and the console/API port is loopback-bound by default.
 The console is the local approval authority for sensitive-access requests and
 external-publication decisions. It loads bounded operator detail through the
-Host API, requires an explicit decision reason, and can return only a
-server-validated redacted summary; it never displays raw Vault/source content.
+Host API and requires an explicit decision reason. Legacy approvals can return
+a server-validated redacted summary. Protected-memory approvals choose a 1–60
+minute window (60 by default) and 1–3 reads (one by default), but the protected
+title and summary are delivered only to the bound requester and never displayed
+in the console. Credentials and keys are never delivered.
 The audit center provides metadata-only decision, failure, configuration,
 ingress, publication, and retention investigation with bounded filters and
 export. It is not a raw-content viewer or a database administration surface.
@@ -616,13 +619,17 @@ classify_preview
 create_shared_memory
 query_shared_memory
 get_shared_memory_item
+request_protected_information_access
+get_protected_information_result
 create_sensitive_access_request
 get_sensitive_access_request
 get_sensitive_access_result
 ```
 
-The default connector token includes `access.request`, so these request/status/result
-tools work after a new install or update. Approval and denial remain outside MCP.
+The default connector token includes `access.request`, so these bounded
+request/status/result tools work after a new install or update. Approval and
+denial remain outside MCP. Requester handles must never be shown or persisted by
+the agent.
 
 ### Additional Agents
 

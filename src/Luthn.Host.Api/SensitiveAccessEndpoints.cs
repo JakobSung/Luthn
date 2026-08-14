@@ -36,6 +36,10 @@ public static class SensitiveAccessEndpoints
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("ResolveProtectedInformationAccess");
 
+        requests.MapPost("/protected-result", ReadProtectedInformationResultEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessRequest)
+            .WithName("ReadProtectedInformationResult");
+
         requests.MapGet("/{id}", ReadRequestEndpoint)
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("ReadSensitiveAccessRequest");
@@ -98,6 +102,8 @@ public static class SensitiveAccessEndpoints
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        httpContext.Response.Headers.Pragma = "no-cache";
         var validationError = ValidateProtectedInformationAccessRequest(request);
         if (validationError is not null)
         {
@@ -112,7 +118,30 @@ public static class SensitiveAccessEndpoints
         return TypedResults.Ok(new ProtectedInformationAccessResponse(
             resolution.Status,
             resolution.Message,
-            resolution.RequestId));
+            resolution.RequestId,
+            resolution.AccessHandle));
+    }
+
+    private static async Task<Results<Ok<ProtectedInformationResultResponse>, BadRequest<ProblemDetails>>> ReadProtectedInformationResultEndpoint(
+        ProtectedInformationResultRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        httpContext.Response.Headers.Pragma = "no-cache";
+        var validationError = ValidateProtectedInformationResultRequest(request);
+        if (validationError is not null)
+        {
+            return TypedResults.BadRequest(validationError);
+        }
+
+        var result = await workflow.ReadProtectedInformationResultAsync(
+            request.AccessHandle.Trim(),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result));
     }
 
     private static async Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestEndpoint(
@@ -321,6 +350,8 @@ public static class SensitiveAccessEndpoints
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        httpContext.Response.Headers.Pragma = "no-cache";
         var result = await workflow.ReadRequestResultAsync(
             id,
             ServiceTokenAuthorization.GetPrincipal(httpContext),
@@ -550,6 +581,30 @@ public static class SensitiveAccessEndpoints
                 title);
     }
 
+    private static ProblemDetails? ValidateProtectedInformationResultRequest(
+        ProtectedInformationResultRequest request)
+    {
+        const string title = "Invalid protected information result request.";
+        var error = ApiValidation.ValidateRequiredText(
+            request.AccessHandle,
+            "accessHandle",
+            64,
+            title);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        return request.AccessHandle.Length == 64 &&
+            request.AccessHandle.All(character =>
+                char.IsAsciiHexDigit(character) &&
+                !char.IsUpper(character))
+            ? null
+            : ApiValidation.CreateProblem(
+                title,
+                "accessHandle must be a 64-character lowercase hexadecimal value.");
+    }
+
     private static ProblemDetails CreateValidationProblem(string detail) =>
         ApiValidation.CreateProblem("Invalid sensitive access request.", detail);
 }
@@ -573,8 +628,11 @@ internal static class SensitiveAccessEndpointMapping
                 request.RedactedOutputAvailable,
             OutputPolicy: ToOutputPolicy(
                 request.Status,
-                request.Status == SensitiveAccessRequestStatus.Approved && request.RedactedOutputAvailable))
+                request.Status == SensitiveAccessRequestStatus.Approved && request.RedactedOutputAvailable,
+                request.AccessMode,
+                request.StatusCode))
         {
+            AccessMode = request.AccessMode.ToString(),
             StatusCode = request.StatusCode,
             RequestExpiresAt = request.RequestExpiresAt,
             GrantExpiresAt = request.GrantExpiresAt,
@@ -616,7 +674,9 @@ internal static class SensitiveAccessEndpointMapping
                 detail.RedactedOutputAvailable,
             OutputPolicy: ToOutputPolicy(
                 detail.Status,
-                detail.Status == SensitiveAccessRequestStatus.Approved && detail.RedactedOutputAvailable),
+                detail.Status == SensitiveAccessRequestStatus.Approved && detail.RedactedOutputAvailable,
+                detail.AccessMode,
+                detail.StatusCode),
             Reference: new SensitiveAccessOperatorReferenceResponse(
                 detail.Reference.SourceSystem,
                 detail.Reference.SourceType,
@@ -626,6 +686,7 @@ internal static class SensitiveAccessEndpointMapping
             PayloadClass: "operator-sensitive-metadata",
             RedactionState: "local-operator-only")
         {
+            AccessMode = detail.AccessMode.ToString(),
             StatusCode = detail.StatusCode,
             RequestExpiresAt = detail.RequestExpiresAt,
             GrantExpiresAt = detail.GrantExpiresAt,
@@ -637,7 +698,11 @@ internal static class SensitiveAccessEndpointMapping
     internal static SensitiveAccessResultResponse ToResponse(SensitiveAccessResultState result)
     {
         var redactedOutputAvailable = result.RedactedOutputAvailable;
-        var outputPolicy = ToOutputPolicy(result.Status, redactedOutputAvailable);
+        var outputPolicy = ToOutputPolicy(
+            result.Status,
+            redactedOutputAvailable,
+            result.AccessMode,
+            result.StatusCode);
         var redactedOutput = redactedOutputAvailable
             ? BoundRedactedOutput(result.RedactedOutput!)
             : null;
@@ -647,7 +712,9 @@ internal static class SensitiveAccessEndpointMapping
             SensitiveAccessStatusCodes.ResultReturned =>
                 ["Approved limited output is sourced from a public-safe redacted summary."],
             SensitiveAccessStatusCodes.GrantActive =>
-                ["Approval is recorded, but no public-safe redacted summary is available."],
+                result.AccessMode == SensitiveAccessMode.ProtectedMemory
+                    ? ["Approval is active; use the requester-bound protected result operation."]
+                    : ["Approval is recorded, but no public-safe redacted summary is available."],
             SensitiveAccessStatusCodes.GrantConsumed =>
                 ["The approved grant has no remaining reads; no output is available."],
             SensitiveAccessStatusCodes.GrantExpired =>
@@ -671,6 +738,7 @@ internal static class SensitiveAccessEndpointMapping
             outputPolicy,
             reasons)
         {
+            AccessMode = result.AccessMode.ToString(),
             StatusCode = result.StatusCode,
             RequestExpiresAt = result.RequestExpiresAt,
             GrantExpiresAt = result.GrantExpiresAt,
@@ -680,10 +748,36 @@ internal static class SensitiveAccessEndpointMapping
         };
     }
 
+    internal static ProtectedInformationResultResponse ToResponse(
+        ProtectedInformationResultState result) =>
+        new(
+            result.Status,
+            result.ContentAvailable,
+            result.ContentAvailable ? result.Title : null,
+            result.ContentAvailable ? result.Content : null,
+            result.GrantExpiresAt,
+            result.RemainingReads,
+            result.MaxReads,
+            result.Reasons);
+
     internal static string ToOutputPolicy(
         SensitiveAccessRequestStatus status,
-        bool redactedOutputAvailable) =>
-        status switch
+        bool redactedOutputAvailable,
+        SensitiveAccessMode accessMode = SensitiveAccessMode.RedactedSummary,
+        string? statusCode = null) =>
+        accessMode == SensitiveAccessMode.ProtectedMemory
+            ? status switch
+            {
+                SensitiveAccessRequestStatus.Approved when statusCode == SensitiveAccessStatusCodes.GrantActive =>
+                    "approved-protected-output-authorized",
+                SensitiveAccessRequestStatus.Approved when statusCode == SensitiveAccessStatusCodes.GrantConsumed =>
+                    "approved-protected-output-consumed",
+                SensitiveAccessRequestStatus.Approved => "approved-protected-output-expired",
+                SensitiveAccessRequestStatus.Denied => "denied-no-output",
+                SensitiveAccessRequestStatus.Expired => "expired-no-output",
+                _ => "pending-approval"
+            }
+            : status switch
         {
             SensitiveAccessRequestStatus.Approved when redactedOutputAvailable =>
                 "approved-redacted-output-available",
@@ -747,12 +841,30 @@ public sealed record ProtectedInformationAccessRequest
 public sealed record ProtectedInformationAccessResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("message")] string Message,
-    [property: JsonPropertyName("requestId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestId);
+    [property: JsonPropertyName("requestId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestId,
+    [property: JsonPropertyName("accessHandle"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AccessHandle);
+
+public sealed record ProtectedInformationResultRequest
+{
+    public string AccessHandle { get; init; } = "";
+}
+
+public sealed record ProtectedInformationResultResponse(
+    string Status,
+    bool ContentAvailable,
+    string? Title,
+    string? Content,
+    DateTimeOffset? GrantExpiresAt,
+    int? RemainingReads,
+    int? MaxReads,
+    IReadOnlyList<string> Reasons);
 
 public sealed record SensitiveAccessDecisionRequest
 {
     public string? Reason { get; init; }
     public string? RedactedSummary { get; init; }
+    public int? GrantDurationSeconds { get; init; }
+    public int? MaximumSuccessfulReads { get; init; }
 }
 
 public sealed record SensitiveAccessRequestsResponse(
@@ -777,6 +889,9 @@ public sealed record SensitiveAccessRequestResponse(
     bool RedactedOutputAvailable,
     string OutputPolicy)
 {
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = SensitiveAccessMode.RedactedSummary.ToString();
+
     [JsonPropertyName("statusCode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? StatusCode { get; init; }
@@ -828,6 +943,9 @@ public sealed record SensitiveAccessOperatorDetailResponse(
     string PayloadClass,
     string RedactionState)
 {
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = SensitiveAccessMode.RedactedSummary.ToString();
+
     [JsonPropertyName("statusCode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? StatusCode { get; init; }
@@ -864,6 +982,9 @@ public sealed record SensitiveAccessResultResponse(
     string RedactionState,
     IReadOnlyList<string> Reasons)
 {
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = SensitiveAccessMode.RedactedSummary.ToString();
+
     [JsonPropertyName("statusCode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? StatusCode { get; init; }

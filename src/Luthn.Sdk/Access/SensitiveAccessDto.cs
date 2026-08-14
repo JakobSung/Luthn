@@ -15,11 +15,27 @@ public sealed record ProtectedInformationAccessRequestDto(
 public sealed record ProtectedInformationAccessResponseDto(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("message")] string Message,
-    [property: JsonPropertyName("requestId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestId = null);
+    [property: JsonPropertyName("requestId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestId = null,
+    [property: JsonPropertyName("accessHandle"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AccessHandle = null);
+
+public sealed record ProtectedInformationResultRequestDto(
+    [property: JsonPropertyName("accessHandle")] string AccessHandle);
+
+public sealed record ProtectedInformationResultDto(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("contentAvailable")] bool ContentAvailable,
+    [property: JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title,
+    [property: JsonPropertyName("content"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Content,
+    [property: JsonPropertyName("grantExpiresAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? GrantExpiresAt,
+    [property: JsonPropertyName("remainingReads"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RemainingReads,
+    [property: JsonPropertyName("maxReads"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MaxReads,
+    [property: JsonPropertyName("reasons")] IReadOnlyList<string> Reasons);
 
 public sealed record SensitiveAccessDecisionRequestDto(
     [property: JsonPropertyName("reason")] string? Reason,
-    [property: JsonPropertyName("redactedSummary")] string? RedactedSummary = null);
+    [property: JsonPropertyName("redactedSummary")] string? RedactedSummary = null,
+    [property: JsonPropertyName("grantDurationSeconds")] int? GrantDurationSeconds = null,
+    [property: JsonPropertyName("maximumSuccessfulReads")] int? MaximumSuccessfulReads = null);
 
 public abstract record SensitiveAccessReadDto;
 
@@ -63,6 +79,9 @@ public sealed record SensitiveAccessRequestDto(
     [JsonPropertyName("maxReads")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxReads { get; init; }
+
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = "RedactedSummary";
 }
 
 /// <summary>
@@ -97,7 +116,11 @@ public sealed record SensitiveAccessOperatorDetailDto(
     [property: JsonPropertyName("outputPolicy")] string OutputPolicy,
     [property: JsonPropertyName("reference")] SensitiveAccessOperatorReferenceDto Reference,
     [property: JsonPropertyName("payloadClass")] string PayloadClass,
-    [property: JsonPropertyName("redactionState")] string RedactionState);
+    [property: JsonPropertyName("redactionState")] string RedactionState)
+{
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = "RedactedSummary";
+}
 
 public sealed record SensitiveAccessResultDto(
     [property: JsonPropertyName("id")] string Id,
@@ -110,6 +133,9 @@ public sealed record SensitiveAccessResultDto(
     [property: JsonPropertyName("redactionState")] string RedactionState,
     [property: JsonPropertyName("reasons")] IReadOnlyList<string> Reasons) : SensitiveAccessReadDto
 {
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = "RedactedSummary";
+
     [JsonPropertyName("statusCode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? StatusCode { get; init; }

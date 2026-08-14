@@ -101,6 +101,17 @@ public static class LuthnMcpToolRegistry
                 StringProperty("reason", "Optional bounded explanation of what the user wants to confirm.", 1_000)
             ], ["memoryItemId"])),
         new(
+            "get_protected_information_result",
+            "Read approved protected memory with the requester-only access handle. A successful read consumes one approved use.",
+            ToolSchema([
+                BoundedStringProperty(
+                    "accessHandle",
+                    "Opaque requester-only access handle returned by the confirmation request.",
+                    64,
+                    "^[0-9a-f]{64}$",
+                    minimumLength: 64)
+            ], ["accessHandle"], allowAdditionalProperties: false)),
+        new(
             "get_sensitive_access_request",
             "Read the metadata-only status of a sensitive-access request.",
             ToolSchema([StringProperty("id", "Sensitive access request id.")], ["id"])),
@@ -131,6 +142,7 @@ public static class LuthnMcpToolRegistry
             new GetSharedMemoryItemTool(client),
             new CreateSensitiveAccessRequestTool(client),
             new RequestProtectedInformationAccessTool(client),
+            new GetProtectedInformationResultTool(client),
             new GetSensitiveAccessRequestTool(client),
             new GetSensitiveAccessResultTool(client)
         ];
@@ -179,14 +191,23 @@ public static class LuthnMcpToolRegistry
         string name,
         string description,
         int maximumLength,
-        string pattern) =>
-        new(name, new Dictionary<string, object>
+        string pattern,
+        int? minimumLength = null)
+    {
+        var schema = new Dictionary<string, object>
         {
             ["type"] = "string",
             ["description"] = description,
             ["maxLength"] = maximumLength,
             ["pattern"] = pattern
-        });
+        };
+        if (minimumLength is not null)
+        {
+            schema["minLength"] = minimumLength.Value;
+        }
+
+        return new(name, schema);
+    }
 
     private static KeyValuePair<string, object> EnumStringProperty(
         string name,

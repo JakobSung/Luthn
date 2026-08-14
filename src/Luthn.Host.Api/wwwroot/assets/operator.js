@@ -1082,11 +1082,21 @@ const decideAccessRequest = async (id, decision) => {
     return;
   }
   const redactedSummary = form.get("redactedSummary")?.toString().trim();
+  const protectedMode = state.selectedAccessDetail.accessMode === "ProtectedMemory";
+  if (decision === "approve" && protectedMode && !formElement.reportValidity()) {
+    return;
+  }
   const body = decision === "approve"
-    ? {
-        reason,
-        ...(redactedSummary ? { redactedSummary } : {})
-      }
+    ? protectedMode
+      ? {
+          reason,
+          grantDurationSeconds: Math.round(Number(form.get("protectedGrantDurationMinutes")) * 60),
+          maximumSuccessfulReads: Number(form.get("protectedMaximumSuccessfulReads"))
+        }
+      : {
+          reason,
+          ...(redactedSummary ? { redactedSummary } : {})
+        }
     : { reason };
 
   state.accessDecisionPending = true;
@@ -1111,6 +1121,7 @@ const decideAccessRequest = async (id, decision) => {
 const accessDetailDefaults = {
   id: "Not selected",
   status: "—",
+  accessMode: "—",
   statusCode: "—",
   createdAt: "—",
   expiresAt: "—",
@@ -1145,6 +1156,13 @@ const updateAccessDecisionState = () => {
   $("#viewAccessAudit").disabled = !state.selectedAccessRequestId;
   document.querySelectorAll("#accessDecisionForm label, #approveAccess, #denyAccess")
     .forEach((element) => { element.hidden = isTombstone; });
+  const protectedMode = !isTombstone && state.selectedAccessDetail?.accessMode === "ProtectedMemory";
+  document.querySelectorAll("[data-access-protected-control]")
+    .forEach((element) => { element.hidden = !protectedMode; });
+  document.querySelectorAll("[data-access-protected-control] input")
+    .forEach((element) => { element.disabled = !protectedMode; });
+  document.querySelectorAll("[data-access-redacted-control]")
+    .forEach((element) => { element.hidden = isTombstone || protectedMode; });
   document.querySelectorAll("[data-tombstone-hidden]")
     .forEach((element) => { element.hidden = isTombstone; });
 };
@@ -1163,6 +1181,7 @@ const clearAccessDetail = (message = "Select a request to review.") => {
 const sanitizeAccessDetail = (detail) => ({
   id: boundedText(detail?.id, 128, "Unknown request"),
   status: boundedText(detail?.status, 32),
+  accessMode: boundedText(detail?.accessMode, 64, "RedactedSummary"),
   statusCode: boundedText(detail?.statusCode, 64),
   createdAt: formatTimestamp(detail?.createdAt),
   expiresAt: formatTimestamp(detail?.requestExpiresAt || detail?.expiresAt),
@@ -1205,7 +1224,9 @@ const loadAccessRequestDetail = async (id) => {
     $("#accessDetailStatus").textContent = safeDetail.isTombstone
       ? "Expired · content removed"
       : safeDetail.statusCode === "request-pending"
-      ? "Review metadata and enter a decision reason."
+      ? safeDetail.accessMode === "ProtectedMemory"
+        ? "Review metadata, duration, and read count. Protected content stays hidden from the console."
+        : "Review metadata and enter a decision reason."
       : `Lifecycle: ${safeDetail.statusCode || safeDetail.status}`;
     document.querySelectorAll("#accessRows tr").forEach((row) => {
       row.setAttribute("aria-selected", row.dataset.requestId === id ? "true" : "false");

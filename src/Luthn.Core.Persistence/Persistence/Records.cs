@@ -85,6 +85,28 @@ public enum SensitiveAccessDecisionKind
     Denied
 }
 
+public enum SensitiveAccessMode
+{
+    RedactedSummary,
+    ProtectedMemory
+}
+
+public static class ProtectedAccessPolicyLimits
+{
+    public const int DefaultGrantDurationSeconds = 3600;
+    public const int DefaultMaximumSuccessfulReads = 1;
+    public const int MinimumGrantDurationSeconds = 60;
+    public const int MaximumGrantDurationSeconds = 3600;
+    public const int MinimumSuccessfulReads = 1;
+    public const int MaximumSuccessfulReads = 3;
+
+    public static bool IsValidGrantDuration(int seconds) =>
+        seconds is >= MinimumGrantDurationSeconds and <= MaximumGrantDurationSeconds;
+
+    public static bool IsValidMaximumSuccessfulReads(int maximumSuccessfulReads) =>
+        maximumSuccessfulReads is >= MinimumSuccessfulReads and <= MaximumSuccessfulReads;
+}
+
 public static class SensitiveAccessPolicyLimits
 {
     public const int DefaultRequestTimeoutSeconds = 600;
@@ -121,6 +143,9 @@ public sealed class SensitiveAccessRequestRecord : IWorkspaceScopedRecord
     public string SessionId { get; set; } = "";
     public string RequestReason { get; set; } = "";
     public string RedactedSummary { get; set; } = "";
+    public SensitiveAccessMode AccessMode { get; set; } = SensitiveAccessMode.RedactedSummary;
+    public string AccessHandleDigest { get; set; } = "";
+    public string RequesterBindingDigest { get; set; } = "";
     public SensitiveAccessRequestStatus Status { get; set; } = SensitiveAccessRequestStatus.Pending;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }

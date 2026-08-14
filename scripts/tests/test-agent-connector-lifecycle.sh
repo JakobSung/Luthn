@@ -352,6 +352,9 @@ grep -q '\`id\` and a short, non-sensitive reason' "$codex_home/AGENTS.md"
 grep -q "Never put the user's raw question" "$codex_home/AGENTS.md"
 grep -q 'type names, field names' "$codex_home/AGENTS.md"
 grep -q 'only a trusted operator can approve or deny it' "$codex_home/AGENTS.md"
+grep -q 'get_protected_information_result' "$codex_home/AGENTS.md"
+grep -q 'Keep any returned access handle private' "$codex_home/AGENTS.md"
+grep -q 'Credential, access-key, and private-key material is never' "$codex_home/AGENTS.md"
 hook_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
 recall_hash="$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')"
 run_luthn connect codex >/dev/null
@@ -1005,7 +1008,7 @@ EOF
     case "$2" in
       org.opencontainers.image.revision) printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
       org.opencontainers.image.version) printf '%s' main ;;
-      io.luthn.mcp-schema.version) printf '%s' 4 ;;
+      io.luthn.mcp-schema.version) printf '%s' 5 ;;
     esac
   }
   read_remote_image_metadata() {
@@ -1032,8 +1035,8 @@ assert set(version) == {
 }
 assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
 assert version["cliTemplateVersion"] == "4"
-assert version["connectorTemplateVersion"] == "5"
-assert version["mcpSchemaVersion"] == "4"
+assert version["connectorTemplateVersion"] == "6"
+assert version["mcpSchemaVersion"] == "5"
 assert update["status"] == "current"
 assert update["candidateRevision"] == "a" * 40
 assert available["status"] == "update-available"

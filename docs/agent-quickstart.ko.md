@@ -117,21 +117,25 @@ query_shared_memory
 submit_search_feedback
 get_shared_memory_item
 request_protected_information_access
+get_protected_information_result
 create_sensitive_access_request
 get_sensitive_access_request
 get_sensitive_access_result
 ```
 
-원본 Vault 일괄 추출, 제한 없는 원본 조회, 비공개 기록 내보내기는 기본 에이전트 기능이 아닙니다. connector는 위 네 가지 메타데이터 전용 요청 도구에 필요한 `access.request`와 제한된 cache 관측·명시적 feedback용 `metrics.write` scope를 기본 설정하지만 MCP는 승인·거절을 노출하지 않습니다. 비공개 세부 정보 결정에는 별도의 신뢰된 운영자 경로가 필요합니다.
+원본 Vault 일괄 추출, 제한 없는 원본 조회, 비공개 기록 내보내기는 기본 에이전트 기능이 아닙니다. connector는 위의 제한된 요청·상태·결과 도구에 필요한 `access.request`와 제한된 cache 관측·명시적 feedback용 `metrics.write` scope를 기본 설정하지만 MCP는 승인·거절을 노출하지 않습니다. 비공개 세부 정보 결정에는 별도의 신뢰된 운영자 경로가 필요합니다.
 
 사용자가 관련 안전 회상 항목 하나에 없는 구체적인 세부 정보를 물으면, 보호되거나
 생략되었을 가능성을 포함해 Codex와 Claude의 관리 지침은 그 안전 항목을 이용해 확인
 요청을 만들도록 안내합니다.
-Luthn은 server가 정한 owner와 workspace 안에서 관련 보호 정보를 찾고 기존의 제한된
-요청을 생성하거나 재사용합니다. 승인 전에는 보호된 값이나 민감한 파생 결과를 반환하지
-않습니다. 에이전트는 사용자에게 확인이 필요하다는 점, 운영자 검토 요청이 생성되었다는
-점, 또는 현재 연결할 보호 정보를 찾지 못했다는 점만 쉬운 말로 안내해야 합니다. 내부
-타입명·필드명·참조 ID·도구명·원본 오류는 사용자 답변에 표시하지 않습니다.
+Luthn은 server가 정한 owner와 workspace 안에서 관련 보호 정보를 찾고 요청자 전용 새
+요청과 opaque handle을 만듭니다. handle은 요청한 task 안에서만 보관하고 화면·로그·cache·
+memory에 남기면 안 됩니다. 승인 전에는 보호된 값을 반환하지 않습니다. 승인 뒤 같은
+task가 `get_protected_information_result`를 호출하며 성공할 때마다 허용된 1~3회 중 1회를
+소비하고 grant는 최대 60분 뒤 만료됩니다. Agent는 사용자가 물은 세부 정보만 답합니다.
+자격증명·access key·private key는 절대 반환하지 않습니다. handle을 잃으면 새 요청을
+만듭니다. 내부 타입명·필드명·참조 ID·도구명·handle·원본 오류는 사용자 답변에 표시하지
+않습니다.
 
 `submit_search_feedback`은 Luthn이 반환한 `retrievalId`와 `helpful|unhelpful`만 받고 query, 결과 본문, 자유형 의견은 받지 않습니다. 검색 지표 보고 실패는 회상 결과나 timeout/cache 동작을 바꾸지 않습니다.
 
