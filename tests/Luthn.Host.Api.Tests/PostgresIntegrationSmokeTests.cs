@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Luthn.Core.Classification;
+using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
 using Luthn.Core.Search;
@@ -16,6 +17,176 @@ namespace Luthn.Host.Api.Tests;
 
 public sealed class PostgresIntegrationSmokeTests
 {
+    [Fact]
+    public async Task DisposablePostgresDatabaseReadsApprovedProtectedMemoryWithRetryingTransactions()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("LUTHN_POSTGRES_TEST_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString) ||
+            !string.Equals(
+                Environment.GetEnvironmentVariable("LUTHN_POSTGRES_TEST_ALLOW_RESET"),
+                "true",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!IsDisposableTestDatabase(connectionString))
+        {
+            throw new InvalidOperationException(
+                "LUTHN_POSTGRES_TEST_CONNECTION must target a disposable database whose name starts with luthn_test.");
+        }
+
+        var optionsBuilder = new DbContextOptionsBuilder<LuthnDbContext>();
+        optionsBuilder.UseLuthnPostgres(
+            new LuthnDatabaseOptions(connectionString, EnableRetries: true));
+        var options = optionsBuilder.Options;
+        await using var db = new LuthnDbContext(options);
+        await db.Database.EnsureDeletedAsync();
+        await db.Database.MigrateAsync();
+
+        var now = DateTimeOffset.Parse("2026-08-14T00:00:00Z");
+        const string workspaceId = "workspace-protected-read-smoke";
+        const string ownerUserId = "owner-protected-read-smoke";
+        const string memoryItemId = "memory-protected-read-smoke";
+        const string sourceEventId = "source-protected-read-smoke";
+        const string referenceId = "reference-protected-read-smoke";
+        var protector = new DataProtectionSensitiveMemoryPayloadProtector(
+            new EphemeralDataProtectionProvider());
+        var payload = new SensitiveMemoryPayload(
+            SensitiveMemoryPayload.CurrentContractVersion,
+            "Protected quote",
+            "The protected quote total is 50 million won.",
+            ["quote"],
+            null,
+            null,
+            [],
+            null);
+
+        db.SourceEvents.Add(new SourceEventRecord
+        {
+            Id = sourceEventId,
+            SourceSystem = "test",
+            SourceType = "turn-summary",
+            ReceivedAt = now,
+            ContentDigest = "sha256:protected-read-smoke",
+            ContainsSensitiveMaterial = true,
+            WorkspaceId = workspaceId,
+            OwnerUserId = ownerUserId
+        });
+        db.SharedMemoryItems.Add(new SharedMemoryItemRecord
+        {
+            Id = memoryItemId,
+            Title = "Protected quote",
+            SafeSummary = "A protected quote is available after confirmation.",
+            Sensitivity = SensitivityLevel.Public,
+            CoreTags = ["quote"],
+            Visibility = MemoryVisibility.SharedAcrossAgents,
+            RetentionKind = MemoryRetentionKind.Durable,
+            AllowsAgentContext = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+            CreatedBy = "agent",
+            WorkspaceId = workspaceId,
+            OwnerUserId = ownerUserId
+        });
+        db.CollectionProvenance.Add(new CollectionProvenanceRecord
+        {
+            Id = "provenance-protected-read-smoke",
+            SourceEventId = sourceEventId,
+            MemoryItemId = memoryItemId,
+            AuthenticatedActor = "agent",
+            ActorTrust = CollectionProvenance.ServiceTokenActorTrust,
+            ClaimsTrust = CollectionProvenance.NoClaimsTrust,
+            WorkspaceId = workspaceId,
+            AuthenticatedUserId = ownerUserId,
+            ReceivedAt = now
+        });
+        db.SensitiveMemoryPayloads.Add(new SensitiveMemoryPayloadRecord
+        {
+            MemoryItemId = memoryItemId,
+            ContractVersion = payload.ContractVersion,
+            ProtectionScheme = protector.ProtectionScheme,
+            ProtectedPayload = protector.Protect(memoryItemId, payload),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
+        {
+            Id = referenceId,
+            SourceEventId = sourceEventId,
+            MemoryItemId = memoryItemId,
+            SourceSystem = "test",
+            SourceType = "turn-summary",
+            ReceivedAt = now,
+            ContainsSensitiveMaterial = true,
+            ReferenceLabel = "Protected information",
+            RedactedSummary = "A protected quote is available after confirmation.",
+            WorkspaceId = workspaceId,
+            OwnerUserId = ownerUserId
+        });
+        await db.SaveChangesAsync();
+
+        var principal = new LuthnRequestPrincipal(
+            ownerUserId,
+            workspaceId,
+            LuthnActorKind.Agent,
+            "agent",
+            IsOperator: false);
+        var operatorPrincipal = new LuthnRequestPrincipal(
+            "operator",
+            workspaceId,
+            LuthnActorKind.User,
+            "operator",
+            IsOperator: true);
+        var workflow = new SensitiveAccessWorkflow(
+            db,
+            NullOperationalMetrics.Instance,
+            new ManualTimeProvider(now),
+            payloadProtector: protector,
+            sensitiveDataDetector: new DeterministicSensitiveDataDetector());
+
+        var resolution = await workflow.ResolveProtectedInformationAccessAsync(
+            new ProtectedInformationAccessRequest { MemoryItemId = memoryItemId },
+            principal,
+            "agent",
+            CancellationToken.None);
+        Assert.Equal(ProtectedInformationAccessStatuses.Requested, resolution.Status);
+        Assert.NotNull(resolution.RequestId);
+        Assert.NotNull(resolution.AccessHandle);
+
+        var decision = await workflow.DecideRequestAsync(
+            resolution.RequestId!,
+            new SensitiveAccessDecisionRequest
+            {
+                GrantDurationSeconds = 3600,
+                MaximumSuccessfulReads = 1
+            },
+            SensitiveAccessRequestStatus.Approved,
+            operatorPrincipal,
+            "operator",
+            CancellationToken.None);
+        Assert.Equal(SensitiveAccessDecisionOutcome.Succeeded, decision.Outcome);
+
+        var result = await workflow.ReadProtectedInformationResultAsync(
+            resolution.AccessHandle!,
+            principal,
+            "agent",
+            CancellationToken.None);
+
+        Assert.Equal(SensitiveAccessStatusCodes.ProtectedResultReturned, result.Status);
+        Assert.True(result.ContentAvailable);
+        Assert.Equal(payload.Title, result.Title);
+        Assert.Equal(payload.SafeSummary, result.Content);
+        Assert.Equal(0, result.RemainingReads);
+        Assert.Equal(1, await db.SensitiveAccessGrants
+            .Where(grant => grant.SensitiveAccessRequestId == resolution.RequestId)
+            .Select(grant => grant.SuccessfulReadCount)
+            .SingleAsync());
+        Assert.Equal(1, await db.AuditEvents.CountAsync(audit =>
+            audit.Action == "sensitive_access.protected_result_read" &&
+            audit.SubjectId == resolution.RequestId));
+    }
+
     [Fact]
     public async Task DisposablePostgresDatabasePrunesExpiredAutomaticTurnCapsulesWhenEnabled()
     {
