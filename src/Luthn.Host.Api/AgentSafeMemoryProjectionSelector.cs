@@ -2,6 +2,7 @@ using Luthn.Core.Classification;
 using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Luthn.Core.Policy;
+using Luthn.Core.Search;
 
 namespace Luthn.Host.Api;
 
@@ -10,6 +11,9 @@ public sealed class AgentSafeMemoryProjectionSelector(
     DeterministicSensitiveDataDetector sensitiveDataDetector,
     IPolicyEngine policyEngine)
 {
+    internal const string QuotationFallbackTitle = "보호된 견적 정보";
+    internal const string QuotationFallbackSummary = "확인 후 열람할 수 있는 견적 정보가 있습니다.";
+
     private static readonly string[] MeaningfulEventMarkers =
     [
         "진행",
@@ -118,22 +122,51 @@ public sealed class AgentSafeMemoryProjectionSelector(
 
         var titleRedaction = sensitiveDataDetector.Redact(originalTitle);
         var summaryRedaction = sensitiveDataDetector.Redact(originalSummary);
-        if (!titleRedaction.IsComplete ||
-            !summaryRedaction.IsComplete ||
-            (!titleRedaction.Changed && !summaryRedaction.Changed) ||
-            !HasMeaningfulProjectionText(titleRedaction.Text, minimumCharacters: 2) ||
-            !HasMeaningfulProjectionText(
+        if (titleRedaction.IsComplete &&
+            summaryRedaction.IsComplete &&
+            (titleRedaction.Changed || summaryRedaction.Changed) &&
+            HasMeaningfulProjectionText(titleRedaction.Text, minimumCharacters: 2) &&
+            HasMeaningfulProjectionText(
                 summaryRedaction.Text,
                 minimumCharacters: 8,
                 requiresEventSignal: true))
         {
-            return original;
+            var meaningfulProjection = await TryCreateProjectionAsync(
+                titleRedaction.Text,
+                summaryRedaction.Text,
+                candidate,
+                sourceId,
+                sourceType,
+                originalClassification,
+                cancellationToken);
+            if (meaningfulProjection is not null)
+            {
+                return meaningfulProjection;
+            }
         }
 
+        var quotationFallback = await TryCreateQuotationFallbackAsync(
+            candidate,
+            sourceId,
+            sourceType,
+            originalClassification,
+            cancellationToken);
+        return quotationFallback ?? original;
+    }
+
+    private async ValueTask<AgentSafeMemoryProjectionSelection?> TryCreateProjectionAsync(
+        string title,
+        string summary,
+        AgentSafeMemoryProjectionCandidate candidate,
+        PublicRecordId sourceId,
+        string sourceType,
+        ClassificationResult originalClassification,
+        CancellationToken cancellationToken)
+    {
         var projectedInput = AgentVisibleClassificationInput.Compose(
             content: null,
-            titleRedaction.Text,
-            summaryRedaction.Text,
+            title,
+            summary,
             candidate.CoreTags,
             candidate.ProjectKey,
             candidate.TaskKey,
@@ -148,16 +181,54 @@ public sealed class AgentSafeMemoryProjectionSelector(
         var projectedDecision = policyEngine.Decide(projectedClassification);
         if (!projectedDecision.AllowsAgentContext)
         {
-            return original;
+            return null;
         }
 
         return new AgentSafeMemoryProjectionSelection(
-            titleRedaction.Text,
-            summaryRedaction.Text,
+            title,
+            summary,
             projectedClassification,
             projectedDecision,
             originalClassification,
             RetainsEncryptedOriginal: true);
+    }
+
+    private async ValueTask<AgentSafeMemoryProjectionSelection?> TryCreateQuotationFallbackAsync(
+        AgentSafeMemoryProjectionCandidate candidate,
+        PublicRecordId sourceId,
+        string sourceType,
+        ClassificationResult originalClassification,
+        CancellationToken cancellationToken)
+    {
+        if (originalClassification.Sensitivity == SensitivityLevel.Restricted ||
+            !originalClassification.Categories.Contains("finance", StringComparer.OrdinalIgnoreCase) ||
+            !HasQuotationSignal(candidate))
+        {
+            return null;
+        }
+
+        return await TryCreateProjectionAsync(
+            QuotationFallbackTitle,
+            QuotationFallbackSummary,
+            candidate,
+            sourceId,
+            sourceType,
+            originalClassification,
+            cancellationToken);
+    }
+
+    private static bool HasQuotationSignal(AgentSafeMemoryProjectionCandidate candidate)
+    {
+        foreach (var value in new[] { candidate.Title, candidate.SafeSummary })
+        {
+            if (value.Contains("견적", StringComparison.Ordinal) ||
+                SafeSearchText.Tokenize(value).Overlaps(["quote", "quotation"]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async ValueTask<ClassificationResult> ClassifyWithLocalGuardAsync(
