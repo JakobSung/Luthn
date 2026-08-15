@@ -755,18 +755,45 @@ internal sealed class SensitiveAccessWorkflow(
         {
             while (true)
             {
-                var state = await WithLifecycleGateAsync(
-                    () => ReadProtectedInformationAccessWaitStateCoreAsync(
-                        accessHandle,
-                        principal,
-                        cancellationToken),
-                    cancellationToken);
+                var remaining = deadline - timeProvider.GetUtcNow();
+                if (remaining <= TimeSpan.Zero)
+                {
+                    return ProtectedInformationAccessWaitState.TimedOut();
+                }
+
+                using var deadlineCancellation =
+                    new CancellationTokenSource(remaining, timeProvider);
+                using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    deadlineCancellation.Token);
+                ProtectedInformationAccessWaitState state;
+                try
+                {
+                    state = await WithLifecycleGateAsync(
+                        () => ReadProtectedInformationAccessWaitStateCoreAsync(
+                            accessHandle,
+                            principal,
+                            readCancellation.Token),
+                        readCancellation.Token);
+                }
+                catch (OperationCanceledException) when (
+                    deadlineCancellation.IsCancellationRequested &&
+                    !cancellationToken.IsCancellationRequested)
+                {
+                    return ProtectedInformationAccessWaitState.TimedOut();
+                }
+
+                if (deadline - timeProvider.GetUtcNow() <= TimeSpan.Zero)
+                {
+                    return ProtectedInformationAccessWaitState.TimedOut();
+                }
+
                 if (state.Status != ProtectedInformationAccessWaitStatuses.Pending)
                 {
                     return state;
                 }
 
-                var remaining = deadline - timeProvider.GetUtcNow();
+                remaining = deadline - timeProvider.GetUtcNow();
                 if (remaining <= TimeSpan.Zero)
                 {
                     return ProtectedInformationAccessWaitState.TimedOut();
