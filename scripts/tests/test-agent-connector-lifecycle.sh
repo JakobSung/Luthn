@@ -347,7 +347,7 @@ grep -q 'normal assistant response or final response' "$codex_home/AGENTS.md"
 grep -q 'Protected information confirmation' "$codex_home/AGENTS.md"
 grep -q 'specific detail that is not present' "$codex_home/AGENTS.md"
 grep -q 'request_and_wait_for_protected_information_access' "$codex_home/AGENTS.md"
-grep -q '\`memoryItemId\` set to that item' "$codex_home/AGENTS.md"
+grep -q '\`memoryItemId\` set to' "$codex_home/AGENTS.md"
 grep -q '\`id\` and a short, non-sensitive reason' "$codex_home/AGENTS.md"
 grep -q "Never put the user's raw question" "$codex_home/AGENTS.md"
 grep -q 'type names, field names' "$codex_home/AGENTS.md"
@@ -829,7 +829,7 @@ EOF
   [[ "$reconcile_output" == *"Restart required: Luthn MCP compatibility changed"* ]]
   [[ "$reconcile_output" == *"Agent notice: restart the current Codex host before invoking Luthn tools again."* ]]
 )
-grep -q '^CONNECTOR_VERSION=6$' "$reconcile_state/connectors/codex.env"
+grep -q '^CONNECTOR_VERSION=7$' "$reconcile_state/connectors/codex.env"
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
 import sys
@@ -849,7 +849,7 @@ import sys
 path = sys.argv[1]
 content = open(path, encoding="utf-8").read()
 with open(path, "w", encoding="utf-8") as stream:
-    stream.write(content.replace("CONNECTOR_VERSION=6\n", "CONNECTOR_VERSION=1\n"))
+    stream.write(content.replace("CONNECTOR_VERSION=7\n", "CONNECTOR_VERSION=1\n"))
 PY
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
@@ -1007,7 +1007,7 @@ EOF
     case "$2" in
       org.opencontainers.image.revision) printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
       org.opencontainers.image.version) printf '%s' main ;;
-      io.luthn.mcp-schema.version) printf '%s' 5 ;;
+      io.luthn.mcp-schema.version) printf '%s' 6 ;;
     esac
   }
   read_remote_image_metadata() {
@@ -1035,7 +1035,7 @@ assert set(version) == {
 assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
 assert version["cliTemplateVersion"] == "4"
 assert version["connectorTemplateVersion"] == "7"
-assert version["mcpSchemaVersion"] == "5"
+assert version["mcpSchemaVersion"] == "6"
 assert update["status"] == "current"
 assert update["candidateRevision"] == "a" * 40
 assert available["status"] == "update-available"

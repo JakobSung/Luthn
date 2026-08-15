@@ -601,7 +601,7 @@ public sealed class McpToolBoundaryTests
         var response = await server.HandleAsync(string.Concat(
             """{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"request_and_wait_for_protected_information_access","arguments":""",
             arguments,
-            "}}}"));
+            "}}"));
 
         using var json = JsonDocument.Parse(response!);
         Assert.Equal(-32602, json.RootElement.GetProperty("error").GetProperty("code").GetInt32());
