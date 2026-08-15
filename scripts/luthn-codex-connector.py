@@ -25,7 +25,7 @@ HOOK_MARKER = "luthn.agent-connector.v1"
 CLAUDE_HOOK_MARKER = "luthn.claude-agent-connector.v1"
 HOOK_STATUS_MESSAGE = "Luthn 메모리 저장 예약 중…"
 CLAUDE_HOOK_STATUS_MESSAGE = "Saving Luthn memory…"
-CONNECTOR_TEMPLATE_VERSION = "6"
+CONNECTOR_TEMPLATE_VERSION = "7"
 INSTRUCTION_START_MARKER = "<!-- luthn:auto-recall:start -->"
 INSTRUCTION_END_MARKER = "<!-- luthn:auto-recall:end -->"
 MAX_HOOK_INPUT_BYTES = 256 * 1024
@@ -90,28 +90,20 @@ safe recalled item, including a detail that may have been protected or omitted,
 do not claim that it is unavailable merely because the safe recall contains no
 internal access reference. If exactly one relevant recalled item can be
 identified safely, call
-`request_protected_information_access` with `memoryItemId` set to that item's
-`id` and a short, non-sensitive reason. Never put the user's raw question, the protected
-value, credentials, customer identifiers, or inferred sensitive details in the
-reason. Do not guess between multiple possible items; ask the user to narrow
-the subject without listing internal identifiers.
+`request_and_wait_for_protected_information_access` with `memoryItemId` set to
+that item's `id` and a short, non-sensitive reason. Never put the user's raw question,
+the protected value, credentials, customer identifiers, or inferred sensitive
+details in the reason. Do not guess between multiple possible items;
+ask the user to narrow the subject without listing internal identifiers.
 
-Tell the user only the human meaning and next step in their language. For
-example, explain that the information is protected and needs confirmation,
-that a confirmation request was created and can be reviewed in the operator
-console, or that no current protected information could be matched. Never show
-or repeat internal type names, field names, reference identifiers, MCP tool
-names, or raw tool errors in the user-facing response. Creating a request does
-not grant access; only a trusted operator can approve or deny it.
-
-Keep any returned access handle private in the current task context. Never
-display it, quote it, place it in recall metadata, or save it as memory. After
-the owner confirms approval, call `get_protected_information_result` with that
-handle. A successful call consumes one approved read. Answer only the specific
-detail the user requested and do not repeat unrelated protected content. If
-the handle is no longer available, create a new confirmation request instead
-of guessing. Credential, access-key, and private-key material is never
-available even after approval.
+The tool waits for the bounded confirmation decision and, if approved, returns
+the detail in the same call. Do not call
+`request_protected_information_access`, `wait_for_protected_information_access`,
+or `get_protected_information_result` as follow-up steps. Tell the user only
+the human meaning in their language. Answer only the specific approved detail,
+or explain that it could not be confirmed now. Never show or repeat internal type names, field names,
+reference identifiers, MCP tool names, raw tool errors, or access handles in the user-facing response.
+Credential, access-key, and private-key material is never available even after approval.
 
 ## Agent memory mutation boundary
 
@@ -163,28 +155,20 @@ safe recalled item, including a detail that may have been protected or omitted,
 do not claim that it is unavailable merely because the safe recall contains no
 internal access reference. If exactly one relevant recalled item can be
 identified safely, call
-`request_protected_information_access` with `memoryItemId` set to that item's
-`id` and a short, non-sensitive reason. Never put the user's raw question, the protected
-value, credentials, customer identifiers, or inferred sensitive details in the
-reason. Do not guess between multiple possible items; ask the user to narrow
-the subject without listing internal identifiers.
+`request_and_wait_for_protected_information_access` with `memoryItemId` set to
+that item's `id` and a short, non-sensitive reason. Never put the user's raw question,
+the protected value, credentials, customer identifiers, or inferred sensitive
+details in the reason. Do not guess between multiple possible items;
+ask the user to narrow the subject without listing internal identifiers.
 
-Tell the user only the human meaning and next step in their language. Explain
-that the information is protected and needs confirmation, that a confirmation
-request was created and can be reviewed in the operator console, or that no
-current protected information could be matched. Never show or repeat internal
-type names, field names, reference identifiers, MCP tool names, or raw tool
-errors in the user-facing response. Creating a request does not grant access;
-only a trusted operator can approve or deny it.
-
-Keep any returned access handle private in the current task context. Never
-display it, quote it, place it in recall metadata, or save it as memory. After
-the owner confirms approval, call `get_protected_information_result` with that
-handle. A successful call consumes one approved read. Answer only the specific
-detail the user requested and do not repeat unrelated protected content. If
-the handle is no longer available, create a new confirmation request instead
-of guessing. Credential, access-key, and private-key material is never
-available even after approval.
+The tool waits for the bounded confirmation decision and, if approved, returns
+the detail in the same call. Do not call
+`request_protected_information_access`, `wait_for_protected_information_access`,
+or `get_protected_information_result` as follow-up steps. Tell the user only
+the human meaning in their language. Answer only the specific approved detail,
+or explain that it could not be confirmed now. Never show or repeat internal type names, field names,
+reference identifiers, MCP tool names, raw tool errors, or access handles in the user-facing response.
+Credential, access-key, and private-key material is never available even after approval.
 
 ## Agent memory mutation boundary
 

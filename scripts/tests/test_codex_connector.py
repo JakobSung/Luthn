@@ -238,14 +238,15 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             self.assertIn("Protected information confirmation", installed)
             self.assertIn("specific detail that is not present", installed)
             self.assertIn("safe recall contains no", installed)
-            self.assertIn("request_protected_information_access", installed)
-            self.assertIn("`memoryItemId` set to that item's", installed)
+            self.assertIn(
+                "request_and_wait_for_protected_information_access", installed
+            )
+            self.assertIn("`memoryItemId` set to\nthat item's", installed)
             self.assertIn("`id` and a short, non-sensitive reason", installed)
             self.assertIn("Never put the user's raw question", installed)
             self.assertIn("internal type names, field names", installed)
-            self.assertIn("only a trusted operator can approve or deny it", installed)
-            self.assertIn("get_protected_information_result", installed)
-            self.assertIn("Keep any returned access handle private", installed)
+            self.assertIn("the detail in the same call", installed)
+            self.assertNotIn("operator console", installed)
             self.assertIn("Credential, access-key, and private-key material is never", installed)
             self.assertIn("Agent memory mutation boundary", installed)
             self.assertIn(
@@ -311,17 +312,24 @@ class CodexInstructionConfigurationTests(unittest.TestCase):
             self.assertIn("Protected information confirmation", instruction)
             self.assertIn("specific detail that is not present", instruction)
             self.assertIn("safe recall contains no", instruction)
-            self.assertIn("request_protected_information_access", instruction)
-            self.assertIn("`memoryItemId` set to that item's", instruction)
+            self.assertIn(
+                "request_and_wait_for_protected_information_access", instruction
+            )
+            self.assertIn("`memoryItemId` set to\nthat item's", instruction)
             self.assertIn("`id` and a short, non-sensitive reason", instruction)
             self.assertIn("Never put the user's raw question", instruction)
             self.assertIn("Do not guess between multiple possible items", instruction)
             self.assertIn("type names, field names", instruction)
-            self.assertIn("only a trusted operator can approve or deny it", instruction)
-            self.assertIn("get_protected_information_result", instruction)
-            self.assertIn("Keep any returned access handle private", instruction)
+            self.assertIn("the detail in the same call", instruction)
             self.assertIn("Answer only the specific", instruction)
             self.assertIn("Credential, access-key, and private-key material is never", instruction)
+            self.assertNotIn("operator console", instruction)
+            self.assertNotIn(
+                "call\n`request_protected_information_access` with", instruction
+            )
+            self.assertNotIn(
+                "call\n`get_protected_information_result` with", instruction
+            )
 
     def test_install_preserves_instruction_symlink(self):
         with tempfile.TemporaryDirectory() as directory:

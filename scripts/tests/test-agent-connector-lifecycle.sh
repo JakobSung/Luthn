@@ -155,7 +155,7 @@ import subprocess
 import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "version":
-    print("6")
+    print("7")
     raise SystemExit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == "helper-digest":
@@ -346,14 +346,13 @@ grep -q 'memory titles, content, IDs, queries, scores, sources' "$codex_home/AGE
 grep -q 'normal assistant response or final response' "$codex_home/AGENTS.md"
 grep -q 'Protected information confirmation' "$codex_home/AGENTS.md"
 grep -q 'specific detail that is not present' "$codex_home/AGENTS.md"
-grep -q 'request_protected_information_access' "$codex_home/AGENTS.md"
+grep -q 'request_and_wait_for_protected_information_access' "$codex_home/AGENTS.md"
 grep -q '\`memoryItemId\` set to that item' "$codex_home/AGENTS.md"
 grep -q '\`id\` and a short, non-sensitive reason' "$codex_home/AGENTS.md"
 grep -q "Never put the user's raw question" "$codex_home/AGENTS.md"
 grep -q 'type names, field names' "$codex_home/AGENTS.md"
-grep -q 'only a trusted operator can approve or deny it' "$codex_home/AGENTS.md"
-grep -q 'get_protected_information_result' "$codex_home/AGENTS.md"
-grep -q 'Keep any returned access handle private' "$codex_home/AGENTS.md"
+grep -q 'the detail in the same call' "$codex_home/AGENTS.md"
+! grep -q 'operator console' "$codex_home/AGENTS.md"
 grep -q 'Credential, access-key, and private-key material is never' "$codex_home/AGENTS.md"
 hook_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
 recall_hash="$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')"
@@ -545,11 +544,11 @@ echo "[12/18] missing helper self-heals from the installed runtime revision"
 rm -f "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
 [[ -x "$tmp_root/connector-helper.py" ]]
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "6" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "7" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
 expected_helper_digest="$(awk -F= '$1 == "HELPER_DIGEST" { print $2 }' "$state_dir/connectors/codex.env")"
 printf '\n# same-version stale helper\n' >>"$tmp_root/connector-helper.py"
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "6" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "7" ]]
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" != "$expected_helper_digest" ]]
 run_luthn connect codex >/dev/null
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" == "$expected_helper_digest" ]]
@@ -566,7 +565,7 @@ raise SystemExit(1)
 EOF
 chmod 0700 "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "6" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "7" ]]
 cp "$tmp_root/connector-helper-fixture.py" "$tmp_root/connector-helper.py"
 run_luthn disconnect codex >/dev/null
 run_luthn connection status codex >/dev/null
@@ -1035,7 +1034,7 @@ assert set(version) == {
 }
 assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
 assert version["cliTemplateVersion"] == "4"
-assert version["connectorTemplateVersion"] == "6"
+assert version["connectorTemplateVersion"] == "7"
 assert version["mcpSchemaVersion"] == "5"
 assert update["status"] == "current"
 assert update["candidateRevision"] == "a" * 40
