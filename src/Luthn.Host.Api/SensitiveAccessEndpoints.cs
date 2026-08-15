@@ -11,6 +11,10 @@ public static class SensitiveAccessEndpoints
 {
     private const int MinExpirySeconds = 60;
     private const int MaxExpirySeconds = 3600;
+    private const int MinProtectedWaitSeconds = 1;
+    private const int MaxProtectedWaitSeconds = 60;
+    private const int MinProtectedPollIntervalMs = 100;
+    private const int MaxProtectedPollIntervalMs = 5000;
 
     public static IEndpointRouteBuilder MapSensitiveAccessRequests(this IEndpointRouteBuilder app)
     {
@@ -39,6 +43,10 @@ public static class SensitiveAccessEndpoints
         requests.MapPost("/protected-result", ReadProtectedInformationResultEndpoint)
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("ReadProtectedInformationResult");
+
+        requests.MapPost("/protected-wait", WaitForProtectedInformationAccessEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessRequest)
+            .WithName("WaitForProtectedInformationAccess");
 
         requests.MapGet("/{id}", ReadRequestEndpoint)
             .RequireServiceScope(ServiceScopes.AccessRequest)
@@ -142,6 +150,31 @@ public static class SensitiveAccessEndpoints
             ServiceTokenAuthorization.GetActor(httpContext),
             cancellationToken);
         return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result));
+    }
+
+    private static async Task<Results<Ok<ProtectedInformationAccessWaitResponse>, BadRequest<ProblemDetails>>> WaitForProtectedInformationAccessEndpoint(
+        ProtectedInformationAccessWaitRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        httpContext.Response.Headers.Pragma = "no-cache";
+        var validationError = ValidateProtectedInformationAccessWaitRequest(request);
+        if (validationError is not null)
+        {
+            return TypedResults.BadRequest(validationError);
+        }
+
+        var result = await workflow.WaitForProtectedInformationAccessAsync(
+            request.AccessHandle.Trim(),
+            TimeSpan.FromSeconds(request.MaxWaitSeconds),
+            TimeSpan.FromMilliseconds(request.PollIntervalMs),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
+        return TypedResults.Ok(new ProtectedInformationAccessWaitResponse(
+            result.Status,
+            result.Message));
     }
 
     private static async Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestEndpoint(
@@ -605,6 +638,43 @@ public static class SensitiveAccessEndpoints
                 "accessHandle must be a 64-character lowercase hexadecimal value.");
     }
 
+    private static ProblemDetails? ValidateProtectedInformationAccessWaitRequest(
+        ProtectedInformationAccessWaitRequest request)
+    {
+        const string title = "Invalid protected information wait request.";
+        var error = ApiValidation.ValidateRequiredText(
+            request.AccessHandle,
+            "accessHandle",
+            64,
+            title);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        if (request.AccessHandle.Length != 64 ||
+            request.AccessHandle.Any(character =>
+                !char.IsAsciiHexDigit(character) || char.IsUpper(character)))
+        {
+            return ApiValidation.CreateProblem(
+                title,
+                "accessHandle must be a 64-character lowercase hexadecimal value.");
+        }
+
+        if (request.MaxWaitSeconds is < MinProtectedWaitSeconds or > MaxProtectedWaitSeconds)
+        {
+            return ApiValidation.CreateProblem(
+                title,
+                $"maxWaitSeconds must be between {MinProtectedWaitSeconds} and {MaxProtectedWaitSeconds}.");
+        }
+
+        return request.PollIntervalMs is < MinProtectedPollIntervalMs or > MaxProtectedPollIntervalMs
+            ? ApiValidation.CreateProblem(
+                title,
+                $"pollIntervalMs must be between {MinProtectedPollIntervalMs} and {MaxProtectedPollIntervalMs}.")
+            : null;
+    }
+
     private static ProblemDetails CreateValidationProblem(string detail) =>
         ApiValidation.CreateProblem("Invalid sensitive access request.", detail);
 }
@@ -848,6 +918,17 @@ public sealed record ProtectedInformationResultRequest
 {
     public string AccessHandle { get; init; } = "";
 }
+
+public sealed record ProtectedInformationAccessWaitRequest
+{
+    public string AccessHandle { get; init; } = "";
+    public int MaxWaitSeconds { get; init; } = 30;
+    public int PollIntervalMs { get; init; } = 250;
+}
+
+public sealed record ProtectedInformationAccessWaitResponse(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message);
 
 public sealed record ProtectedInformationResultResponse(
     string Status,

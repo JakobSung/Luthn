@@ -120,7 +120,7 @@ assert handler["command"] == "python3", handler
 assert handler["args"][1:] == [
     "claude-hook-run", "--base-url", "http://127.0.0.1:1", "--token-file",
     f"{sys.argv[2]}/service-token", "--excluded-token-file",
-    f"{sys.argv[2]}/operator-token", "--connector-version", "6",
+    f"{sys.argv[2]}/operator-token", "--connector-version", "8",
 ], handler
 PY
 grep -q '<!-- luthn:auto-recall:start -->' "$claude_home/CLAUDE.md"
@@ -131,11 +131,10 @@ grep -q 'search_safe_context' "$claude_home/CLAUDE.md"
 grep -q 'could not verify the requested context' "$claude_home/CLAUDE.md"
 grep -q 'Protected information confirmation' "$claude_home/CLAUDE.md"
 grep -q 'specific detail that is not present' "$claude_home/CLAUDE.md"
-grep -q 'request_protected_information_access' "$claude_home/CLAUDE.md"
+grep -q 'request_and_wait_for_protected_information_access' "$claude_home/CLAUDE.md"
 grep -q 'type names, field names' "$claude_home/CLAUDE.md"
-grep -q 'only a trusted operator can approve or deny it' "$claude_home/CLAUDE.md"
-grep -q 'get_protected_information_result' "$claude_home/CLAUDE.md"
-grep -q 'Keep any returned access handle private' "$claude_home/CLAUDE.md"
+grep -q 'the detail in the same call' "$claude_home/CLAUDE.md"
+! grep -q 'operator console' "$claude_home/CLAUDE.md"
 grep -q 'Credential, access-key, and private-key material is never' "$claude_home/CLAUDE.md"
 
 status_output="$(run_luthn connection status claude 2>/dev/null)"

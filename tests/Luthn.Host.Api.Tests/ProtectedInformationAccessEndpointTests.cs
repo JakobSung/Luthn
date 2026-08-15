@@ -18,6 +18,7 @@ public sealed class ProtectedInformationAccessEndpointTests
 {
     private const string AliceBearer = "protected-result-alice";
     private const string OtherAgentBearer = "protected-result-other-agent";
+    private const string OtherWorkspaceBearer = "protected-result-other-workspace";
     private const string OperatorBearer = "protected-result-operator";
 
     [Fact]
@@ -97,6 +98,130 @@ public sealed class ProtectedInformationAccessEndpointTests
         Assert.False(exhausted.RootElement.GetProperty("contentAvailable").GetBoolean());
     }
 
+    [Fact]
+    public async Task WaitIsRequesterBoundStatusOnlyAndDoesNotBlockApprovalOrConsumeRead()
+    {
+        using var factory = CreateFactory();
+        using var alice = Client(factory, AliceBearer);
+        using var otherAgent = Client(factory, OtherAgentBearer);
+        using var otherWorkspace = Client(factory, OtherWorkspaceBearer);
+        using var operatorClient = Client(factory, OperatorBearer);
+        await SeedProtectedQuoteAsync(factory);
+        var protectedRequest = await ResolveAsync(alice, "승인 대기 경계 확인");
+
+        foreach (var isolatedClient in new[] { otherAgent, otherWorkspace })
+        {
+            using var isolatedResponse = await isolatedClient.PostAsJsonAsync(
+                "/api/access-requests/protected-wait",
+                new
+                {
+                    accessHandle = protectedRequest.AccessHandle,
+                    maxWaitSeconds = 1,
+                    pollIntervalMs = 100
+                });
+            using var isolatedBody = await JsonDocument.ParseAsync(
+                await isolatedResponse.Content.ReadAsStreamAsync());
+            Assert.Equal(HttpStatusCode.OK, isolatedResponse.StatusCode);
+            Assert.Equal("not-found", isolatedBody.RootElement.GetProperty("status").GetString());
+            Assert.Equal(2, isolatedBody.RootElement.EnumerateObject().Count());
+        }
+
+        var waitTask = alice.PostAsJsonAsync(
+            "/api/access-requests/protected-wait",
+            new
+            {
+                accessHandle = protectedRequest.AccessHandle,
+                maxWaitSeconds = 5,
+                pollIntervalMs = 100
+            });
+        await Task.Delay(150);
+        using var approval = await operatorClient.PostAsJsonAsync(
+            $"/api/access-requests/{protectedRequest.RequestId}/approve",
+            new { reason = "대기 중 승인" });
+        Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+
+        using var waitResponse = await waitTask;
+        using var waitBody = await JsonDocument.ParseAsync(
+            await waitResponse.Content.ReadAsStreamAsync());
+        Assert.Equal(HttpStatusCode.OK, waitResponse.StatusCode);
+        Assert.Contains("no-store", waitResponse.Headers.CacheControl!.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no-cache", waitResponse.Headers.Pragma.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("approved", waitBody.RootElement.GetProperty("status").GetString());
+        Assert.Equal(2, waitBody.RootElement.EnumerateObject().Count());
+        var responseText = waitBody.RootElement.GetRawText();
+        Assert.DoesNotContain("content", responseText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("accessHandle", responseText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("requestId", responseText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(protectedRequest.AccessHandle, responseText, StringComparison.Ordinal);
+        Assert.DoesNotContain(protectedRequest.RequestId, responseText, StringComparison.Ordinal);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(0, (await db.SensitiveAccessGrants.SingleAsync()).SuccessfulReadCount);
+        Assert.Empty(await db.AuditEvents.Where(record =>
+            record.Action == "sensitive_access.protected_result_read").ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task WaitReturnsDeniedExpiredTimedOutAndCancelledWithoutReadingProtectedResult()
+    {
+        using var factory = CreateFactory();
+        using var alice = Client(factory, AliceBearer);
+        using var operatorClient = Client(factory, OperatorBearer);
+        await SeedProtectedQuoteAsync(factory);
+
+        var deniedRequest = await ResolveAsync(alice, "거절 상태 확인");
+        using (var denial = await operatorClient.PostAsJsonAsync(
+            $"/api/access-requests/{deniedRequest.RequestId}/deny",
+            new { reason = "거절 테스트" }))
+        {
+            Assert.Equal(HttpStatusCode.OK, denial.StatusCode);
+        }
+        await AssertWaitStatusAsync(alice, deniedRequest.AccessHandle, "denied", 1);
+
+        var expiredRequest = await ResolveAsync(alice, "만료 상태 확인");
+        await using (var expireScope = factory.Services.CreateAsyncScope())
+        {
+            var db = expireScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            var request = await db.SensitiveAccessRequests.SingleAsync(record =>
+                record.Id == expiredRequest.RequestId);
+            request.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+            request.UpdatedAt = request.ExpiresAt;
+            await db.SaveChangesAsync();
+        }
+        await AssertWaitStatusAsync(alice, expiredRequest.AccessHandle, "expired", 1);
+
+        var timedOutRequest = await ResolveAsync(alice, "시간 초과 상태 확인");
+        await AssertWaitStatusAsync(alice, timedOutRequest.AccessHandle, "timed-out", 1);
+
+        var cancelledRequest = await ResolveAsync(alice, "취소 상태 확인");
+        await using (var cancelScope = factory.Services.CreateAsyncScope())
+        {
+            var workflow = cancelScope.ServiceProvider.GetRequiredService<ISensitiveAccessWorkflow>();
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+            var cancelled = await workflow.WaitForProtectedInformationAccessAsync(
+                cancelledRequest.AccessHandle,
+                TimeSpan.FromSeconds(5),
+                TimeSpan.FromMilliseconds(100),
+                new LuthnRequestPrincipal(
+                    "alice",
+                    "personal:alice",
+                    LuthnActorKind.Service,
+                    "alice-agent",
+                    IsOperator: false),
+                cancellation.Token);
+            Assert.Equal("cancelled", cancelled.Status);
+            Assert.DoesNotContain("content", cancelled.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.All(await verifyDb.SensitiveAccessGrants.ToArrayAsync(), grant =>
+            Assert.Equal(0, grant.SuccessfulReadCount));
+        Assert.Empty(await verifyDb.AuditEvents.Where(record =>
+            record.Action == "sensitive_access.protected_result_read").ToArrayAsync());
+    }
+
     private static WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
@@ -110,7 +235,39 @@ public sealed class ProtectedInformationAccessEndpointTests
                 "access.request");
             ConfigureToken(builder, 2, "operator", OperatorBearer, "operator", true,
                 "access.review", "access.decide");
+            ConfigureToken(builder, 3, "other-workspace", OtherWorkspaceBearer, "bob", false,
+                "access.request");
+            builder.UseSetting("Luthn:Auth:Tokens:3:WorkspaceId", "personal:bob");
         });
+
+    private static async Task<ProtectedRequest> ResolveAsync(HttpClient client, string reason)
+    {
+        using var response = await client.PostAsJsonAsync("/api/access-requests/resolve", new
+        {
+            memoryItemId = "memory-protected-quote",
+            reason
+        });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        return new ProtectedRequest(
+            body.RootElement.GetProperty("requestId").GetString()!,
+            body.RootElement.GetProperty("accessHandle").GetString()!);
+    }
+
+    private static async Task AssertWaitStatusAsync(
+        HttpClient client,
+        string accessHandle,
+        string expectedStatus,
+        int maxWaitSeconds)
+    {
+        using var response = await client.PostAsJsonAsync(
+            "/api/access-requests/protected-wait",
+            new { accessHandle, maxWaitSeconds, pollIntervalMs = 100 });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expectedStatus, body.RootElement.GetProperty("status").GetString());
+        Assert.Equal(2, body.RootElement.EnumerateObject().Count());
+    }
 
     private static async Task SeedProtectedQuoteAsync(WebApplicationFactory<Program> factory)
     {
@@ -209,4 +366,6 @@ public sealed class ProtectedInformationAccessEndpointTests
 
     private static string Sha256(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private sealed record ProtectedRequest(string RequestId, string AccessHandle);
 }
