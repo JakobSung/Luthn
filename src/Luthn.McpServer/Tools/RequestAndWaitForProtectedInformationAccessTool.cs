@@ -30,12 +30,26 @@ public sealed class RequestAndWaitForProtectedInformationAccessTool(ILuthnAgentC
             return Cancelled();
         }
 
+        var request = new ProtectedInformationAccessRequestDto(
+            McpToolArguments.ReadRequiredString(arguments, "memoryItemId"),
+            McpToolArguments.ReadOptionalString(arguments, "reason"));
+        var maxWaitSeconds = ReadBoundedOptionalInt(
+            arguments,
+            "maxWaitSeconds",
+            DefaultMaxWaitSeconds,
+            MinMaxWaitSeconds,
+            MaxMaxWaitSeconds);
+        var pollIntervalMs = ReadBoundedOptionalInt(
+            arguments,
+            "pollIntervalMs",
+            DefaultPollIntervalMs,
+            MinPollIntervalMs,
+            MaxPollIntervalMs);
+
         try
         {
             var requestResponse = await client.RequestProtectedInformationAccessAsync(
-                new ProtectedInformationAccessRequestDto(
-                    McpToolArguments.ReadRequiredString(arguments, "memoryItemId"),
-                    McpToolArguments.ReadOptionalString(arguments, "reason")),
+                request,
                 cancellationToken);
             if (!string.Equals(requestResponse.Status, "requested", StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(requestResponse.AccessHandle))
@@ -46,18 +60,8 @@ public sealed class RequestAndWaitForProtectedInformationAccessTool(ILuthnAgentC
             var waitResponse = await client.WaitForProtectedInformationAccessAsync(
                 new ProtectedInformationAccessWaitRequestDto(
                     requestResponse.AccessHandle,
-                    ReadBoundedOptionalInt(
-                        arguments,
-                        "maxWaitSeconds",
-                        DefaultMaxWaitSeconds,
-                        MinMaxWaitSeconds,
-                        MaxMaxWaitSeconds),
-                    ReadBoundedOptionalInt(
-                        arguments,
-                        "pollIntervalMs",
-                        DefaultPollIntervalMs,
-                        MinPollIntervalMs,
-                        MaxPollIntervalMs)),
+                    maxWaitSeconds,
+                    pollIntervalMs),
                 cancellationToken);
             if (!string.Equals(waitResponse.Status, "approved", StringComparison.OrdinalIgnoreCase))
             {

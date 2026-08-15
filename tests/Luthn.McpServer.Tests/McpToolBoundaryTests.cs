@@ -586,6 +586,29 @@ public sealed class McpToolBoundaryTests
     }
 
     [Theory]
+    [InlineData("""{"memoryItemId":"memory-safe-1","maxWaitSeconds":0}""")]
+    [InlineData("""{"memoryItemId":"memory-safe-1","maxWaitSeconds":61}""")]
+    [InlineData("""{"memoryItemId":"memory-safe-1","maxWaitSeconds":1.5}""")]
+    [InlineData("""{"memoryItemId":"memory-safe-1","pollIntervalMs":99}""")]
+    [InlineData("""{"memoryItemId":"memory-safe-1","pollIntervalMs":5001}""")]
+    [InlineData("""{"memoryItemId":"memory-safe-1","pollIntervalMs":100.5}""")]
+    public async Task ProtectedInformationOrchestrationValidatesWaitArgumentsBeforeCreatingRequest(
+        string arguments)
+    {
+        var client = new FakeLuthnClient();
+        var server = new McpJsonRpcServer(LuthnMcpToolRegistry.CreateDefault(client));
+
+        var response = await server.HandleAsync(string.Concat(
+            """{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"request_and_wait_for_protected_information_access","arguments":""",
+            arguments,
+            "}}}"));
+
+        using var json = JsonDocument.Parse(response!);
+        Assert.Equal(-32602, json.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+        Assert.Empty(client.ProtectedInformationCallOrder);
+    }
+
+    [Theory]
     [InlineData("denied")]
     [InlineData("expired")]
     [InlineData("timed-out")]
