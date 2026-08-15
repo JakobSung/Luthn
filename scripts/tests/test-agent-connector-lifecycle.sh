@@ -155,7 +155,7 @@ import subprocess
 import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "version":
-    print("7")
+    print("8")
     raise SystemExit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == "helper-digest":
@@ -829,7 +829,7 @@ EOF
   [[ "$reconcile_output" == *"Restart required: Luthn MCP compatibility changed"* ]]
   [[ "$reconcile_output" == *"Agent notice: restart the current Codex host before invoking Luthn tools again."* ]]
 )
-grep -q '^CONNECTOR_VERSION=7$' "$reconcile_state/connectors/codex.env"
+grep -q '^CONNECTOR_VERSION=8$' "$reconcile_state/connectors/codex.env"
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
 import sys
@@ -849,7 +849,7 @@ import sys
 path = sys.argv[1]
 content = open(path, encoding="utf-8").read()
 with open(path, "w", encoding="utf-8") as stream:
-    stream.write(content.replace("CONNECTOR_VERSION=7\n", "CONNECTOR_VERSION=1\n"))
+    stream.write(content.replace("CONNECTOR_VERSION=8\n", "CONNECTOR_VERSION=1\n"))
 PY
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
@@ -1034,7 +1034,7 @@ assert set(version) == {
 }
 assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
 assert version["cliTemplateVersion"] == "4"
-assert version["connectorTemplateVersion"] == "7"
+assert version["connectorTemplateVersion"] == "8"
 assert version["mcpSchemaVersion"] == "6"
 assert update["status"] == "current"
 assert update["candidateRevision"] == "a" * 40
