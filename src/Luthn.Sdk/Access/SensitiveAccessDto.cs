@@ -30,6 +30,17 @@ public sealed record ProtectedInformationAccessWaitResponseDto(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("message")] string Message);
 
+public sealed record ProtectedInformationAccessOrchestrationResponseDto(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("contentAvailable")] bool ContentAvailable,
+    [property: JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title,
+    [property: JsonPropertyName("content"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Content,
+    [property: JsonPropertyName("grantExpiresAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? GrantExpiresAt,
+    [property: JsonPropertyName("remainingReads"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RemainingReads,
+    [property: JsonPropertyName("maxReads"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MaxReads,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("reasons")] IReadOnlyList<string> Reasons);
+
 public sealed record ProtectedInformationResultDto(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("contentAvailable")] bool ContentAvailable,

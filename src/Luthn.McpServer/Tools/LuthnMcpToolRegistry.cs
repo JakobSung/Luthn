@@ -101,6 +101,15 @@ public static class LuthnMcpToolRegistry
                 StringProperty("reason", "Optional bounded explanation of what the user wants to confirm.", 1_000)
             ], ["memoryItemId"])),
         new(
+            "request_and_wait_for_protected_information_access",
+            "Ask the owner to confirm protected information, wait for a bounded decision, and return the approved detail in this same call. This tool cannot approve or deny requests.",
+            ToolSchema([
+                StringProperty("memoryItemId", "The id of the single safe recalled memory item.", 128),
+                StringProperty("reason", "Optional bounded explanation of what the user wants to confirm.", 1_000),
+                IntegerProperty("maxWaitSeconds", "Maximum bounded wait in seconds.", 60, 1),
+                IntegerProperty("pollIntervalMs", "Polling interval in milliseconds.", 5_000, 100)
+            ], ["memoryItemId"], allowAdditionalProperties: false)),
+        new(
             "get_protected_information_result",
             "Read approved protected memory with the requester-only access handle. A successful read consumes one approved use.",
             ToolSchema([
@@ -155,6 +164,7 @@ public static class LuthnMcpToolRegistry
             new GetSharedMemoryItemTool(client),
             new CreateSensitiveAccessRequestTool(client),
             new RequestProtectedInformationAccessTool(client),
+            new RequestAndWaitForProtectedInformationAccessTool(client),
             new GetProtectedInformationResultTool(client),
             new WaitForProtectedInformationAccessTool(client),
             new GetSensitiveAccessRequestTool(client),

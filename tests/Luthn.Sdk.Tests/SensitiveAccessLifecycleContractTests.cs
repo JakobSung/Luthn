@@ -131,6 +131,21 @@ public sealed class SensitiveAccessLifecycleContractTests
             JsonSerializer.Serialize(waitResponse));
         Assert.DoesNotContain("accessHandle", JsonSerializer.Serialize(waitResponse), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("content", JsonSerializer.Serialize(waitResponse), StringComparison.OrdinalIgnoreCase);
+        var orchestrationResponse = new ProtectedInformationAccessOrchestrationResponseDto(
+            "protected-result-returned",
+            true,
+            "견적",
+            "승인된 견적 금액은 10억입니다.",
+            DateTimeOffset.UnixEpoch.AddHours(1),
+            0,
+            1,
+            "The approved protected information was returned.",
+            ["The approved protected information was returned."]);
+        var orchestrationJson = JsonSerializer.Serialize(orchestrationResponse);
+        Assert.Contains("\"contentAvailable\":true", orchestrationJson, StringComparison.Ordinal);
+        Assert.Equal("승인된 견적 금액은 10억입니다.", orchestrationResponse.Content);
+        Assert.DoesNotContain("accessHandle", orchestrationJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("requestId", orchestrationJson, StringComparison.OrdinalIgnoreCase);
         Assert.True(result!.ContentAvailable);
         Assert.Equal("견적", result.Title);
         Assert.Equal("승인된 견적 금액은 10억입니다.", result.Content);
