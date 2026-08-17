@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luthn Operator Console</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/operator.css?v=console-nav-6">
+  <link rel="stylesheet" href="/assets/operator.css?v=console-nav-7">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to console</a>
@@ -539,6 +539,7 @@
           <div class="audit-presets" aria-label="Audit investigation presets">
             <button type="button" class="secondary" data-audit-preset="sensitive">Sensitive access</button>
             <button type="button" class="secondary" data-audit-preset="failures">Classification failures</button>
+            <button type="button" class="secondary" data-audit-preset="hub">Hub ingestion</button>
             <button type="button" class="secondary" data-audit-preset="configuration">Configuration changes</button>
             <button type="button" class="secondary" data-audit-preset="clear">Clear filters</button>
           </div>
@@ -577,10 +578,13 @@
               <select name="actionPrefix">
                 <option value="">Any</option>
                 <option value="sensitive_access.">Sensitive access</option>
+                <option value="authorization.">Authorization</option>
                 <option value="operator.classification_provider.">Provider configuration</option>
                 <option value="classification.provider.">Provider invocation</option>
                 <option value="source.intake.">Source intake</option>
                 <option value="turn_summary.">Turn summary</option>
+                <option value="hub.ingress.">Hub ingestion</option>
+                <option value="console.">Console lifecycle</option>
                 <option value="memory.">Memory</option>
                 <option value="retrieval.">Retrieval</option>
                 <option value="processing.">Processing</option>
@@ -590,7 +594,19 @@
             </label>
             <label>
               Outcome
-              <input name="outcome" maxlength="32" placeholder="for example failed">
+              <select name="outcome">
+                <option value="">Any</option>
+                <option value="started">Started</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+                <option value="denied">Denied</option>
+                <option value="approved">Approved</option>
+                <option value="requested">Requested</option>
+                <option value="expired">Expired</option>
+                <option value="rejected">Rejected</option>
+                <option value="unavailable">Unavailable</option>
+                <option value="requeued">Requeued</option>
+              </select>
             </label>
             <label>
               Subject type
@@ -622,32 +638,45 @@
           <button id="nextAuditPage" type="button" class="secondary" disabled data-i18n="audit.next">Next page</button>
           <button id="exportAudit" type="button" class="secondary" data-i18n="audit.export">Export metadata</button>
         </div>
-        <div class="table-wrap">
-          <table>
+        <div class="audit-workbench">
+          <div class="table-wrap">
+            <table>
             <thead>
               <tr>
                 <th data-i18n="audit.occurred">Occurred</th>
-                <th data-i18n="audit.category">Category</th>
-                <th data-i18n="audit.actor">Actor</th>
                 <th data-i18n="audit.action">Action</th>
-                <th data-i18n="audit.subject">Subject</th>
-                <th data-i18n="audit.type">Type</th>
                 <th data-i18n="audit.outcome">Outcome</th>
+                <th data-i18n="audit.category">Category</th>
+                <th data-i18n="audit.subject">Subject</th>
                 <th data-i18n="audit.correlation">Correlation</th>
-                <th data-i18n="audit.payload">Payload</th>
-                <th data-i18n="audit.redaction">Redaction</th>
-                <th data-i18n="audit.retention">Retention</th>
               </tr>
             </thead>
             <tbody id="auditRows">
-              <tr><td colspan="11">No audit events loaded.</td></tr>
+              <tr><td colspan="6">No audit events loaded.</td></tr>
             </tbody>
-          </table>
+            </table>
+          </div>
+          <aside class="audit-detail" aria-live="polite" aria-label="Selected audit event details">
+            <div class="workbench-heading">
+              <div>
+                <p class="eyebrow">Investigation detail</p>
+                <h3>Selected audit event</h3>
+              </div>
+              <span id="auditDetailStatus" class="inline-status">Select a timeline event.</span>
+            </div>
+            <dl id="auditDetailFields" class="access-detail-fields">
+              <div class="detail-summary"><dt>Detail</dt><dd>Select an audit event to inspect metadata and continue the investigation.</dd></div>
+            </dl>
+            <div class="row-actions">
+              <button id="viewAuditSubject" type="button" class="secondary" disabled>View subject trail</button>
+              <button id="viewAuditCorrelation" type="button" class="secondary" disabled>View correlation</button>
+            </div>
+          </aside>
         </div>
       </section>
     </main>
   </div>
-  <script src="/assets/operator-i18n.js?v=console-nav-6" defer></script>
-  <script src="/assets/operator.js?v=console-nav-6" defer></script>
+  <script src="/assets/operator-i18n.js?v=console-nav-7" defer></script>
+  <script src="/assets/operator.js?v=console-nav-7" defer></script>
 </body>
 </html>

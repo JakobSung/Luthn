@@ -15,20 +15,6 @@ public static class AuditEndpoints
     private const int AuditCursorMaxLength = 2048;
     private const int AuditExportMaxItems = 1000;
     private const string AuditCursorProtectionPurpose = "Luthn.Audit.Cursor.v1";
-    private static readonly HashSet<string> AllowedActionPrefixes = new(StringComparer.Ordinal)
-    {
-        "audit.",
-        "classification.provider.",
-        "memory.",
-        "operator.classification_provider.",
-        "processing.",
-        "retrieval.",
-        "sensitive_access.",
-        "source.intake.",
-        "transport.",
-        "turn_summary."
-    };
-
     public static IEndpointRouteBuilder MapAuditEvents(this IEndpointRouteBuilder app)
     {
         var audit = app.MapGroup("/api/audit-events");
@@ -215,10 +201,10 @@ public static class AuditEndpoints
         }
 
         var normalizedActionPrefix = Normalize(filters.ActionPrefix);
-        if (normalizedActionPrefix is not null && !AllowedActionPrefixes.Contains(normalizedActionPrefix))
+        if (normalizedActionPrefix is not null && !AuditActionFamilies.AllowedPrefixes.Contains(normalizedActionPrefix))
         {
             return AuditQueryPreparation.Fail(BadRequest(
-                $"actionPrefix must be one of: {string.Join(", ", AllowedActionPrefixes.Order())}"));
+                $"actionPrefix must be one of: {string.Join(", ", AuditActionFamilies.AllowedPrefixes.Order())}"));
         }
 
         if (!AuditEventCategories.TryNormalize(filters.Category, out var normalizedCategory))

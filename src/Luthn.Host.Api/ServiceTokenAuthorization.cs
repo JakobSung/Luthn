@@ -277,6 +277,10 @@ public static class ServiceTokenAuthorization
                 return consoleResult.Result;
             }
 
+            if (!string.IsNullOrWhiteSpace(authorization))
+            {
+                await AuthorizationAudit.RecordCredentialRejectedAsync(httpContext, requiredScope);
+            }
             httpContext.Response.Headers.WWWAuthenticate = "Bearer";
             return Unauthorized();
         }
@@ -284,12 +288,25 @@ public static class ServiceTokenAuthorization
         var matchedToken = FindMatchingToken(authOptions.Tokens, bearer, DateTimeOffset.UtcNow);
         if (matchedToken is null)
         {
+            await AuthorizationAudit.RecordCredentialRejectedAsync(httpContext, requiredScope);
             httpContext.Response.Headers.WWWAuthenticate = "Bearer";
             return Unauthorized();
         }
 
         if (!HasScope(matchedToken, requiredScope))
         {
+            var deniedUserId = identityOptions.Mode == LuthnIdentityMode.SingleOwner
+                ? singleOwnerUserId
+                : NormalizeUserId(matchedToken.UserId) ?? singleOwnerUserId;
+            var deniedWorkspaceId = NormalizeWorkspaceId(matchedToken.WorkspaceId) ??
+                WorkspaceIds.ForLegacyUser(deniedUserId);
+            await AuthorizationAudit.RecordScopeDeniedAsync(
+                httpContext,
+                deniedWorkspaceId,
+                deniedUserId,
+                Enum.IsDefined(matchedToken.ActorKind) ? matchedToken.ActorKind.ToString().ToLowerInvariant() : "service",
+                ComposeActor(matchedToken.Name.Trim(), httpContext.Request.Headers[OperatorHeaderName].ToString()),
+                requiredScope);
             return TypedResults.Problem(
                 title: "Forbidden.",
                 detail: "The service token is not authorized for this operation.",
@@ -360,12 +377,21 @@ public static class ServiceTokenAuthorization
             return (false, null);
         }
 
+        var authenticatedSession = session;
         var cloudValidation = await httpContext.RequestServices
             .GetRequiredService<IConsoleCloudSessionValidator>()
             .ValidateAsync(httpContext, session, httpContext.RequestAborted);
         session = cloudValidation.Session;
         if (session is null)
         {
+            await AuthorizationAudit.RecordScopeDeniedAsync(
+                httpContext,
+                authenticatedSession.WorkspaceId,
+                authenticatedSession.UserId,
+                "user",
+                authenticatedSession.ActorId,
+                requiredScope,
+                action: "authorization.session_expired");
             return (true, TypedResults.Problem(
                 title: "Cloud console session expired.",
                 detail: cloudValidation.Detail ?? "Cloud console authentication is no longer active. Sign in again; Local access will not be restored automatically.",
@@ -374,6 +400,13 @@ public static class ServiceTokenAuthorization
 
         if (!HasConsoleScope(session.Scopes, requiredScope))
         {
+            await AuthorizationAudit.RecordScopeDeniedAsync(
+                httpContext,
+                session.WorkspaceId,
+                session.UserId,
+                "user",
+                session.ActorId,
+                requiredScope);
             return (true, TypedResults.Problem(
                 title: "Forbidden.",
                 detail: "The console session is not authorized for this operation.",

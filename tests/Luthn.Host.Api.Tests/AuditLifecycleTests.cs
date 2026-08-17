@@ -113,6 +113,66 @@ public sealed class AuditCursorContractTests
         Assert.Equal(HttpStatusCode.BadRequest, reusedResponse.StatusCode);
     }
 
+    [Theory]
+    [InlineData("hub.ingress.accepted", "Ingestion")]
+    [InlineData("classification.provider.failed", "Security")]
+    [InlineData("turn_summary.classification_provider.failed", "Security")]
+    [InlineData("authorization.scope_denied", "Security")]
+    [InlineData("console.session.revoked", "Security")]
+    public void CategoriesClassifyOperationalActionFamilies(string action, string category)
+    {
+        Assert.Equal(category, AuditEventCategories.FromAction(action));
+    }
+
+    [Fact]
+    public async Task RetentionKeepsNestedClassificationProviderEventsAtTheSecurityWindow()
+    {
+        var now = DateTimeOffset.Parse("2026-08-06T08:30:00Z");
+        var options = new AuditRetentionOptions
+        {
+            AccessDays = 365,
+            SecurityDays = 365,
+            ConfigurationDays = 365,
+            PublicationDays = 365,
+            IngestionDays = 90,
+            RetentionDays = 365
+        };
+        var dbOptions = new DbContextOptionsBuilder<LuthnDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        await using var db = new LuthnDbContext(dbOptions);
+        db.AuditEvents.AddRange(
+            Audit(
+                "expired-ingestion", "turn_summary.intake.completed", now.AddDays(-91)),
+            Audit(
+                "security-provider", "turn_summary.classification_provider.completed", now.AddDays(-91)));
+        await db.SaveChangesAsync();
+        var processor = new AuditRetentionCleanupProcessor(db, Options.Create(options));
+
+        var result = await processor.ProcessBatchAsync(now, 10);
+        var remaining = await db.AuditEvents.AsNoTracking().ToArrayAsync();
+
+        Assert.Equal(1, result.DeletedCount);
+        Assert.DoesNotContain(remaining, item => item.Id == "expired-ingestion");
+        Assert.Contains(remaining, item => item.Id == "security-provider");
+        Assert.DoesNotContain(
+            AuditEventCategories.Apply(db.AuditEvents.AsNoTracking(), AuditEventCategories.Ingestion),
+            item => item.Id == "security-provider");
+    }
+
+    [Fact]
+    public async Task AuditQueryAcceptsHubConsoleAndAuthorizationActionFamilies()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        foreach (var actionPrefix in new[] { "hub.ingress.", "console.", "authorization." })
+        {
+            using var response = await client.GetAsync($"/api/audit-events?actionPrefix={Uri.EscapeDataString(actionPrefix)}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+    }
+
     internal static WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {

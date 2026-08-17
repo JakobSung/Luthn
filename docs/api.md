@@ -1092,15 +1092,18 @@ The endpoint supports exact metadata filters for `subjectId`, `action`,
 inclusive UTC timestamps. `actionPrefix` is limited to known event families:
 `sensitive_access.`, `operator.classification_provider.`,
 `classification.provider.`, `source.intake.`, `turn_summary.`, `memory.`,
-`retrieval.`, `processing.`, `transport.`, and `audit.`. `category` accepts
+`retrieval.`, `processing.`, `transport.`, `hub.ingress.`, `console.`,
+`authorization.`, and `audit.`. `category` accepts
 `Access`, `Security`, `Configuration`, `Publication`, `Ingestion`, or
 `Retention`. Filters never widen the
 authenticated workspace or installation scope. Invalid, non-UTC, oversized,
 or unrecognized filters return `400` before the database query runs.
 
-Current `hub.ingress.*` events use the bounded `Security` category and are
-queried with `category=Security` plus subject, correlation, and UTC filters;
-the action-prefix allowlist does not yet expose a separate Hub family.
+`hub.ingress.*` events are in the `Ingestion` category and provider invocation
+or failure events are in `Security`. Query Hub ingress directly with
+`actionPrefix=hub.ingress.`. `authorization.*` events retain only the denied
+required scope; they never retain credentials, headers, request content, or
+network identifiers.
 
 Pages are ordered by descending `occurredAt` and ascending `id`. When
 `nextCursor` is non-null, pass it back with the exact same filters. The opaque
@@ -1153,9 +1156,11 @@ Use audit metadata for a specific operational purpose:
 
 - Before and after a sensitive-access decision, filter by the request
   `subjectId` or the `sensitive_access.` family to verify the review sequence.
-- When classification fails, start with `outcome=failed`, then narrow by
-  `correlationId` and a UTC time range. Provider-failure audit events remain
-  metadata-only and never include the classified content or provider error body.
+- When classification fails, start with `category=Security&outcome=failed`,
+  then narrow by `correlationId` and a UTC time range. A server-generated
+  correlation value connects invocation, completion or failure, and the final
+  intake event. Provider-failure audit events remain metadata-only and never
+  include the classified content or provider error body.
 - When classification behavior changes, use installation scope with the
   `operator.classification_provider.` family to review provider updates and
   tests. Installation scope remains operator-only.

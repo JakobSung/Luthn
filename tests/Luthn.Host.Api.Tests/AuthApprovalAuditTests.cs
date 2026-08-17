@@ -93,6 +93,32 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var audit = await db.AuditEvents.SingleAsync(record => record.Action == "authorization.scope_denied");
+        Assert.Equal(ServiceScopes.AgentRead, audit.SubjectId);
+        Assert.Equal("denied", audit.Outcome);
+        Assert.Equal("metadata-only", audit.PayloadClass);
+        Assert.DoesNotContain(RequestBearer, JsonSerializer.Serialize(audit), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidPresentedCredentialCreatesInstallationScopedMetadataOnlyAudit()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        client.SetBearer("invalid-presented-credential");
+
+        using var response = await client.GetAsync("/api/audit-events");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var audit = await db.AuditEvents.SingleAsync(record => record.Action == "authorization.credential_rejected");
+        Assert.Equal(AuditEventScopeKind.Installation, audit.ScopeKind);
+        Assert.Equal(ServiceScopes.AuditRead, audit.SubjectId);
+        Assert.Equal("credential-not-retained", audit.RedactionState);
+        Assert.DoesNotContain("invalid-presented-credential", JsonSerializer.Serialize(audit), StringComparison.Ordinal);
     }
 
     [Fact]

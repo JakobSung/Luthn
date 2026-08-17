@@ -690,15 +690,17 @@ GET /api/audit-events/export?category=Access&subjectId=access-...
 정확히 일치하는 메타데이터 필터입니다. `from`, `to`는 양 끝을 포함하는 UTC
 시각입니다. `actionPrefix`는 알려진 사건 계열인 `sensitive_access.`,
 `operator.classification_provider.`, `classification.provider.`, `source.intake.`,
-`turn_summary.`, `memory.`, `retrieval.`, `processing.`, `transport.`만 허용합니다.
-`audit.`도 retention 사건 조회에 허용됩니다. `category`는 `Access`, `Security`,
+`turn_summary.`, `memory.`, `retrieval.`, `processing.`, `transport.`, `hub.ingress.`,
+`console.`, `authorization.`만 허용합니다. `audit.`도 retention 사건 조회에 허용됩니다.
+`category`는 `Access`, `Security`,
 `Configuration`, `Publication`, `Ingestion`, `Retention` 중 하나입니다.
 필터는 인증된 workspace 또는 installation 범위를 넓히지 않습니다. 잘못된 UTC,
 과도한 길이, 허용되지 않은 접두사는 database 조회 전에 `400`으로 거절합니다.
 
-현재 `hub.ingress.*` 사건은 제한된 `Security` category를 사용합니다. 별도 Hub
-action-prefix는 아직 허용하지 않으므로 `category=Security`와 subject, correlation,
-UTC filter를 함께 사용해 조회합니다.
+`hub.ingress.*` 사건은 `Ingestion` category로, provider 호출·실패 사건은 `Security`
+category로 분류합니다. Hub ingress는 `actionPrefix=hub.ingress.`로 바로 조회할 수
+있습니다. `authorization.*` 사건에는 거부된 필요 scope만 남기며 credential, header,
+request content, network identifier를 기록하지 않습니다.
 
 page는 `occurredAt` 내림차순, `id` 오름차순입니다. `nextCursor`가 null이 아니면
 같은 filter와 함께 다음 요청에 전달합니다. opaque cursor에는 내용이나 credential이
@@ -741,9 +743,10 @@ actor user, owner 식별자가 없고 `metadata-only-no-protected-content` 경�
 
 - 민감 접근 승인·반려 전후에는 요청 `subjectId` 또는 `sensitive_access.` 계열로
   요청, 검토, 결정, 결과 조회 순서를 확인합니다.
-- 분류 실패 조사에는 `outcome=failed`로 시작한 뒤 `correlationId`와 UTC 시각
-  범위로 좁힙니다. Provider 실패 감사 사건은 metadata-only이며 분류 대상 내용이나
-  provider 오류 본문을 포함하지 않습니다.
+- 분류 실패 조사에는 `category=Security&outcome=failed`로 시작한 뒤
+  `correlationId`와 UTC 시각 범위로 좁힙니다. 분류 요청마다 서버가 만든 correlation
+  값은 시작·완료 또는 실패·최종 intake 사건을 연결합니다. Provider 실패 감사 사건은
+  metadata-only이며 분류 대상 내용이나 provider 오류 본문을 포함하지 않습니다.
 - 분류 동작 변경 조사에는 installation 범위와
   `operator.classification_provider.` 계열로 provider 설정 변경·시험을 확인합니다.
   installation 범위는 계속 명시적 운영자만 조회할 수 있습니다.

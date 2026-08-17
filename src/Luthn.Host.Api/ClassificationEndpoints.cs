@@ -84,6 +84,7 @@ public static class ClassificationEndpoints
 
         var occurredAt = DateTimeOffset.UtcNow;
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        var correlationId = AuditCorrelationIds.CreateOperationId();
         db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
             principal,
             ServiceTokenAuthorization.GetActor(httpContext),
@@ -93,13 +94,27 @@ public static class ClassificationEndpoints
             service.ProviderBoundary.RedactionState,
             occurredAt,
             subjectType: "source_event",
-            outcome: "started"));
+            outcome: AuditOutcomes.Started,
+            correlationId: correlationId));
         await db.SaveChangesAsync(cancellationToken);
 
         var normalizedRequest = request with { SourceId = sourceId.Value };
         try
         {
-            return TypedResults.Ok(await service.PreviewAsync(normalizedRequest, cancellationToken));
+            var response = await service.PreviewAsync(normalizedRequest, cancellationToken);
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                ServiceTokenAuthorization.GetActor(httpContext),
+                "classification.provider.completed",
+                sourceId.Value,
+                service.ProviderBoundary.PayloadClass,
+                service.ProviderBoundary.RedactionState,
+                DateTimeOffset.UtcNow,
+                subjectType: "source_event",
+                outcome: AuditOutcomes.Completed,
+                correlationId: correlationId));
+            await db.SaveChangesAsync(cancellationToken);
+            return TypedResults.Ok(response);
         }
         catch (ClassificationProviderException error)
         {
@@ -112,7 +127,8 @@ public static class ClassificationEndpoints
                 service.ProviderBoundary.RedactionState,
                 DateTimeOffset.UtcNow,
                 subjectType: "source_event",
-                outcome: "failed"));
+                outcome: AuditOutcomes.Failed,
+                correlationId: correlationId));
             await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }

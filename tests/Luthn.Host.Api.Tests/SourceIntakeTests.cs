@@ -105,11 +105,15 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
         Assert.Equal(sourceEventId, providerAudit.SubjectId);
         Assert.Equal("local-classification-input", providerAudit.PayloadClass);
         Assert.Equal("local-only", providerAudit.RedactionState);
+        var completedProviderAudit = await db.AuditEvents.SingleAsync(record => record.Action == "classification.provider.completed");
+        Assert.Equal(providerAudit.CorrelationId, completedProviderAudit.CorrelationId);
+        Assert.False(string.IsNullOrWhiteSpace(providerAudit.CorrelationId));
 
         var audit = await db.AuditEvents.SingleAsync(record => record.Action == "source.intake.classified");
         Assert.Equal(sourceEventId, audit.SubjectId);
         Assert.Equal("metadata-only", audit.PayloadClass);
         Assert.Equal("safe-projection-only", audit.RedactionState);
+        Assert.Equal(providerAudit.CorrelationId, audit.CorrelationId);
     }
 
     [Fact]
@@ -188,7 +192,7 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
         Assert.Equal("", reference.RedactedSummary);
 
         Assert.Empty(await db.WikiProposals.ToArrayAsync());
-        Assert.Equal(2, await db.AuditEvents.CountAsync());
+        Assert.Equal(3, await db.AuditEvents.CountAsync());
     }
 
     [Fact]
@@ -265,7 +269,7 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
         Assert.Equal("", reference.RedactedSummary);
 
         Assert.Empty(await db.WikiProposals.ToArrayAsync());
-        Assert.Equal(2, await db.AuditEvents.CountAsync());
+        Assert.Equal(3, await db.AuditEvents.CountAsync());
     }
 
     [Fact]
@@ -613,10 +617,12 @@ public sealed class SourceIntakeTests : IClassFixture<WebApplicationFactory<Prog
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, problem.StatusCode);
         var audits = await db.AuditEvents.ToArrayAsync();
         Assert.Equal(2, audits.Length);
-        Assert.Single(audits, audit => audit.Action == "classification.provider.invoked");
+        var invokedAudit = Assert.Single(audits, audit => audit.Action == "classification.provider.invoked");
         var failedAudit = Assert.Single(audits, audit => audit.Action == "classification.provider.failed");
         Assert.Equal("failed", failedAudit.Outcome);
         Assert.Equal("metadata-only", failedAudit.PayloadClass);
+        Assert.Equal(invokedAudit.CorrelationId, failedAudit.CorrelationId);
+        Assert.False(string.IsNullOrWhiteSpace(failedAudit.CorrelationId));
         Assert.Empty(await db.SourceEvents.ToArrayAsync());
         Assert.Empty(await db.ClassificationResults.ToArrayAsync());
     }

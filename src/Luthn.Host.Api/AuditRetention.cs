@@ -83,27 +83,34 @@ public static class AuditEventCategories
             return Retention;
         }
 
-        if (action.StartsWith("operator.classification_provider.", StringComparison.Ordinal))
+        if (action.StartsWith(AuditActionFamilies.OperatorClassificationProvider, StringComparison.Ordinal))
         {
             return Configuration;
         }
 
-        if (action.StartsWith("transport.", StringComparison.Ordinal) ||
-            action.StartsWith("processing.", StringComparison.Ordinal) ||
+        if (action.StartsWith(AuditActionFamilies.Transport, StringComparison.Ordinal) ||
+            action.StartsWith(AuditActionFamilies.Processing, StringComparison.Ordinal) ||
             action.StartsWith("memory.external_publication.", StringComparison.Ordinal))
         {
             return Publication;
         }
 
-        if (action.StartsWith("sensitive_access.", StringComparison.Ordinal) ||
-            action.StartsWith("retrieval.", StringComparison.Ordinal))
+        if (action.StartsWith(AuditActionFamilies.SensitiveAccess, StringComparison.Ordinal) ||
+            action.StartsWith(AuditActionFamilies.Retrieval, StringComparison.Ordinal))
         {
             return Access;
         }
 
-        if (action.StartsWith("source.intake.", StringComparison.Ordinal) ||
-            action.StartsWith("turn_summary.", StringComparison.Ordinal) ||
-            action.StartsWith("memory.", StringComparison.Ordinal))
+        if (action.StartsWith(AuditActionFamilies.ClassificationProvider, StringComparison.Ordinal) ||
+            action.Contains(".classification_provider.", StringComparison.Ordinal))
+        {
+            return Security;
+        }
+
+        if (action.StartsWith(AuditActionFamilies.HubIngress, StringComparison.Ordinal) ||
+            action.StartsWith(AuditActionFamilies.SourceIntake, StringComparison.Ordinal) ||
+            action.StartsWith(AuditActionFamilies.TurnSummary, StringComparison.Ordinal) ||
+            action.StartsWith(AuditActionFamilies.Memory, StringComparison.Ordinal))
         {
             return Ingestion;
         }
@@ -128,32 +135,38 @@ public static class AuditEventCategories
                 record.Action.Contains(".retention.") ||
                 record.Action.StartsWith("audit.retention.")),
             Configuration => query.Where(record =>
-                record.Action.StartsWith("operator.classification_provider.")),
+                record.Action.StartsWith(AuditActionFamilies.OperatorClassificationProvider)),
             Publication => query.Where(record =>
-                record.Action.StartsWith("transport.") ||
-                record.Action.StartsWith("processing.") ||
+                record.Action.StartsWith(AuditActionFamilies.Transport) ||
+                record.Action.StartsWith(AuditActionFamilies.Processing) ||
                 record.Action.StartsWith("memory.external_publication.")),
             Access => query.Where(record =>
-                record.Action.StartsWith("sensitive_access.") ||
-                record.Action.StartsWith("retrieval.")),
+                record.Action.StartsWith(AuditActionFamilies.SensitiveAccess) ||
+                record.Action.StartsWith(AuditActionFamilies.Retrieval)),
             Ingestion => query.Where(record =>
                 !record.Action.Contains(".retention.") &&
                 !record.Action.StartsWith("memory.external_publication.") &&
-                (record.Action.StartsWith("source.intake.") ||
-                    record.Action.StartsWith("turn_summary.") ||
-                    record.Action.StartsWith("memory."))),
+                !record.Action.Contains(".classification_provider.") &&
+                (record.Action.StartsWith(AuditActionFamilies.HubIngress) ||
+                    record.Action.StartsWith(AuditActionFamilies.SourceIntake) ||
+                    record.Action.StartsWith(AuditActionFamilies.TurnSummary) ||
+                    record.Action.StartsWith(AuditActionFamilies.Memory))),
             _ => query.Where(record =>
-                !record.Action.Contains(".retention.") &&
-                !record.Action.StartsWith("audit.retention.") &&
-                !record.Action.StartsWith("operator.classification_provider.") &&
-                !record.Action.StartsWith("transport.") &&
-                !record.Action.StartsWith("processing.") &&
-                !record.Action.StartsWith("memory.external_publication.") &&
-                !record.Action.StartsWith("sensitive_access.") &&
-                !record.Action.StartsWith("retrieval.") &&
-                !record.Action.StartsWith("source.intake.") &&
-                !record.Action.StartsWith("turn_summary.") &&
-                !record.Action.StartsWith("memory."))
+                record.Action.StartsWith(AuditActionFamilies.ClassificationProvider) ||
+                (record.Action.Contains(".classification_provider.") &&
+                    !record.Action.StartsWith(AuditActionFamilies.OperatorClassificationProvider)) ||
+                (!record.Action.Contains(".retention.") &&
+                    !record.Action.StartsWith("audit.retention.") &&
+                    !record.Action.StartsWith(AuditActionFamilies.OperatorClassificationProvider) &&
+                    !record.Action.StartsWith(AuditActionFamilies.Transport) &&
+                    !record.Action.StartsWith(AuditActionFamilies.Processing) &&
+                    !record.Action.StartsWith("memory.external_publication.") &&
+                    !record.Action.StartsWith(AuditActionFamilies.SensitiveAccess) &&
+                    !record.Action.StartsWith(AuditActionFamilies.Retrieval) &&
+                    !record.Action.StartsWith(AuditActionFamilies.HubIngress) &&
+                    !record.Action.StartsWith(AuditActionFamilies.SourceIntake) &&
+                    !record.Action.StartsWith(AuditActionFamilies.TurnSummary) &&
+                    !record.Action.StartsWith(AuditActionFamilies.Memory)))
         };
 }
 

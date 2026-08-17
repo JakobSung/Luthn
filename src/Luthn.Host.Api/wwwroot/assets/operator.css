@@ -601,6 +601,38 @@ button.nav-tab.active {
   border-top: 1px solid var(--border);
 }
 
+.audit-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.audit-detail {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.audit-row {
+  cursor: pointer;
+}
+
+.audit-row:hover td,
+.audit-row:focus-visible td,
+.audit-row.selected td {
+  background: #17241c;
+}
+
+.audit-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .access-detail,
 .access-decision-form {
   min-width: 0;
@@ -981,6 +1013,10 @@ tbody tr:last-child td {
   }
 
   .access-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-workbench {
     grid-template-columns: 1fr;
   }
 
