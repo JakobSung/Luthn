@@ -65,6 +65,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Contains("Audit center", index, StringComparison.Ordinal);
         Assert.Contains("Sensitive access", index, StringComparison.Ordinal);
         Assert.Contains("Classification failures", index, StringComparison.Ordinal);
+        Assert.Contains("Hub ingestion", index, StringComparison.Ordinal);
         Assert.Contains("Configuration changes", index, StringComparison.Ordinal);
         Assert.Contains("They never provide protected content", index, StringComparison.Ordinal);
         Assert.Contains("Agent connections", index, StringComparison.Ordinal);
@@ -100,7 +101,7 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.DoesNotContain("detail?.workspaceId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("detail?.sessionId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("event.workspaceId", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("event.actorUserId", script, StringComparison.Ordinal);
+        Assert.Contains("event.actorUserId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/observations", script, StringComparison.Ordinal);
     }
 
@@ -687,6 +688,9 @@ public sealed class ClassificationPreviewTests : IClassFixture<WebApplicationFac
         Assert.Equal("source-preview-audit", audit.SubjectId);
         Assert.Equal("local-classification-input", audit.PayloadClass);
         Assert.Equal("local-only", audit.RedactionState);
+        var completed = await db.AuditEvents.SingleAsync(record => record.Action == "classification.provider.completed");
+        Assert.Equal(audit.CorrelationId, completed.CorrelationId);
+        Assert.False(string.IsNullOrWhiteSpace(audit.CorrelationId));
     }
 
     [Fact]

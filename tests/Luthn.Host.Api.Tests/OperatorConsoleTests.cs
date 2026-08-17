@@ -77,21 +77,26 @@ public sealed class OperatorConsoleContractTests
         Assert.Contains("name=\"category\"", index, StringComparison.Ordinal);
         Assert.Contains("id=\"nextAuditPage\"", index, StringComparison.Ordinal);
         Assert.Contains("id=\"exportAudit\"", index, StringComparison.Ordinal);
+        Assert.Contains("id=\"auditDetailFields\"", index, StringComparison.Ordinal);
+        Assert.Contains("data-audit-preset=\"hub\"", index, StringComparison.Ordinal);
         Assert.Contains("/api/operator/console-profile", script, StringComparison.Ordinal);
         Assert.Contains("cloud-account-expired", script, StringComparison.Ordinal);
         Assert.Contains("/api/access-requests/", script, StringComparison.Ordinal);
         Assert.Contains("/api/external-publication/", script, StringComparison.Ordinal);
         Assert.Contains("/api/audit-events/export", script, StringComparison.Ordinal);
+        Assert.Contains("readAuditExportFilename", script, StringComparison.Ordinal);
+        Assert.Contains("credentials: \"same-origin\"", script, StringComparison.Ordinal);
+        Assert.Contains("viewSelectedAuditCorrelation", script, StringComparison.Ordinal);
         Assert.Contains("result?.nextCursor", script, StringComparison.Ordinal);
         Assert.Contains("event.retentionClass", script, StringComparison.Ordinal);
         Assert.DoesNotContain("innerHTML", script, StringComparison.Ordinal);
         Assert.DoesNotContain("event.workspaceId", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("event.actorUserId", script, StringComparison.Ordinal);
+        Assert.Contains("event.actorUserId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/api/operator/metrics", script, StringComparison.Ordinal);
         Assert.Contains("response.status === 401", script, StringComparison.Ordinal);
         Assert.Contains("markCloudSessionExpired", script, StringComparison.Ordinal);
         Assert.Contains("renderSessionGuidance()", script, StringComparison.Ordinal);
-        Assert.Contains("console-nav-6", index, StringComparison.Ordinal);
+        Assert.Contains("console-nav-7", index, StringComparison.Ordinal);
     }
 }
 

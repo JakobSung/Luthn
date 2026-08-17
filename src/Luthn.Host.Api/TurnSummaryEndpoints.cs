@@ -118,6 +118,7 @@ public static class TurnSummaryEndpoints
         }
         var sourceId = new PublicRecordId(sourceEventId);
         var resolvedTitle = ResolveTitle(request);
+        var correlationId = AuditCorrelationIds.CreateOperationId();
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
         db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
             principal,
@@ -128,7 +129,8 @@ public static class TurnSummaryEndpoints
             projectionSelector.Boundary.RedactionState,
             receivedAt,
             subjectType: "source_event",
-            outcome: "started",
+            outcome: AuditOutcomes.Started,
+            correlationId: correlationId,
             id: providerAuditEventId));
         await db.SaveChangesAsync(cancellationToken);
 
@@ -161,13 +163,25 @@ public static class TurnSummaryEndpoints
                 projectionSelector.Boundary.RedactionState,
                 timeProvider.GetUtcNow(),
                 subjectType: "source_event",
-                outcome: "failed"));
+                outcome: AuditOutcomes.Failed,
+                correlationId: correlationId));
             await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
 
         var classification = projection.Classification;
         var decision = projection.Decision;
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "turn_summary.classification_provider.completed",
+            sourceEventId,
+            projectionSelector.Boundary.PayloadClass,
+            projectionSelector.Boundary.RedactionState,
+            timeProvider.GetUtcNow(),
+            subjectType: "source_event",
+            outcome: AuditOutcomes.Completed,
+            correlationId: correlationId));
         var allowsAgentContext = decision.AllowsAgentContext &&
             classification.Sensitivity == SensitivityLevel.Public &&
             !classification.ContainsSensitiveMaterial;
@@ -300,7 +314,8 @@ public static class TurnSummaryEndpoints
                     : "encrypted-payload-only",
             receivedAt,
             subjectType: "source_event",
-            outcome: "completed",
+            outcome: AuditOutcomes.Completed,
+            correlationId: correlationId,
             id: auditEventId));
         try
         {

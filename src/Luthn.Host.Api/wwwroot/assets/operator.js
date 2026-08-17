@@ -10,6 +10,7 @@ const state = {
   accessDecisionPending: false,
   accessPolicyPending: false,
   auditEvents: [],
+  selectedAuditEvent: null,
   auditNextCursor: "",
   auditBaseQuery: "",
   consoleProfile: null,
@@ -118,10 +119,13 @@ const renderSessionGuidance = () => {
   renderAccessRows([]);
   clearAccessDetail(guidance);
   state.auditEvents = [];
+  state.selectedAuditEvent = null;
   state.auditNextCursor = "";
   state.auditBaseQuery = "";
   renderAuditRows([]);
-  $("#auditStatus").textContent = guidance;
+  renderAuditDetail(null);
+  setAuditControlsEnabled(false);
+  $("#auditStatus").textContent = "Console login is required to review audit metadata.";
 };
 
 const isCloudSessionExpired = (response, body) => response.status === 401 && (
@@ -213,6 +217,15 @@ const requestJson = async (url, options = {}) => {
 };
 
 const hasConsoleSession = () => ["Active", "Restricted"].includes(state.consoleSession?.state);
+
+const setAuditControlsEnabled = (enabled) => {
+  const refreshButton = $("#auditForm button[type=submit]");
+  if (refreshButton) {
+    refreshButton.disabled = !enabled;
+  }
+  $("#nextAuditPage").disabled = !enabled || !state.auditNextCursor;
+  $("#exportAudit").disabled = !enabled;
+};
 
 const refreshConsoleSession = async () => {
   let session = await requestJson("/api/operator/session", { cache: "no-store" });
@@ -863,22 +876,31 @@ const buildAuditParams = () => {
 
 const refreshAudit = async (event) => {
   event?.preventDefault();
+  if (!hasConsoleSession()) {
+    renderSessionGuidance();
+    return;
+  }
+  setAuditControlsEnabled(true);
   const params = buildAuditParams();
 
   try {
     const result = await requestJson(`/api/audit-events?${params}`);
     state.auditEvents = Array.isArray(result?.events) ? result.events : [];
+    state.selectedAuditEvent = null;
     state.auditNextCursor = typeof result?.nextCursor === "string" ? result.nextCursor : "";
     state.auditBaseQuery = params.toString();
     renderAuditRows(state.auditEvents);
+    renderAuditDetail(null);
     $("#nextAuditPage").disabled = !state.auditNextCursor;
     $("#auditStatus").textContent = `${state.auditEvents.length} metadata events loaded.`;
     setAction("audit refreshed", `${state.auditEvents.length} events`);
   } catch (error) {
     state.auditEvents = [];
+    state.selectedAuditEvent = null;
     state.auditNextCursor = "";
     state.auditBaseQuery = "";
     renderAuditRows([]);
+    renderAuditDetail(null);
     $("#nextAuditPage").disabled = true;
     $("#auditStatus").textContent = hasConsoleSession()
       ? "Audit metadata is unavailable for these filters."
@@ -888,7 +910,10 @@ const refreshAudit = async (event) => {
 };
 
 const loadNextAuditPage = async () => {
-  if (!state.auditNextCursor || !state.auditBaseQuery) {
+  if (!hasConsoleSession() || !state.auditNextCursor || !state.auditBaseQuery) {
+    if (!hasConsoleSession()) {
+      renderSessionGuidance();
+    }
     return;
   }
 
@@ -913,29 +938,58 @@ const loadNextAuditPage = async () => {
 };
 
 const exportAuditMetadata = async () => {
+  if (!hasConsoleSession()) {
+    renderSessionGuidance();
+    return;
+  }
   const button = $("#exportAudit");
   button.disabled = true;
   const params = buildAuditParams();
   params.delete("limit");
   try {
     const response = await fetch(`/api/audit-events/export?${params}`, {
-      headers: authHeaders()
+      credentials: "same-origin"
     });
     if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}`);
+      const responseText = await response.text();
+      let problem = null;
+      try {
+        problem = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        problem = null;
+      }
+      if (isCloudSessionExpired(response, problem)) {
+        markCloudSessionExpired();
+      }
+      throw new Error(`${response.status} ${problem?.detail || problem?.title || response.statusText}`);
     }
     const url = URL.createObjectURL(await response.blob());
     const link = document.createElement("a");
     link.href = url;
-    link.download = "luthn-audit-metadata.json";
+    link.download = readAuditExportFilename(response.headers.get("content-disposition"));
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
-    setAction("audit exported", "metadata-only JSON");
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    setAction("audit exported", `${link.download} / metadata-only JSON`);
   } catch (error) {
     setAction("audit export failed", error.message);
   } finally {
     button.disabled = false;
   }
+};
+
+const readAuditExportFilename = (contentDisposition) => {
+  const fallback = "luthn-audit-metadata.json";
+  const encoded = contentDisposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return fallback;
+    }
+  }
+  return contentDisposition?.match(/filename="?([^";]+)"?/i)?.[1] || fallback;
 };
 
 const applyAuditPreset = (preset) => {
@@ -951,6 +1005,11 @@ const applyAuditPreset = (preset) => {
     form.scope.value = "workspace";
     form.category.value = "Security";
     form.outcome.value = "failed";
+  } else if (preset === "hub") {
+    form.scope.value = "workspace";
+    form.category.value = "Ingestion";
+    form.actionPrefix.value = "hub.ingress.";
+    form.subjectType.value = "hub_ingress_item";
   } else if (preset === "configuration") {
     form.scope.value = "installation";
     form.category.value = "Configuration";
@@ -1288,7 +1347,7 @@ const renderAuditRows = (events) => {
   if (events.length === 0) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 11;
+    cell.colSpan = 6;
     cell.textContent = "No audit events available.";
     row.appendChild(cell);
     rows.replaceChildren(row);
@@ -1297,25 +1356,114 @@ const renderAuditRows = (events) => {
 
   rows.replaceChildren(...events.map((event) => {
     const tr = document.createElement("tr");
+    const selected = state.selectedAuditEvent?.id === event.id;
+    tr.className = selected ? "audit-row selected" : "audit-row";
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-label", `Inspect ${event.action || "audit event"}`);
+    tr.setAttribute("aria-pressed", String(selected));
     [
       new Date(event.occurredAt).toLocaleString(),
-      event.category,
-      event.actor,
       event.action,
-      event.subjectId,
-      event.subjectType,
       event.outcome,
+      event.category,
+      event.subjectId,
       event.correlationId,
-      event.payloadClass,
-      event.redactionState,
-      `${boundedText(event.retentionClass, 64, "Unknown")} / ${formatTimestamp(event.retainedUntil)}`
     ].forEach((value) => {
       const td = document.createElement("td");
       td.textContent = value || "";
       tr.appendChild(td);
     });
+    const inspect = () => {
+      state.selectedAuditEvent = event;
+      renderAuditRows(state.auditEvents);
+      renderAuditDetail(event);
+    };
+    tr.addEventListener("click", inspect);
+    tr.addEventListener("keydown", (keyEvent) => {
+      if (["Enter", " "].includes(keyEvent.key)) {
+        keyEvent.preventDefault();
+        inspect();
+      }
+    });
     return tr;
   }));
+};
+
+const renderAuditDetail = (event) => {
+  const fields = $("#auditDetailFields");
+  const status = $("#auditDetailStatus");
+  const subjectButton = $("#viewAuditSubject");
+  const correlationButton = $("#viewAuditCorrelation");
+  if (!event) {
+    fields.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "detail-summary"
+    }));
+    const detail = fields.firstElementChild;
+    const label = document.createElement("dt");
+    label.textContent = "Detail";
+    const value = document.createElement("dd");
+    value.textContent = "Select an audit event to inspect metadata and continue the investigation.";
+    detail.append(label, value);
+    status.textContent = "Select a timeline event.";
+    subjectButton.disabled = true;
+    correlationButton.disabled = true;
+    return;
+  }
+
+  const details = [
+    ["Occurred", formatTimestamp(event.occurredAt)],
+    ["Action", event.action],
+    ["Outcome", event.outcome],
+    ["Category", event.category],
+    ["Actor", event.actor],
+    ["Actor user", event.actorUserId || "Not recorded"],
+    ["Actor kind", event.actorKind],
+    ["Subject", event.subjectId],
+    ["Subject type", event.subjectType],
+    ["Correlation", event.correlationId || "Not recorded"],
+    ["Payload boundary", event.payloadClass],
+    ["Redaction", event.redactionState],
+    ["Retention", `${boundedText(event.retentionClass, 64, "Unknown")} / ${formatTimestamp(event.retainedUntil)}`]
+  ];
+  fields.replaceChildren(...details.map(([labelText, valueText]) => {
+    const item = document.createElement("div");
+    const label = document.createElement("dt");
+    label.textContent = labelText;
+    const value = document.createElement("dd");
+    value.textContent = valueText || "Not recorded";
+    item.append(label, value);
+    return item;
+  }));
+  status.textContent = "Metadata-only detail.";
+  subjectButton.disabled = !event.subjectId;
+  correlationButton.disabled = !event.correlationId;
+};
+
+const viewSelectedAuditSubject = () => {
+  const event = state.selectedAuditEvent;
+  if (!event?.subjectId) {
+    return;
+  }
+  const form = $("#auditForm");
+  form.reset();
+  form.scope.value = event.scopeKind === "Installation" ? "installation" : "workspace";
+  form.subjectId.value = event.subjectId;
+  form.limit.value = "25";
+  refreshAudit();
+};
+
+const viewSelectedAuditCorrelation = () => {
+  const event = state.selectedAuditEvent;
+  if (!event?.correlationId) {
+    return;
+  }
+  const form = $("#auditForm");
+  form.reset();
+  form.scope.value = event.scopeKind === "Installation" ? "installation" : "workspace";
+  form.correlationId.value = event.correlationId;
+  form.limit.value = "25";
+  refreshAudit();
 };
 
 const previewContent = async (event) => {
@@ -1425,6 +1573,8 @@ $("#viewAccessAudit").addEventListener("click", viewSelectedAccessAudit);
 $("#auditForm").addEventListener("submit", refreshAudit);
 $("#nextAuditPage").addEventListener("click", loadNextAuditPage);
 $("#exportAudit").addEventListener("click", exportAuditMetadata);
+$("#viewAuditSubject").addEventListener("click", viewSelectedAuditSubject);
+$("#viewAuditCorrelation").addEventListener("click", viewSelectedAuditCorrelation);
 $("#consoleLanguage").addEventListener("change", (event) => {
   i18n?.apply(event.currentTarget.value);
   renderConsoleProfile();

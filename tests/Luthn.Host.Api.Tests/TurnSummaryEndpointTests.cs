@@ -57,8 +57,13 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         var failedAudit = Assert.Single(
             audits,
             audit => audit.Action == "turn_summary.classification_provider.failed");
+        var invokedAudit = Assert.Single(
+            audits,
+            audit => audit.Action == "turn_summary.classification_provider.invoked");
         Assert.Equal("failed", failedAudit.Outcome);
         Assert.Equal("metadata-only", failedAudit.PayloadClass);
+        Assert.Equal(invokedAudit.CorrelationId, failedAudit.CorrelationId);
+        Assert.False(string.IsNullOrWhiteSpace(failedAudit.CorrelationId));
         Assert.Empty(await db.SourceEvents.ToArrayAsync());
         Assert.Empty(await db.SharedMemoryItems.ToArrayAsync());
     }
@@ -257,6 +262,10 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         var audit = await db.AuditEvents.SingleAsync(record => record.Action == "turn_summary.intake.classified");
         Assert.Equal("metadata-only", audit.PayloadClass);
         Assert.Equal("safe-projection-with-encrypted-original", audit.RedactionState);
+        var providerAudit = await db.AuditEvents.SingleAsync(record => record.Action == "turn_summary.classification_provider.invoked");
+        var completedProviderAudit = await db.AuditEvents.SingleAsync(record => record.Action == "turn_summary.classification_provider.completed");
+        Assert.Equal(providerAudit.CorrelationId, completedProviderAudit.CorrelationId);
+        Assert.Equal(providerAudit.CorrelationId, audit.CorrelationId);
         var auditJson = JsonSerializer.Serialize(await db.AuditEvents.AsNoTracking().ToArrayAsync());
         Assert.DoesNotContain(sensitiveEmail, auditJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(sensitiveAmount, auditJson, StringComparison.Ordinal);

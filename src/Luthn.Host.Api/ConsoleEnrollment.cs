@@ -90,11 +90,26 @@ public sealed class ConsoleLifecycleStore(
     };
 
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _initializationGate = new();
     private readonly IDataProtector _protector =
         dataProtectionProvider.CreateProtector("Luthn.Console.InstallationProof.v1");
     private ConsoleLifecycleSnapshot? _current;
 
-    public ConsoleLifecycleSnapshot Current => _current ??= ReadOrCreate();
+    public ConsoleLifecycleSnapshot Current
+    {
+        get
+        {
+            if (_current is not null)
+            {
+                return _current;
+            }
+
+            lock (_initializationGate)
+            {
+                return _current ??= ReadOrCreate();
+            }
+        }
+    }
     public bool IsEnrolled => Current.IsEnrolled;
     public bool IsSubjectRemoved(string subjectKey) =>
         Current.RemovedSubjects.Contains(subjectKey, StringComparer.Ordinal);

@@ -552,7 +552,17 @@ public sealed class OwnershipIsolationTests
         Assert.Equal(before.SensitiveReferences, await afterDb.SensitiveRecordReferences.CountAsync());
         Assert.Equal(before.AccessRequests, await afterDb.SensitiveAccessRequests.CountAsync());
         Assert.Equal(before.AccessDecisions, await afterDb.SensitiveAccessDecisions.CountAsync());
-        Assert.Equal(before.AuditEvents, await afterDb.AuditEvents.CountAsync());
+        var authorizationDenials = await afterDb.AuditEvents
+            .Where(item => item.Action == "authorization.scope_denied")
+            .ToArrayAsync();
+        Assert.Equal(before.AuditEvents + 2, await afterDb.AuditEvents.CountAsync());
+        Assert.Equal(2, authorizationDenials.Length);
+        Assert.All(authorizationDenials, item =>
+        {
+            Assert.Equal("metadata-only", item.PayloadClass);
+            Assert.Equal("authorization-metadata-only", item.RedactionState);
+            Assert.Equal("denied", item.Outcome);
+        });
         Assert.Equal(before.MemoryTitle, afterMemory.Title);
         Assert.Equal(before.MemorySummary, afterMemory.SafeSummary);
         Assert.Equal(before.AccessStatus, afterAccess.Status);

@@ -11,6 +11,24 @@ namespace Luthn.Host.Api.Tests;
 public sealed class ConsoleLifecycleTests
 {
     [Fact]
+    public async Task ConcurrentConsoleProfileRequestsInitializeLifecycleOnce()
+    {
+        using var factory = CreateFactory();
+        using var client = CreateHttpsClient(factory);
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 8)
+            .Select(_ => client.GetAsync("/api/operator/console-profile")));
+
+        Assert.All(responses, response =>
+        {
+            using (response)
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+        });
+    }
+
+    [Fact]
     public async Task MembershipRemovalRevokesOnlySubjectAndNeverFallsBackToLocal()
     {
         using var factory = CreateFactory();
