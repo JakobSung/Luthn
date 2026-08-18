@@ -142,6 +142,15 @@ outside this repository. Enrollment is two-phase, successful activation revokes
 LocalAuto, membership loss never falls back to Local, and explicit reclaim is
 revoke-first. See [Central team Hub data plane](docs/cloud-hub-data-plane.md).
 
+## Luthn Cloud (in development)
+
+Luthn Cloud is a managed team extension for organizations and small teams
+that need multiple AI agents to share approved context. It is being developed
+separately from the self-hosted runtime and is not generally available yet.
+
+The open-source Luthn runtime remains local-first and self-hosted. Cloud is
+designed around policy-approved safe projections, not raw Vault data.
+
 ## Documentation
 
 - [Installation, recovery, and lifecycle](docs/installation.md)

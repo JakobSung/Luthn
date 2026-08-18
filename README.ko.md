@@ -115,6 +115,16 @@ lease/retry/dead-letter, 내용 없는 운영 상태와 disabled/fake relay 경�
 transport는 이 저장소 범위 밖에 있습니다. 자세한 내용은
 [중앙 팀 Hub data plane](docs/cloud-hub-data-plane.ko.md)을 참고하세요.
 
+## Luthn Cloud (개발 중)
+
+Luthn Cloud는 승인된 맥락을 여러 AI agent가 함께 사용해야 하는 팀과
+소규모 조직을 위한 관리형 확장 버전입니다. 오픈소스 self-hosted runtime과
+별도로 개발 중이며 아직 일반 제공되지 않습니다.
+
+오픈소스 Luthn runtime은 계속 local-first·self-hosted로 사용할 수 있습니다.
+Cloud는 원본 Vault 데이터가 아니라 정책을 통과한 안전한 투영을 공유하는
+방향으로 설계하고 있습니다.
+
 ## 문서
 
 - [설치, 복구와 수명주기](docs/installation.ko.md)
