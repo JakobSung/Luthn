@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 using System.Text.Json.Serialization;
 
 namespace Luthn.Sdk.Audit;
 
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(AuditEventCategoryJsonConverter))]
 public enum AuditEventCategory
 {
     Access,
@@ -12,6 +14,11 @@ public enum AuditEventCategory
     Ingestion,
     Retention
 }
+
+public sealed class AuditEventCategoryJsonConverter()
+    : JsonStringEnumConverter<AuditEventCategory>(
+        namingPolicy: null,
+        allowIntegerValues: false);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record AuditEventMetadataDto(
