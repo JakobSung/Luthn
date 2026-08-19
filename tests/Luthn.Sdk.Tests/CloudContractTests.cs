@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Luthn.Sdk.Access;
@@ -208,6 +210,112 @@ public sealed class SerializationCompatibilityTests
         Assert.DoesNotContain("capabilities", legacyJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("requestReason", accessJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("decisionReason", accessJson, StringComparison.OrdinalIgnoreCase);
+    }
+    [Fact]
+    public void M1ProofRelayAndEncryptedResultContractsStayTenantNeutral()
+    {
+        var now = DateTimeOffset.Parse("2026-08-19T12:00:00Z");
+        var publicKey = new P256PublicJwkDto("EC", "P-256", "x-coordinate", "y-coordinate");
+        var proof = new HubEnrollmentProofDto(
+            HubEnrollmentProofContractVersions.V2,
+            "enrollment-1",
+            "key-1",
+            publicKey,
+            "header.payload.signature");
+        var relay = new HubRelayEnvelopeDto(
+            HubRelayContractVersions.V1,
+            "envelope-1",
+            "device-key-1",
+            "hub-key-1",
+            "Auth",
+            "DHKEM-X25519-HKDF-SHA256",
+            "HKDF-SHA256",
+            "AES-256-GCM",
+            "luthn-relay-aad.v1",
+            "encapsulated-key",
+            "ciphertext",
+            "aad-digest",
+            now,
+            now.AddMinutes(10));
+        var request = new CloudSensitiveAccessRequestDto(
+            CloudSensitiveAccessContractVersions.V1,
+            "memory-1",
+            "Approved operational purpose.");
+        var result = new EncryptedSensitiveResultEnvelopeDto(
+            CloudSensitiveAccessContractVersions.V1,
+            "grant-1",
+            "request-1",
+            "hub-key-1",
+            "device-key-1",
+            "Auth",
+            "DHKEM-X25519-HKDF-SHA256",
+            "HKDF-SHA256",
+            "AES-256-GCM",
+            "luthn-sensitive-info.v1",
+            "luthn-sensitive-aad.v1",
+            "encapsulated-key",
+            "ciphertext",
+            "info-digest",
+            "aad-digest",
+            now,
+            now.AddMinutes(10));
+
+        var json = JsonSerializer.Serialize(new { proof, relay, request, result });
+
+        Assert.Contains("\"publicKey\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"encapsulatedKey\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"memoryReference\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"recipientKeyId\"", json, StringComparison.Ordinal);
+        CloudContractTests.AssertForbiddenTokensAbsent(json);
+        Assert.DoesNotContain("plaintext", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("protectedValue", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void M1WireEnumsRejectNumericValues()
+    {
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<InstallationEnrollmentStatusDto>(
+                """
+                {
+                  "enrollmentId": "enrollment-1",
+                  "state": 0,
+                  "expiresAt": "2026-08-19T12:10:00Z",
+                  "installationId": null,
+                  "error": null
+                }
+                """));
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<CloudSensitiveAccessDecisionDto>(
+                """
+                {
+                  "contractVersion": 1,
+                  "requestId": "request-1",
+                  "expectedRevision": 1,
+                  "disposition": 0,
+                  "reasonCode": null
+                }
+                """));
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<AuditEventMetadataDto>(
+                """
+                {
+                  "id": "audit-1",
+                  "occurredAt": "2026-08-19T12:00:00Z",
+                  "category": 0,
+                  "scopeKind": "Workspace",
+                  "actor": "auditor",
+                  "actorKind": "service",
+                  "action": "projection.accepted",
+                  "subjectId": "memory-1",
+                  "subjectType": "safe_projection",
+                  "outcome": "accepted",
+                  "correlationId": null,
+                  "payloadVersion": 1,
+                  "payloadClass": "metadata-only",
+                  "redactionState": "content-excluded"
+                }
+                """));
     }
 }
 

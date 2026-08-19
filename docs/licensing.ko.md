@@ -16,6 +16,7 @@ Luthn은 구성 요소별 라이선스 모형을 사용하며, 이 저장소에 
 | Luthn.Host.Worker | AGPL-3.0-only | 백그라운드 host 뼈대 |
 | Luthn.Tools | AGPL-3.0-only | 범위가 제한된 관리·진단 명령 |
 | Luthn.Sdk | Apache-2.0 | 공개 DTO와 client 계약 |
+| Luthn.Sdk.Tests | Apache-2.0 | 공개 SDK 계약 test와 호환성 fixture |
 | Luthn.AgentConnector.Http | Apache-2.0 | 외부 에이전트용 HTTP connector |
 | 공개 plugin 틀 | Apache-2.0 | 외부 서비스용 틀 |
 | 공개 에이전트 절차/skill(가능한 경우) | Apache-2.0 | 폭넓은 재사용을 위한 연동 자료 |

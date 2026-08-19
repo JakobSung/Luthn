@@ -18,6 +18,7 @@ This repository licenses only the source code contained in this repository.
 | Luthn.Host.Worker | AGPL-3.0-only | Background host scaffold |
 | Luthn.Tools | AGPL-3.0-only | Bounded admin and diagnostic commands |
 | Luthn.Sdk | Apache-2.0 | Public DTOs and client contracts |
+| Luthn.Sdk.Tests | Apache-2.0 | Public SDK contract tests and compatibility fixtures |
 | Luthn.AgentConnector.Http | Apache-2.0 | HTTP connector for external agents |
 | Public plugin templates | Apache-2.0 | Templates for external services |
 | Public agent recipes/skills, where possible | Apache-2.0 | Integration material intended for broad reuse |

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 using System.Text.Json.Serialization;
 
 namespace Luthn.Sdk.Sync;
@@ -7,7 +9,7 @@ public static class CloudSyncContractVersions
     public const int V2 = 2;
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(InstallationEnrollmentStateJsonConverter))]
 public enum InstallationEnrollmentState
 {
     Pending,
@@ -16,6 +18,11 @@ public enum InstallationEnrollmentState
     Expired,
     Revoked
 }
+
+public sealed class InstallationEnrollmentStateJsonConverter()
+    : JsonStringEnumConverter<InstallationEnrollmentState>(
+        namingPolicy: null,
+        allowIntegerValues: false);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record InstallationEnrollmentChallengeDto(
