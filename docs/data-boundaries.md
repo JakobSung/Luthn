@@ -356,5 +356,6 @@ cleanup pass.
   metadata only; they do not repeat the projection body.
 - Raw source/Vault data, private memory, credentials, prompts, transcripts,
   local paths, and sensitive-access output must never enter the sync contract.
-- The public self-host build has no active cloud transport and performs no
-  external sync by default.
+- The public Cloud transport is opt-in and disabled by default. When enabled,
+  it sends only this safe-projection contract and replaces raw local record
+  identifiers with deterministic opaque hashes before transmission.

@@ -20,13 +20,14 @@ builder.WebHost.ConfigureKestrel(options =>
     options.Limits.MaxRequestBodySize = ApiValidation.RequestBodyMaxBytes;
 });
 
-var operatorConfigDirectory = builder.Configuration["Luthn:OperatorConfig:Directory"] ?? ".luthn/operator";
+var cloudHubStoragePaths = CloudHubStoragePaths.Resolve(builder.Configuration);
+var operatorConfigDirectory = cloudHubStoragePaths.OperatorConfigDirectory;
 var hostOptions = builder.Configuration
     .GetSection("Luthn:Host")
     .Get<LuthnHostOperationalOptions>() ?? new LuthnHostOperationalOptions();
 
 builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(operatorConfigDirectory, "keys")));
+    .PersistKeysToFileSystem(new DirectoryInfo(cloudHubStoragePaths.KeyDirectory));
 builder.Services.AddSingleton<ISensitiveMemoryPayloadProtector, DataProtectionSensitiveMemoryPayloadProtector>();
 builder.Services.AddSingleton<IHubIngressCapsuleProtector, DataProtectionHubIngressCapsuleProtector>();
 builder.Services.AddSingleton<SensitiveMemoryProtectionState>();
@@ -94,7 +95,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ISensitiveAccessWorkflow, SensitiveAccessWorkflow>();
 builder.Services.AddScoped<ISensitiveAccessSystemWorkflow, SensitiveAccessWorkflow>();
 builder.Services.AddHostedService<SensitiveAccessExpiryCleanupHostedService>();
-builder.Services.AddSafeProjectionSyncFoundation();
+builder.Services.AddSafeProjectionSyncFoundation(builder.Configuration, cloudHubStoragePaths);
 builder.Services.AddProblemDetails();
 builder.Services.AddRequestTimeouts(options =>
 {
@@ -153,11 +154,14 @@ builder.Services.AddSingleton<IConsoleInstallationState>(provider =>
 builder.Services.AddSingleton<IConsoleLocalAccessArmStore, InMemoryConsoleLocalAccessArmStore>();
 builder.Services.AddSingleton<DisabledInstallationEnrollmentAdapter>();
 builder.Services.AddSingleton<FakeInstallationEnrollmentAdapter>();
+builder.Services.AddSingleton<CloudInstallationEnrollmentAdapter>();
 builder.Services.AddSingleton<IInstallationEnrollmentAdapter>(provider =>
     provider.GetRequiredService<IOptions<ConsoleEnrollmentOptions>>().Value.Adapter switch
     {
         Luthn.Sdk.Console.ConsoleEnrollmentAdapter.Fake =>
             provider.GetRequiredService<FakeInstallationEnrollmentAdapter>(),
+        Luthn.Sdk.Console.ConsoleEnrollmentAdapter.Cloud =>
+            provider.GetRequiredService<CloudInstallationEnrollmentAdapter>(),
         _ => provider.GetRequiredService<DisabledInstallationEnrollmentAdapter>()
     });
 builder.Services.AddSingleton<IConsoleSessionStore, InMemoryConsoleSessionStore>();

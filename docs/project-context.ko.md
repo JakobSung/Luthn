@@ -24,12 +24,12 @@ Luthn은 AI 에이전트용 직접 호스팅 공유 기억 계층입니다. 민�
   trail이며 내용 복구나 backup 경로가 아닙니다.
 - 위키 Markdown은 Core가 관리하는 지식의 투영이며 원본 사실 저장소가 아닙니다.
 - 로컬/PostgreSQL이 기본 직접 호스팅 기억 경로이고 외부 기억 서비스는 Luthn 정책 뒤의 선택적 adapter입니다.
-- 로컬 전용 동작은 불변 조건입니다. 외부 공개에는 운영자 동작이 필요하며, 버전이 지정된 공개 안전 투영만 로컬 durable outbox를 거칩니다. 공개 저장소에는 활성 cloud client가 없습니다.
+- 로컬 전용 동작은 기본 불변 조건입니다. 외부 공개에는 운영자 동작이 필요하며, 버전이 지정된 공개 안전 투영만 로컬 durable outbox를 거칩니다. 공개 Cloud client는 기본 비활성입니다.
 - 승인된 팀 구조는 구성원 PC마다 전체 설치를 두지 않고 Organization당 중앙 OSS Hub
   하나를 사용합니다. 공개 runtime에는 선택 활성화 방식의 암호화 durable ingress,
   server가 정하는 Workspace identity, 제한된 처리, dead-letter/replay, aggregate
-  status와 disabled/fake relay 경계가 구현되어 있습니다. Cloud enrollment, Cloud
-  identity control과 실제 outbound transport는 이 저장소 밖에 있습니다. 자세한 내용은
+  status와 기본 비활성 proof 기반 Cloud client가 구현되어 있습니다. Hosted identity
+  control, billing, tenant 관리와 사람의 Cloud login은 이 저장소 밖에 있습니다. 자세한 내용은
   [중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)에 있습니다.
 - 로컬 직접 호스팅 확인 흐름은 provider 자격 증명 없이 실행할 수 있어야 합니다.
 - 저장소에는 자격 증명, 비공개 원본, 고객 원문, 로컬 에이전트 자료, 계획 상태, 실행 증거를 두지 않습니다.

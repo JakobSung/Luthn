@@ -44,17 +44,42 @@ public sealed class OperatorConsoleProfileTests
         Assert.Equal("disabled", body.RootElement.GetProperty("cloudTransport").GetString());
     }
 
-    internal static WebApplicationFactory<Program> CreateFactory(string? identityMode = null) =>
+    [Fact]
+    public async Task ProfileReportsConfiguredCloudTransportFromServerState()
+    {
+        using var factory = CreateFactory(cloudEnabled: true);
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/api/operator/console-profile");
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("disconnected", body.RootElement.GetProperty("cloudTransport").GetString());
+    }
+
+    internal static WebApplicationFactory<Program> CreateFactory(
+        string? identityMode = null,
+        bool cloudEnabled = false) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Luthn:TestingDatabaseName", Guid.NewGuid().ToString("N"));
+            var directory = Path.Combine(
+                Path.GetTempPath(),
+                "luthn-console-tests",
+                Guid.NewGuid().ToString("N"));
             builder.UseSetting(
                 "Luthn:OperatorConfig:Directory",
-                Path.Combine(Path.GetTempPath(), "luthn-console-tests", Guid.NewGuid().ToString("N")));
+                directory);
             if (identityMode is not null)
             {
                 builder.UseSetting("Luthn:Identity:Mode", identityMode);
+            }
+            if (cloudEnabled)
+            {
+                builder.UseSetting("Luthn:Cloud:Enabled", "true");
+                builder.UseSetting("Luthn:Cloud:BaseUrl", "https://cloud.example");
+                builder.UseSetting("Luthn:Cloud:StateDirectory", directory);
             }
         });
 }

@@ -159,10 +159,9 @@ path는 포함하지 않습니다. 조사나 정책상 필요할 때만 export�
 ## OSS console mode와 언어
 
 운영 console은 개인 Local mode와 중앙 OSS Hub mode 모두에서 승인 권한의 정본입니다.
-banner는 `/api/operator/console-profile`에서 server identity 설정으로 결정한 mode를
-받으며 공개 OSS build는 항상 외부 전송 없음으로 표시합니다. browser에서 tenant
-identity를 바꾸거나 Cloud transport를 켜거나 Host API authorization을 우회하는
-control을 추가하지 않습니다.
+banner는 `/api/operator/console-profile`에서 server identity 설정과 보호된 연결 상태로
+결정한 mode 및 Cloud transport 상태를 받습니다. browser에서 tenant identity를 바꾸거나
+Cloud transport를 켜거나 Host API authorization을 우회하는 control을 추가하지 않습니다.
 
 영어·한국어 정적 label은 allowlist된 browser preference를 사용합니다. token은
 session에만 두고, identity나 보호 데이터를 포함하지 않는 언어 preference만 local에
@@ -172,9 +171,8 @@ session에만 두고, identity나 보호 데이터를 포함하지 않는 언어
 ## 중앙 OSS Hub runtime 기반
 
 개인 self-host가 기본입니다. 운영자가 명시적으로 켜기 전에는 Hub ingress, 분류
-worker, outbound relay가 모두 비활성이며 공개 build에는 실제 Cloud transport가
-없습니다. 초기 Hub data plane을 실행하려면 multi-user service-token identity를
-server 설정에 바인딩하고 다음 값을 설정합니다.
+worker와 Cloud transport가 모두 비활성입니다. 초기 Hub data plane을 실행하려면
+multi-user service-token identity를 server 설정에 바인딩하고 다음 값을 설정합니다.
 
 ```dotenv
 Luthn__Hub__Ingress__Enabled=true
@@ -217,4 +215,10 @@ admission/backpressure 합계를 확인하는 50개 burst, 제어된 5초·30초
 docker compose --env-file .env --profile sync-worker up -d worker
 ```
 
-기본 stack은 worker를 시작하지 않습니다. 시작해도 공개 build는 비활성 transport만 등록해 외부 연결을 하지 않고 pending outbox를 그대로 둡니다. 실제 cloud adapter는 endpoint 인증, tenant 격리, 삭제, backup/복원, 감사 경계를 별도로 검토한 뒤에만 배포합니다.
+기본 stack은 worker를 시작하지 않습니다. Worker를 시작해도
+`Luthn:Cloud:Enabled`를 명시하지 않으면 Cloud transport는 비활성이고 pending outbox를
+그대로 둡니다. 활성화할 때는 API와 Worker가 같은 보호 상태 directory와 Data Protection
+key ring을 사용해야 합니다. Transport는 safe-projection V2만 보내고 로컬 record ID를
+전송 전에 hash하며, 배타적 로컬 lock 안에서 DPoP credential을 회전하고 실패한 outbox를
+재시도용으로 보존합니다. Endpoint 인증, tenant 격리, 삭제, backup/복원, 감사 경계를
+검토하지 않은 대상에는 활성화하지 않습니다.

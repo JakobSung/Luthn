@@ -2,10 +2,13 @@
 
 [한국어](cloud-hub-data-plane.ko.md)
 
-Status: the public runtime implements the initial opt-in encrypted durable
-ingress, bounded local worker, disabled/fake relay boundary, and deterministic
-recovery harness. Cloud enrollment, identity control plane, and real outbound
-transport remain unimplemented.
+Status: the public runtime implements an opt-in encrypted durable ingress,
+bounded local worker, and a real opt-in Luthn Cloud client. The client covers
+proof-bound enrollment, protected local credential persistence, DPoP session
+refresh, retry-safe local enrollment activation, safe-projection delivery,
+checkpoints, and revocation failure while keeping local processing available.
+Hosted identity, entitlement, billing,
+tenant administration, and human Cloud login remain private or later boundaries.
 
 ## Deployment boundary
 
@@ -170,15 +173,15 @@ not production capacity or latency SLOs.
 
 ## Remaining Cloud boundary
 
-The OSS runtime now owns the provider-neutral contracts and disabled/fake test
-boundaries for versioned enrollment/capabilities, console login,
-membership/offboarding, and explicit revoke-first Local reclaim. The remaining
-external boundary is production Cloud-issued connection authority, identity and
-entitlement verification, an authenticated relay transport, remote MCP/OAuth
-lifecycle capture, billing, and managed Organization operations. Any production
-adapter must preserve the authenticated-installation
-tenant derivation, metadata-only audit contract, safe-projection-only payload,
-revoke-first ordering, and disabled-by-default personal self-host path.
+The OSS runtime now owns the versioned Cloud enrollment and DPoP client,
+protected local connection state, durable safe-projection transport, and
+provider-neutral console lifecycle boundaries. The remaining external boundary
+is hosted user identity and entitlement validation, human Cloud login, remote
+MCP/OAuth lifecycle capture, billing, and managed Organization operations.
+Relay writes also remain gated on AgentDevice authority. Every hosted adapter
+must continue to derive tenant scope from authenticated installation state and
+preserve metadata-only audit, safe-projection-only payloads, revoke-first
+ordering, and disabled-by-default personal self-hosting.
 
 ## Future capacity and recovery evidence
 

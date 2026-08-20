@@ -149,12 +149,11 @@ runtime. The public runtime now implements the opt-in baseline: Hub ingress
 persists an encrypted capsule and metadata-only audit event before returning
 `202`, a bounded Workspace-fair worker handles leases/retries/dead letters and
 explicit replay, and `/api/hub/status` exposes aggregate content-free status.
-The relay boundary remains disabled or fake, so no Cloud request is made by the
-OSS build. The public Host also provides provider-neutral disabled/fake
-enrollment, human-login, membership/offboarding, and explicit Local-reclaim
-boundaries. These exercise two-phase activation and revoke-first behavior but
-do not issue real Cloud identity. Production Cloud identity, billing, and real
-outbound transport remain future boundaries defined in
+The public runtime also provides an opt-in proof-bound Cloud client. It protects
+the local installation key and rotating credentials, sends only safe projections
+from the durable outbox, and keeps local work available during Cloud failure.
+Provider-neutral human-login, membership/offboarding, and explicit Local-reclaim
+boundaries remain; hosted human identity and billing are future boundaries defined in
 [`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
 
 ## Plugin Ingestion Contract

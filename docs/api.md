@@ -1028,9 +1028,11 @@ GET /api/operator/console-profile
 ```
 
 The read-only profile tells the shared OSS console whether the server is in
-`Local` (un-enrolled `SingleOwner`) or `Hub` (`MultiUser` or enrolled) mode. It also returns the fixed
-`cloudTransport: disabled`, `sensitiveAuthority: oss-console`, and
-`tenancySource: authenticated-request` boundaries. The endpoint accepts no
+`Local` (un-enrolled `SingleOwner`) or `Hub` (`MultiUser` or enrolled) mode. It
+returns a server-derived `cloudTransport` state (`disabled`, `disconnected`,
+`stale`, `revoked`, or `ready`) plus the fixed
+`sensitiveAuthority: oss-console` and `tenancySource: authenticated-request`
+boundaries. The endpoint accepts no
 request body or caller-selected tenant/mode identity and returns no workspace,
 organization, installation, owner, or credential fields.
 
@@ -1066,8 +1068,11 @@ HttpOnly, host-only, and SameSite. Cookie-authenticated mutations require the
 same-origin `X-Luthn-CSRF` proof. LocalAuto is limited to an explicitly
 local-only, loopback, un-enrolled `SingleOwner`; enrollment activation and Local
 reclaim revoke existing authority first. Enrollment, login, lifecycle, and
-recovery providers default to disabled. Fake providers are deterministic test
-adapters with zero outbound traffic, not production Cloud endpoints.
+recovery providers default to disabled. The `Cloud` enrollment adapter uses the
+protected DPoP client when Cloud is explicitly enabled. Fake providers remain
+deterministic zero-outbound test adapters. Human Cloud login is not implemented
+in this milestone, so successful Cloud activation deliberately enters
+`CloudLoginRequired` without LocalAuto fallback.
 
 Cloud login accepts plain HTTP only for a direct, local-only loopback request
 with forwarded headers disabled. Every remote or forwarded deployment must use

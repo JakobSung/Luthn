@@ -2,7 +2,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Luthn.Core.Common;
 using Luthn.Core.Memory;
+using Luthn.Sdk.Sync;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -10,9 +13,42 @@ namespace Luthn.Core.Persistence;
 
 public static class SafeProjectionSyncServiceCollectionExtensions
 {
-    public static IServiceCollection AddSafeProjectionSyncFoundation(this IServiceCollection services)
+    public static IServiceCollection AddSafeProjectionSyncFoundation(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        CloudHubStoragePaths storagePaths)
     {
-        services.TryAddSingleton<IHubOutboundRelayTransport, DisabledHubOutboundRelayTransport>();
+        ArgumentNullException.ThrowIfNull(storagePaths);
+        services.AddOptions<CloudHubConnectionOptions>()
+            .Bind(configuration.GetSection(CloudHubConnectionOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                if (string.IsNullOrWhiteSpace(options.StateDirectory))
+                {
+                    options.StateDirectory = storagePaths.StateDirectory;
+                }
+            });
+        services.AddHttpClient<CloudHubProtocolClient>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+            UseCookies = false,
+        });
+        services.TryAddSingleton<ICloudHubStateProtector>(_ =>
+            new DataProtectionCloudHubStateProtector(
+                DataProtectionProvider.Create(
+                    new DirectoryInfo(storagePaths.KeyDirectory),
+                    builder => builder.SetApplicationName("Luthn.Cloud.HubState.v1"))));
+        services.TryAddSingleton<ICloudHubStateStore, DataProtectionCloudHubStateStore>();
+        services.TryAddSingleton<CloudHubOutboundRelayTransport>();
+        services.TryAddSingleton<DisabledHubOutboundRelayTransport>();
+        services.Replace(ServiceDescriptor.Singleton<IHubOutboundRelayTransport>(provider =>
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<CloudHubConnectionOptions>>()
+                .Value.Enabled
+                ? provider.GetRequiredService<CloudHubOutboundRelayTransport>()
+                : provider.GetRequiredService<DisabledHubOutboundRelayTransport>()));
         services.TryAddSingleton<ISafeProjectionSyncTransport>(provider =>
             new HubRelaySafeProjectionSyncTransport(
                 provider.GetRequiredService<IHubOutboundRelayTransport>()));

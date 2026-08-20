@@ -631,9 +631,10 @@ GET /api/operator/console-profile
 ```
 
 read-only profile은 같은 OSS console에 미등록 `SingleOwner`를 `Local`,
-`MultiUser` 또는 등록 완료 설치를 `Hub` mode로 알려 줍니다. 또한 `cloudTransport: disabled`,
+`MultiUser` 또는 등록 완료 설치를 `Hub` mode로 알려 줍니다. 또한 server가 결정한
+`cloudTransport` 상태(`disabled`, `disconnected`, `stale`, `revoked`, `ready`)와 고정된
 `sensitiveAuthority: oss-console`, `tenancySource: authenticated-request` 경계를
-고정해 반환합니다. 요청 body나 호출자가 선택한 tenant/mode identity를 받지 않으며
+반환합니다. 요청 body나 호출자가 선택한 tenant/mode identity를 받지 않으며
 workspace, organization, installation, owner, credential 필드를 반환하지 않습니다.
 
 browser는 정적 label에 allowlist된 `en`, `ko` 언어 preference만 사용합니다. 언어
@@ -666,8 +667,11 @@ POST /api/operator/lifecycle/reclaim
 SameSite를 적용합니다. Cookie 인증 변경 요청에는 same-origin `X-Luthn-CSRF` proof가
 필요합니다. LocalAuto는 명시적 local-only·loopback·미등록 `SingleOwner`로 제한하며,
 enrollment 활성화와 Local 회수는 기존 권한을 먼저 철회합니다. Enrollment, login,
-lifecycle, recovery provider의 기본값은 disabled입니다. Fake provider는 outbound가 없는
-결정적 시험 adapter일 뿐 production Cloud endpoint가 아닙니다.
+lifecycle, recovery provider의 기본값은 disabled입니다. `Cloud` enrollment adapter는
+Cloud를 명시적으로 활성화했을 때 보호된 DPoP client를 사용합니다. Fake provider는
+outbound가 없는 결정적 시험 adapter입니다. 이 milestone에는 사람의 Cloud login이
+없으므로 Cloud activation에 성공하면 LocalAuto fallback 없이 의도적으로
+`CloudLoginRequired` 상태가 됩니다.
 
 Cloud 로그인은 forwarded header가 비활성인 직접 local-only loopback 요청에 한해서만
 일반 HTTP를 허용합니다. 원격 또는 forwarded 배포는 반드시 HTTPS를 사용해야 하며 Cloud
