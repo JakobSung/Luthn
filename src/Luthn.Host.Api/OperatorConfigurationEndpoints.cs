@@ -1,5 +1,6 @@
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
+using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
 using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -33,7 +34,8 @@ public static class OperatorConfigurationEndpoints
 
     public static Ok<OperatorConsoleProfileResponse> ReadConsoleProfile(
         IOptions<LuthnIdentityOptions> identityOptions,
-        IConsoleInstallationState installationState)
+        IConsoleInstallationState installationState,
+        IHubOutboundRelayTransport cloudTransport)
     {
         var consoleMode = installationState.IsEnrolled ||
             identityOptions.Value.Mode == LuthnIdentityMode.MultiUser
@@ -41,7 +43,7 @@ public static class OperatorConfigurationEndpoints
             : "Local";
         return TypedResults.Ok(new OperatorConsoleProfileResponse(
             consoleMode,
-            "disabled",
+            cloudTransport.State.ToString().ToLowerInvariant(),
             "oss-console",
             "authenticated-request",
             true));

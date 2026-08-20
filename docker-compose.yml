@@ -25,6 +25,11 @@ services:
       Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
       Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
       Luthn__OperatorConfig__Directory: ${Luthn__OperatorConfig__Directory:-/var/lib/luthn/operator}
+      Luthn__Cloud__Enabled: ${Luthn__Cloud__Enabled:-false}
+      Luthn__Cloud__BaseUrl: ${Luthn__Cloud__BaseUrl:-}
+      Luthn__Cloud__Audience: ${Luthn__Cloud__Audience:-luthn-cloud}
+      Luthn__Cloud__StateDirectory: ${Luthn__Cloud__StateDirectory:-/var/lib/luthn/operator}
+      Luthn__Console__Enrollment__Adapter: ${Luthn__Console__Enrollment__Adapter:-Disabled}
       Luthn__Host__RequestTimeoutSeconds: ${Luthn__Host__RequestTimeoutSeconds:-65}
       Luthn__Console__LocalOnly: ${Luthn__Console__LocalOnly:-true}
       Luthn__Console__TrustedLocalBridge: ${Luthn__Console__TrustedLocalBridge:-true}
@@ -77,9 +82,16 @@ services:
       Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
       Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
       Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
+      Luthn__OperatorConfig__Directory: ${Luthn__OperatorConfig__Directory:-/var/lib/luthn/operator}
+      Luthn__Cloud__Enabled: ${Luthn__Cloud__Enabled:-false}
+      Luthn__Cloud__BaseUrl: ${Luthn__Cloud__BaseUrl:-}
+      Luthn__Cloud__Audience: ${Luthn__Cloud__Audience:-luthn-cloud}
+      Luthn__Cloud__StateDirectory: ${Luthn__Cloud__StateDirectory:-/var/lib/luthn/operator}
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - luthn-operator:/var/lib/luthn/operator
 
   postgres:
     image: postgres:18-alpine

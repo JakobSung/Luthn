@@ -38,15 +38,16 @@ context.
   truth.
 - Local/PostgreSQL storage is the default self-host memory path; external memory
   services are optional adapters behind Luthn policy.
-- Local-only operation is the invariant. External publication requires an
-  operator action and exports only a versioned public-safe projection through a
-  durable local outbox. The public repository contains no active cloud client.
+- Local-only operation is the default invariant. External publication requires
+  an operator action and exports only a versioned public-safe projection through
+  a durable local outbox. The opt-in public Cloud client is disabled by default.
 - The approved team topology uses one central OSS Hub per Organization, not one
   full installation per member PC. The public runtime now implements the
   opt-in Hub data-plane baseline: encrypted durable ingress, server-derived
   Workspace identity, bounded processing, dead-letter/replay, aggregate status,
-  and disabled/fake relay boundaries. Cloud enrollment, Cloud identity control,
-  and real outbound transport remain outside this repository. See
+  and a disabled-by-default proof-bound Cloud client. Hosted identity control,
+  billing, tenant administration, and human Cloud login remain outside this
+  repository. See
   [`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
 - Local self-host smoke flows should run without provider credentials.
 - The repository must remain safe to expose: no credentials, private source

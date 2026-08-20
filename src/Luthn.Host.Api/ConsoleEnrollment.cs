@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Luthn.Core.Persistence;
@@ -33,7 +34,9 @@ internal sealed record PersistedConsoleLifecycle(
     IReadOnlyList<string> Capabilities,
     ConsoleOrganizationState OrganizationState = ConsoleOrganizationState.Active,
     DateTimeOffset? ConnectionAuthorityRevokedAt = null,
-    IReadOnlyList<string>? RemovedSubjects = null);
+    IReadOnlyList<string>? RemovedSubjects = null,
+    Uri? VerificationUri = null,
+    string? UserCode = null);
 
 public sealed record ConsoleLifecycleSnapshot(
     InstallationEnrollmentState? EnrollmentState,
@@ -44,7 +47,9 @@ public sealed record ConsoleLifecycleSnapshot(
     IReadOnlyList<string> Capabilities,
     ConsoleOrganizationState OrganizationState,
     DateTimeOffset? ConnectionAuthorityRevokedAt,
-    IReadOnlyList<string> RemovedSubjects)
+    IReadOnlyList<string> RemovedSubjects,
+    Uri? VerificationUri,
+    string? UserCode)
 {
     public bool IsEnrolled => EnrollmentState == InstallationEnrollmentState.Approved;
 }
@@ -56,6 +61,8 @@ public interface IConsoleLifecycleStore : IConsoleInstallationState
         string pendingReference,
         DateTimeOffset expiresAt,
         IReadOnlyList<string> capabilities,
+        Uri? verificationUri,
+        string? userCode,
         CancellationToken cancellationToken);
     ValueTask<ConsoleLifecycleSnapshot> ActivateEnrollmentAsync(
         string pendingReference,
@@ -118,6 +125,8 @@ public sealed class ConsoleLifecycleStore(
         string pendingReference,
         DateTimeOffset expiresAt,
         IReadOnlyList<string> capabilities,
+        Uri? verificationUri,
+        string? userCode,
         CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
@@ -135,6 +144,8 @@ public sealed class ConsoleLifecycleStore(
                 EnrollmentExpiresAt = expiresAt,
                 PendingReference = BoundReference(pendingReference),
                 Capabilities = capabilities.ToArray(),
+                VerificationUri = verificationUri,
+                UserCode = BoundUserCode(userCode),
                 OrganizationState = ConsoleOrganizationState.Active,
                 ConnectionAuthorityRevokedAt = null
             };
@@ -196,6 +207,8 @@ public sealed class ConsoleLifecycleStore(
                 EnrolledAt = null,
                 PendingReference = "",
                 Capabilities = [],
+                VerificationUri = null,
+                UserCode = null,
                 OrganizationState = ConsoleOrganizationState.Detached,
                 RemovedSubjects = []
             },
@@ -252,6 +265,8 @@ public sealed class ConsoleLifecycleStore(
                 EnrollmentExpiresAt = null,
                 EnrolledAt = enrolledAt,
                 PendingReference = "",
+                VerificationUri = null,
+                UserCode = null,
                 Capabilities = capabilities.ToArray()
             };
             await PersistAsync(next, cancellationToken);
@@ -282,7 +297,9 @@ public sealed class ConsoleLifecycleStore(
                     persisted.Capabilities ?? [],
                     persisted.OrganizationState,
                     persisted.ConnectionAuthorityRevokedAt,
-                    persisted.RemovedSubjects ?? []);
+                    persisted.RemovedSubjects ?? [],
+                    persisted.VerificationUri,
+                    persisted.UserCode);
             }
         }
 
@@ -298,7 +315,9 @@ public sealed class ConsoleLifecycleStore(
             [],
             ConsoleOrganizationState.Active,
             null,
-            []);
+            [],
+            null,
+            null);
         Persist(initial, _protector.Protect(Convert.ToBase64String(proof)));
         return initial;
     }
@@ -318,7 +337,9 @@ public sealed class ConsoleLifecycleStore(
             snapshot.Capabilities,
             snapshot.OrganizationState,
             snapshot.ConnectionAuthorityRevokedAt,
-            snapshot.RemovedSubjects);
+            snapshot.RemovedSubjects,
+            snapshot.VerificationUri,
+            snapshot.UserCode);
         await WriteAtomicallyAsync(next, cancellationToken);
     }
 
@@ -334,7 +355,9 @@ public sealed class ConsoleLifecycleStore(
             snapshot.Capabilities,
             snapshot.OrganizationState,
             snapshot.ConnectionAuthorityRevokedAt,
-            snapshot.RemovedSubjects);
+            snapshot.RemovedSubjects,
+            snapshot.VerificationUri,
+            snapshot.UserCode);
         var temporaryPath = TemporaryPath();
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(persisted, SerializerOptions));
         File.Move(temporaryPath, StatePath);
@@ -388,18 +411,24 @@ public sealed class ConsoleLifecycleStore(
 
     private static string BoundReference(string value) =>
         value.Length <= 128 ? value : value[..128];
+
+    private static string? BoundUserCode(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 16)];
 }
 
 public sealed record EnrollmentChallenge(
     string PendingReference,
     DateTimeOffset ExpiresAt,
-    IReadOnlyList<string> Capabilities);
+    IReadOnlyList<string> Capabilities,
+    Uri? VerificationUri = null,
+    string? UserCode = null);
 
 public sealed record EnrollmentGrant(
     string PendingReference,
     string InstallationFingerprint,
     DateTimeOffset ExpiresAt,
-    IReadOnlyList<string> Capabilities);
+    IReadOnlyList<string> Capabilities,
+    DateTimeOffset? ApprovedAt = null);
 
 public interface IInstallationEnrollmentAdapter
 {
@@ -480,6 +509,174 @@ public sealed class FakeInstallationEnrollmentAdapter(
     }
 }
 
+public sealed class CloudInstallationEnrollmentAdapter(
+    ICloudHubStateStore stateStore,
+    CloudHubProtocolClient protocolClient,
+    IOptions<CloudHubConnectionOptions> cloudOptions,
+    TimeProvider timeProvider) : IInstallationEnrollmentAdapter
+{
+    private static readonly string[] Capabilities = [CloudHubProtocolClient.SafeProjectionCapability];
+
+    public ConsoleEnrollmentAdapter Kind => ConsoleEnrollmentAdapter.Cloud;
+
+    public async ValueTask<EnrollmentChallenge> BeginAsync(
+        string installationFingerprint,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        try
+        {
+            return await stateStore.UpdateAsync(
+                async (state, updateCancellationToken) =>
+                {
+                    var result = await protocolClient.BeginEnrollmentAsync(
+                        state,
+                        cloudOptions.Value.ToProtocolOptions(),
+                        updateCancellationToken);
+                    return new CloudHubStateUpdate<EnrollmentChallenge>(
+                        result.State,
+                        new EnrollmentChallenge(
+                            PendingReference(result.Challenge.EnrollmentId),
+                            result.Challenge.ExpiresAt,
+                            Capabilities,
+                            result.Challenge.VerificationUri,
+                            result.Challenge.UserCode));
+                },
+                cancellationToken);
+        }
+        catch (Exception exception) when (
+            exception is HttpRequestException or IOException or CloudHubProtocolException or
+            CryptographicException or InvalidOperationException)
+        {
+            throw new InvalidOperationException("Cloud enrollment could not be started safely.", exception);
+        }
+    }
+
+    public async ValueTask<EnrollmentGrant> VerifyAsync(
+        ConsoleLifecycleSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        if (snapshot.EnrollmentState != InstallationEnrollmentState.Pending ||
+            string.IsNullOrWhiteSpace(snapshot.PendingReference))
+        {
+            throw new InvalidOperationException("There is no active Cloud enrollment to verify.");
+        }
+
+        try
+        {
+            var outcome = await stateStore.UpdateAsync(
+                async (state, updateCancellationToken) =>
+                {
+                    var pendingReference = state.PendingEnrollment is null
+                        ? null
+                        : PendingReference(state.PendingEnrollment.EnrollmentId);
+                    if (!string.Equals(
+                            pendingReference,
+                            snapshot.PendingReference,
+                            StringComparison.Ordinal))
+                    {
+                        if (TryRecoverApprovedEnrollment(state, snapshot, out var recoveryGrant))
+                        {
+                            return new CloudHubStateUpdate<CloudVerificationOutcome>(
+                                state,
+                                new CloudVerificationOutcome(recoveryGrant, null));
+                        }
+
+                        throw new InvalidOperationException("The Cloud enrollment state does not match this installation.");
+                    }
+
+                    var result = await protocolClient.PollEnrollmentAsync(
+                        state,
+                        cloudOptions.Value.ToProtocolOptions(),
+                        updateCancellationToken);
+                    if (result.RetryAfterSeconds is not null ||
+                        result.Status.State == InstallationEnrollmentState.Pending)
+                    {
+                        return new CloudHubStateUpdate<CloudVerificationOutcome>(
+                            result.State,
+                            new CloudVerificationOutcome(
+                                null,
+                                "Cloud enrollment approval is still pending."));
+                    }
+                    if (result.Status.State != InstallationEnrollmentState.Approved ||
+                        result.State.Session is null)
+                    {
+                        return new CloudHubStateUpdate<CloudVerificationOutcome>(
+                            result.State,
+                            new CloudVerificationOutcome(
+                                null,
+                                "Cloud enrollment was not approved."));
+                    }
+
+                    return new CloudHubStateUpdate<CloudVerificationOutcome>(
+                        result.State,
+                        new CloudVerificationOutcome(
+                            new EnrollmentGrant(
+                                snapshot.PendingReference,
+                                snapshot.InstallationFingerprint,
+                                snapshot.EnrollmentExpiresAt ?? result.Status.ExpiresAt,
+                                Capabilities,
+                                result.State.ApprovedEnrollment?.ApprovedAt),
+                            null));
+                },
+                cancellationToken);
+            return outcome.Grant ?? throw new InvalidOperationException(outcome.Error);
+        }
+        catch (Exception exception) when (
+            exception is HttpRequestException or IOException or CloudHubProtocolException or
+            CryptographicException)
+        {
+            throw new InvalidOperationException("Cloud enrollment verification could not complete safely.", exception);
+        }
+    }
+
+    private void EnsureEnabled()
+    {
+        if (!cloudOptions.Value.Enabled)
+        {
+            throw new InvalidOperationException("Cloud enrollment is disabled in this OSS installation.");
+        }
+    }
+
+    private bool TryRecoverApprovedEnrollment(
+        CloudHubLocalState state,
+        ConsoleLifecycleSnapshot snapshot,
+        out EnrollmentGrant grant)
+    {
+        var approved = state.ApprovedEnrollment;
+        if (state.PendingEnrollment is null &&
+            state.Session is { } session &&
+            session.RefreshExpiresAt > timeProvider.GetUtcNow() &&
+            approved is not null &&
+            approved.ApprovedAt < approved.ExpiresAt &&
+            string.Equals(
+                PendingReference(approved.EnrollmentId),
+                snapshot.PendingReference,
+                StringComparison.Ordinal))
+        {
+            grant = new EnrollmentGrant(
+                snapshot.PendingReference,
+                snapshot.InstallationFingerprint,
+                approved.ExpiresAt,
+                Capabilities,
+                approved.ApprovedAt);
+            return true;
+        }
+
+        grant = null!;
+        return false;
+    }
+
+    private static string PendingReference(string enrollmentId) =>
+        $"enrollment_{Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(enrollmentId)))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_')}";
+
+    private sealed record CloudVerificationOutcome(EnrollmentGrant? Grant, string? Error);
+}
+
 public static class ConsoleEnrollmentEndpoints
 {
     public static IEndpointRouteBuilder MapConsoleEnrollment(this IEndpointRouteBuilder app)
@@ -516,6 +713,8 @@ public static class ConsoleEnrollmentEndpoints
                 challenge.PendingReference,
                 challenge.ExpiresAt,
                 challenge.Capabilities,
+                challenge.VerificationUri,
+                challenge.UserCode,
                 cancellationToken);
             db.AuditEvents.Add(CreateAudit(context, "console.enrollment.started", "pending", timeProvider.GetUtcNow()));
             await db.SaveChangesAsync(cancellationToken);
@@ -541,7 +740,8 @@ public static class ConsoleEnrollmentEndpoints
         {
             var grant = await adapter.VerifyAsync(lifecycle.Current, cancellationToken);
             var now = timeProvider.GetUtcNow();
-            if (grant.ExpiresAt <= now)
+            var approvedAt = grant.ApprovedAt ?? now;
+            if (approvedAt > now.AddSeconds(30) || grant.ExpiresAt <= approvedAt)
             {
                 throw new InvalidOperationException("The enrollment grant has expired.");
             }
@@ -550,7 +750,7 @@ public static class ConsoleEnrollmentEndpoints
                 grant.PendingReference,
                 grant.InstallationFingerprint,
                 grant.Capabilities,
-                now,
+                approvedAt,
                 cancellationToken);
             sessions.RevokeAll(session => session.Mode == ConsoleAccessMode.LocalAuto);
             db.AuditEvents.Add(CreateAudit(context, "console.enrollment.activated", "approved", now));
@@ -581,7 +781,9 @@ public static class ConsoleEnrollmentEndpoints
                 _ when adapter == ConsoleEnrollmentAdapter.Disabled => "enable-provider",
                 _ => "start-enrollment"
             },
-            true);
+            true,
+            snapshot.VerificationUri,
+            snapshot.UserCode);
 
     private static ProblemHttpResult EnrollmentProblem(string detail, int statusCode) =>
         TypedResults.Problem(

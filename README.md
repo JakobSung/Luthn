@@ -132,15 +132,17 @@ not a backup, a prompt/transcript store, or a raw-data recovery path. See the
 
 ## Central OSS Hub Boundary
 
-The public runtime now includes an opt-in central Hub data-plane foundation:
-encrypted durable ingress, server-derived Workspace identity, bounded worker
-leases/retries/dead letters, content-free operational status, and disabled/fake
-relay, enrollment, login, and recovery-provider boundaries. Personal self-host
-remains the default. The fake providers exist only for deterministic lifecycle
-tests; production Cloud identity, billing, and real outbound transport remain
-outside this repository. Enrollment is two-phase, successful activation revokes
-LocalAuto, membership loss never falls back to Local, and explicit reclaim is
-revoke-first. See [Central team Hub data plane](docs/cloud-hub-data-plane.md).
+The public runtime now includes both an opt-in central Hub data-plane foundation
+and an opt-in Luthn Cloud client. The client performs P-256 proof-bound
+enrollment, stores its key and rotating credentials with local Data Protection,
+and sends only versioned safe projections through the durable outbox. Raw local
+record identifiers are replaced with deterministic opaque hashes before they
+cross the Cloud boundary. Personal self-host remains the default and makes no
+Cloud requests. Hosted identity, billing, tenant administration, and managed
+operations remain private Cloud responsibilities. Human Cloud login is a later
+milestone; after Cloud enrollment activates, the console intentionally requires
+that login instead of falling back to LocalAuto. See
+[Central team Hub data plane](docs/cloud-hub-data-plane.md).
 
 ## Luthn Cloud (in development)
 

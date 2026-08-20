@@ -7,7 +7,8 @@ namespace Luthn.Sdk.Console;
 public enum ConsoleEnrollmentAdapter
 {
     Disabled,
-    Fake
+    Fake,
+    Cloud
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -19,4 +20,6 @@ public sealed record ConsoleEnrollmentDto(
     [property: JsonPropertyName("capabilities")] IReadOnlyList<string> Capabilities,
     [property: JsonPropertyName("providerLabel")] string ProviderLabel,
     [property: JsonPropertyName("nextAction")] string NextAction,
-    [property: JsonPropertyName("serverDerived")] bool ServerDerived);
+    [property: JsonPropertyName("serverDerived")] bool ServerDerived,
+    [property: JsonPropertyName("verificationUri"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Uri? VerificationUri = null,
+    [property: JsonPropertyName("userCode"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UserCode = null);

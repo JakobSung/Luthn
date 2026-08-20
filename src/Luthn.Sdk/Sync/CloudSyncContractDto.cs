@@ -9,6 +9,15 @@ public static class CloudSyncContractVersions
     public const int V2 = 2;
 }
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record HubEnrollmentStartDto(
+    [property: JsonPropertyName("contractVersion")] int ContractVersion,
+    [property: JsonPropertyName("capabilities")] IReadOnlyList<string> Capabilities);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record HubEnrollmentPollRequestDto(
+    [property: JsonPropertyName("enrollmentId")] string EnrollmentId);
+
 [JsonConverter(typeof(InstallationEnrollmentStateJsonConverter))]
 public enum InstallationEnrollmentState
 {
@@ -37,14 +46,20 @@ public sealed record InstallationEnrollmentStatusDto(
     [property: JsonPropertyName("enrollmentId")] string EnrollmentId,
     [property: JsonPropertyName("state")] InstallationEnrollmentState State,
     [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiresAt,
-    [property: JsonPropertyName("installationId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? InstallationId,
-    [property: JsonPropertyName("error"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoundedErrorDto? Error);
+    [property: JsonPropertyName("installationId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? InstallationId = null,
+    [property: JsonPropertyName("error"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoundedErrorDto? Error = null);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record InstallationCapabilitySetDto(
     [property: JsonPropertyName("contractVersion")] int ContractVersion,
     [property: JsonPropertyName("supportedCapabilities")] IReadOnlyList<string> SupportedCapabilities,
     [property: JsonPropertyName("issuedAt")] DateTimeOffset IssuedAt);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record HubEnrollmentPollResponseDto(
+    [property: JsonPropertyName("status")] InstallationEnrollmentStatusDto Status,
+    [property: JsonPropertyName("capabilities"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InstallationCapabilitySetDto? Capabilities = null,
+    [property: JsonPropertyName("sessionGrant"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HubSessionGrantDto? SessionGrant = null);
 
 /// <summary>
 /// Describes authenticated installation authority. Tenant and workspace scope
@@ -85,8 +100,8 @@ public sealed record SafeProjectionSyncBatchDto(
 public sealed record BoundedErrorDto(
     [property: JsonPropertyName("code")] string Code,
     [property: JsonPropertyName("retryable")] bool Retryable,
-    [property: JsonPropertyName("retryAfterSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RetryAfterSeconds,
-    [property: JsonPropertyName("correlationId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CorrelationId);
+    [property: JsonPropertyName("retryAfterSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RetryAfterSeconds = null,
+    [property: JsonPropertyName("correlationId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CorrelationId = null);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record SafeProjectionSyncReceiptDto(
@@ -96,10 +111,21 @@ public sealed record SafeProjectionSyncReceiptDto(
     [property: JsonPropertyName("outcome")] string Outcome,
     [property: JsonPropertyName("retryable")] bool Retryable,
     [property: JsonPropertyName("acknowledgedAt")] DateTimeOffset AcknowledgedAt,
-    [property: JsonPropertyName("error"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoundedErrorDto? Error);
+    [property: JsonPropertyName("error"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoundedErrorDto? Error = null);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record SafeProjectionSyncCheckpointDto(
     [property: JsonPropertyName("checkpoint")] string Checkpoint,
     [property: JsonPropertyName("lastAcknowledgedOperationId")] string LastAcknowledgedOperationId,
     [property: JsonPropertyName("updatedAt")] DateTimeOffset UpdatedAt);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record SafeProjectionSyncBatchResponseDto(
+    [property: JsonPropertyName("batchId")] string BatchId,
+    [property: JsonPropertyName("receipts")] IReadOnlyList<SafeProjectionSyncReceiptDto> Receipts,
+    [property: JsonPropertyName("checkpoint")] SafeProjectionSyncCheckpointDto Checkpoint);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record RefreshHubSessionRequestDto(
+    [property: JsonPropertyName("refreshCredential")] string RefreshCredential,
+    [property: JsonPropertyName("proof")] string Proof);

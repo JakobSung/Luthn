@@ -2,9 +2,12 @@
 
 [English](cloud-hub-data-plane.md)
 
-상태: 공개 runtime은 선택 활성화 방식의 암호화 durable ingress, 제한된 로컬 worker,
-disabled/fake relay 경계와 결정적 복구 harness를 구현했습니다. Cloud enrollment,
-identity control plane과 실제 outbound transport는 아직 구현하지 않았습니다.
+상태: 공개 runtime은 선택 활성화 방식의 암호화 durable ingress, 제한된 로컬 worker와
+실제 Luthn Cloud client를 구현했습니다. Client는 proof 기반 enrollment, 보호된 로컬
+credential 영속화, DPoP session refresh, 재시도 안전한 로컬 enrollment 활성화,
+safe-projection 전달, checkpoint와 revoke 실패 시 로컬 동작 유지를 담당합니다.
+Hosted identity, entitlement, billing, tenant 관리와 사람의
+Cloud login은 비공개 또는 다음 milestone 경계입니다.
 
 ## 배포 경계
 
@@ -153,13 +156,13 @@ relay 재연결·revoke-first를 검증합니다. 이는 정확성·복구 basel
 
 ## 남아 있는 Cloud 경계
 
-OSS runtime은 이제 versioned enrollment/capability, 콘솔 login, 회원/종료 준비, 명시적
-revoke-first Local 회수의 provider-neutral 계약과 disabled/fake 시험 경계를 소유합니다.
-남은 외부 경계는 production Cloud가 발급하는 connection authority, identity·entitlement
-검증, 인증 relay transport, remote MCP/OAuth lifecycle capture, billing과 관리형
-Organization 운영입니다. Production adapter도 인증된 installation에서 tenant 범위를
-정하고 metadata-only 감사, safe-projection-only payload, revoke-first 순서와 개인
-self-host disabled-by-default를 유지해야 합니다.
+OSS runtime은 이제 versioned Cloud enrollment와 DPoP client, 보호된 로컬 연결 상태,
+durable safe-projection transport와 provider-neutral console lifecycle 경계를 소유합니다.
+남은 외부 경계는 hosted user identity·entitlement 검증, 사람의 Cloud login, remote
+MCP/OAuth lifecycle capture, billing과 관리형 Organization 운영입니다. Relay write도
+AgentDevice authority 전에는 열지 않습니다. Hosted adapter는 인증된 installation에서
+tenant 범위를 정하고 metadata-only 감사, safe-projection-only payload, revoke-first 순서와
+개인 self-host disabled-by-default를 유지해야 합니다.
 
 ## 미래 용량·복구 evidence
 

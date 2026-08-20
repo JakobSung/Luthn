@@ -322,9 +322,9 @@ recovery source.
 
 The operator console is the approval authority in both personal Local mode and
 central OSS Hub mode. Its banner comes from `/api/operator/console-profile`,
-which derives mode from server identity configuration and always reports the
-public OSS build as zero-outbound. Do not add a browser control that changes
-tenant identity, enables Cloud transport, or bypasses Host API authorization.
+which derives mode and Cloud transport state from server-side configuration and
+protected connection state. Do not add a browser control that changes tenant
+identity, enables Cloud transport, or bypasses Host API authorization.
 
 English and Korean static labels use an allowlisted browser preference. Tokens
 remain session-only, while the language preference may persist locally because
@@ -335,9 +335,9 @@ external-publication decisions so one approval cannot imply the other.
 ## Central OSS Hub runtime foundation
 
 Personal self-host remains the default: Hub ingress, its classification worker,
-and the outbound relay are all disabled unless the operator explicitly enables
-them. The public build contains no real Cloud transport. To run the initial Hub
-data plane, configure multi-user service-token identity bindings and set:
+and the Cloud transport are all disabled unless the operator explicitly enables
+them. To run the initial Hub data plane, configure multi-user service-token
+identity bindings and set:
 
 ```dotenv
 Luthn__Hub__Ingress__Enabled=true
@@ -404,7 +404,10 @@ docker compose --env-file .env --profile sync-worker up -d worker
 ```
 
 The default Compose stack does not start this profile. Even when started, the
-public build registers only the disabled transport, performs no outbound
-connection, and leaves pending outbox rows untouched. Do not deploy a real
-cloud adapter until its endpoint authentication, tenant isolation, deletion,
-backup/restore, and audit boundaries are separately reviewed.
+Cloud transport remains disabled unless `Luthn:Cloud:Enabled` is explicitly
+set. When enabled, API and Worker must use the same protected state directory
+and Data Protection key ring. The transport sends only the safe-projection V2
+contract, hashes local record identifiers before transmission, rotates DPoP
+credentials under an exclusive local lock, and retains failed outbox rows for
+retry. Do not enable it against an endpoint whose authentication, tenant
+isolation, deletion, backup/restore, and audit boundaries have not been reviewed.

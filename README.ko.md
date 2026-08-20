@@ -108,11 +108,14 @@ https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installat
 
 ## 중앙 OSS Hub 경계
 
-공개 runtime에는 선택 활성화 방식의 중앙 Hub data-plane 기반이 구현되어 있습니다.
-암호화 durable ingress, server가 정하는 Workspace identity, 제한된 worker
-lease/retry/dead-letter, 내용 없는 운영 상태와 disabled/fake relay 경계를 제공합니다.
-개인 self-host가 기본이며 Cloud enrollment, Cloud identity control, 실제 outbound
-transport는 이 저장소 범위 밖에 있습니다. 자세한 내용은
+공개 runtime에는 선택 활성화 방식의 중앙 Hub data plane과 Luthn Cloud client가
+구현되어 있습니다. Client는 P-256 proof 기반 enrollment를 수행하고 key와 회전
+credential을 로컬 Data Protection으로 보호하며 durable outbox의 versioned safe
+projection만 전송합니다. 로컬 record ID는 Cloud 경계를 넘기 전에 결정적 opaque
+hash로 바뀝니다. 개인 self-host가 기본이며 Cloud 요청을 보내지 않습니다. Hosted
+identity, 결제, tenant 관리와 managed operation은 비공개 Cloud가 담당합니다. 사람의
+Cloud login은 다음 milestone이므로 enrollment 활성화 후에는 LocalAuto로 되돌아가지
+않고 해당 login을 요구합니다. 자세한 내용은
 [중앙 팀 Hub data plane](docs/cloud-hub-data-plane.ko.md)을 참고하세요.
 
 ## Luthn Cloud (개발 중)

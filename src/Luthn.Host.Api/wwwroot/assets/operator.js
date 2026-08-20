@@ -456,7 +456,14 @@ const renderConsoleProfile = () => {
   const isHub = profile.consoleMode === "Hub";
   $("#consoleMode").textContent = t(isHub ? "mode.hub" : "mode.local");
   $("#consoleModeDetail").textContent = t(isHub ? "mode.hubDetail" : "mode.localDetail");
-  $("#consoleTransport").textContent = t("mode.transportDisabled");
+  const transportKey = {
+    disabled: "mode.transportDisabled",
+    disconnected: "mode.transportDisconnected",
+    stale: "mode.transportStale",
+    revoked: "mode.transportRevoked",
+    ready: "mode.transportReady"
+  }[profile.cloudTransport] ?? "mode.transportDisconnected";
+  $("#consoleTransport").textContent = t(transportKey);
   $("#consoleAuthority").textContent = t("mode.authorityOss");
 };
 
@@ -465,7 +472,7 @@ const refreshConsoleProfile = async () => {
     const result = await requestJson("/api/operator/console-profile");
     if (
       !["Local", "Hub"].includes(result?.consoleMode) ||
-      result?.cloudTransport !== "disabled" ||
+      !["disabled", "disconnected", "stale", "revoked", "ready"].includes(result?.cloudTransport) ||
       result?.sensitiveAuthority !== "oss-console" ||
       result?.tenancySource !== "authenticated-request" ||
       result?.serverDerived !== true

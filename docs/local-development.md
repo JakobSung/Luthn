@@ -90,9 +90,23 @@ The opt-in Hub baseline is disabled by default. To exercise it locally, use
 `Luthn__Hub__Ingress__Enabled=true` and optionally
 `Luthn__Hub__Ingress__WorkerEnabled=true`. Ingress encrypts the bounded capsule,
 derives organization/workspace/member/agent/session identity from the trusted
-token, and returns only a metadata receipt. The disabled/fake relay makes no
-Cloud request; see [Central team Hub data plane](cloud-hub-data-plane.md) for
-the limits and Cloud boundary.
+token, and returns only a metadata receipt. Cloud client transport remains
+disabled unless all of the following are set explicitly:
+
+```dotenv
+Luthn__Cloud__Enabled=true
+Luthn__Cloud__BaseUrl=https://your-cloud-origin.example/
+Luthn__Cloud__Audience=luthn-cloud
+Luthn__Cloud__StateDirectory=.luthn/operator
+Luthn__Console__Enrollment__Adapter=Cloud
+```
+
+API and Worker must share the state directory and Data Protection key ring.
+Use HTTPS except for an explicit loopback test origin. The current M3 client can
+enroll and sync safe projections, but human Cloud login remains an M4 boundary;
+therefore activation enters `CloudLoginRequired`. See
+[Central team Hub data plane](cloud-hub-data-plane.md) for the limits and Cloud
+boundary.
 
 Agent installation, reconfiguration, and disconnect remain host CLI operations.
 
@@ -116,10 +130,11 @@ and `operator-token`). Do not print or commit these files.
 Those credentials remain necessary for agents and direct API clients. They are
 not human-console sessions and are not upgraded into one. For lifecycle tests,
 set `Luthn:Console:Enrollment:Adapter=Fake` and
-`Luthn:Console:CloudLogin:Provider=Fake`; both default to `Disabled`, make no
-network call, and must never be described as live Cloud authentication. The
-fake recovery verifier is also disabled unless a focused test explicitly
-enables it.
+`Luthn:Console:CloudLogin:Provider=Fake`; both default to `Disabled`. The Fake
+adapters make no network call. The `Cloud` enrollment adapter is real and may be
+used only with the explicitly enabled protected Cloud client configuration
+above. The fake recovery verifier is also disabled unless a focused test
+explicitly enables it.
 
 Use the menu by task:
 
