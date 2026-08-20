@@ -12,6 +12,7 @@ state_file="${LUTHN_STATE_FILE:-$state_dir/install-state.env}"
 cli_path="${LUTHN_CLI_PATH:-$bin_dir/luthn}"
 token_file="${LUTHN_SERVICE_TOKEN_FILE:-$config_dir/service-token}"
 operator_token_file="${LUTHN_OPERATOR_TOKEN_FILE:-$config_dir/operator-token}"
+cloud_agent_state_key_file="${LUTHN_CLOUD_AGENT_STATE_KEY_FILE:-$config_dir/cloud-agent-state-key}"
 runtime_dir="${LUTHN_RUNTIME_DIR:-$data_dir/runtime}"
 connector_state_dir="${LUTHN_CONNECTOR_STATE_DIR:-$state_dir/connectors}"
 codex_state_file="${LUTHN_CODEX_STATE_FILE:-$connector_state_dir/codex.env}"
@@ -19,6 +20,8 @@ codex_pending_state_file="${LUTHN_CODEX_PENDING_STATE_FILE:-$connector_state_dir
 codex_disconnect_pending_state_file="${LUTHN_CODEX_DISCONNECT_PENDING_STATE_FILE:-$connector_state_dir/codex.disconnect.pending.env}"
 claude_state_file="${LUTHN_CLAUDE_STATE_FILE:-$connector_state_dir/claude-code.env}"
 claude_pending_state_file="${LUTHN_CLAUDE_PENDING_STATE_FILE:-$connector_state_dir/claude-code.pending.env}"
+cloud_codex_state_file="${LUTHN_CLOUD_CODEX_STATE_FILE:-$connector_state_dir/cloud-codex.env}"
+cloud_claude_state_file="${LUTHN_CLOUD_CLAUDE_STATE_FILE:-$connector_state_dir/cloud-claude.env}"
 cli_template_version="4"
 codex_connector_version="8"
 mcp_schema_version="6"
@@ -49,6 +52,10 @@ commands:
                                    Configure Codex or Claude Code; recall is enabled by default.
   connection status codex|claude Show connector state.
   disconnect codex|claude        Remove only Luthn-owned connector configuration.
+  cloud connect codex|claude --workspace UUID --cloud-url HTTPS_URL
+                                   Add a separate Cloud MCP connection; local MCP stays active.
+  cloud status codex|claude      Show the local Cloud MCP registration state.
+  cloud disconnect codex|claude Remove only the Luthn-owned Cloud MCP registration.
   adapter                         Upload a turn-summary JSON payload from stdin.
   mcp [--list-tools]              Run the MCP stdio server from the image.
   help                            Show this help.
@@ -2021,6 +2028,240 @@ Setup is complete only when automatic-ingestion reports Active.
 EOF
 }
 
+cloud_json_field() {
+  field="$1"
+  python3 -c 'import json,sys; value=json.load(sys.stdin).get(sys.argv[1]); print("" if value is None else value)' "$field"
+}
+
+cloud_agent_step() {
+  cloud_url="$1"
+  workspace_id="$2"
+  agent_kind="$3"
+  device_name="$4"
+  capability="$5"
+  compose_cmd --profile tools run --rm --no-deps -T \
+    -v "$cloud_agent_state_key_file:/run/secrets/cloud-agent-state-key:ro" \
+    cloud-agent \
+    cloud-agent \
+    --base-url "$cloud_url" \
+    --state-dir /var/lib/luthn/operator/cloud-agent \
+    --state-key-file /run/secrets/cloud-agent-state-key \
+    --workspace "$workspace_id" \
+    --agent "$agent_kind" \
+    --capability "$capability" \
+    --device-name "$device_name"
+}
+
+ensure_cloud_agent_state_key() {
+  if [[ -f "$cloud_agent_state_key_file" ]]; then
+    if ! python3 - "$cloud_agent_state_key_file" <<'PY'
+import base64
+import pathlib
+import sys
+
+value = pathlib.Path(sys.argv[1]).read_text(encoding="ascii").strip()
+try:
+    key = base64.b64decode(value, validate=True)
+except Exception:
+    raise SystemExit(1)
+raise SystemExit(0 if len(key) == 32 else 1)
+PY
+    then
+      echo "The Cloud AgentDevice state key file is invalid; no configuration was changed." >&2
+      return 1
+    fi
+    chmod 0600 "$cloud_agent_state_key_file"
+    return 0
+  fi
+
+  mkdir -p "$config_dir"
+  temporary_key="$(mktemp "$config_dir/cloud-agent-state-key.XXXXXX")"
+  if ! python3 -c 'import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode("ascii"))' >"$temporary_key"; then
+    rm -f "$temporary_key"
+    return 1
+  fi
+  chmod 0600 "$temporary_key"
+  mv "$temporary_key" "$cloud_agent_state_key_file"
+}
+
+open_cloud_verification_uri() {
+  verification_uri="$1"
+  if command -v open >/dev/null 2>&1; then
+    open "$verification_uri" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$verification_uri" >/dev/null 2>&1 || true
+  fi
+}
+
+cloud_connection_state_file() {
+  case "$1" in
+    codex) printf '%s' "$cloud_codex_state_file" ;;
+    claude) printf '%s' "$cloud_claude_state_file" ;;
+    *) return 1 ;;
+  esac
+}
+
+record_cloud_connection_state() {
+  state_path="$1"
+  agent_kind="$2"
+  remote_mcp_url="$3"
+  connection_id="$4"
+  organization_id="$5"
+  workspace_id="$6"
+  ensure_directories
+  temporary_state="$(mktemp "$connector_state_dir/cloud-connection.XXXXXX")"
+  chmod 0600 "$temporary_state"
+  {
+    printf 'VERSION=1\n'
+    printf 'AGENT_KIND=%s\n' "$agent_kind"
+    printf 'REMOTE_MCP_URL=%s\n' "$remote_mcp_url"
+    printf 'AGENT_CONNECTION_ID=%s\n' "$connection_id"
+    printf 'ORGANIZATION_ID=%s\n' "$organization_id"
+    printf 'WORKSPACE_ID=%s\n' "$workspace_id"
+  } >"$temporary_state"
+  mv "$temporary_state" "$state_path"
+}
+
+connect_cloud_agent() {
+  agent_kind="$1"
+  shift
+  workspace_id=""
+  cloud_url=""
+  capability="reader"
+  device_name="$(hostname 2>/dev/null || printf 'Luthn local device')"
+  while (( $# > 0 )); do
+    case "$1" in
+      --workspace) workspace_id="${2:-}"; shift 2 ;;
+      --cloud-url) cloud_url="${2:-}"; shift 2 ;;
+      --capability) capability="${2:-}"; shift 2 ;;
+      --device-name) device_name="${2:-}"; shift 2 ;;
+      *)
+        echo "usage: luthn cloud connect codex|claude --workspace UUID --cloud-url HTTPS_URL [--capability reader|contributor|sensitive-requester] [--device-name name]" >&2
+        return 2
+        ;;
+    esac
+  done
+  if [[ -z "$workspace_id" || -z "$cloud_url" ]]; then
+    echo "--workspace and --cloud-url are required" >&2
+    return 2
+  fi
+
+  require_installation
+  require_docker
+  require_command python3
+  require_command "$agent_kind"
+  ownership_file="$(cloud_connection_state_file "$agent_kind")"
+  if [[ -f "$ownership_file" ]]; then
+    echo "The Luthn Cloud MCP registration for $agent_kind is already owned by this installation."
+    echo "Run 'luthn cloud status $agent_kind' to inspect it."
+    return 0
+  fi
+  if "$agent_kind" mcp get luthn-cloud >/dev/null 2>&1; then
+    echo "$agent_kind already has an unrelated MCP registration named 'luthn-cloud'; no configuration was changed." >&2
+    return 1
+  fi
+  ensure_cloud_agent_state_key || return 1
+
+  response="$(cloud_agent_step "$cloud_url" "$workspace_id" "$agent_kind" "$device_name" "$capability")" || return 1
+  state="$(printf '%s' "$response" | cloud_json_field state)"
+  if [[ "$state" == "approval-required" ]]; then
+    verification_uri="$(printf '%s' "$response" | cloud_json_field verificationUri)"
+    user_code="$(printf '%s' "$response" | cloud_json_field userCode)"
+    echo "Approve this device in your browser:"
+    echo "  URL:  $verification_uri"
+    echo "  Code: $user_code"
+    open_cloud_verification_uri "$verification_uri"
+  fi
+
+  for _ in $(seq 1 120); do
+    if [[ "$state" == "connected" ]]; then
+      break
+    fi
+    case "$state" in
+      approval-required|pending)
+        retry_after="$(printf '%s' "$response" | cloud_json_field retryAfterSeconds)"
+        [[ "$retry_after" =~ ^[0-9]+$ ]] || retry_after=5
+        sleep "$retry_after"
+        response="$(cloud_agent_step "$cloud_url" "$workspace_id" "$agent_kind" "$device_name" "$capability")" || return 1
+        state="$(printf '%s' "$response" | cloud_json_field state)"
+        ;;
+      denied|expired|revoked)
+        echo "Cloud device enrollment ended with state: $state" >&2
+        return 1
+        ;;
+      *)
+        echo "Cloud device enrollment returned an invalid state." >&2
+        return 1
+        ;;
+    esac
+  done
+  if [[ "$state" != "connected" ]]; then
+    echo "Cloud device enrollment timed out. Run the same command to continue safely." >&2
+    return 1
+  fi
+
+  remote_mcp_url="$(printf '%s' "$response" | cloud_json_field remoteMcpUrl)"
+  connection_id="$(printf '%s' "$response" | cloud_json_field agentConnectionId)"
+  organization_id="$(printf '%s' "$response" | cloud_json_field organizationId)"
+  if [[ "$agent_kind" == "codex" ]]; then
+    if ! codex mcp add luthn-cloud --url "$remote_mcp_url" >/dev/null; then
+      return 1
+    fi
+    if ! codex mcp login luthn-cloud --scopes openid,email; then
+      codex mcp remove luthn-cloud >/dev/null 2>&1 || true
+      echo "Cloud OAuth login failed; the new MCP registration was rolled back." >&2
+      return 1
+    fi
+  else
+    if ! claude mcp add --scope user --transport http luthn-cloud "$remote_mcp_url"; then
+      return 1
+    fi
+  fi
+  if ! record_cloud_connection_state \
+    "$ownership_file" "$agent_kind" "$remote_mcp_url" "$connection_id" "$organization_id" "$workspace_id"; then
+    "$agent_kind" mcp remove luthn-cloud >/dev/null 2>&1 || true
+    echo "Cloud MCP ownership state could not be saved; the new registration was rolled back." >&2
+    return 1
+  fi
+
+  echo "Luthn Cloud is connected as a separate 'luthn-cloud' MCP server."
+  echo "The existing local 'luthn' MCP server was not changed."
+}
+
+show_cloud_connection_status() {
+  agent_kind="$1"
+  require_command "$agent_kind"
+  ownership_file="$(cloud_connection_state_file "$agent_kind")"
+  if [[ ! -f "$ownership_file" ]]; then
+    echo "Luthn does not own a Cloud MCP registration for $agent_kind."
+    return 1
+  fi
+  if "$agent_kind" mcp get luthn-cloud >/dev/null 2>&1; then
+    echo "Luthn Cloud MCP is registered for $agent_kind."
+    echo "The Cloud console remains the authority for device and connection revocation."
+    return 0
+  fi
+  echo "Luthn Cloud ownership exists, but the MCP registration is missing." >&2
+  return 1
+}
+
+disconnect_cloud_agent() {
+  agent_kind="$1"
+  require_command "$agent_kind"
+  ownership_file="$(cloud_connection_state_file "$agent_kind")"
+  if [[ ! -f "$ownership_file" ]]; then
+    echo "Luthn does not own a Cloud MCP registration for $agent_kind; no configuration was changed."
+    return 0
+  fi
+  if ! "$agent_kind" mcp remove luthn-cloud >/dev/null 2>&1; then
+    echo "Cloud MCP removal failed; ownership state was preserved." >&2
+    return 1
+  fi
+  rm -f "$ownership_file"
+  echo "Removed the local 'luthn-cloud' MCP registration."
+  echo "Revoke the AgentConnection or device in the Cloud console to end server-side access."
+}
+
 show_codex_connection_status() {
   require_installation
   require_command python3
@@ -2809,6 +3050,19 @@ case "$command" in
   disconnect)
     shift
     case "${1:-}" in codex) disconnect_codex;; claude) disconnect_claude;; *) echo "usage: luthn disconnect codex|claude" >&2; exit 2;; esac
+    ;;
+  cloud)
+    shift
+    cloud_action="${1:-}"
+    agent_kind="${2:-}"
+    case "$agent_kind" in codex|claude) ;; *) echo "usage: luthn cloud connect|status|disconnect codex|claude" >&2; exit 2 ;; esac
+    shift 2
+    case "$cloud_action" in
+      connect) connect_cloud_agent "$agent_kind" "$@" ;;
+      status) (( $# == 0 )) || { echo "usage: luthn cloud status codex|claude" >&2; exit 2; }; show_cloud_connection_status "$agent_kind" ;;
+      disconnect) (( $# == 0 )) || { echo "usage: luthn cloud disconnect codex|claude" >&2; exit 2; }; disconnect_cloud_agent "$agent_kind" ;;
+      *) echo "usage: luthn cloud connect|status|disconnect codex|claude" >&2; exit 2 ;;
+    esac
     ;;
   codex-hook) run_codex_hook ;;
   adapter) run_adapter ;;

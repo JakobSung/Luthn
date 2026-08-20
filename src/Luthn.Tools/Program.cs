@@ -42,6 +42,12 @@ switch (command)
     case "token-digest":
         await RunTokenDigest(args);
         break;
+    case "cloud-agent":
+        Environment.ExitCode = await new CloudAgentDeviceCommand().ExecuteAsync(
+            args.Skip(1).ToArray(),
+            Console.Out,
+            Console.Error);
+        break;
     case null:
         PrintUsage();
         break;
@@ -226,4 +232,5 @@ static void PrintUsage()
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- migrate-db");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- migration-script");
     Console.WriteLine("  printf '%s' \"$LUTHN_SERVICE_VALUE\" | dotnet run --project src/Luthn.Tools -- token-digest --stdin");
+    Console.WriteLine("  dotnet run --project src/Luthn.Tools -- cloud-agent --base-url https://cloud.example --state-dir path --state-key-file path --workspace uuid --agent codex|claude");
 }

@@ -6,14 +6,52 @@ Luthn은 한 설치에 Codex와 Claude Code를 동시에 연결할 수 있습니
 같은 Luthn API와 정책을 통과한 안전한 공유 기억을 사용하지만, 호스트 설정과
 연결 수명주기는 서로 독립적입니다.
 
-이 문서는 현재 구현된 개인/셀프호스트 연결과 선택 활성화 OSS Hub 기준선을 설명합니다.
-Hub는 server가 정한 identity와 metadata-only 감사를 사용해 암호화 durable ingress를
-받을 수 있지만 기본값은 비활성이고 Cloud 연결을 만들지 않습니다. 미래 팀 Cloud 모드도
-중앙 OSS Hub 하나를 사용하며 구성원 PC마다 전체 runtime을 설치하지 않습니다. 구성원은
-OAuth로 Cloud remote MCP endpoint를 등록하고 Agent-native hook, plugin 또는 관리형
-설정으로 lifecycle capture를 활성화합니다. MCP만으로는 회상과 도구는 제공할 수 있지만
-자동 수집까지 보장하지 않습니다. 자세한 내용은
+이 문서는 구현된 개인/셀프호스트 연결, 선택 활성화 OSS Hub 기준선, 별도 라이선스의
+Luthn Cloud가 사용하는 Apache-2.0 AgentDevice client 경계를 설명합니다. Hub는
+서버가 정한 identity와 metadata-only 감사를 사용해 암호화 durable ingress를 받을 수
+있지만 기본값은 비활성입니다. Cloud 연결은 별도의 명시적 작업이며 로컬 MCP를
+비활성화하지 않습니다. MCP는 회상과 도구를 제공하고, 자동 수명주기 수집은 독립적인
+Agent-native hook, plugin 또는 관리형 설정이 담당합니다. 자세한 내용은
 [중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)에 있습니다.
+
+## 로컬 Luthn을 유지하면서 Cloud 추가하기
+
+관리자가 Workspace ID와 Cloud 주소를 제공하면 두 번째 MCP 서버를 연결합니다.
+
+```bash
+luthn cloud connect codex \
+  --workspace 00000000-0000-0000-0000-000000000000 \
+  --cloud-url https://cloud.example
+
+luthn cloud status codex
+```
+
+이 명령은 서로 다른 장치 키 쌍 세 개를 만들고, private key와 credential을
+AES-256-GCM으로 암호화한 로컬 상태 파일에 저장합니다. 무작위 복호화 키는 운영 데이터
+볼륨과 분리된 호스트의 소유자 전용 설정 파일에 두고, 코드 기반 장치 승인 페이지를
+엽니다. 승인된 remote MCP는
+`luthn-cloud`라는 별도 이름으로 등록됩니다. 브라우저 주소와 사용자 코드는 따로
+표시하므로 코드가 브라우저 기록, referrer 또는 proxy URL log에 들어가지 않습니다.
+기존 로컬 `luthn` 등록은 보존되며 Cloud 장애 중에도 계속 동작합니다.
+
+Codex는 MCP 등록 뒤 OAuth를 완료합니다. Claude Code도 같은 remote MCP endpoint를
+사용하고 연결 시 지원되는 OAuth 흐름을 진행합니다. Cloud 동의 화면은 정확한
+Organization, Workspace, 장치와 Agent 연결을 묶으며, PC에 조직 공용 token을
+설치하지 않습니다.
+
+상태 파일과 분리된 복호화 키는 같은 보호 수준의 호스트 backup 정책으로 함께
+보관해야 합니다. 키를 잃으면 AgentDevice 상태는 의도적으로 복구할 수 없으므로
+Cloud 콘솔에서 장치를 철회하고 다시 등록해야 합니다.
+
+로컬 해제는 Luthn이 소유한 설정에만 적용됩니다.
+
+```bash
+luthn cloud disconnect codex
+```
+
+이 명령은 로컬의 `luthn-cloud` 등록만 제거합니다. 서버 접근 권한 종료는 Cloud 고객
+콘솔에서 해당 AgentConnection 또는 장치를 철회해야 합니다. 사용자가
+`luthn cloud connect`를 명시적으로 실행하기 전까지 Cloud 모드는 꺼져 있습니다.
 
 ## 동시에 연결하기
 

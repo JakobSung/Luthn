@@ -6,16 +6,55 @@ Luthn can connect Codex and Claude Code to one installation at the same time.
 Both agents use the same Luthn API and policy-approved safe memory, while their
 host configuration and connection lifecycle remain independent.
 
-This document describes the currently implemented personal/self-hosted
-connection and the opt-in OSS Hub baseline. The Hub can accept encrypted
+This document describes the implemented personal/self-hosted connection, the
+opt-in OSS Hub baseline, and the Apache-2.0 AgentDevice client boundary used by
+the separately licensed Luthn Cloud service. The Hub can accept encrypted
 durable ingress with server-derived identity and metadata-only audit, but it is
-disabled by default and does not establish a Cloud connection. The future team
-Cloud mode still uses one central OSS Hub and does not require the full runtime
-on each member PC. A member will register the Cloud remote MCP endpoint with
-OAuth and enable an Agent-native hook, plugin, or managed configuration for
-lifecycle capture. MCP alone provides recall and tools but does not guarantee
-automatic capture. See
+disabled by default. Cloud connection is a separate, explicit operation and
+never disables the local MCP server. MCP provides recall and tools; automatic
+lifecycle capture remains an independent Agent-native hook, plugin, or managed
+configuration. See
 [`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
+
+## Add Cloud Without Replacing Local Luthn
+
+After an administrator provides the Workspace ID and Cloud origin, connect a
+second MCP server:
+
+```bash
+luthn cloud connect codex \
+  --workspace 00000000-0000-0000-0000-000000000000 \
+  --cloud-url https://cloud.example
+
+luthn cloud status codex
+```
+
+The command creates three distinct device key pairs, stores private keys and
+credentials in an AES-256-GCM encrypted local state file, keeps its randomly
+generated decryption key in a separate owner-only host configuration file, and opens a code-based device
+approval page, and registers the approved remote MCP as `luthn-cloud`. The
+browser URL and user code are displayed separately so the code does not enter
+browser history, referrer data, or proxy URL logs. The existing local `luthn`
+registration is preserved and continues working when Cloud is unavailable.
+
+Codex completes OAuth after MCP registration. Claude Code uses the same remote
+MCP endpoint and performs its supported OAuth flow when connecting. The Cloud
+consent screen binds the exact Organization, Workspace, device, and Agent
+connection; no Organization-wide shared token is installed on the PC.
+
+Back up the state file and its separate key through the same protected host
+backup policy. Losing the key makes the AgentDevice state intentionally
+unrecoverable and requires device revocation and re-enrollment.
+
+Local removal is ownership-safe:
+
+```bash
+luthn cloud disconnect codex
+```
+
+This removes only the Luthn-owned local `luthn-cloud` registration. Server-side
+authority must be revoked in the Cloud customer console. Cloud mode remains
+off until a user runs `luthn cloud connect` explicitly.
 
 ## Connect Both Agents
 

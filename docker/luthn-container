@@ -12,6 +12,7 @@ commands:
   seed-demo
   migration-script
   token-digest --stdin
+  cloud-agent --base-url URL --state-dir path --state-key-file path --workspace uuid --agent codex|claude
   classification-eval [--dataset path] [--output path]
   mcp [--list-tools]
   adapter
@@ -67,7 +68,7 @@ case "$command" in
     cd /app/worker
     exec dotnet /app/worker/Luthn.Host.Worker.dll "$@"
     ;;
-  migrate-db|seed-demo|migration-script|token-digest|classification-eval)
+  migrate-db|seed-demo|migration-script|token-digest|classification-eval|cloud-agent)
     exec dotnet /app/tools/Luthn.Tools.dll "$command" "$@"
     ;;
   mcp)

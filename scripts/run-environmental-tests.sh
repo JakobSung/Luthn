@@ -69,7 +69,7 @@ print_docker_rows() {
   result="$1"
   state="$(result_state "$result")"
   reason="$(result_reason "$result")"
-  printf '%s\n' "docker-connectors | scripts/tests/test-agent-connector-lifecycle.sh, scripts/tests/test-claude-connector-lifecycle.sh | $state | $reason"
+  printf '%s\n' "docker-connectors | scripts/tests/test-agent-connector-lifecycle.sh, scripts/tests/test-claude-connector-lifecycle.sh, scripts/tests/test-cloud-agent-connection-lifecycle.sh | $state | $reason"
   printf '%s\n' "docker-distribution | scripts/tests/test-distribution-lifecycle.sh | $state | $reason"
   printf '%s\n' "postgres-integration | scripts/tests/test-postgres-integration-smoke.sh | $state | $reason"
 }
@@ -80,6 +80,7 @@ print_windows_rows() {
   reason="$(result_reason "$result")"
   printf '%s\n' "windows-hook | scripts/tests/test-windows-codex-hook-smoke.ps1 | $state | $reason"
   printf '%s\n' "windows-lifecycle | scripts/tests/test-windows-lifecycle.ps1 | $state | $reason"
+  printf '%s\n' "windows-cloud-agent | scripts/tests/test-windows-cloud-agent-lifecycle.ps1 | $state | $reason"
 }
 
 print_status() {
@@ -114,6 +115,7 @@ selected_unavailable() {
 run_docker_suites() {
   bash "$repo_root/scripts/tests/test-agent-connector-lifecycle.sh"
   bash "$repo_root/scripts/tests/test-claude-connector-lifecycle.sh"
+  bash "$repo_root/scripts/tests/test-cloud-agent-connection-lifecycle.sh"
   bash "$repo_root/scripts/tests/test-distribution-lifecycle.sh"
   bash "$repo_root/scripts/tests/test-postgres-integration-smoke.sh"
 }
@@ -121,6 +123,7 @@ run_docker_suites() {
 run_windows_suites() {
   pwsh -File "$repo_root/scripts/tests/test-windows-codex-hook-smoke.ps1"
   pwsh -File "$repo_root/scripts/tests/test-windows-lifecycle.ps1" -RepoRoot "$repo_root"
+  pwsh -File "$repo_root/scripts/tests/test-windows-cloud-agent-lifecycle.ps1" -RepoRoot "$repo_root"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -173,6 +176,7 @@ if [ "$mode" = "list" ]; then
   printf '%s\n' "postgres-integration | PostgreSQL integration smoke script | not-sampled | --run docker"
   printf '%s\n' "windows-hook | Windows Codex hook smoke script | not-sampled | --run windows"
   printf '%s\n' "windows-lifecycle | Windows lifecycle script | not-sampled | --run windows"
+  printf '%s\n' "windows-cloud-agent | Windows Cloud Agent lifecycle script | not-sampled | --run windows"
   exit 0
 fi
 

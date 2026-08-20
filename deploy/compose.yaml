@@ -134,6 +134,28 @@ services:
     secrets:
       - service-token
 
+  cloud-agent:
+    profiles: ["tools"]
+    image: *luthn-image
+    command:
+      - cloud-agent
+      - --base-url
+      - ${LUTHN_CLOUD_BASE_URL:-https://cloud.invalid}
+      - --state-dir
+      - /var/lib/luthn/operator/cloud-agent
+      - --state-key-file
+      - /run/secrets/cloud-agent-state-key
+      - --workspace
+      - ${LUTHN_CLOUD_WORKSPACE_ID:-00000000-0000-0000-0000-000000000000}
+      - --agent
+      - ${LUTHN_CLOUD_AGENT_KIND:-disabled}
+      - --capability
+      - ${LUTHN_CLOUD_CAPABILITY_PRESET:-reader}
+      - --device-name
+      - ${LUTHN_CLOUD_DEVICE_NAME:-Luthn local device}
+    volumes:
+      - operator-data:/var/lib/luthn/operator
+
 secrets:
   service-token:
     file: ${LUTHN_SERVICE_TOKEN_FILE:?service token file is required}

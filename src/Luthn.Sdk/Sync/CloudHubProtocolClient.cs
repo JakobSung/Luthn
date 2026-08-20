@@ -548,7 +548,7 @@ public sealed class CloudHubProtocolClient(HttpClient httpClient, TimeProvider t
                 HubEnrollmentProofContractVersions.V2,
                 key.KeyId));
 
-    private static string CreateRequestProof(
+    internal static string CreateRequestProof(
         CloudHubKeyMaterial key,
         string credential,
         string method,
@@ -564,7 +564,7 @@ public sealed class CloudHubProtocolClient(HttpClient httpClient, TimeProvider t
                 now.AddMinutes(1).ToUnixTimeSeconds(),
                 Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(credential)))));
 
-    private static string CreateProof<T>(CloudHubKeyMaterial key, T payload)
+    internal static string CreateProof<T>(CloudHubKeyMaterial key, T payload)
     {
         var header = new ProofHeader(DpopType, Algorithm, key.PublicKey);
         var headerSegment = Base64Url(JsonSerializer.SerializeToUtf8Bytes(header, SerializerOptions));
@@ -579,7 +579,7 @@ public sealed class CloudHubProtocolClient(HttpClient httpClient, TimeProvider t
         return $"{headerSegment}.{payloadSegment}.{Base64Url(signature)}";
     }
 
-    private static string ComputeThumbprint(P256PublicJwkDto key)
+    internal static string ComputeThumbprint(P256PublicJwkDto key)
     {
         var canonical = Encoding.UTF8.GetBytes(
             $"{{\"crv\":\"{key.Curve}\",\"kty\":\"{key.KeyType}\",\"x\":\"{key.X}\",\"y\":\"{key.Y}\"}}");
@@ -720,12 +720,12 @@ public sealed class CloudHubProtocolClient(HttpClient httpClient, TimeProvider t
     private static string OpaqueDigest(string prefix, byte[] value) =>
         $"{prefix}_{Base64Url(SHA256.HashData(value))}";
 
-    private static string NewJti() => Base64Url(RandomNumberGenerator.GetBytes(24));
+    internal static string NewJti() => Base64Url(RandomNumberGenerator.GetBytes(24));
 
-    private static string NormalizeHtu(Uri uri) =>
+    internal static string NormalizeHtu(Uri uri) =>
         uri.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
 
-    private static string Base64Url(byte[] value) =>
+    internal static string Base64Url(byte[] value) =>
         Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private static JsonSerializerOptions CreateSerializerOptions()

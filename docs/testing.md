@@ -8,11 +8,12 @@ default execution path, not the importance of the coverage.
 
 ## Current baseline
 
-The canonical inventory currently contains 43 C# test sources, 7 .NET test
-projects, and 15 files under `scripts/tests/`, for 65 test-related files. The
-latest full .NET run covered 471 test cases. File count and test-case count are
-tracked separately; both include the Hub ingress/worker, operator-console,
-audit-lifecycle, and Cloud-contract coverage added after the previous baseline.
+The canonical inventory currently contains 66 C# test sources, 7 .NET test
+projects, 16 files under `scripts/tests/`, and one SDK test-license file, for 90
+test-related files. The latest full .NET run covered 710 test cases. File count
+and test-case count are tracked separately; both include the Hub ingress/worker,
+operator-console, protected-access, and Cloud AgentDevice coverage added after
+the previous baseline.
 
 File count and test-case count are tracked separately. A future reduction must
 show the retained security, sensitive-data, retrieval, recall, ownership, and
@@ -89,10 +90,12 @@ check.
 | `full` | `dotnet format Luthn.sln --no-restore --verify-no-changes` | Prove the reviewed delivery head has no formatting drift. |
 | `environmental` | `bash scripts/tests/test-agent-connector-lifecycle.sh` | Exercise the connector lifecycle against the local distribution runtime, including restart and ownership behavior. |
 | `environmental` | `bash scripts/tests/test-claude-connector-lifecycle.sh` | Exercise the Claude connector lifecycle against the local distribution runtime. |
+| `environmental` | `bash scripts/tests/test-cloud-agent-connection-lifecycle.sh` | Exercise additive Cloud MCP registration, ownership, local preservation, and removal. |
 | `environmental` | `bash scripts/tests/test-distribution-lifecycle.sh` | Exercise Docker distribution startup, migration, update, rollback, safe projection, and persistence behavior. |
 | `environmental` | `bash scripts/tests/test-postgres-integration-smoke.sh` | Start an isolated PostgreSQL container and run the opt-in integration smoke test. |
 | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Validate the Windows Codex hook smoke path. |
 | `environmental` | `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | Validate Windows install, update, migration, backup, rollback, and cleanup behavior. |
+| `environmental` | `pwsh -File scripts/tests/test-windows-cloud-agent-lifecycle.ps1 -RepoRoot $PWD` | Validate additive Windows Cloud Agent connection, outage fallback, ownership, and cleanup behavior. |
 
 The focused batch runner uses one static OR filter for the existing Host API
 test project. It covers `MemoryEndpointTests`, `AgentSafeEndpointTests`,
@@ -125,6 +128,7 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | --- | --- | --- | --- |
 | `scripts/tests/test-agent-connector-lifecycle.sh` | `environmental` | `bash scripts/tests/test-agent-connector-lifecycle.sh` | Live connector lifecycle, restart, ownership, and rollback behavior. |
 | `scripts/tests/test-claude-connector-lifecycle.sh` | `environmental` | `bash scripts/tests/test-claude-connector-lifecycle.sh` | Claude connector lifecycle and failure handling. |
+| `scripts/tests/test-cloud-agent-connection-lifecycle.sh` | `environmental` | `bash scripts/tests/test-cloud-agent-connection-lifecycle.sh` | Additive Cloud MCP connection, local MCP preservation, ownership, status, conflict, and disconnect behavior. |
 | `scripts/tests/test-distribution-lifecycle.sh` | `environmental` | `bash scripts/tests/test-distribution-lifecycle.sh` | Docker distribution startup, update, rollback, persistence, and safe projection. |
 | `scripts/tests/test-local-script-safety.sh` | `fast` | `bash scripts/tests/test-local-script-safety.sh` | Local script safety and generated configuration checks. |
 | `scripts/tests/test-postgres-integration-smoke.sh` | `environmental` | `bash scripts/tests/test-postgres-integration-smoke.sh` | Opt-in PostgreSQL integration smoke coverage. |
@@ -135,6 +139,7 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `scripts/tests/test-test-tier-timing-contract.sh` | `fast` | `bash scripts/tests/test-test-tier-timing-contract.sh` | Deterministic timing run-count and option contract without executing test suites. |
 | `scripts/tests/test-windows-codex-hook-smoke.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Windows Codex hook smoke behavior. |
 | `scripts/tests/test-windows-lifecycle.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-lifecycle.ps1 -RepoRoot $PWD` | Windows lifecycle, update, migration, backup, rollback, and cleanup. |
+| `scripts/tests/test-windows-cloud-agent-lifecycle.ps1` | `environmental` | `pwsh -File scripts/tests/test-windows-cloud-agent-lifecycle.ps1 -RepoRoot $PWD` | Windows Cloud Agent connection, outage fallback, ownership, and cleanup. |
 | `scripts/tests/test_codex_connector.py` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | Deterministic Codex hook, instruction, and turn-capsule contracts. |
 | `scripts/tests/test_release_container.py` | `focused` | `python3 -m unittest scripts/tests/test_release_container.py` | Release-container command and configuration contracts. |
 | `scripts/tests/test_version_contract.py` | `fast` | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | Version and release metadata contracts. |
@@ -146,6 +151,9 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `tests/Luthn.Core.Persistence.Tests/HubIngressPersistenceTests.cs` | `focused` | `dotnet test tests/Luthn.Core.Persistence.Tests/Luthn.Core.Persistence.Tests.csproj --no-restore --filter FullyQualifiedName~HubIngressPersistenceTests` | Durable Hub ingress queue restart and Workspace partition persistence. |
 | `tests/Luthn.Core.Persistence.Tests/HubRelayOutboxTests.cs` | `focused` | `dotnet test tests/Luthn.Core.Persistence.Tests/Luthn.Core.Persistence.Tests.csproj --no-restore --filter FullyQualifiedName~HubRelayOutboxTests` | Disabled/fake relay, outage continuity, checkpoint, revoke-first, and unsafe-envelope boundaries. |
 | `tests/Luthn.Core.Persistence.Tests/CloudHubConnectionTests.cs` | `focused` | `dotnet test tests/Luthn.Core.Persistence.Tests/Luthn.Core.Persistence.Tests.csproj --no-restore --filter FullyQualifiedName~CloudHubConnectionTests` | Protected restartable Cloud state, owner-only file mode, local-ID hashing, and retryable outage behavior. |
+| `tests/Luthn.Core.Persistence.Tests/CloudAgentDeviceConnectionTests.cs` | `focused` | `dotnet test tests/Luthn.Core.Persistence.Tests/Luthn.Core.Persistence.Tests.csproj --no-restore --filter FullyQualifiedName~CloudAgentDeviceConnectionTests` | Protected AgentDevice keys and credentials, restart behavior, failed-update preservation, and disabled-by-default Cloud state. |
+| `tests/Luthn.Core.Persistence.Tests/SensitiveAccessPolicyPersistenceTests.cs` | `focused` | `dotnet test tests/Luthn.Core.Persistence.Tests/Luthn.Core.Persistence.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessPolicyPersistenceTests` | Sensitive-access policy persistence and reload boundaries. |
+| `tests/Luthn.Core.Persistence.Tests/SensitiveAccessTombstonePersistenceTests.cs` | `focused` | `dotnet test tests/Luthn.Core.Persistence.Tests/Luthn.Core.Persistence.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessTombstonePersistenceTests` | Sensitive-access tombstone durability and cleanup ordering. |
 | `tests/Luthn.Core.Tests/ClassificationContractTests.cs` | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | Classifier taxonomy, projection, and Korean/mixed contract cases. |
 | `tests/Luthn.Core.Tests/ClassificationGoldenEvaluationTests.cs` | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | Golden dataset schema, deterministic evaluation, and mismatch accounting. |
 | `tests/Luthn.Core.Tests/ContextPackBuilderTests.cs` | `fast` | `dotnet test tests/Luthn.Core.Tests/Luthn.Core.Tests.csproj --no-restore` | Bounded context-pack construction. |
@@ -166,6 +174,10 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `tests/Luthn.Host.Api.Tests/AuditLifecycleTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~AuditLifecycleTests` | Audit categories, cursor/filter contracts, metadata-only export, and retention cleanup. |
 | `tests/Luthn.Host.Api.Tests/ClassificationPreviewTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ClassificationPreviewTests` | Classification preview endpoint boundary. |
 | `tests/Luthn.Host.Api.Tests/CollectionProvenanceTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~CollectionProvenanceTests` | Collection provenance and source lineage. |
+| `tests/Luthn.Host.Api.Tests/ConsoleCloudLoginTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ConsoleCloudLoginTests` | Local console Cloud login handoff and fail-closed boundary. |
+| `tests/Luthn.Host.Api.Tests/ConsoleEnrollmentTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ConsoleEnrollmentTests` | Console enrollment proof and authorization behavior. |
+| `tests/Luthn.Host.Api.Tests/ConsoleLifecycleTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ConsoleLifecycleTests` | Local console lifecycle and ownership-safe state transitions. |
+| `tests/Luthn.Host.Api.Tests/ConsoleSessionSecurityTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ConsoleSessionSecurityTests` | Console session expiry, integrity, and authorization security. |
 | `tests/Luthn.Host.Api.Tests/ExternalPublicationEndpointTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ExternalPublicationEndpointTests` | External publication approval and safe projection behavior. |
 | `tests/Luthn.Host.Api.Tests/HubIngressTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~HubIngressTests` | Server-derived Hub identity, idempotency, backpressure, zero-outbound, and replay authorization. |
 | `tests/Luthn.Host.Api.Tests/HubIngressWorkerTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~HubIngressWorkerTests` | Hub lease recovery, bounded retry/dead-letter/replay, fairness, and delayed provider behavior. |
@@ -175,9 +187,19 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `tests/Luthn.Host.Api.Tests/OperatorConsoleTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OperatorConsole` | Operator console profile, approval/publication separation, localization, and safe DOM contract. |
 | `tests/Luthn.Host.Api.Tests/OwnershipIsolationTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~OwnershipIsolationTests` | Multi-user owner isolation and forbidden agent mutation. |
 | `tests/Luthn.Host.Api.Tests/PostgresIntegrationSmokeTests.cs` | `environmental` | `bash scripts/tests/test-postgres-integration-smoke.sh` | PostgreSQL-backed integration path; opt-in and reset-gated. |
+| `tests/Luthn.Host.Api.Tests/ProtectedInformationAccessEndpointTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ProtectedInformationAccessEndpointTests` | Protected-information request, wait, and response endpoint boundary. |
+| `tests/Luthn.Host.Api.Tests/ProtectedInformationAccessResolutionTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ProtectedInformationAccessResolutionTests` | Approved protected-information resolution and one-time result behavior. |
 | `tests/Luthn.Host.Api.Tests/RetrievalCandidateSelectorTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~RetrievalCandidateSelectorTests` | Bounded candidate preselection, scope, safety, and recency. |
 | `tests/Luthn.Host.Api.Tests/RetrievalEndpointTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~RetrievalEndpointTests` | Search endpoint retrieval, latency, zero-result, and telemetry resilience. |
 | `tests/Luthn.Host.Api.Tests/SensitiveMemoryProtectionTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveMemoryProtectionTests` | Sensitive payload encryption, migration, tamper detection, and fail-closed writes. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessConsoleLifecycleTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessConsoleLifecycleTests` | Operator-console sensitive request, decision, and lifecycle boundaries. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessExpiryAndAuditMetricsTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessExpiryAndAuditMetricsTests` | Sensitive-access expiry, content-free audit, and metrics behavior. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessPolicyAndGrantWorkflowTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessPolicyAndGrantWorkflowTests` | Policy evaluation and grant workflow invariants. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessPolicyEndpointTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessPolicyEndpointTests` | Sensitive-access policy endpoint authorization and validation. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessResolutionTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessResolutionTests` | Sensitive-access resolution, delivery, and terminal-state behavior. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessTombstoneCleanupTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessTombstoneCleanupTests` | Tombstone cleanup, retention, and deletion ordering. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessWorkflowBoundaryTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessWorkflowBoundaryTests` | Request, approval, denial, timeout, and one-time workflow boundaries. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessWorkflowBypassTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessWorkflowBypassTests` | Authorization and self-approval bypass resistance. |
 | `tests/Luthn.Host.Api.Tests/SourceIntakeTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SourceIntakeTests` | Source intake and safe publication boundary. |
 | `tests/Luthn.Host.Api.Tests/TestSensitiveMemoryProtection.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveMemoryProtectionTests` | Sensitive-memory test fixture and protection setup. |
 | `tests/Luthn.Host.Api.Tests/TurnSummaryEndpointTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~TurnSummaryEndpointTests` | Turn-summary intake and retention behavior. |
@@ -186,8 +208,13 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore` | SDK project-level contracts. |
 | `tests/Luthn.Sdk.Tests/CloudContractTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore --filter FullyQualifiedName~CloudContractTests` | Additive enrollment, capability, safe-projection, receipt, checkpoint, bounded-error, and forbidden-field contracts. |
 | `tests/Luthn.Sdk.Tests/CloudHubProtocolClientTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore --filter FullyQualifiedName~CloudHubProtocolClientTests` | P-256 enrollment proof, DPoP requests, refresh rotation, strict response validation, and non-HTTPS remote rejection. |
+| `tests/Luthn.Sdk.Tests/AgentDeviceProtocolClientTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore --filter FullyQualifiedName~AgentDeviceProtocolClientTests` | AgentDevice P-256 and distinct X25519 keys, DPoP enrollment, connection, rotation, strict URI, and non-TLS rejection. |
+| `tests/Luthn.Sdk.Tests/ConsoleSessionContractTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore --filter FullyQualifiedName~ConsoleSessionContractTests` | Console session wire contracts and fail-closed parsing. |
+| `tests/Luthn.Sdk.Tests/LICENSE.md` | `full` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore` | SDK test fixture licensing boundary. |
 | `tests/Luthn.Sdk.Tests/SdkContractTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore` | SDK request and response contracts. |
+| `tests/Luthn.Sdk.Tests/SensitiveAccessLifecycleContractTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessLifecycleContractTests` | Sensitive-access request, decision, expiry, one-time grant, and failure wire contracts. |
 | `tests/Luthn.Tools.Tests/ClassificationEvaluationCommandTests.cs` | `fast` | `dotnet test tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj --no-restore` | Classification evaluation command, local deterministic, same-device HTTP, and output contracts. |
+| `tests/Luthn.Tools.Tests/CloudAgentDeviceCommandTests.cs` | `fast` | `dotnet test tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj --no-restore --filter FullyQualifiedName~CloudAgentDeviceCommandTests` | Protected state progression, safe device-code output, DPoP connection, and non-TLS rejection. |
 | `tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj` | `fast` | `dotnet test tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj --no-restore` | Tools project-level deterministic checks. |
 | `tests/Luthn.Tools.Tests/ServiceTokenDigestTests.cs` | `fast` | `dotnet test tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj --no-restore` | Service-token digest and secret-handling contracts. |
 

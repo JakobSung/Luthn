@@ -31,6 +31,7 @@ $script:ComposeFile = if ($env:LUTHN_COMPOSE_FILE) { $env:LUTHN_COMPOSE_FILE } e
 $script:ConfigFile = if ($env:LUTHN_CONFIG_FILE) { $env:LUTHN_CONFIG_FILE } else { Join-Path $script:ConfigDir "luthn.env" }
 $script:TokenFile = if ($env:LUTHN_SERVICE_TOKEN_FILE) { $env:LUTHN_SERVICE_TOKEN_FILE } else { Join-Path $script:ConfigDir "service-token" }
 $script:OperatorTokenFile = if ($env:LUTHN_OPERATOR_TOKEN_FILE) { $env:LUTHN_OPERATOR_TOKEN_FILE } else { Join-Path $script:ConfigDir "operator-token" }
+$script:CloudAgentStateKeyFile = if ($env:LUTHN_CLOUD_AGENT_STATE_KEY_FILE) { $env:LUTHN_CLOUD_AGENT_STATE_KEY_FILE } else { Join-Path $script:ConfigDir "cloud-agent-state-key" }
 $script:ConnectorStateDir = if ($env:LUTHN_CONNECTOR_STATE_DIR) { $env:LUTHN_CONNECTOR_STATE_DIR } else { Join-Path $script:StateDir "connectors" }
 $script:CodexStateFile = if ($env:LUTHN_CODEX_STATE_FILE) { $env:LUTHN_CODEX_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.json" }
 $script:CodexPendingStateFile = if ($env:LUTHN_CODEX_PENDING_STATE_FILE) { $env:LUTHN_CODEX_PENDING_STATE_FILE } else { Join-Path $script:ConnectorStateDir "codex-windows.pending.json" }
@@ -39,6 +40,8 @@ $script:CodexHooksFile = if ($env:LUTHN_CODEX_HOOKS_FILE) { $env:LUTHN_CODEX_HOO
 $script:CodexInstructionsFile = if ($env:LUTHN_CODEX_INSTRUCTIONS_FILE) { $env:LUTHN_CODEX_INSTRUCTIONS_FILE } else { Join-Path $script:CodexHome "AGENTS.md" }
 $script:ClaudeStateFile = if ($env:LUTHN_CLAUDE_STATE_FILE) { $env:LUTHN_CLAUDE_STATE_FILE } else { Join-Path $script:ConnectorStateDir "claude-code-windows.json" }
 $script:ClaudePendingStateFile = if ($env:LUTHN_CLAUDE_PENDING_STATE_FILE) { $env:LUTHN_CLAUDE_PENDING_STATE_FILE } else { Join-Path $script:ConnectorStateDir "claude-code-windows.pending.json" }
+$script:CloudCodexStateFile = if ($env:LUTHN_CLOUD_CODEX_STATE_FILE) { $env:LUTHN_CLOUD_CODEX_STATE_FILE } else { Join-Path $script:ConnectorStateDir "cloud-codex-windows.json" }
+$script:CloudClaudeStateFile = if ($env:LUTHN_CLOUD_CLAUDE_STATE_FILE) { $env:LUTHN_CLOUD_CLAUDE_STATE_FILE } else { Join-Path $script:ConnectorStateDir "cloud-claude-windows.json" }
 $script:ClaudeHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } elseif ($env:USERPROFILE) { Join-Path $env:USERPROFILE ".claude" } else { throw "USERPROFILE or CLAUDE_CONFIG_DIR is required." }
 $script:ClaudeSettingsFile = if ($env:LUTHN_CLAUDE_SETTINGS_FILE) { $env:LUTHN_CLAUDE_SETTINGS_FILE } else { Join-Path $script:ClaudeHome "settings.json" }
 $script:ClaudeInstructionsFile = if ($env:LUTHN_CLAUDE_INSTRUCTIONS_FILE) { $env:LUTHN_CLAUDE_INSTRUCTIONS_FILE } else { Join-Path $script:ClaudeHome "CLAUDE.md" }
@@ -215,6 +218,11 @@ commands:
   connection status codex|claude
                              Show local and server connector state.
   disconnect codex|claude    Remove only Luthn-owned connector configuration.
+  cloud connect codex|claude --workspace UUID --cloud-url HTTPS_URL
+                             Add a separate Cloud MCP connection; local MCP stays active.
+  cloud status codex|claude  Show the local Cloud MCP registration state.
+  cloud disconnect codex|claude
+                             Remove only the Luthn-owned Cloud MCP registration.
   mcp [--list-tools]         Run the Docker-backed MCP stdio server.
   uninstall                  Remove services and runtime; preserve data/config.
   help                       Show this help.
@@ -2724,6 +2732,170 @@ function Show-ClaudeConnectionStatus {
     try { $credentials = Get-CodexApiCredentials; $response = Invoke-LuthnApiRequest "GET" "$($credentials.BaseUrl)/api/agent-connections" $credentials.Token; $connection = @($response["connections"] | Where-Object { $_["agentId"] -ceq "claude-code" }) | Select-Object -First 1; if (-not $connection) { Write-Host "Server observation: unknown"; return }; Write-Host "Server observation: $($connection['state'])"; foreach ($channel in @($connection["channels"])) { Write-Host "  $($channel['channel']): $($channel['state'])" } } catch { Write-Host "Server observation: unavailable" }
 }
 
+function Get-CloudAgentTool([string]$AgentKind) {
+    if ($AgentKind -ceq "codex") { return Get-CodexTool }
+    if ($AgentKind -ceq "claude") { return Get-ClaudeTool }
+    throw "agent kind must be codex or claude"
+}
+
+function Get-CloudStateFile([string]$AgentKind) {
+    if ($AgentKind -ceq "codex") { return $script:CloudCodexStateFile }
+    if ($AgentKind -ceq "claude") { return $script:CloudClaudeStateFile }
+    throw "agent kind must be codex or claude"
+}
+
+function Test-CloudMcpRegistration($Tool) {
+    $result = Invoke-ToolCapture -Tool $Tool -Arguments @("mcp", "get", "luthn-cloud")
+    return $result.ExitCode -eq 0
+}
+
+function Invoke-CloudAgentStep(
+    [string]$CloudUrl,
+    [string]$WorkspaceId,
+    [string]$AgentKind,
+    [string]$Capability,
+    [string]$DeviceName
+) {
+    $result = Invoke-ComposeCapture @(
+        "--profile", "tools", "run", "--rm", "--no-deps", "-T",
+        "--volume", "$($script:CloudAgentStateKeyFile):/run/secrets/cloud-agent-state-key:ro",
+        "cloud-agent",
+        "cloud-agent",
+        "--base-url", $CloudUrl,
+        "--state-dir", "/var/lib/luthn/operator/cloud-agent",
+        "--state-key-file", "/run/secrets/cloud-agent-state-key",
+        "--workspace", $WorkspaceId,
+        "--agent", $AgentKind,
+        "--capability", $Capability,
+        "--device-name", $DeviceName
+    )
+    Assert-ToolSuccess $result "Cloud AgentDevice connection"
+    return $result.StdOut | ConvertFrom-Json
+}
+
+function Ensure-CloudAgentStateKey {
+    if ([IO.File]::Exists($script:CloudAgentStateKeyFile)) {
+        try { $key = [Convert]::FromBase64String([IO.File]::ReadAllText($script:CloudAgentStateKeyFile).Trim()) } catch { throw "The Cloud AgentDevice state key file is invalid; no configuration was changed." }
+        try { if ($key.Length -ne 32) { throw "The Cloud AgentDevice state key file is invalid; no configuration was changed." } } finally { [Security.Cryptography.CryptographicOperations]::ZeroMemory($key) }
+        Protect-SecretFile $script:CloudAgentStateKeyFile
+        return
+    }
+    Ensure-Directories
+    $key = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+    try {
+        Write-Utf8File -Path $script:CloudAgentStateKeyFile -Content ([Convert]::ToBase64String($key) + "`n")
+        Protect-SecretFile $script:CloudAgentStateKeyFile
+    } finally {
+        [Security.Cryptography.CryptographicOperations]::ZeroMemory($key)
+    }
+}
+
+function Connect-CloudAgent([string]$AgentKind, [string[]]$Arguments = @()) {
+    $workspaceId = ""
+    $cloudUrl = ""
+    $capability = "reader"
+    $deviceName = [Environment]::MachineName
+    for ($index = 0; $index -lt $Arguments.Count; $index += 2) {
+        if ($index + 1 -ge $Arguments.Count) { throw "Every Cloud connection option requires a value." }
+        switch -CaseSensitive ($Arguments[$index]) {
+            "--workspace" { $workspaceId = $Arguments[$index + 1] }
+            "--cloud-url" { $cloudUrl = $Arguments[$index + 1] }
+            "--capability" { $capability = $Arguments[$index + 1] }
+            "--device-name" { $deviceName = $Arguments[$index + 1] }
+            default { throw "usage: luthn cloud connect codex|claude --workspace UUID --cloud-url HTTPS_URL [--capability reader|contributor|sensitive-requester] [--device-name name]" }
+        }
+    }
+    if (-not $workspaceId -or -not $cloudUrl) { throw "--workspace and --cloud-url are required" }
+
+    Require-Installation
+    Test-DockerPreflight
+    $tool = Get-CloudAgentTool $AgentKind
+    $stateFile = Get-CloudStateFile $AgentKind
+    if ([IO.File]::Exists($stateFile)) {
+        Write-Host "The Luthn Cloud MCP registration for $AgentKind is already owned by this installation."
+        Write-Host "Run 'luthn cloud status $AgentKind' to inspect it."
+        return
+    }
+    if (Test-CloudMcpRegistration $tool) {
+        throw "$AgentKind already has an unrelated MCP registration named 'luthn-cloud'; no configuration was changed."
+    }
+    Ensure-CloudAgentStateKey
+
+    $response = Invoke-CloudAgentStep $cloudUrl $workspaceId $AgentKind $capability $deviceName
+    if ($response.state -ceq "approval-required") {
+        Write-Host "Approve this device in your browser:"
+        Write-Host "  URL:  $($response.verificationUri)"
+        Write-Host "  Code: $($response.userCode)"
+        Start-Process $response.verificationUri
+    }
+    for ($attempt = 0; $attempt -lt 120 -and $response.state -cne "connected"; $attempt++) {
+        if ($response.state -in @("approval-required", "pending")) {
+            $retryAfter = if ($response.retryAfterSeconds -as [int]) { [int]$response.retryAfterSeconds } else { 5 }
+            Start-Sleep -Seconds $retryAfter
+            $response = Invoke-CloudAgentStep $cloudUrl $workspaceId $AgentKind $capability $deviceName
+        } elseif ($response.state -in @("denied", "expired", "revoked")) {
+            throw "Cloud device enrollment ended with state: $($response.state)"
+        } else {
+            throw "Cloud device enrollment returned an invalid state."
+        }
+    }
+    if ($response.state -cne "connected") { throw "Cloud device enrollment timed out. Run the same command to continue safely." }
+
+    $added = $false
+    try {
+        if ($AgentKind -ceq "codex") {
+            Assert-ToolSuccess (Invoke-ToolCapture -Tool $tool -Arguments @("mcp", "add", "luthn-cloud", "--url", [string]$response.remoteMcpUrl)) "Codex Cloud MCP registration"
+            $added = $true
+            Invoke-ToolVisible -Tool $tool -Arguments @("mcp", "login", "luthn-cloud", "--scopes", "openid,email")
+        } else {
+            Assert-ToolSuccess (Invoke-ToolCapture -Tool $tool -Arguments @("mcp", "add", "--scope", "user", "--transport", "http", "luthn-cloud", [string]$response.remoteMcpUrl)) "Claude Cloud MCP registration"
+            $added = $true
+        }
+        Ensure-Directories
+        $state = [ordered]@{
+            version = 1
+            agentKind = $AgentKind
+            remoteMcpUrl = [string]$response.remoteMcpUrl
+            agentConnectionId = [string]$response.agentConnectionId
+            organizationId = [string]$response.organizationId
+            workspaceId = $workspaceId
+            updatedAt = [DateTimeOffset]::UtcNow.ToString("O")
+        } | ConvertTo-Json
+        Write-Utf8File -Path $stateFile -Content ($state + "`n")
+        Protect-SecretFile $stateFile
+    } catch {
+        if ($added) { [void](Invoke-ToolCapture -Tool $tool -Arguments @("mcp", "remove", "luthn-cloud")) }
+        throw
+    }
+    Write-Host "Luthn Cloud is connected as a separate 'luthn-cloud' MCP server."
+    Write-Host "The existing local 'luthn' MCP server was not changed."
+}
+
+function Show-CloudConnectionStatus([string]$AgentKind) {
+    $stateFile = Get-CloudStateFile $AgentKind
+    if (-not [IO.File]::Exists($stateFile)) {
+        Write-Host "Luthn does not own a Cloud MCP registration for $AgentKind."
+        return
+    }
+    $tool = Get-CloudAgentTool $AgentKind
+    if (-not (Test-CloudMcpRegistration $tool)) { throw "Luthn Cloud ownership exists, but the MCP registration is missing." }
+    Write-Host "Luthn Cloud MCP is registered for $AgentKind."
+    Write-Host "The Cloud console remains the authority for device and connection revocation."
+}
+
+function Disconnect-CloudAgent([string]$AgentKind) {
+    $stateFile = Get-CloudStateFile $AgentKind
+    if (-not [IO.File]::Exists($stateFile)) {
+        Write-Host "Luthn does not own a Cloud MCP registration for $AgentKind; no configuration was changed."
+        return
+    }
+    $tool = Get-CloudAgentTool $AgentKind
+    Assert-ToolSuccess (Invoke-ToolCapture -Tool $tool -Arguments @("mcp", "remove", "luthn-cloud")) "Cloud MCP removal"
+    [IO.File]::Delete($stateFile)
+    Write-Host "Removed the local 'luthn-cloud' MCP registration."
+    Write-Host "Revoke the AgentConnection or device in the Cloud console to end server-side access."
+}
+
 function Disconnect-Claude {
     $statePath = if ([IO.File]::Exists($script:ClaudeStateFile)) { $script:ClaudeStateFile } elseif ([IO.File]::Exists($script:ClaudePendingStateFile)) { $script:ClaudePendingStateFile } else { $null }
     if (-not $statePath) { Write-Host "No Luthn-owned Claude Code configuration was recorded."; return }
@@ -2823,6 +2995,17 @@ try {
             if ($CommandArguments[0] -ceq "codex") { Disconnect-Codex }
             elseif ($CommandArguments[0] -ceq "claude") { Disconnect-Claude }
             else { throw "usage: luthn disconnect codex|claude" }
+        }
+        "cloud" {
+            if ($CommandArguments.Count -lt 2) { throw "usage: luthn cloud connect|status|disconnect codex|claude" }
+            $action = $CommandArguments[0]
+            $agentKind = $CommandArguments[1]
+            if ($agentKind -notin @("codex", "claude")) { throw "usage: luthn cloud connect|status|disconnect codex|claude" }
+            $remaining = @($CommandArguments | Select-Object -Skip 2)
+            if ($action -ceq "connect") { Connect-CloudAgent $agentKind $remaining }
+            elseif ($action -ceq "status" -and $remaining.Count -eq 0) { Show-CloudConnectionStatus $agentKind }
+            elseif ($action -ceq "disconnect" -and $remaining.Count -eq 0) { Disconnect-CloudAgent $agentKind }
+            else { throw "usage: luthn cloud connect|status|disconnect codex|claude" }
         }
         "mcp" { Run-Mcp $CommandArguments }
         "codex-hook" {
