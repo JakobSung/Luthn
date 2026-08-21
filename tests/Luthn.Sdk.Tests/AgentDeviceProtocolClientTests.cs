@@ -143,6 +143,48 @@ public sealed class AgentDeviceProtocolClientTests
     }
 
     [Fact]
+    public async Task PendingEnrollmentMayOmitApprovedOnlyProperties()
+    {
+        var handler = new QueueHandler(
+            _ => Json(
+                HttpStatusCode.Created,
+                $$"""
+                {
+                  "enrollmentId":"enrollment_1",
+                  "verificationUri":"https://cloud.example/connect/device",
+                  "userCode":"ABCD-EFGH",
+                  "expiresAt":"{{Now.AddMinutes(10):O}}",
+                  "pollIntervalSeconds":5
+                }
+                """,
+                ("DPoP-Nonce", "nonce_1")),
+            _ => new HttpResponseMessage(HttpStatusCode.NoContent),
+            _ => Json(
+                HttpStatusCode.OK,
+                """
+                {
+                  "state":"Pending"
+                }
+                """));
+        using var httpClient = new HttpClient(handler);
+        var client = new AgentDeviceProtocolClient(httpClient, new FixedTimeProvider(Now));
+
+        var started = await client.BeginEnrollmentAsync(
+            AgentDeviceProtocolClient.CreateLocalState(),
+            Options,
+            "Member MacBook",
+            CancellationToken.None);
+        var pending = await client.PollEnrollmentAsync(
+            started.State,
+            Options,
+            CancellationToken.None);
+
+        Assert.Equal(AgentDeviceEnrollmentState.Pending, pending.StateValue);
+        Assert.NotNull(pending.State.PendingEnrollment);
+        Assert.Null(pending.State.Session);
+    }
+
+    [Fact]
     public async Task VerificationUriContainingTheUserCodeIsRejectedBeforeProofSubmission()
     {
         var handler = new QueueHandler(

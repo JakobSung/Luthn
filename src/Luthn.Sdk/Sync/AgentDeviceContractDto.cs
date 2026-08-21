@@ -77,10 +77,19 @@ public sealed record AgentDeviceSessionGrantDto(
     [property: JsonPropertyName("scopes")] IReadOnlyList<string> Scopes);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record AgentDeviceEnrollmentPollResponseDto(
-    [property: JsonPropertyName("state")] AgentDeviceEnrollmentState State,
-    [property: JsonPropertyName("agentDeviceId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AgentDeviceId,
-    [property: JsonPropertyName("sessionGrant"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] AgentDeviceSessionGrantDto? SessionGrant);
+public sealed record AgentDeviceEnrollmentPollResponseDto
+{
+    [JsonPropertyName("state")]
+    public required AgentDeviceEnrollmentState State { get; init; }
+
+    [JsonPropertyName("agentDeviceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AgentDeviceId { get; init; }
+
+    [JsonPropertyName("sessionGrant")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentDeviceSessionGrantDto? SessionGrant { get; init; }
+}
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record RefreshAgentDeviceSessionRequestDto(
