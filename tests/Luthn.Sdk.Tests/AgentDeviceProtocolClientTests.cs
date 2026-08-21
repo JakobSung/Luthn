@@ -185,6 +185,52 @@ public sealed class AgentDeviceProtocolClientTests
     }
 
     [Fact]
+    public async Task ConnectionStatusDistinguishesAContractNotFoundFromAMissingEndpoint()
+    {
+        var state = AgentDeviceProtocolClient.CreateLocalState();
+        state = state with
+        {
+            Session = new AgentDeviceSession(
+                Guid.NewGuid(),
+                "access_token_1",
+                Now.AddMinutes(5),
+                "refresh_token_1",
+                Now.AddDays(30),
+                state.Key.AuthenticationKey.KeyId,
+                [AgentDeviceProtocolClient.ConnectionWriteScope]),
+        };
+        var connectionId = Guid.NewGuid();
+        var handler = new QueueHandler(
+            _ => Json(
+                HttpStatusCode.NotFound,
+                """
+                {
+                  "extensions": {
+                    "code": "agent_connection.not_found"
+                  }
+                }
+                """),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        using var httpClient = new HttpClient(handler);
+        var client = new AgentDeviceProtocolClient(httpClient, new FixedTimeProvider(Now));
+
+        var missingConnection = await client.GetConnectionAsync(
+            state,
+            Options,
+            connectionId,
+            CancellationToken.None);
+        var missingEndpoint = await Assert.ThrowsAsync<AgentDeviceProtocolException>(() =>
+            client.GetConnectionAsync(
+                state,
+                Options,
+                connectionId,
+                CancellationToken.None));
+
+        Assert.Null(missingConnection.Connection);
+        Assert.Equal("agent_connection.status_failed", missingEndpoint.ErrorCode);
+    }
+
+    [Fact]
     public async Task VerificationUriContainingTheUserCodeIsRejectedBeforeProofSubmission()
     {
         var handler = new QueueHandler(

@@ -93,6 +93,10 @@ public sealed record AgentDeviceConnectionCreateResult(
     AgentDeviceLocalState State,
     CloudAgentConnectionDto Connection);
 
+public sealed record AgentDeviceConnectionReadResult(
+    AgentDeviceLocalState State,
+    CloudAgentConnectionDto? Connection);
+
 public sealed class AgentDeviceProtocolException(
     string errorCode,
     HttpStatusCode? statusCode = null) : InvalidOperationException(errorCode)
@@ -335,6 +339,81 @@ public sealed class AgentDeviceProtocolClient(HttpClient httpClient, TimeProvide
             connection);
     }
 
+    public async Task<AgentDeviceConnectionReadResult> GetConnectionAsync(
+        AgentDeviceLocalState state,
+        AgentDeviceProtocolOptions options,
+        Guid connectionId,
+        CancellationToken cancellationToken)
+    {
+        if (connectionId == Guid.Empty)
+        {
+            throw new AgentDeviceProtocolException("agent_connection.invalid_request");
+        }
+
+        var current = await EnsureFreshSessionAsync(state, options, cancellationToken);
+        if (current.Session is null ||
+            !current.Session.Scopes.Contains(ConnectionWriteScope, StringComparer.Ordinal))
+        {
+            throw new AgentDeviceProtocolException("agent_device.not_connected");
+        }
+
+        var first = await SendConnectionStatusAsync(
+            current,
+            options,
+            connectionId,
+            cancellationToken);
+        if (first.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            current = await RefreshSessionAsync(current, options, cancellationToken);
+            if (current.Session is null)
+            {
+                throw new AgentDeviceProtocolException(
+                    "agent_device.revoked",
+                    HttpStatusCode.Unauthorized);
+            }
+            first = await SendConnectionStatusAsync(
+                current,
+                options,
+                connectionId,
+                cancellationToken);
+        }
+        if (first.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            throw new AgentDeviceProtocolException(
+                "agent_device.revoked",
+                HttpStatusCode.Unauthorized);
+        }
+        if (first.Connection is null)
+        {
+            if (first.StatusCode == HttpStatusCode.NotFound &&
+                string.Equals(
+                    first.ErrorCode,
+                    "agent_connection.not_found",
+                    StringComparison.Ordinal))
+            {
+                return new AgentDeviceConnectionReadResult(current, null);
+            }
+
+            throw new AgentDeviceProtocolException(
+                first.ErrorCode ?? "agent_connection.status_failed",
+                first.StatusCode);
+        }
+
+        var connection = ValidateConnectionStatus(
+            first.Connection,
+            current.Session.AgentDeviceId,
+            connectionId);
+        var connections = (current.Connections ?? [])
+            .Where(item => item.Id != connection.Id)
+            .Append(connection)
+            .OrderBy(item => item.AgentKind, StringComparer.Ordinal)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        return new AgentDeviceConnectionReadResult(
+            current with { Connections = connections },
+            connection);
+    }
+
     public async Task<AgentDeviceLocalState> RotateKeysAsync(
         AgentDeviceLocalState state,
         AgentDeviceProtocolOptions options,
@@ -423,6 +502,41 @@ public sealed class AgentDeviceProtocolClient(HttpClient httpClient, TimeProvide
         return (
             response.StatusCode,
             await ReadJsonAsync<CloudAgentConnectionDto>(response, cancellationToken));
+    }
+
+    private async Task<(
+        HttpStatusCode StatusCode,
+        CloudAgentConnectionDto? Connection,
+        string? ErrorCode)> SendConnectionStatusAsync(
+        AgentDeviceLocalState state,
+        AgentDeviceProtocolOptions options,
+        Guid connectionId,
+        CancellationToken cancellationToken)
+    {
+        var uri = options.Resolve($"api/v1/agent/connections/{connectionId:D}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        AddDpopHeaders(request, state.Key.AuthenticationKey, state.Session!.AccessToken);
+        using var response = await httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return (
+                response.StatusCode,
+                null,
+                response.StatusCode == HttpStatusCode.Unauthorized
+                    ? null
+                    : await ReadErrorCodeAsync(
+                        response,
+                        "agent_connection.status_failed",
+                        cancellationToken));
+        }
+
+        return (
+            response.StatusCode,
+            await ReadJsonAsync<CloudAgentConnectionDto>(response, cancellationToken),
+            null);
     }
 
     private async Task<AgentDeviceLocalState> EnsureFreshSessionAsync(
@@ -567,6 +681,28 @@ public sealed class AgentDeviceProtocolClient(HttpClient httpClient, TimeProvide
             !string.Equals(connection.AgentKind, request.AgentKind, StringComparison.Ordinal) ||
             !string.Equals(connection.CapabilityPreset, request.CapabilityPreset, StringComparison.Ordinal) ||
             !string.Equals(connection.Status, "active", StringComparison.Ordinal) ||
+            (connection.OauthClientId is not null &&
+             !Guid.TryParseExact(connection.OauthClientId, "D", out _)) ||
+            connection.CreatedAt == default ||
+            connection.UpdatedAt < connection.CreatedAt)
+        {
+            throw new AgentDeviceProtocolException("agent_connection.invalid_response");
+        }
+        return connection;
+    }
+
+    private static CloudAgentConnectionDto ValidateConnectionStatus(
+        CloudAgentConnectionDto connection,
+        Guid agentDeviceId,
+        Guid connectionId)
+    {
+        if (connection.Id != connectionId ||
+            connection.OrganizationId == Guid.Empty ||
+            connection.WorkspaceId == Guid.Empty ||
+            connection.AgentDeviceId != agentDeviceId ||
+            connection.AgentKind is not ("codex" or "claude") ||
+            connection.CapabilityPreset is not ("reader" or "contributor" or "sensitive-requester") ||
+            connection.Status is not ("active" or "revoked") ||
             (connection.OauthClientId is not null &&
              !Guid.TryParseExact(connection.OauthClientId, "D", out _)) ||
             connection.CreatedAt == default ||

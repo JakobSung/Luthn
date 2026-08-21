@@ -125,9 +125,35 @@ public sealed class CloudAgentDeviceCommand(
     {
         if (FindConnection(state, arguments) is { } existing)
         {
-            return new CloudAgentDeviceStateUpdate<CloudAgentCommandResult>(
+            var remote = await client.GetConnectionAsync(
                 state,
-                Connected(existing, options));
+                options,
+                existing.Id,
+                cancellationToken);
+            if (remote.Connection is { } current)
+            {
+                EnsureConnectionMatches(current, existing, arguments);
+                if (current.Status == "active")
+                {
+                    return new CloudAgentDeviceStateUpdate<CloudAgentCommandResult>(
+                        remote.State,
+                        Connected(current, options));
+                }
+            }
+
+            state = remote.State with
+            {
+                Connections = (remote.State.Connections ?? [])
+                    .Where(connection => connection.Id != existing.Id)
+                    .ToArray(),
+            };
+            return await CreateConnectionAsync(
+                client,
+                state,
+                options,
+                arguments,
+                existing.Id,
+                cancellationToken);
         }
 
         if (state.Session is null && state.PendingEnrollment is null)
@@ -161,17 +187,51 @@ public sealed class CloudAgentDeviceCommand(
             state = poll.State;
         }
 
+        return await CreateConnectionAsync(
+            client,
+            state,
+            options,
+            arguments,
+            previousConnectionId: null,
+            cancellationToken);
+    }
+
+    private static async Task<CloudAgentDeviceStateUpdate<CloudAgentCommandResult>> CreateConnectionAsync(
+        AgentDeviceProtocolClient client,
+        AgentDeviceLocalState state,
+        AgentDeviceProtocolOptions options,
+        CloudAgentArguments arguments,
+        Guid? previousConnectionId,
+        CancellationToken cancellationToken)
+    {
         var created = await client.CreateConnectionAsync(
             state,
             options,
             arguments.WorkspaceId,
             arguments.AgentKind,
             arguments.CapabilityPreset,
-            CreateIdempotencyKey(state.Session!.AgentDeviceId, arguments),
+            CreateIdempotencyKey(state.Session!.AgentDeviceId, arguments, previousConnectionId),
             cancellationToken);
         return new CloudAgentDeviceStateUpdate<CloudAgentCommandResult>(
             created.State,
             Connected(created.Connection, options));
+    }
+
+    private static void EnsureConnectionMatches(
+        CloudAgentConnectionDto remote,
+        CloudAgentConnectionDto local,
+        CloudAgentArguments arguments)
+    {
+        if (remote.OrganizationId != local.OrganizationId ||
+            remote.WorkspaceId != arguments.WorkspaceId ||
+            !string.Equals(remote.AgentKind, arguments.AgentKind, StringComparison.Ordinal) ||
+            !string.Equals(
+                remote.CapabilityPreset,
+                arguments.CapabilityPreset,
+                StringComparison.Ordinal))
+        {
+            throw new AgentDeviceProtocolException("agent_connection.invalid_response");
+        }
     }
 
     private static CloudAgentConnectionDto? FindConnection(
@@ -197,10 +257,11 @@ public sealed class CloudAgentDeviceCommand(
 
     private static string CreateIdempotencyKey(
         Guid agentDeviceId,
-        CloudAgentArguments arguments)
+        CloudAgentArguments arguments,
+        Guid? previousConnectionId)
     {
         var input = Encoding.UTF8.GetBytes(
-            $"{agentDeviceId:D}|{arguments.WorkspaceId:D}|{arguments.AgentKind}|{arguments.CapabilityPreset}");
+            $"{agentDeviceId:D}|{arguments.WorkspaceId:D}|{arguments.AgentKind}|{arguments.CapabilityPreset}|{previousConnectionId?.ToString("D") ?? "initial"}");
         return $"m4-{Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant()}";
     }
 
