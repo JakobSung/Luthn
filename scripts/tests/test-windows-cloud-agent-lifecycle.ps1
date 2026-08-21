@@ -65,6 +65,7 @@ if ($args.Count -ge 2 -and $args[0] -ceq "compose" -and $args[1] -ceq "version")
 if ($args.Count -ge 1 -and $args[0] -ceq "info") { "linux"; exit 0 }
 if ($joined -match " cloud-agent cloud-agent ") {
     if ($env:FAKE_CLOUD_UNAVAILABLE -ceq "true") { [Console]::Error.WriteLine("Cloud unavailable"); exit 42 }
+    if ($env:FAKE_CLOUD_REVOKED -ceq "true") { '{"state":"revoked"}'; exit 0 }
     '{"state":"connected","agentConnectionId":"81000000-0000-0000-0000-000000000001","organizationId":"20000000-0000-0000-0000-000000000001","workspaceId":"30000000-0000-0000-0000-000000000001","agentKind":"codex","capabilityPreset":"reader","remoteMcpUrl":"https://cloud.example/mcp"}'
     exit 0
 }
@@ -111,6 +112,7 @@ exit 2
     $env:FAKE_LOCAL_MCP_STATE = $localMcpState
     $env:FAKE_CLOUD_MCP_STATE = $cloudMcpState
     $env:FAKE_CLOUD_UNAVAILABLE = "false"
+    $env:FAKE_CLOUD_REVOKED = "false"
 
     $connect = Invoke-LuthnProcess $cliPath @(
         "cloud", "connect", "codex",
@@ -128,6 +130,24 @@ exit 2
 
     $status = Invoke-LuthnProcess $cliPath @("cloud", "status", "codex")
     Assert-True ($status.ExitCode -eq 0 -and $status.Output -match "registered for codex") "Cloud status should report the owned registration"
+
+    $env:FAKE_CLOUD_REVOKED = "true"
+    $revoked = Invoke-LuthnProcess $cliPath @(
+        "cloud", "connect", "codex",
+        "--workspace", "30000000-0000-0000-0000-000000000001",
+        "--cloud-url", "https://cloud.example")
+    Assert-True ($revoked.ExitCode -ne 0 -and $revoked.Output -match "new device approval") "revocation should require a new device approval"
+    Assert-True ([IO.File]::Exists($localMcpState)) "revocation recovery should preserve local MCP"
+    Assert-True (-not [IO.File]::Exists($cloudMcpState)) "revocation recovery should remove Cloud MCP"
+    Assert-True (-not [IO.File]::Exists($ownershipState)) "revocation recovery should remove ownership state"
+    $env:FAKE_CLOUD_REVOKED = "false"
+    $reconnect = Invoke-LuthnProcess $cliPath @(
+        "cloud", "connect", "codex",
+        "--workspace", "30000000-0000-0000-0000-000000000001",
+        "--cloud-url", "https://cloud.example")
+    Assert-True ($reconnect.ExitCode -eq 0) "Cloud connection should recover after a new device approval: $($reconnect.Output)"
+    Assert-True ([IO.File]::Exists($cloudMcpState)) "reconnection should restore Cloud MCP"
+    Assert-True ([IO.File]::Exists($ownershipState)) "reconnection should restore ownership state"
 
     $disconnect = Invoke-LuthnProcess $cliPath @("cloud", "disconnect", "codex")
     Assert-True ($disconnect.ExitCode -eq 0) "Cloud disconnect should succeed: $($disconnect.Output)"
@@ -160,7 +180,7 @@ exit 2
     Write-Host "Windows Cloud Agent connection lifecycle tests passed."
 } finally {
     foreach ($name in @(
-        "FAKE_CLOUD_MCP_STATE", "FAKE_CLOUD_UNAVAILABLE", "FAKE_CODEX_LOG",
+        "FAKE_CLOUD_MCP_STATE", "FAKE_CLOUD_REVOKED", "FAKE_CLOUD_UNAVAILABLE", "FAKE_CODEX_LOG",
         "FAKE_DOCKER_LOG", "FAKE_LOCAL_MCP_STATE", "LUTHN_CODEX_COMMAND",
         "LUTHN_DOCKER_COMMAND", "LUTHN_WINDOWS_ROOT")) {
         Remove-Item "Env:$name" -ErrorAction SilentlyContinue

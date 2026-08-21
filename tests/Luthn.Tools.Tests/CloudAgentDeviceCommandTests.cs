@@ -20,7 +20,6 @@ public sealed class CloudAgentDeviceCommandTests : IDisposable
         var organizationId = Guid.NewGuid();
         var workspaceId = Guid.NewGuid();
         var connectionId = Guid.NewGuid();
-        var replacementConnectionId = Guid.NewGuid();
         var idempotencyKeys = new List<string>();
         string? keyId = null;
         var handler = new QueueHandler(
@@ -98,15 +97,25 @@ public sealed class CloudAgentDeviceCommandTests : IDisposable
             request =>
             {
                 Assert.Equal(HttpMethod.Post, request.Method);
-                using var payload = JsonDocument.Parse(request.Content!.ReadAsStringAsync().Result);
-                idempotencyKeys.Add(payload.RootElement.GetProperty("idempotencyKey").GetString()!);
-                return Connection(HttpStatusCode.Created, replacementConnectionId, deviceId, organizationId, workspaceId, "active");
+                Assert.EndsWith("/api/v1/agent-device-enrollments/", request.RequestUri!.AbsoluteUri, StringComparison.Ordinal);
+                return Json(
+                    HttpStatusCode.Created,
+                    $$"""
+                    {
+                      "enrollmentId":"enrollment_2",
+                      "verificationUri":"https://cloud.example/connect/device",
+                      "userCode":"WXYZ-2345",
+                      "expiresAt":"{{Now.AddMinutes(10):O}}",
+                      "pollIntervalSeconds":5
+                    }
+                    """,
+                    ("DPoP-Nonce", "nonce_2"));
             },
             request =>
             {
-                Assert.Equal(HttpMethod.Get, request.Method);
-                Assert.EndsWith($"/api/v1/agent/connections/{replacementConnectionId:D}", request.RequestUri!.AbsoluteUri, StringComparison.Ordinal);
-                return Connection(HttpStatusCode.OK, replacementConnectionId, deviceId, organizationId, workspaceId, "active");
+                Assert.Equal(HttpMethod.Post, request.Method);
+                Assert.EndsWith("/proof", request.RequestUri!.AbsoluteUri, StringComparison.Ordinal);
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
             });
         using var httpClient = new HttpClient(handler);
         var command = new CloudAgentDeviceCommand(httpClient, new FixedTimeProvider(Now));
@@ -149,18 +158,17 @@ public sealed class CloudAgentDeviceCommandTests : IDisposable
         var fifthOutput = new StringWriter();
         Assert.Equal(0, await command.ExecuteAsync(arguments, fifthOutput, TextWriter.Null));
         using var fifthResult = JsonDocument.Parse(fifthOutput.ToString());
-        Assert.Equal(
-            replacementConnectionId,
-            fifthResult.RootElement.GetProperty("agentConnectionId").GetGuid());
-        Assert.Equal(2, idempotencyKeys.Count);
-        Assert.NotEqual(idempotencyKeys[0], idempotencyKeys[1]);
+        Assert.Equal("revoked", fifthResult.RootElement.GetProperty("state").GetString());
+        Assert.Single(idempotencyKeys);
 
         var sixthOutput = new StringWriter();
-        Assert.Equal(0, await command.ExecuteAsync(arguments, sixthOutput, TextWriter.Null));
+        var sixthError = new StringWriter();
+        Assert.True(
+            await command.ExecuteAsync(arguments, sixthOutput, sixthError) == 0,
+            sixthError.ToString());
         using var sixthResult = JsonDocument.Parse(sixthOutput.ToString());
-        Assert.Equal(
-            replacementConnectionId,
-            sixthResult.RootElement.GetProperty("agentConnectionId").GetGuid());
+        Assert.Equal("approval-required", sixthResult.RootElement.GetProperty("state").GetString());
+        Assert.Equal("WXYZ-2345", sixthResult.RootElement.GetProperty("userCode").GetString());
         Assert.Equal(0, handler.RemainingResponseCount);
     }
 

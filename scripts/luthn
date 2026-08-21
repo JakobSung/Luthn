@@ -2152,9 +2152,30 @@ connect_cloud_agent() {
   require_command "$agent_kind"
   ownership_file="$(cloud_connection_state_file "$agent_kind")"
   if [[ -f "$ownership_file" ]]; then
-    echo "The Luthn Cloud MCP registration for $agent_kind is already owned by this installation."
-    echo "Run 'luthn cloud status $agent_kind' to inspect it."
-    return 0
+    ensure_cloud_agent_state_key || return 1
+    response="$(cloud_agent_step "$cloud_url" "$workspace_id" "$agent_kind" "$device_name" "$capability")" || {
+      echo "Cloud connection status could not be verified; the existing local MCP registration was preserved." >&2
+      return 1
+    }
+    state="$(printf '%s' "$response" | cloud_json_field state)"
+    if [[ "$state" == "connected" ]]; then
+      echo "The Luthn Cloud MCP registration for $agent_kind is already owned by this installation."
+      echo "Run 'luthn cloud status $agent_kind' to inspect it."
+      return 0
+    fi
+    if [[ "$state" == "revoked" || "$state" == "denied" || "$state" == "expired" ]]; then
+      if "$agent_kind" mcp get luthn-cloud >/dev/null 2>&1 \
+        && ! "$agent_kind" mcp remove luthn-cloud >/dev/null 2>&1; then
+        echo "Cloud access is no longer active, but the local MCP registration could not be removed. Ownership state was preserved." >&2
+        return 1
+      fi
+      rm -f "$ownership_file"
+      echo "Cloud access was $state. The local 'luthn-cloud' MCP registration was removed."
+      echo "Run the same command again to request a new device approval."
+      return 1
+    fi
+    echo "Cloud connection status could not be verified safely; the existing local MCP registration was preserved." >&2
+    return 1
   fi
   if "$agent_kind" mcp get luthn-cloud >/dev/null 2>&1; then
     echo "$agent_kind already has an unrelated MCP registration named 'luthn-cloud'; no configuration was changed." >&2

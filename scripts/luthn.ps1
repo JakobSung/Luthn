@@ -2812,9 +2812,25 @@ function Connect-CloudAgent([string]$AgentKind, [string[]]$Arguments = @()) {
     $tool = Get-CloudAgentTool $AgentKind
     $stateFile = Get-CloudStateFile $AgentKind
     if ([IO.File]::Exists($stateFile)) {
-        Write-Host "The Luthn Cloud MCP registration for $AgentKind is already owned by this installation."
-        Write-Host "Run 'luthn cloud status $AgentKind' to inspect it."
-        return
+        Ensure-CloudAgentStateKey
+        try {
+            $response = Invoke-CloudAgentStep $cloudUrl $workspaceId $AgentKind $capability $deviceName
+        } catch {
+            throw "Cloud connection status could not be verified; the existing local MCP registration was preserved."
+        }
+        if ($response.state -ceq "connected") {
+            Write-Host "The Luthn Cloud MCP registration for $AgentKind is already owned by this installation."
+            Write-Host "Run 'luthn cloud status $AgentKind' to inspect it."
+            return
+        }
+        if ($response.state -in @("revoked", "denied", "expired")) {
+            if (Test-CloudMcpRegistration $tool) {
+                Assert-ToolSuccess (Invoke-ToolCapture -Tool $tool -Arguments @("mcp", "remove", "luthn-cloud")) "Cloud MCP removal"
+            }
+            [IO.File]::Delete($stateFile)
+            throw "Cloud access was $($response.state). The local 'luthn-cloud' MCP registration was removed. Run the same command again to request a new device approval."
+        }
+        throw "Cloud connection status could not be verified safely; the existing local MCP registration was preserved."
     }
     if (Test-CloudMcpRegistration $tool) {
         throw "$AgentKind already has an unrelated MCP registration named 'luthn-cloud'; no configuration was changed."

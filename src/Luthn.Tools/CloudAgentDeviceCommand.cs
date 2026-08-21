@@ -141,19 +141,17 @@ public sealed class CloudAgentDeviceCommand(
                 }
             }
 
-            state = remote.State with
+            var revokedState = remote.State with
             {
                 Connections = (remote.State.Connections ?? [])
                     .Where(connection => connection.Id != existing.Id)
                     .ToArray(),
+                PendingEnrollment = null,
+                Session = null,
             };
-            return await CreateConnectionAsync(
-                client,
-                state,
-                options,
-                arguments,
-                existing.Id,
-                cancellationToken);
+            return new CloudAgentDeviceStateUpdate<CloudAgentCommandResult>(
+                revokedState,
+                new CloudAgentCommandResult("revoked"));
         }
 
         if (state.Session is null && state.PendingEnrollment is null)

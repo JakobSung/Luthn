@@ -33,6 +33,10 @@ if [[ " $* " == *" cloud-agent cloud-agent "* ]]; then
     printf '%s\n' 'Cloud unavailable' >&2
     exit 42
   fi
+  if [[ "${FAKE_CLOUD_REVOKED:-false}" == "true" ]]; then
+    printf '%s\n' '{"state":"revoked"}'
+    exit 0
+  fi
   step_file="${FAKE_CLOUD_STEP_FILE:?}"
   if [[ ! -f "$step_file" ]]; then
     touch "$step_file"
@@ -138,6 +142,23 @@ grep -q '^REMOTE_MCP_URL=https://cloud.example/mcp$' "$ownership_file"
 
 status_output="$(run_luthn cloud status codex)"
 grep -q 'registered for codex' <<<"$status_output"
+
+if FAKE_CLOUD_REVOKED=true run_luthn cloud connect codex \
+  --workspace 30000000-0000-0000-0000-000000000001 \
+  --cloud-url https://cloud.example >/dev/null 2>&1; then
+  echo "expected revoked Cloud connection to require a new approval" >&2
+  exit 1
+fi
+[[ -f "$mcp_dir/luthn" ]]
+[[ ! -f "$mcp_dir/luthn-cloud" ]]
+[[ ! -f "$ownership_file" ]]
+rm -f "$cloud_step_file"
+reconnect_output="$(run_luthn cloud connect codex \
+  --workspace 30000000-0000-0000-0000-000000000001 \
+  --cloud-url https://cloud.example)"
+grep -q 'Code: ABCD-EFGH' <<<"$reconnect_output"
+[[ -f "$mcp_dir/luthn-cloud" ]]
+[[ -f "$ownership_file" ]]
 
 run_luthn cloud disconnect codex >/dev/null
 [[ -f "$mcp_dir/luthn" ]]
