@@ -184,7 +184,13 @@ public sealed class CloudAgentDeviceCommand(
                         poll.StateValue.ToString().ToLowerInvariant(),
                         RetryAfterSeconds: poll.RetryAfterSeconds));
             }
-            state = poll.State;
+
+            // Persist the one-time session grant before attempting a connection mutation.
+            // If connection creation fails, a subsequent invocation can retry without
+            // losing the only grant the server will issue for this enrollment.
+            return new CloudAgentDeviceStateUpdate<CloudAgentCommandResult>(
+                poll.State,
+                new CloudAgentCommandResult("pending", RetryAfterSeconds: 0));
         }
 
         return await CreateConnectionAsync(

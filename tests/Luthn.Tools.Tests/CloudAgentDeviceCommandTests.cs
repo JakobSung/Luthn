@@ -131,9 +131,7 @@ public sealed class CloudAgentDeviceCommandTests : IDisposable
         using var secondResult = JsonDocument.Parse(secondOutput.ToString());
 
         Assert.Equal(0, secondExitCode);
-        Assert.Equal("connected", secondResult.RootElement.GetProperty("state").GetString());
-        Assert.Equal(connectionId, secondResult.RootElement.GetProperty("agentConnectionId").GetGuid());
-        Assert.Equal("https://cloud.example/mcp", secondResult.RootElement.GetProperty("remoteMcpUrl").GetString());
+        Assert.Equal("pending", secondResult.RootElement.GetProperty("state").GetString());
         Assert.DoesNotContain("access_token_1", secondOutput.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("refresh_token_1", secondOutput.ToString(), StringComparison.Ordinal);
 
@@ -141,15 +139,12 @@ public sealed class CloudAgentDeviceCommandTests : IDisposable
         Assert.Equal(0, await command.ExecuteAsync(arguments, thirdOutput, TextWriter.Null));
         using var thirdResult = JsonDocument.Parse(thirdOutput.ToString());
         Assert.Equal(connectionId, thirdResult.RootElement.GetProperty("agentConnectionId").GetGuid());
+        Assert.Equal("https://cloud.example/mcp", thirdResult.RootElement.GetProperty("remoteMcpUrl").GetString());
 
         var fourthOutput = new StringWriter();
         Assert.Equal(0, await command.ExecuteAsync(arguments, fourthOutput, TextWriter.Null));
         using var fourthResult = JsonDocument.Parse(fourthOutput.ToString());
-        Assert.Equal(
-            replacementConnectionId,
-            fourthResult.RootElement.GetProperty("agentConnectionId").GetGuid());
-        Assert.Equal(2, idempotencyKeys.Count);
-        Assert.NotEqual(idempotencyKeys[0], idempotencyKeys[1]);
+        Assert.Equal(connectionId, fourthResult.RootElement.GetProperty("agentConnectionId").GetGuid());
 
         var fifthOutput = new StringWriter();
         Assert.Equal(0, await command.ExecuteAsync(arguments, fifthOutput, TextWriter.Null));
@@ -157,6 +152,15 @@ public sealed class CloudAgentDeviceCommandTests : IDisposable
         Assert.Equal(
             replacementConnectionId,
             fifthResult.RootElement.GetProperty("agentConnectionId").GetGuid());
+        Assert.Equal(2, idempotencyKeys.Count);
+        Assert.NotEqual(idempotencyKeys[0], idempotencyKeys[1]);
+
+        var sixthOutput = new StringWriter();
+        Assert.Equal(0, await command.ExecuteAsync(arguments, sixthOutput, TextWriter.Null));
+        using var sixthResult = JsonDocument.Parse(sixthOutput.ToString());
+        Assert.Equal(
+            replacementConnectionId,
+            sixthResult.RootElement.GetProperty("agentConnectionId").GetGuid());
         Assert.Equal(0, handler.RemainingResponseCount);
     }
 
@@ -176,6 +180,86 @@ public sealed class CloudAgentDeviceCommandTests : IDisposable
 
         Assert.Equal(2, exitCode);
         Assert.Contains("invalid", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, handler.RemainingResponseCount);
+    }
+
+    [Fact]
+    public async Task ApprovedSessionGrantSurvivesAConnectionCreationFailure()
+    {
+        var deviceId = Guid.NewGuid();
+        var organizationId = Guid.NewGuid();
+        var workspaceId = Guid.NewGuid();
+        var connectionId = Guid.NewGuid();
+        string? keyId = null;
+        var handler = new QueueHandler(
+            _ => Json(
+                HttpStatusCode.Created,
+                $$"""
+                {
+                  "enrollmentId":"enrollment_2",
+                  "verificationUri":"https://cloud.example/connect/device",
+                  "userCode":"ABCD-EFGH",
+                  "expiresAt":"{{Now.AddMinutes(10):O}}",
+                  "pollIntervalSeconds":5
+                }
+                """,
+                ("DPoP-Nonce", "nonce_2")),
+            request =>
+            {
+                using var proof = JsonDocument.Parse(request.Content!.ReadAsStringAsync().Result);
+                keyId = proof.RootElement.GetProperty("keyId").GetString();
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            },
+            _ => Json(
+                HttpStatusCode.OK,
+                $$"""
+                {
+                  "state":"Approved",
+                  "agentDeviceId":"{{deviceId:D}}",
+                  "sessionGrant":{
+                    "agentDeviceId":"{{deviceId:D}}",
+                    "tokenType":"DPoP",
+                    "accessToken":"access_token_2",
+                    "expiresInSeconds":300,
+                    "refreshCredential":"refresh_token_2",
+                    "refreshExpiresAt":"{{Now.AddDays(30):O}}",
+                    "confirmationJwkThumbprint":"{{keyId}}",
+                    "scopes":["agent-connection.write","agent-device.rotate"]
+                  }
+                }
+                """),
+            _ => Json(
+                HttpStatusCode.NotFound,
+                """{"extensions":{"code":"agent_connection.workspace_not_found"}}"""),
+            _ => Connection(
+                HttpStatusCode.Created,
+                connectionId,
+                deviceId,
+                organizationId,
+                workspaceId,
+                "active"));
+        using var httpClient = new HttpClient(handler);
+        var command = new CloudAgentDeviceCommand(httpClient, new FixedTimeProvider(Now));
+        var arguments = Arguments(workspaceId);
+
+        Assert.Equal(0, await command.ExecuteAsync(arguments, new StringWriter(), TextWriter.Null));
+
+        var approvedOutput = new StringWriter();
+        Assert.Equal(0, await command.ExecuteAsync(arguments, approvedOutput, TextWriter.Null));
+        using (var approved = JsonDocument.Parse(approvedOutput.ToString()))
+        {
+            Assert.Equal("pending", approved.RootElement.GetProperty("state").GetString());
+        }
+
+        var failedError = new StringWriter();
+        Assert.Equal(1, await command.ExecuteAsync(arguments, TextWriter.Null, failedError));
+        Assert.Contains("agent_connection.workspace_not_found", failedError.ToString(), StringComparison.Ordinal);
+
+        var recoveredOutput = new StringWriter();
+        Assert.Equal(0, await command.ExecuteAsync(arguments, recoveredOutput, TextWriter.Null));
+        using var recovered = JsonDocument.Parse(recoveredOutput.ToString());
+        Assert.Equal("connected", recovered.RootElement.GetProperty("state").GetString());
+        Assert.Equal(connectionId, recovered.RootElement.GetProperty("agentConnectionId").GetGuid());
         Assert.Equal(0, handler.RemainingResponseCount);
     }
 
