@@ -69,7 +69,7 @@ print_docker_rows() {
   result="$1"
   state="$(result_state "$result")"
   reason="$(result_reason "$result")"
-  printf '%s\n' "docker-connectors | scripts/tests/test-agent-connector-lifecycle.sh, scripts/tests/test-claude-connector-lifecycle.sh | $state | $reason"
+  printf '%s\n' "docker-connectors | scripts/tests/test-agent-connector-lifecycle.sh, scripts/tests/test-claude-connector-lifecycle.sh, scripts/tests/test-remote-mcp-profile.sh | $state | $reason"
   printf '%s\n' "docker-distribution | scripts/tests/test-distribution-lifecycle.sh | $state | $reason"
   printf '%s\n' "postgres-integration | scripts/tests/test-postgres-integration-smoke.sh | $state | $reason"
 }
@@ -114,6 +114,7 @@ selected_unavailable() {
 run_docker_suites() {
   bash "$repo_root/scripts/tests/test-agent-connector-lifecycle.sh"
   bash "$repo_root/scripts/tests/test-claude-connector-lifecycle.sh"
+  bash "$repo_root/scripts/tests/test-remote-mcp-profile.sh"
   bash "$repo_root/scripts/tests/test-distribution-lifecycle.sh"
   bash "$repo_root/scripts/tests/test-postgres-integration-smoke.sh"
 }
@@ -168,7 +169,7 @@ done
 if [ "$mode" = "list" ]; then
   printf '%s\n' "environmental test suites"
   printf '%s\n' "suite | source | status | execution"
-  printf '%s\n' "docker-connectors | connector lifecycle scripts | not-sampled | --run docker"
+  printf '%s\n' "docker-connectors | connector lifecycle and remote MCP profile scripts | not-sampled | --run docker"
   printf '%s\n' "docker-distribution | distribution lifecycle script | not-sampled | --run docker"
   printf '%s\n' "postgres-integration | PostgreSQL integration smoke script | not-sampled | --run docker"
   printf '%s\n' "windows-hook | Windows Codex hook smoke script | not-sampled | --run windows"

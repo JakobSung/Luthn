@@ -48,7 +48,8 @@ public sealed record SafeProjectionSyncEnvelope(
 public sealed record SafeProjectionSyncTransportResult(
     bool Accepted,
     string? Checkpoint = null,
-    string? ErrorCode = null);
+    string? ErrorCode = null,
+    bool Retryable = false);
 
 public interface ISafeProjectionSyncTransport
 {
@@ -239,11 +240,12 @@ public static class SafeProjectionSyncPolicy
         }
 
         ValidateRevision(revision);
+        ValidateTimeline(createdAt, updatedAt, decidedAt, expiresAt);
         return new SafeProjectionSyncEnvelope(
             SafeProjectionSyncContractVersions.Current,
-            RequiredToken(workspaceId, nameof(workspaceId)),
-            RequiredToken(originInstanceId, nameof(originInstanceId)),
-            RequiredToken(localRecordId, nameof(localRecordId)),
+            RequiredExtensionWorkspaceId(workspaceId),
+            RequiredOpaqueOriginInstanceId(originInstanceId),
+            RequiredOpaqueRecordId(localRecordId),
             revision,
             SafeProjectionSyncOperation.Upsert,
             Title: null,
@@ -268,11 +270,12 @@ public static class SafeProjectionSyncPolicy
         DateTimeOffset decidedAt)
     {
         ValidateRevision(revision);
+        ValidateTimeline(createdAt, updatedAt, decidedAt, expiresAt: null);
         return new SafeProjectionSyncEnvelope(
             SafeProjectionSyncContractVersions.Current,
-            RequiredToken(workspaceId, nameof(workspaceId)),
-            RequiredToken(originInstanceId, nameof(originInstanceId)),
-            RequiredToken(localRecordId, nameof(localRecordId)),
+            RequiredExtensionWorkspaceId(workspaceId),
+            RequiredOpaqueOriginInstanceId(originInstanceId),
+            RequiredOpaqueRecordId(localRecordId),
             revision,
             SafeProjectionSyncOperation.Revoke,
             Title: null,
@@ -301,6 +304,42 @@ public static class SafeProjectionSyncPolicy
         }
     }
 
+    /// <summary>
+    /// Validates the generic same-network extension routing identities without
+    /// accepting a local filesystem path or arbitrary free-form text.
+    /// Workspace identifiers retain the public local-installation grammar;
+    /// origin and record identifiers are opaque tokens.
+    /// </summary>
+    public static bool HasValidExtensionIdentity(
+        string? workspaceId,
+        string? originInstanceId,
+        string? localRecordId) =>
+        IsExtensionWorkspaceId(workspaceId) &&
+        IsOpaqueToken(originInstanceId, 128, rejectLeadingDot: false) &&
+        IsOpaqueToken(localRecordId, 128, rejectLeadingDot: true);
+
+    public static bool HasValidTimeline(
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt,
+        DateTimeOffset decidedAt,
+        DateTimeOffset? expiresAt) =>
+        createdAt != default &&
+        updatedAt >= createdAt &&
+        decidedAt >= updatedAt &&
+        (expiresAt is null || expiresAt > decidedAt);
+
+    private static void ValidateTimeline(
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt,
+        DateTimeOffset decidedAt,
+        DateTimeOffset? expiresAt)
+    {
+        if (!HasValidTimeline(createdAt, updatedAt, decidedAt, expiresAt))
+        {
+            throw new ArgumentException("Safe projection timestamps are invalid or out of order.");
+        }
+    }
+
     private static string RequiredText(string value, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -321,4 +360,53 @@ public static class SafeProjectionSyncPolicy
 
         return token;
     }
+
+    private static string RequiredExtensionWorkspaceId(string value)
+    {
+        var workspaceId = RequiredToken(value, nameof(value));
+        if (!IsExtensionWorkspaceId(workspaceId))
+        {
+            throw new ArgumentException(
+                "Safe projection workspace identifiers must use the local extension routing grammar.",
+                nameof(value));
+        }
+
+        return workspaceId;
+    }
+
+    private static string RequiredOpaqueOriginInstanceId(string value)
+    {
+        var originInstanceId = RequiredToken(value, nameof(value));
+        if (!IsOpaqueToken(originInstanceId, 128, rejectLeadingDot: false))
+        {
+            throw new ArgumentException(
+                "Safe projection origin identifiers must be opaque tokens.",
+                nameof(value));
+        }
+
+        return originInstanceId;
+    }
+
+    private static string RequiredOpaqueRecordId(string value)
+    {
+        var recordId = RequiredToken(value, nameof(value));
+        if (!IsOpaqueToken(recordId, 128, rejectLeadingDot: true))
+        {
+            throw new ArgumentException(
+                "Safe projection record identifiers must be opaque, path-free tokens.",
+                nameof(value));
+        }
+
+        return recordId;
+    }
+
+    private static bool IsExtensionWorkspaceId(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Length <= 160 &&
+        char.IsAsciiLetterOrDigit(value[0]) &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or ':' or '@');
+
+    private static bool IsOpaqueToken(string? value, int maxLength, bool rejectLeadingDot) =>
+        !string.IsNullOrWhiteSpace(value) && value.Length <= maxLength &&
+        (!rejectLeadingDot || value[0] != '.') &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
 }

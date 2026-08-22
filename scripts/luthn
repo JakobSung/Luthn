@@ -49,6 +49,9 @@ commands:
                                    Configure Codex or Claude Code; recall is enabled by default.
   connection status codex|claude Show connector state.
   disconnect codex|claude        Remove only Luthn-owned connector configuration.
+  profile remote codex|claude --url HTTPS_URL [--oauth-client-id ID] [--oauth-resource URI]
+                                   Explicitly replace the owned local MCP registration with a remote OAuth MCP profile.
+  profile local codex|claude     Restore the owned local MCP profile. Network outages never trigger this automatically.
   adapter                         Upload a turn-summary JSON payload from stdin.
   mcp [--list-tools]              Run the MCP stdio server from the image.
   help                            Show this help.
@@ -1835,6 +1838,10 @@ connect_codex() {
     echo "usage: luthn connect codex [--no-auto-recall]" >&2
     return 2
   fi
+  if [[ -f "$remote_codex_profile_state_file" ]]; then
+    echo "An owned remote Codex MCP profile is active. Run '$cli_path profile local codex' before configuring the local MCP profile." >&2
+    return 1
+  fi
 
   require_installation
   require_docker
@@ -2038,7 +2045,9 @@ show_codex_connection_status() {
   instructions_file="$(codex_state_value INSTRUCTIONS_FILE)"
   [[ -n "$instructions_file" ]] || instructions_file="$(codex_instructions_path)"
 
-  if [[ -f "$codex_state_file" ]]; then
+  if [[ -f "$remote_codex_profile_state_file" ]]; then
+    echo "MCP profile: remote"
+  elif [[ -f "$codex_state_file" ]]; then
     echo "Local connector: configured"
   else
     echo "Local connector: not configured"
@@ -2052,7 +2061,13 @@ show_codex_connection_status() {
     echo "  automatic-ingestion: missing"
   fi
 
-  if command -v codex >/dev/null 2>&1 && codex_mcp_registration_status; then
+  if [[ -f "$remote_codex_profile_state_file" ]]; then
+    if command -v codex >/dev/null 2>&1 && codex mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+      echo "  remote-mcp: configured"
+    else
+      echo "  remote-mcp: missing or changed"
+    fi
+  elif command -v codex >/dev/null 2>&1 && codex_mcp_registration_status; then
     echo "  mcp: configured"
   else
     echo "  mcp: missing or changed"
@@ -2090,6 +2105,15 @@ EOF
 disconnect_codex() {
   require_installation
   require_command python3
+  if [[ -f "$remote_codex_profile_state_file" ]]; then
+    require_command codex
+    if ! codex mcp get "$remote_mcp_name" >/dev/null 2>&1 ||
+      ! codex mcp remove "$remote_mcp_name" >/dev/null; then
+      echo "The Luthn-owned remote Codex MCP could not be removed; local connector cleanup was not started." >&2
+      return 1
+    fi
+    rm -f "$remote_codex_profile_state_file"
+  fi
   if [[ -f "$codex_disconnect_pending_state_file" ]] \
     && ! has_codex_connector_state \
     && ! command -v codex >/dev/null 2>&1; then
@@ -2547,14 +2571,14 @@ uninstall_luthn() {
   fi
 
   require_docker
-  if has_codex_connector_artifact; then
+  if has_codex_connector_artifact || [[ -f "$remote_codex_profile_state_file" ]]; then
     if ! disconnect_codex; then
       echo "Uninstall stopped because Codex connector cleanup did not complete." >&2
       echo "Restore Codex prerequisites, run 'luthn disconnect codex', and retry." >&2
       return 1
     fi
   fi
-  if [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]]; then
+  if [[ -f "$claude_state_file" || -f "$claude_pending_state_file" || -f "$remote_claude_profile_state_file" ]]; then
     if ! disconnect_claude; then
       echo "Uninstall stopped because Claude Code connector cleanup did not complete." >&2
       echo "Restore Claude Code prerequisites, run 'luthn disconnect claude', and retry." >&2
@@ -2663,6 +2687,10 @@ connect_claude() {
   auto_recall=true
   case "${1:-}" in --auto-recall) shift;; --no-auto-recall) auto_recall=false; shift;; esac
   (( $# == 0 )) || { echo "usage: luthn connect claude [--no-auto-recall]" >&2; return 2; }
+  if [[ -f "$remote_claude_profile_state_file" ]]; then
+    echo "An owned remote Claude Code MCP profile is active. Run '$cli_path profile local claude' before configuring the local MCP profile." >&2
+    return 1
+  fi
   require_installation; require_docker; require_command curl; require_command python3; require_command claude
   ensure_codex_connector_helper || { echo "Claude Code connector helper is unavailable." >&2; return 1; }
   helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"
@@ -2714,16 +2742,39 @@ connect_claude() {
 show_claude_connection_status() {
   require_installation; require_command python3
   helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"; [[ -n "$settings" ]] || settings="$(claude_settings_path)"; [[ -n "$instructions" ]] || instructions="$(claude_instructions_path)"; hook_args=(); while IFS= read -r value; do hook_args+=("$value"); done < <(claude_hook_args)
-  [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] && echo "Local connector: $(claude_state_value SETUP_STATE)" || echo "Local connector: not configured"
+  if [[ -f "$remote_claude_profile_state_file" ]]; then
+    echo "MCP profile: remote"
+  elif [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]]; then
+    echo "Local connector: $(claude_state_value SETUP_STATE)"
+  else
+    echo "Local connector: not configured"
+  fi
   if [[ -f "$helper" ]] && python3 "$helper" claude-hooks check --path "$settings" --command python3 "${hook_args[@]}"; then echo "  automatic-ingestion: configured"; else echo "  automatic-ingestion: missing"; fi
-  recorded_digest="$(claude_state_value MCP_DIGEST)"; if command -v claude >/dev/null 2>&1 && claude_registration_snapshot && { [[ -z "$recorded_digest" ]] || [[ "$recorded_digest" == "$claude_registration_digest" ]]; }; then echo "  mcp: configured"; else echo "  mcp: missing or changed"; fi
+  if [[ -f "$remote_claude_profile_state_file" ]]; then
+    if command -v claude >/dev/null 2>&1 && claude mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+      echo "  remote-mcp: configured"
+    else
+      echo "  remote-mcp: missing or changed"
+    fi
+  else
+    recorded_digest="$(claude_state_value MCP_DIGEST)"; if command -v claude >/dev/null 2>&1 && claude_registration_snapshot && { [[ -z "$recorded_digest" ]] || [[ "$recorded_digest" == "$claude_registration_digest" ]]; }; then echo "  mcp: configured"; else echo "  mcp: missing or changed"; fi
+  fi
   if [[ -f "$helper" ]] && python3 "$helper" claude-instructions check --path "$instructions"; then echo "  lightweight-recall: enabled"; else echo "  lightweight-recall: disabled"; fi
   service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"; base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"; [[ -f "$helper" && -f "$service_token_file" ]] && python3 "$helper" status --base-url "$base_url" --token-file "$service_token_file" --agent-id claude-code || true
 }
 
 disconnect_claude() {
   require_installation; require_command python3
-  [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] || { echo "No Luthn-owned Claude Code configuration was recorded."; return 0; }
+  if [[ -f "$remote_claude_profile_state_file" ]]; then
+    require_command claude
+    if ! claude mcp get "$remote_mcp_name" >/dev/null 2>&1 ||
+      ! claude mcp remove "$remote_mcp_name" >/dev/null; then
+      echo "The Luthn-owned remote Claude Code MCP could not be removed; local connector cleanup was not started." >&2
+      return 1
+    fi
+    rm -f "$remote_claude_profile_state_file"
+  fi
+  [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] || { echo "Luthn-owned remote Claude Code MCP configuration was removed."; return 0; }
   helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"; [[ -n "$settings" ]] || settings="$(claude_settings_path)"; [[ -n "$instructions" ]] || instructions="$(claude_instructions_path)"
   [[ -f "$helper" ]] || ensure_codex_connector_helper || return 1
   require_command claude
@@ -2774,6 +2825,194 @@ run_mcp() {
   fi
 }
 
+remote_codex_profile_state_file="${LUTHN_REMOTE_CODEX_PROFILE_STATE_FILE:-$connector_state_dir/codex.remote-profile.env}"
+remote_claude_profile_state_file="${LUTHN_REMOTE_CLAUDE_PROFILE_STATE_FILE:-$connector_state_dir/claude-code.remote-profile.env}"
+remote_mcp_name="luthn-remote"
+
+validate_remote_mcp_url() {
+  python3 - "$1" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+value = sys.argv[1]
+parsed = urlparse(value)
+if parsed.username or parsed.password or parsed.query or parsed.fragment:
+    raise SystemExit(1)
+if parsed.scheme == "https" and parsed.hostname:
+    raise SystemExit(0)
+if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+write_remote_profile_state() {
+  destination="$1"; agent="$2"; url="$3"; client_id="$4"; resource="$5"
+  ensure_directories || return 1
+  state_tmp="$(mktemp "${destination}.XXXXXX")" || return 1
+  if ! cat >"$state_tmp" <<EOF
+PROFILE_VERSION=1
+AGENT=$agent
+CONFIGURATION_OWNER=luthn
+LOCAL_MCP_NAME=luthn
+REMOTE_MCP_NAME=$remote_mcp_name
+REMOTE_URL=$url
+OAUTH_CLIENT_ID=$client_id
+OAUTH_RESOURCE=$resource
+UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  then rm -f "$state_tmp"; return 1; fi
+  chmod 0600 "$state_tmp" && mv "$state_tmp" "$destination" || { rm -f "$state_tmp"; return 1; }
+}
+
+remote_profile_value() {
+  state="$1"; key="$2"
+  [[ -f "$state" ]] || return 0
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$state"
+}
+
+parse_remote_profile_options() {
+  remote_url=""; remote_oauth_client_id=""; remote_oauth_resource=""
+  while (( $# > 0 )); do
+    case "$1" in
+      --url) remote_url="${2:-}"; shift 2 ;;
+      --oauth-client-id) remote_oauth_client_id="${2:-}"; shift 2 ;;
+      --oauth-resource) remote_oauth_resource="${2:-}"; shift 2 ;;
+      *) echo "unknown remote profile option: $1" >&2; return 2 ;;
+    esac
+  done
+  if [[ -z "$remote_url" ]] || ! validate_remote_mcp_url "$remote_url"; then
+    echo "A remote MCP profile requires an absolute HTTPS URL (or explicit loopback HTTP for development)." >&2
+    return 2
+  fi
+  if [[ -n "$remote_oauth_client_id" ]] && { (( ${#remote_oauth_client_id} > 256 )) || ! printf '%s' "$remote_oauth_client_id" | grep -Eq '^[A-Za-z0-9._:-]+$'; }; then
+    echo "The OAuth client ID is invalid." >&2; return 2
+  fi
+  if [[ -n "$remote_oauth_resource" ]] && ! validate_remote_mcp_url "$remote_oauth_resource"; then
+    echo "The OAuth resource must be an absolute HTTPS URI (or loopback HTTP for development)." >&2; return 2
+  fi
+}
+
+activate_remote_codex_profile() {
+  parse_remote_profile_options "$@" || return $?
+  require_installation; require_command codex; require_command python3
+  [[ -f "$codex_state_file" ]] || { echo "The Luthn-owned local Codex connector must be configured first." >&2; return 1; }
+  codex_mcp_registration_status || { echo "The owned local Codex MCP registration is missing or changed; no profile was switched." >&2; return 1; }
+  if codex mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+    echo "An MCP registration named '$remote_mcp_name' already exists; it was preserved." >&2; return 1
+  fi
+  remote_args=(mcp add "$remote_mcp_name" --url "$remote_url")
+  [[ -n "$remote_oauth_client_id" ]] && remote_args+=(--oauth-client-id "$remote_oauth_client_id")
+  [[ -n "$remote_oauth_resource" ]] && remote_args+=(--oauth-resource "$remote_oauth_resource")
+  if ! codex "${remote_args[@]}"; then return 1; fi
+  if ! codex mcp login "$remote_mcp_name"; then
+    codex mcp remove "$remote_mcp_name" >/dev/null 2>&1 || true
+    echo "Remote OAuth did not complete; the local MCP profile was preserved." >&2; return 1
+  fi
+  if ! write_remote_profile_state "$remote_codex_profile_state_file" codex "$remote_url" "$remote_oauth_client_id" "$remote_oauth_resource"; then
+    codex mcp remove "$remote_mcp_name" >/dev/null 2>&1 || true
+    echo "Remote profile ownership could not be recorded; the local MCP profile was preserved." >&2; return 1
+  fi
+  if ! codex mcp remove luthn >/dev/null; then
+    if codex mcp remove "$remote_mcp_name" >/dev/null 2>&1; then
+      rm -f "$remote_codex_profile_state_file"
+      echo "The local MCP could not be disabled; remote configuration was rolled back." >&2
+    else
+      echo "The local MCP could not be disabled; remote profile ownership was preserved for recovery." >&2
+    fi
+    return 1
+  fi
+  echo "The remote Codex MCP profile is active. Local automatic capture remains unchanged."
+}
+
+restore_local_codex_profile() {
+  require_installation; require_command codex
+  [[ -f "$remote_codex_profile_state_file" ]] || { echo "No Luthn-owned remote Codex profile is active."; return 0; }
+  remote_url="$(remote_profile_value "$remote_codex_profile_state_file" REMOTE_URL)"
+  remote_client_id="$(remote_profile_value "$remote_codex_profile_state_file" OAUTH_CLIENT_ID)"
+  remote_resource="$(remote_profile_value "$remote_codex_profile_state_file" OAUTH_RESOURCE)"
+  if ! codex mcp get "$remote_mcp_name" >/dev/null 2>&1 || ! codex mcp remove "$remote_mcp_name" >/dev/null; then
+    echo "The owned remote Codex MCP could not be removed; local MCP was not changed." >&2; return 1
+  fi
+  if ! codex mcp add luthn -- "$cli_path" mcp >/dev/null; then
+    rollback_args=(mcp add "$remote_mcp_name" --url "$remote_url")
+    [[ -n "$remote_client_id" ]] && rollback_args+=(--oauth-client-id "$remote_client_id")
+    [[ -n "$remote_resource" ]] && rollback_args+=(--oauth-resource "$remote_resource")
+    if codex "${rollback_args[@]}" >/dev/null 2>&1 && codex mcp login "$remote_mcp_name" >/dev/null; then
+      echo "Local MCP could not be restored; the remote profile was restored for recovery." >&2
+    else
+      echo "Local MCP could not be restored, and remote profile recovery was incomplete." >&2
+    fi
+    return 1
+  fi
+  rm -f "$remote_codex_profile_state_file"
+  echo "The owned local Codex MCP profile is active."
+}
+
+activate_remote_claude_profile() {
+  parse_remote_profile_options "$@" || return $?
+  [[ -z "$remote_oauth_resource" ]] || { echo "Claude Code does not expose an OAuth resource option; omit --oauth-resource." >&2; return 2; }
+  require_installation; require_command claude; require_command python3
+  [[ -f "$claude_state_file" ]] || { echo "The Luthn-owned local Claude Code connector must be configured first." >&2; return 1; }
+  claude_registration_snapshot || { echo "The owned local Claude Code MCP registration is missing or changed; no profile was switched." >&2; return 1; }
+  if claude mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+    echo "An MCP registration named '$remote_mcp_name' already exists; it was preserved." >&2; return 1
+  fi
+  remote_args=(mcp add --scope user --transport http "$remote_mcp_name" "$remote_url")
+  [[ -n "$remote_oauth_client_id" ]] && remote_args+=(--client-id "$remote_oauth_client_id")
+  if ! claude "${remote_args[@]}" || ! claude mcp login "$remote_mcp_name"; then
+    claude mcp remove "$remote_mcp_name" >/dev/null 2>&1 || true
+    echo "Remote OAuth did not complete; the local MCP profile was preserved." >&2; return 1
+  fi
+  if ! write_remote_profile_state "$remote_claude_profile_state_file" claude "$remote_url" "$remote_oauth_client_id" ""; then
+    claude mcp remove "$remote_mcp_name" >/dev/null 2>&1 || true
+    echo "Remote profile ownership could not be recorded; the local MCP profile was preserved." >&2; return 1
+  fi
+  if ! claude mcp remove luthn >/dev/null; then
+    if claude mcp remove "$remote_mcp_name" >/dev/null 2>&1; then
+      rm -f "$remote_claude_profile_state_file"
+      echo "The local MCP could not be disabled; remote configuration was rolled back." >&2
+    else
+      echo "The local MCP could not be disabled; remote profile ownership was preserved for recovery." >&2
+    fi
+    return 1
+  fi
+  echo "The remote Claude Code MCP profile is active. Local automatic capture remains unchanged."
+}
+
+restore_local_claude_profile() {
+  require_installation; require_command claude
+  [[ -f "$remote_claude_profile_state_file" ]] || { echo "No Luthn-owned remote Claude Code profile is active."; return 0; }
+  remote_url="$(remote_profile_value "$remote_claude_profile_state_file" REMOTE_URL)"
+  remote_client_id="$(remote_profile_value "$remote_claude_profile_state_file" OAUTH_CLIENT_ID)"
+  if ! claude mcp get "$remote_mcp_name" >/dev/null 2>&1 || ! claude mcp remove "$remote_mcp_name" >/dev/null; then
+    echo "The owned remote Claude Code MCP could not be removed; local MCP was not changed." >&2; return 1
+  fi
+  if ! claude mcp add --scope user luthn -- "$cli_path" mcp >/dev/null; then
+    rollback_args=(mcp add --scope user --transport http "$remote_mcp_name" "$remote_url")
+    [[ -n "$remote_client_id" ]] && rollback_args+=(--client-id "$remote_client_id")
+    if claude "${rollback_args[@]}" >/dev/null 2>&1 && claude mcp login "$remote_mcp_name" >/dev/null; then
+      echo "Local MCP could not be restored; the remote profile was restored for recovery." >&2
+    else
+      echo "Local MCP could not be restored, and remote profile recovery was incomplete." >&2
+    fi
+    return 1
+  fi
+  rm -f "$remote_claude_profile_state_file"
+  echo "The owned local Claude Code MCP profile is active."
+}
+
+manage_profile() {
+  mode="${1:-}"; agent="${2:-}"; shift 2 || true
+  case "$mode:$agent" in
+    remote:codex) activate_remote_codex_profile "$@" ;;
+    remote:claude) activate_remote_claude_profile "$@" ;;
+    local:codex) (( $# == 0 )) || { echo "usage: luthn profile local codex" >&2; return 2; }; restore_local_codex_profile ;;
+    local:claude) (( $# == 0 )) || { echo "usage: luthn profile local claude" >&2; return 2; }; restore_local_claude_profile ;;
+    *) echo "usage: luthn profile remote|local codex|claude [options]" >&2; return 2 ;;
+  esac
+}
+
 command="${1:-help}"
 case "$command" in
   install) shift; install_luthn "$@" ;;
@@ -2810,6 +3049,7 @@ case "$command" in
     shift
     case "${1:-}" in codex) disconnect_codex;; claude) disconnect_claude;; *) echo "usage: luthn disconnect codex|claude" >&2; exit 2;; esac
     ;;
+  profile) shift; manage_profile "$@" ;;
   codex-hook) run_codex_hook ;;
   adapter) run_adapter ;;
   mcp) shift; run_mcp "$@" ;;
