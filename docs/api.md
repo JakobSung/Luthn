@@ -238,7 +238,7 @@ POST /api/external-publication/memory-items/{id}/revoke
 These endpoints operate on the local publication lifecycle. Approval is
 accepted only for public, agent-visible, non-expired safe memory. It writes a
 versioned safe-projection envelope to the local durable outbox; it does not
-connect to a cloud service. Revoke queues a tombstone without title, safe
+connect to an external service. Revoke queues a tombstone without title, safe
 summary, expiration, or provenance body fields. Repeated approval or revocation
 returns the existing state without creating another revision.
 
@@ -705,7 +705,7 @@ human-readable `message`. `requestId` and a fresh 64-character lowercase
 hexadecimal `accessHandle` are present only for `requested`; no protected record
 reference or content is returned. Only a SHA-256 digest of the handle is stored.
 The handle must stay inside the requesting task and must not enter user-visible
-output, logs, audit, cache, recall metadata, Cloud sync, or operator responses.
+output, logs, audit, cache, recall metadata, synchronization, or operator responses.
 Losing it requires a new request. Resolve and protected-result responses use
 `Cache-Control: no-store` and `Pragma: no-cache`.
 
@@ -811,9 +811,7 @@ denial, expiry, or consumption only when it calls the existing create/status/res
 operation again; no SignalR, SSE, WebSocket, webhook, email, Slack, mobile push,
 or unsolicited Agent message is emitted. A `grant-active` response can be
 followed by the existing result operation in the same user turn. Approved output
-is not transported through Cloud, Cloud safe-projection sync, or an external
-publication outbox. No Cloud result relay or Cloud administrator route is part of
-this contract.
+is not transported through synchronization or an external-publication outbox.
 
 ### Workflow, audit, and bypass boundary
 
@@ -822,7 +820,7 @@ mutate requests, decisions, policy revisions, grants, expiry, and read counters.
 Legacy approved-output reads additionally require a non-serializable, one-time
 internal permit. Protected-memory reads instead require both the authenticated
 requester binding and the opaque access handle; only its digest is persisted.
-Neither permit nor plaintext handle is exposed in logs, audit, cache, Cloud, or
+Neither permit nor plaintext handle is exposed in logs, audit, cache, or
 operator contracts. Agent-facing API/MCP surfaces do not expose approve, deny,
 policy/grant mutation, unrestricted Vault/source reads, or credential reads.
 
@@ -842,11 +840,11 @@ reference labels, redacted-output content, credentials, secrets, owner paths,
 workspace/owner display identifiers, or raw sensitive content.
 
 `GET /api/access-requests/{id}/operator-detail` is a separate `access.review`
-contract for local or self-hosted Hub consoles. It returns the request and decision
+contract for local or self-hosted consoles. It returns the request and decision
 reasons plus the sensitive reference's existing label, source metadata, and redacted
 summary. The response is marked `operator-sensitive-metadata` and
-`local-operator-only`; it is not agent-safe and must not enter Cloud safe-projection
-sync, logs, metrics, or general audit payloads. Authorization always enforces the
+`local-operator-only`; it is not agent-safe and must not enter synchronization,
+logs, metrics, or general audit payloads. Authorization always enforces the
 authenticated workspace. A non-operator decider is additionally restricted to its
 server-derived owner, while an explicitly configured operator may review other owners
 only inside that workspace. Successful reads emit a content-free, metadata-only
@@ -1002,25 +1000,6 @@ List responses keep live entries in `requests` and expose removed entries in a
 separate strongly typed `tombstones` array so existing request consumers remain
 compatible.
 
-## Cloud-neutral synchronization contracts
-
-`Luthn.Sdk` exposes additive version-two DTOs for installation enrollment,
-capability negotiation, safe-projection batches, receipts, checkpoints,
-bounded errors, and metadata-only audit pages. These are transport-neutral
-contracts only: the OSS runtime still registers the disabled sync transport by
-default and no Cloud endpoint or credential store is enabled by these types.
-
-Version-two projection payloads deliberately omit Organization, Workspace, and
-Installation identity. A receiver derives tenant scope from the authenticated
-Installation authority instead of accepting caller-selected tenancy fields.
-Each batch item carries an opaque `operationId` that the receiver returns in its
-receipt, so acknowledgement and checkpoint advancement never depend on tenant
-identity or content fields.
-The strict input contract rejects unknown fields, including raw/Vault content,
-encrypted payloads, credentials, prompts, transcripts, working directories,
-and local paths. The existing `SafeProjectionSyncEnvelopeDto` version-one JSON
-shape remains available for compatibility.
-
 ## Operator console profile
 
 ```http
@@ -1028,8 +1007,8 @@ GET /api/operator/console-profile
 ```
 
 The read-only profile tells the shared OSS console whether the server is in
-`Local` (un-enrolled `SingleOwner`) or `Hub` (`MultiUser` or enrolled) mode. It also returns the fixed
-`cloudTransport: disabled`, `sensitiveAuthority: oss-console`, and
+`Local` (`SingleOwner`) or `MultiUser` mode. It also returns the fixed
+`outboundTransport: disabled`, `sensitiveAuthority: oss-console`, and
 `tenancySource: authenticated-request` boundaries. The endpoint accepts no
 request body or caller-selected tenant/mode identity and returns no workspace,
 organization, installation, owner, or credential fields.
@@ -1040,21 +1019,14 @@ or transport state. Sensitive-access approval and external-publication approval
 remain separate API and console sections; both continue to use Host APIs rather
 than direct database access.
 
-## Console session and Cloud lifecycle boundaries
+## Local console session boundary
 
 ```http
 GET  /api/operator/session
 POST /api/operator/session/local/arm
 POST /api/operator/session/local
+POST /api/operator/session/local/connect
 POST /api/operator/session/logout
-GET  /api/operator/enrollment
-POST /api/operator/enrollment/start
-POST /api/operator/enrollment/verify
-GET  /api/operator/cloud-login
-POST /api/operator/cloud-login
-GET  /api/operator/lifecycle
-POST /api/operator/lifecycle/reconnect
-POST /api/operator/lifecycle/reclaim
 ```
 
 The browser first receives an unprivileged HttpOnly candidate cookie. The installed
@@ -1064,14 +1036,8 @@ bootstrap value enters the browser, URL, or API body. The session cookie is opaq
 server-side, bounded by idle and absolute expiry,
 HttpOnly, host-only, and SameSite. Cookie-authenticated mutations require the
 same-origin `X-Luthn-CSRF` proof. LocalAuto is limited to an explicitly
-local-only, loopback, un-enrolled `SingleOwner`; enrollment activation and Local
-reclaim revoke existing authority first. Enrollment, login, lifecycle, and
-recovery providers default to disabled. Fake providers are deterministic test
-adapters with zero outbound traffic, not production Cloud endpoints.
-
-Cloud login accepts plain HTTP only for a direct, local-only loopback request
-with forwarded headers disabled. Every remote or forwarded deployment must use
-HTTPS, and Cloud session cookies remain `Secure` in both cases.
+local-only, loopback `SingleOwner` installation. Forwarded or remotely exposed
+installations do not receive a LocalAuto session.
 
 These JSON contracts expose bounded state, capabilities, expiry, actions, and
 server-derived labels only. They do not accept or return service credentials,
@@ -1203,7 +1169,7 @@ Supported scopes:
 ## Central OSS Hub ingress (opt-in)
 
 The public runtime includes an opt-in Hub data-plane foundation. It is disabled
-by default and does not implement a Cloud HTTP transport. A Hub ingress token
+by default and does not implement an external HTTP transport. A Hub ingress token
 must bind `HubOrganizationId`, `WorkspaceId`, `UserId`,
 `HubAgentConnectionId`, `HubAgentId`, and `HubSessionId` in server
 configuration. The request body cannot select or override those identities.

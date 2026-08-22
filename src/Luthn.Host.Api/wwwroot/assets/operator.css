@@ -919,7 +919,7 @@ tbody tr:last-child td {
   border: 0;
 }
 
-.enrollment-card {
+.local-access-card {
   margin-top: 22px;
   padding: 20px;
   border: 1px solid var(--line);
@@ -929,35 +929,6 @@ tbody tr:last-child td {
 
 .panel-heading.compact {
   margin-bottom: 14px;
-}
-
-.enrollment-steps {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0 0 16px;
-  padding: 0;
-  list-style: none;
-}
-
-.enrollment-steps li {
-  display: grid;
-  gap: 6px;
-  min-height: 120px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--panel);
-}
-
-.enrollment-steps span {
-  color: var(--muted);
-  font-size: 0.84rem;
-  line-height: 1.45;
-}
-
-.enrollment-card code {
-  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {
@@ -999,13 +970,8 @@ tbody tr:last-child td {
   }
 
   .auth-explainer,
-  .orientation-steps,
-  .enrollment-steps {
+  .orientation-steps {
     grid-template-columns: 1fr;
-  }
-
-  .enrollment-steps li {
-    min-height: 0;
   }
 
   .orientation-steps p {

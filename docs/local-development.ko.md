@@ -40,7 +40,7 @@ DOTNET_ENVIRONMENT=Testing dotnet run --project src/Luthn.Host.Api/Luthn.Host.Ap
 
 운영자 화면은 <http://127.0.0.1:5089/>입니다. health/readiness, 읽기 전용 에이전트 연결 상태, 분류 미리 보기, 통제된 source intake, 민감 접근 요청 검토·승인·거절, 목적 중심 메타데이터 감사 조사를 제공합니다. 민감 요청은 먼저 선택해 허용된 operator detail만 조회해야 하며 명시적 결정 사유 없이는 승인·반려할 수 없습니다. 감사 센터는 민감 접근, 분류 실패, 설정 변경, publication, ingress, worker, retention preset과 제한된 사용자 필터를 제공하지만 원문 조회 화면이 아닙니다.
 
-선택 활성화 OSS Hub 기준선은 기본 비활성입니다. 로컬에서 시험할 때는 server-bound Hub scope를 가진 `MultiUser` identity를 사용한 뒤 `Luthn__Hub__Ingress__Enabled=true`와 필요하면 `Luthn__Hub__Ingress__WorkerEnabled=true`를 설정합니다. Ingress는 제한된 capsule을 암호화하고 trusted token에서 organization/workspace/member/agent/session identity를 정하며 metadata receipt만 반환합니다. disabled/fake relay는 Cloud 요청을 보내지 않습니다. 제한값과 Cloud 경계는 [중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)을 참고하세요.
+선택 활성화 OSS Hub 기준선은 기본 비활성입니다. 로컬에서 시험할 때는 server-bound Hub scope를 가진 `MultiUser` identity를 사용한 뒤 `Luthn__Hub__Ingress__Enabled=true`와 필요하면 `Luthn__Hub__Ingress__WorkerEnabled=true`를 설정합니다. Ingress는 제한된 capsule을 암호화하고 trusted token에서 organization/workspace/member/agent/session identity를 정하며 metadata receipt만 반환합니다. disabled/fake relay는 외부 요청을 보내지 않습니다.
 
 에이전트 설치·재설정·연결 해제는 host CLI에서 수행합니다.
 
@@ -62,10 +62,7 @@ token은 기본적으로 결정 전용입니다. 패키지 설치는 같은 secr
 커밋하지 않습니다.
 
 이 자격 증명은 Agent와 직접 API client에는 계속 필요하지만 사람의 콘솔 세션으로
-승격되지 않습니다. 수명주기 시험은 `Luthn:Console:Enrollment:Adapter=Fake`와
-`Luthn:Console:CloudLogin:Provider=Fake`를 사용할 수 있습니다. 둘 다 기본값은
-`Disabled`이고 네트워크 요청을 하지 않으며 실제 Cloud 인증으로 설명하면 안 됩니다.
-Fake recovery verifier도 집중 시험에서 명시적으로 켜지 않으면 비활성입니다.
+승격되지 않습니다.
 
 메뉴는 작업별로 사용합니다.
 

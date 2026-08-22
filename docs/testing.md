@@ -8,11 +8,11 @@ default execution path, not the importance of the coverage.
 
 ## Current baseline
 
-The canonical inventory currently contains 43 C# test sources, 7 .NET test
-projects, and 15 files under `scripts/tests/`, for 65 test-related files. The
-latest full .NET run covered 471 test cases. File count and test-case count are
+The canonical inventory currently contains 57 C# test sources, 7 .NET test
+projects, and 15 files under `scripts/tests/`, for 79 test-related files. The
+latest full .NET run covered 636 test cases. File count and test-case count are
 tracked separately; both include the Hub ingress/worker, operator-console,
-audit-lifecycle, and Cloud-contract coverage added after the previous baseline.
+audit-lifecycle, and safe-projection contract coverage added after the previous baseline.
 
 File count and test-case count are tracked separately. A future reduction must
 show the retained security, sensitive-data, retrieval, recall, ownership, and
@@ -183,11 +183,25 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | `tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj` | `focused` | `dotnet test tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj --no-restore` | MCP server project-level boundary checks. |
 | `tests/Luthn.McpServer.Tests/McpToolBoundaryTests.cs` | `focused` | `dotnet test tests/Luthn.McpServer.Tests/Luthn.McpServer.Tests.csproj --no-restore --filter FullyQualifiedName~McpToolBoundaryTests` | MCP tool names, schemas, and safe boundary behavior. |
 | `tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore` | SDK project-level contracts. |
-| `tests/Luthn.Sdk.Tests/CloudContractTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore --filter FullyQualifiedName~CloudContractTests` | Additive enrollment, capability, safe-projection, receipt, checkpoint, bounded-error, and forbidden-field contracts. |
 | `tests/Luthn.Sdk.Tests/SdkContractTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore` | SDK request and response contracts. |
 | `tests/Luthn.Tools.Tests/ClassificationEvaluationCommandTests.cs` | `fast` | `dotnet test tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj --no-restore` | Classification evaluation command, local deterministic, same-device HTTP, and output contracts. |
 | `tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj` | `fast` | `dotnet test tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj --no-restore` | Tools project-level deterministic checks. |
 | `tests/Luthn.Tools.Tests/ServiceTokenDigestTests.cs` | `fast` | `dotnet test tests/Luthn.Tools.Tests/Luthn.Tools.Tests.csproj --no-restore` | Service-token digest and secret-handling contracts. |
+| `tests/Luthn.Core.Persistence.Tests/SensitiveAccessPolicyPersistenceTests.cs` | `focused` | `dotnet test tests/Luthn.Core.Persistence.Tests/Luthn.Core.Persistence.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessPolicyPersistenceTests` | Sensitive-access policy persistence and revision boundaries. |
+| `tests/Luthn.Core.Persistence.Tests/SensitiveAccessTombstonePersistenceTests.cs` | `focused` | `dotnet test tests/Luthn.Core.Persistence.Tests/Luthn.Core.Persistence.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessTombstonePersistenceTests` | Content-pruned sensitive-access tombstone persistence. |
+| `tests/Luthn.Host.Api.Tests/ConsoleSessionSecurityTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ConsoleSessionSecurityTests` | Local console session authorization, cookie, and antiforgery boundaries. |
+| `tests/Luthn.Host.Api.Tests/ProtectedInformationAccessEndpointTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ProtectedInformationAccessEndpointTests` | Protected-information endpoint authorization and bounded response behavior. |
+| `tests/Luthn.Host.Api.Tests/ProtectedInformationAccessResolutionTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~ProtectedInformationAccessResolutionTests` | Protected-information request resolution and requester binding. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessConsoleLifecycleTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessConsoleLifecycleTests` | Sensitive-access controls exposed through the local operator console. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessExpiryAndAuditMetricsTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessExpiryAndAuditMetricsTests` | Sensitive-access expiry and metadata-only audit metrics. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessPolicyAndGrantWorkflowTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessPolicyAndGrantWorkflowTests` | Sensitive-access policy, grant, and decision workflow boundaries. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessPolicyEndpointTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessPolicyEndpointTests` | Sensitive-access policy endpoint authorization and validation. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessResolutionTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessResolutionTests` | Sensitive-access resolution state and retrieval behavior. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessTombstoneCleanupTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessTombstoneCleanupTests` | Content-pruned sensitive-access cleanup behavior. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessWorkflowBoundaryTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessWorkflowBoundaryTests` | Sensitive-access application boundary enforcement. |
+| `tests/Luthn.Host.Api.Tests/SensitiveAccessWorkflowBypassTests.cs` | `focused` | `dotnet test tests/Luthn.Host.Api.Tests/Luthn.Host.Api.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessWorkflowBypassTests` | Sensitive-access workflow bypass rejection. |
+| `tests/Luthn.Sdk.Tests/ConsoleSessionContractTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore --filter FullyQualifiedName~ConsoleSessionContractTests` | Bounded local console session contract. |
+| `tests/Luthn.Sdk.Tests/SensitiveAccessLifecycleContractTests.cs` | `fast` | `dotnet test tests/Luthn.Sdk.Tests/Luthn.Sdk.Tests.csproj --no-restore --filter FullyQualifiedName~SensitiveAccessLifecycleContractTests` | Additive sensitive-access lifecycle metadata contracts. |
 
 ## Duplicate candidates retained for follow-up
 

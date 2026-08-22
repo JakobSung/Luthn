@@ -96,7 +96,7 @@ https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installat
 재검증한 제한된 redacted summary뿐이며, 원본 Vault/source 조회 경로를 열지 않습니다.
 
 민감 접근 승인과 외부 공개 승인은 서로 다른 결정입니다. 화면은 직접 database에
-접근하지 않고 Host API 계약만 사용하며, 공개 runtime의 Cloud transport는 기본적으로
+접근하지 않고 Host API 계약만 사용하며, 공개 runtime의 외부 전송은 기본적으로
 비활성입니다.
 
 감사 데이터는 metadata-only입니다. 요청의 결정 timeline, 분류·provider 실패,
@@ -105,15 +105,6 @@ https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installat
 저장소·원문 복구 수단이 아닙니다. 자세한 내용은
 [API 승인·감사 계약](docs/api.ko.md)과 [운영 보존 모델](docs/operations.ko.md)을
 참고하세요.
-
-## 중앙 OSS Hub 경계
-
-공개 runtime에는 선택 활성화 방식의 중앙 Hub data-plane 기반이 구현되어 있습니다.
-암호화 durable ingress, server가 정하는 Workspace identity, 제한된 worker
-lease/retry/dead-letter, 내용 없는 운영 상태와 disabled/fake relay 경계를 제공합니다.
-개인 self-host가 기본이며 Cloud enrollment, Cloud identity control, 실제 outbound
-transport는 이 저장소 범위 밖에 있습니다. 자세한 내용은
-[중앙 팀 Hub data plane](docs/cloud-hub-data-plane.ko.md)을 참고하세요.
 
 ## 문서
 
@@ -124,7 +115,6 @@ transport는 이 저장소 범위 밖에 있습니다. 자세한 내용은
 - [운영과 복구](docs/operations.ko.md)
 - [컨테이너 릴리즈](docs/releases.ko.md)
 - [API](docs/api.ko.md)
-- [중앙 팀 Hub data plane](docs/cloud-hub-data-plane.ko.md)
 - [구조](docs/architecture.ko.md)
 - [로컬 개발](docs/local-development.ko.md)
 - [프로젝트 맥락](docs/project-context.ko.md)

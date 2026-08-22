@@ -134,9 +134,6 @@ if (hostOptions.EnableForwardedHeaders)
 builder.Services.Configure<LuthnAuthOptions>(builder.Configuration.GetSection("Luthn:Auth"));
 builder.Services.Configure<LuthnIdentityOptions>(builder.Configuration.GetSection("Luthn:Identity"));
 builder.Services.Configure<ConsoleAccessOptions>(builder.Configuration.GetSection(ConsoleAccessOptions.SectionName));
-builder.Services.Configure<ConsoleEnrollmentOptions>(builder.Configuration.GetSection(ConsoleEnrollmentOptions.SectionName));
-builder.Services.Configure<ConsoleCloudLoginOptions>(builder.Configuration.GetSection(ConsoleCloudLoginOptions.SectionName));
-builder.Services.Configure<ConsoleRecoveryOptions>(builder.Configuration.GetSection(ConsoleRecoveryOptions.SectionName));
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = ConsoleAccessOptions.AntiforgeryHeaderName;
@@ -145,41 +142,8 @@ builder.Services.AddAntiforgery(options =>
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
 });
-builder.Services.AddSingleton<ConsoleLifecycleStore>();
-builder.Services.AddSingleton<IConsoleLifecycleStore>(provider =>
-    provider.GetRequiredService<ConsoleLifecycleStore>());
-builder.Services.AddSingleton<IConsoleInstallationState>(provider =>
-    provider.GetRequiredService<ConsoleLifecycleStore>());
 builder.Services.AddSingleton<IConsoleLocalAccessArmStore, InMemoryConsoleLocalAccessArmStore>();
-builder.Services.AddSingleton<DisabledInstallationEnrollmentAdapter>();
-builder.Services.AddSingleton<FakeInstallationEnrollmentAdapter>();
-builder.Services.AddSingleton<IInstallationEnrollmentAdapter>(provider =>
-    provider.GetRequiredService<IOptions<ConsoleEnrollmentOptions>>().Value.Adapter switch
-    {
-        Luthn.Sdk.Console.ConsoleEnrollmentAdapter.Fake =>
-            provider.GetRequiredService<FakeInstallationEnrollmentAdapter>(),
-        _ => provider.GetRequiredService<DisabledInstallationEnrollmentAdapter>()
-    });
 builder.Services.AddSingleton<IConsoleSessionStore, InMemoryConsoleSessionStore>();
-builder.Services.AddSingleton<DisabledConsoleCloudLoginProvider>();
-builder.Services.AddSingleton<FakeConsoleCloudLoginProvider>();
-builder.Services.AddSingleton<IConsoleCloudLoginProvider>(provider =>
-    provider.GetRequiredService<IOptions<ConsoleCloudLoginOptions>>().Value.Provider switch
-    {
-        Luthn.Sdk.Console.ConsoleCloudLoginProvider.Fake =>
-            provider.GetRequiredService<FakeConsoleCloudLoginProvider>(),
-        _ => provider.GetRequiredService<DisabledConsoleCloudLoginProvider>()
-    });
-builder.Services.AddSingleton<IConsoleCloudSessionValidator, ConsoleCloudSessionValidator>();
-builder.Services.AddSingleton<DisabledConsoleOfflineRecoveryVerifier>();
-builder.Services.AddSingleton<FakeConsoleOfflineRecoveryVerifier>();
-builder.Services.AddSingleton<IConsoleOfflineRecoveryVerifier>(provider =>
-    provider.GetRequiredService<IOptions<ConsoleRecoveryOptions>>().Value.Verifier switch
-    {
-        Luthn.Sdk.Console.ConsoleRecoveryVerifier.Fake =>
-            provider.GetRequiredService<FakeConsoleOfflineRecoveryVerifier>(),
-        _ => provider.GetRequiredService<DisabledConsoleOfflineRecoveryVerifier>()
-    });
 builder.Services.AddOptions<HubIngressOptions>()
     .Bind(builder.Configuration.GetSection("Luthn:Hub:Ingress"))
     .Validate(options => options.IsValid, "Luthn Hub ingress limits are invalid.")
@@ -249,9 +213,6 @@ await using (var scope = app.Services.CreateAsyncScope())
 
 app.MapLuthnApi();
 app.MapConsoleSessions();
-app.MapConsoleEnrollment();
-app.MapConsoleCloudLogin();
-app.MapConsoleLifecycle();
 app.MapOperatorConfiguration();
 app.MapOperationalMetrics();
 app.MapSearchTelemetry();

@@ -17,20 +17,16 @@ Luthn은 AI 에이전트용 직접 호스팅 공유 기억 계층입니다. 민�
 
 - 에이전트는 기본적으로 Core로 걸러진 공유 기억, context pack, 위키 안전 Markdown을 읽습니다.
 - 원본·비공개 기록은 Vault, 정책, 통제된 접근, 감사 경계 뒤에 둡니다.
-- 로컬 운영자 화면은 Local과 Hub mode의 민감 접근 검토 권한 정본입니다. 운영자 상세에는
+- 로컬 운영자 화면은 Local과 다중 사용자 self-host mode의 민감 접근 검토 권한 정본입니다. 운영자 상세에는
   제한된 안전 참조 metadata와 redacted summary만 표시하며, 승인·반려에는 명시적 사유가
   필요하고 원본 Vault/source는 노출하지 않습니다.
 - 민감 접근 승인과 외부 공개 승인은 서로 다른 결정입니다. 감사는 metadata-only 조사
   trail이며 내용 복구나 backup 경로가 아닙니다.
 - 위키 Markdown은 Core가 관리하는 지식의 투영이며 원본 사실 저장소가 아닙니다.
 - 로컬/PostgreSQL이 기본 직접 호스팅 기억 경로이고 외부 기억 서비스는 Luthn 정책 뒤의 선택적 adapter입니다.
-- 로컬 전용 동작은 불변 조건입니다. 외부 공개에는 운영자 동작이 필요하며, 버전이 지정된 공개 안전 투영만 로컬 durable outbox를 거칩니다. 공개 저장소에는 활성 cloud client가 없습니다.
-- 승인된 팀 구조는 구성원 PC마다 전체 설치를 두지 않고 Organization당 중앙 OSS Hub
-  하나를 사용합니다. 공개 runtime에는 선택 활성화 방식의 암호화 durable ingress,
-  server가 정하는 Workspace identity, 제한된 처리, dead-letter/replay, aggregate
-  status와 disabled/fake relay 경계가 구현되어 있습니다. Cloud enrollment, Cloud
-  identity control과 실제 outbound transport는 이 저장소 밖에 있습니다. 자세한 내용은
-  [중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)에 있습니다.
+- 로컬 전용 동작은 불변 조건입니다. 외부 공개에는 운영자 동작이 필요하며, 버전이 지정된 공개 안전 투영만 로컬 durable outbox를 거칩니다. 공개 저장소에는 활성 외부 전송 client가 없습니다.
+- 다중 사용자 self-host는 server 설정 identity binding과 기본 비활성 ingress·외부 전송
+  경계를 사용합니다.
 - 로컬 직접 호스팅 확인 흐름은 provider 자격 증명 없이 실행할 수 있어야 합니다.
 - 저장소에는 자격 증명, 비공개 원본, 고객 원문, 로컬 에이전트 자료, 계획 상태, 실행 증거를 두지 않습니다.
 
@@ -44,19 +40,8 @@ Luthn은 AI 에이전트용 직접 호스팅 공유 기억 계층입니다. 민�
   -> 에이전트 API는 Core로 걸러진 위키 안전 기억과 맥락 반환
 ```
 
-선택적인 미래 팀 공유 경계:
-
-```text
-승인된 공유 기억
-  -> 명시적 외부 공개 승인
-  -> 로컬 durable outbox의 버전 지정 안전 투영
-  -> 비활성 전송 경계
-  -> 이 저장소 밖의 미래 상용 cloud adapter
-```
-
-팀 Hub 확장은 현재 공개 outbox 앞에 비동기 ingress·classification 경계를 추가합니다.
-구성원 Agent는 각 PC에 전체 runtime을 설치하는 대신 Cloud가 발급한 remote MCP/OAuth와
-Agent-native lifecycle 연동을 사용합니다.
+선택적 다중 사용자 self-host는 server 설정의 identity binding과 기본 비활성 ingress·
+외부 전송 경계를 사용합니다.
 
 runtime 프로젝트는 `Luthn.Core`, `Luthn.Core.Persistence`, `Luthn.Host.Api`, `Luthn.Host.Worker`, `Luthn.Tools`, `Luthn.Sdk`, `Luthn.AgentConnector.Http`, `Luthn.McpServer`입니다.
 
@@ -96,7 +81,6 @@ git diff --check
 - [Codex 연결](agent-quickstart.ko.md)
 - [라이선스](licensing.ko.md)
 - [구조](architecture.ko.md)
-- [중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)
 - [프로젝트 구조](project-structure.ko.md)
 - [데이터 경계](data-boundaries.ko.md)
 - [원본 참조](source-references.ko.md)

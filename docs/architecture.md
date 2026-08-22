@@ -114,7 +114,7 @@ retention action as metadata-only events. Cursor queries and metadata-only
 exports support investigation, but audit is not a content store or recovery
 backup.
 
-## Cloud-Ready Local-First Foundation
+## Local-First Safe-Projection Foundation
 
 Every shared-memory record starts as `LocalOnly`. Agent visibility and external
 publication are independent decisions: an agent-safe record is not queued for
@@ -137,9 +137,7 @@ backoff, supersedes unsent older revisions, stores acknowledgements/checkpoints,
 and emits revocation tombstones. A newer revision is not sent while an older
 revision for the same local record is still processing.
 The only transport registered by this repository is `disabled`; it makes no
-network request and leaves queued records untouched. A real Luthn Ontology
-transport, tenant/auth service, billing, and shared team data plane belong to a
-separate commercial repository.
+network request and leaves queued records untouched.
 
 ### Central OSS Hub runtime
 
@@ -149,13 +147,8 @@ runtime. The public runtime now implements the opt-in baseline: Hub ingress
 persists an encrypted capsule and metadata-only audit event before returning
 `202`, a bounded Workspace-fair worker handles leases/retries/dead letters and
 explicit replay, and `/api/hub/status` exposes aggregate content-free status.
-The relay boundary remains disabled or fake, so no Cloud request is made by the
-OSS build. The public Host also provides provider-neutral disabled/fake
-enrollment, human-login, membership/offboarding, and explicit Local-reclaim
-boundaries. These exercise two-phase activation and revoke-first behavior but
-do not issue real Cloud identity. Production Cloud identity, billing, and real
-outbound transport remain future boundaries defined in
-[`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
+The relay boundary remains disabled or fake, so no external request is made by
+the OSS build.
 
 ## Plugin Ingestion Contract
 

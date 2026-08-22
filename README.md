@@ -117,7 +117,7 @@ never loads the protected value.
 
 Sensitive-access approval and external-publication approval are separate
 decisions. The console uses Host API contracts, never direct database access,
-and the public runtime keeps Cloud transport disabled by default. Personal
+and the public runtime keeps outbound transport disabled by default. Personal
 `SingleOwner` installs use `luthn console` to authorize one bounded server-side
 session on the loopback-bound console; browser JavaScript never receives the service or
 decision credential.
@@ -130,18 +130,6 @@ not a backup, a prompt/transcript store, or a raw-data recovery path. See the
 [API audit and approval contracts](docs/api.md) and the
 [operations retention model](docs/operations.md).
 
-## Central OSS Hub Boundary
-
-The public runtime now includes an opt-in central Hub data-plane foundation:
-encrypted durable ingress, server-derived Workspace identity, bounded worker
-leases/retries/dead letters, content-free operational status, and disabled/fake
-relay, enrollment, login, and recovery-provider boundaries. Personal self-host
-remains the default. The fake providers exist only for deterministic lifecycle
-tests; production Cloud identity, billing, and real outbound transport remain
-outside this repository. Enrollment is two-phase, successful activation revokes
-LocalAuto, membership loss never falls back to Local, and explicit reclaim is
-revoke-first. See [Central team Hub data plane](docs/cloud-hub-data-plane.md).
-
 ## Documentation
 
 - [Installation, recovery, and lifecycle](docs/installation.md)
@@ -151,7 +139,6 @@ revoke-first. See [Central team Hub data plane](docs/cloud-hub-data-plane.md).
 - [Operations and recovery](docs/operations.md)
 - [Container releases](docs/releases.md)
 - [API](docs/api.md)
-- [Central team Hub data plane](docs/cloud-hub-data-plane.md)
 - [Architecture](docs/architecture.md)
 - [Local development](docs/local-development.md)
 - [Licensing](docs/licensing.md)

@@ -32,15 +32,10 @@ public static class OperatorConfigurationEndpoints
     }
 
     public static Ok<OperatorConsoleProfileResponse> ReadConsoleProfile(
-        IOptions<LuthnIdentityOptions> identityOptions,
-        IConsoleInstallationState installationState)
+        IOptions<LuthnIdentityOptions> identityOptions)
     {
-        var consoleMode = installationState.IsEnrolled ||
-            identityOptions.Value.Mode == LuthnIdentityMode.MultiUser
-            ? "Hub"
-            : "Local";
         return TypedResults.Ok(new OperatorConsoleProfileResponse(
-            consoleMode,
+            identityOptions.Value.Mode == LuthnIdentityMode.MultiUser ? "MultiUser" : "Local",
             "disabled",
             "oss-console",
             "authenticated-request",
@@ -228,7 +223,7 @@ public static class OperatorConfigurationEndpoints
 
 public sealed record OperatorConsoleProfileResponse(
     string ConsoleMode,
-    string CloudTransport,
+    string OutboundTransport,
     string SensitiveAuthority,
     string TenancySource,
     bool ServerDerived);

@@ -402,7 +402,7 @@ server는 인증된 owner와 workspace 안에서만 관련 보호 정보를 해�
 `requestId`와 새 64자 소문자 hexadecimal `accessHandle`은 `requested`일 때만 포함하고 보호
 정보 참조나 내용은 반환하지 않습니다. server에는 handle의 SHA-256 digest만 저장합니다.
 handle은 요청한 task 안에서만 보관하고 사용자 출력·로그·감사·cache·recall metadata·
-Cloud sync·운영자 응답에 넣으면 안 됩니다. 잃어버리면 새 요청을 만들어야 합니다.
+동기화·운영자 응답에 넣으면 안 됩니다. 잃어버리면 새 요청을 만들어야 합니다.
 resolve와 protected-result 응답은 `Cache-Control: no-store`, `Pragma: no-cache`를 사용합니다.
 
 ### 권한과 정책 계약
@@ -499,8 +499,7 @@ Pending 요청이나 active grant를 반환합니다. terminal 상태는 새 요
 때만 승인, 반려, 만료, 소진 상태를 확인합니다. SignalR, SSE, WebSocket, webhook, email,
 Slack, mobile push 또는 Agent의 선제 메시지는 보내지 않습니다. `grant-active`를 받은
 Agent는 같은 사용자 turn에서 기존 result 작업을 이어서 호출할 수 있습니다. 승인 결과는
-Cloud, Cloud safe-projection sync 또는 외부 공개 outbox로 전송하지 않습니다. Cloud 결과
-relay와 Cloud 관리자 route는 이 계약의 일부가 아닙니다.
+동기화 또는 외부 공개 outbox로 전송하지 않습니다.
 
 ### Workflow, 감사, 우회 차단 경계
 
@@ -508,7 +507,7 @@ relay와 Cloud 관리자 route는 이 계약의 일부가 아닙니다.
 counter를 조회하거나 변경할 수 있는 application 경계입니다. 기존 승인 결과 조회에는 이
 Workflow가 발급한 직렬화 불가능한 일회성 내부 permit이 필요합니다. protected-memory
 조회에는 인증된 요청자 binding과 opaque handle이 모두 필요하며 plaintext handle은
-저장하지 않습니다. permit과 handle은 로그·감사·cache·Cloud·운영자 계약에 노출하지
+저장하지 않습니다. permit과 handle은 로그·감사·cache·운영자 계약에 노출하지
 않습니다. Agent용 API/MCP에는 approve, deny, 정책/grant 변경, 제한 없는 Vault/source
 조회나 자격증명 조회 작업이 없습니다.
 
@@ -524,11 +523,11 @@ materialization, 우회 차단은 제한된 metadata-only audit와 저카디널�
 남깁니다. prompt·reason 본문, reference label, redacted output 본문, credential, secret,
 owner path, workspace/owner 화면 식별자, 민감 원문은 포함하지 않습니다.
 
-`GET /api/access-requests/{id}/operator-detail`은 로컬 또는 self-hosted Hub
+`GET /api/access-requests/{id}/operator-detail`은 로컬 또는 self-hosted
 콘솔을 위한 별도 `access.review` 계약입니다. 요청·결정 사유와 민감 참조에 이미
 저장된 label, source metadata, redacted summary만 반환합니다. 응답은
 `operator-sensitive-metadata`, `local-operator-only`로 표시되며 Agent-safe 데이터가
-아니므로 Cloud safe-projection sync, 로그, metric, 일반 감사 payload에 넣으면 안 됩니다.
+아니므로 동기화, 로그, metric, 일반 감사 payload에 넣으면 안 됩니다.
 항상 인증된 workspace를 강제하고, 비운영자 decider는 server가 정한 자기 owner로도
 제한합니다. 명시적 operator도 같은 workspace 안에서만 다른 owner를 검토할 수
 있습니다. 성공한 조회는 내용 없는 metadata-only
@@ -607,31 +606,14 @@ Agent나 operator가 호출할 수 있는 cleanup mutation API는 추가하지 �
 목록 응답은 기존 호환성을 위해 live 항목을 `requests`에 유지하고, 제거된 항목은 별도의
 강타입 `tombstones` 배열로 제공합니다.
 
-## Cloud-neutral 동기화 계약
-
-`Luthn.Sdk`는 installation enrollment, capability negotiation, 안전 투영 batch,
-receipt, checkpoint, 제한된 오류, metadata-only 감사 page를 위한 additive v2 DTO를
-제공합니다. 이는 transport-neutral 계약일 뿐입니다. OSS runtime은 계속 기본적으로
-비활성 sync transport를 등록하며 이 DTO만으로 Cloud endpoint나 credential 저장소가
-활성화되지 않습니다.
-
-v2 투영 payload에는 Organization, Workspace, Installation identity를 넣지 않습니다.
-수신자는 caller가 선택한 tenancy 필드가 아니라 인증된 Installation authority에서
-tenant 범위를 결정합니다. 각 batch item은 opaque `operationId`를 포함하고 수신자는
-이를 receipt에 그대로 반환하므로 승인과 checkpoint 갱신이 tenant identity나 content
-필드에 의존하지 않습니다. 엄격한 입력 계약은 알 수 없는 필드와 raw/Vault content,
-encrypted payload, credential, prompt, transcript, working directory, local path를
-거절합니다. 기존 `SafeProjectionSyncEnvelopeDto` v1 JSON 형식은 하위 호환을 위해
-그대로 유지합니다.
-
 ## 운영 콘솔 profile
 
 ```http
 GET /api/operator/console-profile
 ```
 
-read-only profile은 같은 OSS console에 미등록 `SingleOwner`를 `Local`,
-`MultiUser` 또는 등록 완료 설치를 `Hub` mode로 알려 줍니다. 또한 `cloudTransport: disabled`,
+read-only profile은 같은 OSS console에 `SingleOwner`를 `Local`,
+`MultiUser`를 `MultiUser` mode로 알려 줍니다. 또한 `outboundTransport: disabled`,
 `sensitiveAuthority: oss-console`, `tenancySource: authenticated-request` 경계를
 고정해 반환합니다. 요청 body나 호출자가 선택한 tenant/mode identity를 받지 않으며
 workspace, organization, installation, owner, credential 필드를 반환하지 않습니다.
@@ -641,21 +623,14 @@ browser는 정적 label에 allowlist된 `en`, `ko` 언어 preference만 사용�
 승인과 외부 공개 승인은 별도 API·console section으로 유지되며 DB가 아니라 Host API만
 사용합니다.
 
-## 콘솔 세션과 Cloud 수명주기 경계
+## 로컬 콘솔 세션 경계
 
 ```http
 GET  /api/operator/session
 POST /api/operator/session/local/arm
 POST /api/operator/session/local
+POST /api/operator/session/local/connect
 POST /api/operator/session/logout
-GET  /api/operator/enrollment
-POST /api/operator/enrollment/start
-POST /api/operator/enrollment/verify
-GET  /api/operator/cloud-login
-POST /api/operator/cloud-login
-GET  /api/operator/lifecycle
-POST /api/operator/lifecycle/reconnect
-POST /api/operator/lifecycle/reclaim
 ```
 
 브라우저는 먼저 권한 없는 HttpOnly 후보 cookie를 받습니다. 설치된 CLI는 운영체제에서
@@ -664,14 +639,8 @@ POST /api/operator/lifecycle/reclaim
 전달하지 않습니다.
 세션 cookie는 불투명한 서버측 식별자이며 유휴·절대 만료, HttpOnly, host-only,
 SameSite를 적용합니다. Cookie 인증 변경 요청에는 same-origin `X-Luthn-CSRF` proof가
-필요합니다. LocalAuto는 명시적 local-only·loopback·미등록 `SingleOwner`로 제한하며,
-enrollment 활성화와 Local 회수는 기존 권한을 먼저 철회합니다. Enrollment, login,
-lifecycle, recovery provider의 기본값은 disabled입니다. Fake provider는 outbound가 없는
-결정적 시험 adapter일 뿐 production Cloud endpoint가 아닙니다.
-
-Cloud 로그인은 forwarded header가 비활성인 직접 local-only loopback 요청에 한해서만
-일반 HTTP를 허용합니다. 원격 또는 forwarded 배포는 반드시 HTTPS를 사용해야 하며 Cloud
-세션 cookie는 두 경우 모두 `Secure`를 유지합니다.
+필요합니다. LocalAuto는 명시적 local-only·loopback `SingleOwner`로 제한합니다.
+원격 또는 forwarded 배포에서는 LocalAuto 세션을 발급하지 않습니다.
 
 JSON 계약은 제한된 상태·capability·만료·작업·server-derived label만 노출합니다.
 Service credential, recovery proof 값, caller-selected tenant identity, raw/Vault content,
@@ -768,7 +737,7 @@ dotnet run --project src/Luthn.Tools -- token-digest --stdin
 ## 중앙 OSS Hub ingress (선택 활성화)
 
 공개 runtime에는 선택적으로 켜는 Hub data-plane 기반이 있습니다. 기본값은
-비활성이며 Cloud HTTP transport는 구현하지 않습니다. Hub ingress token은 server
+비활성이며 외부 HTTP transport는 구현하지 않습니다. Hub ingress token은 server
 설정에서 `HubOrganizationId`, `WorkspaceId`, `UserId`,
 `HubAgentConnectionId`, `HubAgentId`, `HubSessionId`를 바인딩해야 합니다.
 요청 body는 이 identity를 선택하거나 덮어쓸 수 없습니다.

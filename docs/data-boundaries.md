@@ -298,7 +298,7 @@ default). The protected result is returned only when both the authenticated
 requester binding and opaque handle match. It contains only the encrypted
 original title and summary; credentials, access keys, and private keys are
 blocked without consuming a read. The operator console, logs, audit, cache, and
-Cloud contracts never receive the handle or protected value. Expiry, detail
+External contracts never receive the handle or protected value. Expiry, detail
 reads, decisions, and result reads emit metadata-only audit events.
 Sensitive-access approval never implies external-publication approval.
 
@@ -356,5 +356,5 @@ cleanup pass.
   metadata only; they do not repeat the projection body.
 - Raw source/Vault data, private memory, credentials, prompts, transcripts,
   local paths, and sensitive-access output must never enter the sync contract.
-- The public self-host build has no active cloud transport and performs no
+- The public self-host build has no active outbound transport and performs no
   external sync by default.

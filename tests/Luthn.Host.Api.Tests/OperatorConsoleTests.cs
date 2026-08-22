@@ -14,14 +14,14 @@ public sealed class OperatorConsoleProfileTests
         using var client = factory.CreateClient();
 
         using var response = await client.GetAsync(
-            "/api/operator/console-profile?consoleMode=Hub&workspaceId=caller-selected");
+            "/api/operator/console-profile?consoleMode=MultiUser&workspaceId=caller-selected");
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         using var postResponse = await client.PostAsync("/api/operator/console-profile", null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(HttpStatusCode.MethodNotAllowed, postResponse.StatusCode);
         Assert.Equal("Local", body.RootElement.GetProperty("consoleMode").GetString());
-        Assert.Equal("disabled", body.RootElement.GetProperty("cloudTransport").GetString());
+        Assert.Equal("disabled", body.RootElement.GetProperty("outboundTransport").GetString());
         Assert.Equal("oss-console", body.RootElement.GetProperty("sensitiveAuthority").GetString());
         Assert.Equal("authenticated-request", body.RootElement.GetProperty("tenancySource").GetString());
         Assert.True(body.RootElement.GetProperty("serverDerived").GetBoolean());
@@ -31,7 +31,7 @@ public sealed class OperatorConsoleProfileTests
     }
 
     [Fact]
-    public async Task ProfileDerivesHubModeFromMultiUserIdentityConfiguration()
+    public async Task ProfileDerivesMultiUserModeFromIdentityConfiguration()
     {
         using var factory = CreateFactory("MultiUser");
         using var client = factory.CreateClient();
@@ -40,8 +40,8 @@ public sealed class OperatorConsoleProfileTests
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("Hub", body.RootElement.GetProperty("consoleMode").GetString());
-        Assert.Equal("disabled", body.RootElement.GetProperty("cloudTransport").GetString());
+        Assert.Equal("MultiUser", body.RootElement.GetProperty("consoleMode").GetString());
+        Assert.Equal("disabled", body.RootElement.GetProperty("outboundTransport").GetString());
     }
 
     internal static WebApplicationFactory<Program> CreateFactory(string? identityMode = null) =>
@@ -80,7 +80,6 @@ public sealed class OperatorConsoleContractTests
         Assert.Contains("id=\"auditDetailFields\"", index, StringComparison.Ordinal);
         Assert.Contains("data-audit-preset=\"hub\"", index, StringComparison.Ordinal);
         Assert.Contains("/api/operator/console-profile", script, StringComparison.Ordinal);
-        Assert.Contains("cloud-account-expired", script, StringComparison.Ordinal);
         Assert.Contains("/api/access-requests/", script, StringComparison.Ordinal);
         Assert.Contains("/api/external-publication/", script, StringComparison.Ordinal);
         Assert.Contains("/api/audit-events/export", script, StringComparison.Ordinal);
@@ -93,8 +92,6 @@ public sealed class OperatorConsoleContractTests
         Assert.DoesNotContain("event.workspaceId", script, StringComparison.Ordinal);
         Assert.Contains("event.actorUserId", script, StringComparison.Ordinal);
         Assert.DoesNotContain("/api/operator/metrics", script, StringComparison.Ordinal);
-        Assert.Contains("response.status === 401", script, StringComparison.Ordinal);
-        Assert.Contains("markCloudSessionExpired", script, StringComparison.Ordinal);
         Assert.Contains("renderSessionGuidance()", script, StringComparison.Ordinal);
         Assert.Contains("console-nav-7", index, StringComparison.Ordinal);
     }

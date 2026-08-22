@@ -209,10 +209,6 @@ public sealed class ConsoleSessionSecurityTests
             builder.UseSetting("Luthn:Host:EnableForwardedHeaders", forwardedHeaders.ToString());
             builder.UseSetting("Luthn:Auth:RequireServiceToken", "true");
             ConfigureOperatorCredential(builder);
-            builder.ConfigureTestServices(services =>
-                services.RemoveAll<IConsoleInstallationState>());
-            builder.ConfigureTestServices(services =>
-                services.AddSingleton<IConsoleInstallationState, UnenrolledConsoleInstallationState>());
         });
 
     internal static void ConfigureOperatorCredential(IWebHostBuilder builder)

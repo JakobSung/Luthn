@@ -149,21 +149,11 @@ HttpOnly·host-only·SameSite 세션 cookie만 전달하며 변경 요청에는 
 적용합니다. Service/decision 자격 증명은 Agent와 비콘솔 API client를 위한 보호된 서버
 설정에만 남고 페이지·URL·브라우저 저장소·로그·export로 복사하지 않습니다.
 
-URL만 직접 열어서는 새 세션을 승인하지 않습니다. MultiUser, 등록 완료, forwarded 노출,
-명시적 local-only가 아닌 설치에서는 LocalAuto를
-fail-closed로 차단합니다. Cloud enrollment는 기본 비활성입니다. 공개 fake adapter는
-네트워크 없이 fingerprint 결합 2단계 흐름을 검증합니다. Grant를 영속 검증하기 전에는
-로컬 세션을 유지하고, 활성화가 끝나면 모든 Local 세션을 철회한 뒤 Cloud 로그인만
-허용합니다. Disabled/fake login·recovery provider는 계약·시험 경계이며 실제 Cloud가
-아닙니다. 회원·구독 상실은 로컬로 자동 전환하지 않고, Organization 제한은 종료 준비
-작업만 허용하며, Local 회수는 owner/recovery 검증 뒤 Cloud 권한을 먼저 철회하는 명시적
-전환입니다. 기존 bearer client와 최소 scope 계약은 그대로 유지합니다.
-
-패키지형 loopback bridge는 직접 연결된 로컬 HTTP origin에서 Cloud 로그인을 시작할 수
-있지만 Cloud 세션 cookie는 `Secure`를 유지합니다. Loopback이 아니거나 forwarded 또는
-원격 공개된 콘솔은 Cloud 로그인 전에 반드시 HTTPS를 종료해야 하며 일반 HTTP는 거부합니다.
-패키지 Compose는 `Luthn__Console__TrustedLocalBridge=true`를 설정하며 Host는 loopback Host,
-사설 container endpoint, forwarded header 비활성 조건을 모두 만족할 때만 이 bridge를 신뢰합니다.
+URL만 직접 열어서는 새 세션을 승인하지 않습니다. MultiUser, forwarded 노출,
+명시적 local-only가 아닌 설치에서는 LocalAuto를 fail-closed로 차단합니다.
+패키지형 loopback bridge는 직접 연결된 로컬 HTTP origin으로 제한됩니다. 패키지 Compose는
+`Luthn__Console__TrustedLocalBridge=true`를 설정하며 Host는 loopback Host, 사설 container
+endpoint, forwarded header 비활성 조건을 모두 만족할 때만 이 bridge를 신뢰합니다.
 
 ### 분류 기본값
 

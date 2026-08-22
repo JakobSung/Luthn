@@ -6,16 +6,10 @@ Luthn can connect Codex and Claude Code to one installation at the same time.
 Both agents use the same Luthn API and policy-approved safe memory, while their
 host configuration and connection lifecycle remain independent.
 
-This document describes the currently implemented personal/self-hosted
-connection and the opt-in OSS Hub baseline. The Hub can accept encrypted
-durable ingress with server-derived identity and metadata-only audit, but it is
-disabled by default and does not establish a Cloud connection. The future team
-Cloud mode still uses one central OSS Hub and does not require the full runtime
-on each member PC. A member will register the Cloud remote MCP endpoint with
-OAuth and enable an Agent-native hook, plugin, or managed configuration for
-lifecycle capture. MCP alone provides recall and tools but does not guarantee
-automatic capture. See
-[`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
+This document describes the currently implemented personal and self-hosted
+connection lifecycle. Codex and Claude Code remain independent local
+integrations: MCP provides recall and tools, while an Agent-native hook or
+plugin is responsible for lifecycle capture when configured.
 
 ## Connect Both Agents
 

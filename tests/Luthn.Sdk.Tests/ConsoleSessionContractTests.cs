@@ -42,12 +42,12 @@ public sealed class ConsoleSessionContractTests
     {
         var node = JsonNode.Parse("""
             {
-              "mode": "CloudLoginRequired",
-              "state": "LoginRequired",
+              "mode": "LocalAuto",
+              "state": "Anonymous",
               "expiresAt": null,
               "idleExpiresAt": null,
               "capabilities": [],
-              "nextAction": "cloud-login",
+              "nextAction": "arm-local-session",
               "serverDerived": true
             }
             """)!.AsObject();
@@ -69,93 +69,5 @@ public sealed class ConsoleSessionContractTests
         {
             Assert.DoesNotContain(value, json, StringComparison.OrdinalIgnoreCase);
         }
-    }
-}
-
-public sealed class ConsoleEnrollmentContractTests
-{
-    [Fact]
-    public void EnrollmentContractRemainsBoundedAndTenantNeutral()
-    {
-        var response = new ConsoleEnrollmentDto(
-            InstallationEnrollmentState.Pending,
-            ConsoleEnrollmentAdapter.Fake,
-            DateTimeOffset.Parse("2026-08-10T10:10:00Z"),
-            "0123456789abcdef",
-            ["console-login.v1"],
-            "Luthn Cloud",
-            "verify-enrollment",
-            true);
-
-        var json = JsonSerializer.Serialize(response);
-
-        Assert.Contains("\"state\":\"Pending\"", json, StringComparison.Ordinal);
-        Assert.Contains("\"installationFingerprint\"", json, StringComparison.Ordinal);
-        Assert.DoesNotContain("organization", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("prompt", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("transcript", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("localPath", json, StringComparison.OrdinalIgnoreCase);
-    }
-}
-
-public sealed class ConsoleCloudLoginContractTests
-{
-    [Fact]
-    public void LoginStatusExposesNoCallerSelectableAuthorityFields()
-    {
-        var response = new ConsoleCloudLoginDto(
-            ConsoleCloudLoginProvider.Fake,
-            true,
-            ConsoleSessionState.LoginRequired,
-            ConsoleMembershipState.Active,
-            ConsoleEntitlementState.Active,
-            [ConsoleCapability.AuditRead],
-            "cloud-login",
-            true);
-
-        var json = JsonSerializer.Serialize(response);
-
-        Assert.Contains("\"provider\":\"Fake\"", json, StringComparison.Ordinal);
-        Assert.Contains("\"serverDerived\":true", json, StringComparison.Ordinal);
-        Assert.DoesNotContain("organization", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("tenant", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("userId", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("prompt", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("transcript", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("localPath", json, StringComparison.OrdinalIgnoreCase);
-    }
-}
-
-public sealed class ConsoleLifecycleContractTests
-{
-    [Fact]
-    public void LifecycleAndReclaimContractsContainNoRecoveryCredentialOrTenantIdentity()
-    {
-        var lifecycle = new ConsoleLifecycleDto(
-            ConsoleOrganizationState.RestrictedOffboarding,
-            ConsoleMembershipState.Active,
-            false,
-            ConsoleRecoveryVerifier.Disabled,
-            ["reconnect", "export-metadata", "local-reclaim"],
-            "reconnect",
-            true);
-        var reclaim = new ConsoleReclaimRequestDto(ConsoleReclaimMethod.OfflineRecovery);
-
-        var json = JsonSerializer.Serialize(new { lifecycle, reclaim });
-
-        Assert.Contains("\"organizationState\":\"RestrictedOffboarding\"", json, StringComparison.Ordinal);
-        Assert.Contains("\"method\":\"OfflineRecovery\"", json, StringComparison.Ordinal);
-        Assert.DoesNotContain("proof", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("organizationId", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("workspaceId", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("tenant", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("prompt", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("transcript", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("localPath", json, StringComparison.OrdinalIgnoreCase);
     }
 }

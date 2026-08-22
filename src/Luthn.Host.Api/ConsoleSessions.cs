@@ -44,12 +44,7 @@ public sealed record ConsoleSessionIdentity(
     DateTimeOffset IdleExpiresAt,
     IReadOnlySet<string> Scopes,
     IReadOnlyList<ConsoleCapability> Capabilities,
-    bool Restricted,
-    string? CloudSubjectKey = null,
-    string? OrganizationId = null,
-    ConsoleMembershipState? Membership = null,
-    ConsoleEntitlementState? Entitlement = null,
-    bool CloudOwner = false);
+    bool Restricted);
 
 internal sealed class ConsoleSessionRecord
 {
@@ -65,21 +60,6 @@ internal sealed class ConsoleSessionRecord
     public required IReadOnlyList<ConsoleCapability> Capabilities { get; set; }
     public bool Restricted { get; set; }
     public bool Revoked { get; set; }
-    public string? CloudSubjectKey { get; init; }
-    public string? OrganizationId { get; init; }
-    public ConsoleMembershipState? Membership { get; init; }
-    public ConsoleEntitlementState? Entitlement { get; set; }
-    public bool CloudOwner { get; init; }
-}
-
-public interface IConsoleInstallationState
-{
-    bool IsEnrolled { get; }
-}
-
-public sealed class UnenrolledConsoleInstallationState : IConsoleInstallationState
-{
-    public bool IsEnrolled => false;
 }
 
 public interface IConsoleLocalAccessArmStore
@@ -197,12 +177,8 @@ public interface IConsoleSessionStore
     ConsoleSessionIdentity? Authenticate(HttpContext context);
     bool IsLocalEligible(HttpContext context);
     ConsoleSessionIdentity CreateLocal(HttpContext context);
-    ConsoleSessionIdentity CreateCloud(HttpContext context, AuthenticatedConsoleAuthority authority);
     void Revoke(HttpContext context);
     void RevokeAll(Func<ConsoleSessionIdentity, bool>? predicate = null);
-    void RevokeSubject(string subjectKey);
-    void RestrictSubject(string subjectKey);
-    void RestrictCloudSessions();
 }
 
 public sealed class InMemoryConsoleSessionStore(
@@ -210,7 +186,6 @@ public sealed class InMemoryConsoleSessionStore(
     IOptions<ConsoleAccessOptions> options,
     IOptions<LuthnIdentityOptions> identityOptions,
     IOptions<LuthnHostOperationalOptions> hostOptions,
-    IConsoleLifecycleStore lifecycle,
     IConsoleLocalAccessArmStore localAccessArm,
     IHostEnvironment environment) : IConsoleSessionStore
 {
@@ -238,15 +213,8 @@ public sealed class InMemoryConsoleSessionStore(
         ConsoleCapability.SourceIntake,
         ConsoleCapability.PublicationOperate,
         ConsoleCapability.AgentConnectionRead,
-        ConsoleCapability.ConfigurationWrite,
-        ConsoleCapability.EnrollmentManage
+        ConsoleCapability.ConfigurationWrite
     ];
-
-    private static readonly string[] RestrictedScopes =
-    [ServiceScopes.AuditRead, ServiceScopes.AgentConnectionRead, ServiceScopes.ExternalPublicationRead];
-
-    private static readonly ConsoleCapability[] RestrictedCapabilities =
-    [ConsoleCapability.AuditRead, ConsoleCapability.AgentConnectionRead, ConsoleCapability.OffboardingExport, ConsoleCapability.InstallationDetach, ConsoleCapability.LocalReclaim];
 
     private readonly ConcurrentDictionary<string, ConsoleSessionRecord> _sessions =
         new(StringComparer.Ordinal);
@@ -269,28 +237,11 @@ public sealed class InMemoryConsoleSessionStore(
             return null;
         }
 
-        if (session.Mode == ConsoleAccessMode.LocalAuto && !IsLocalEligible(context))
+        if (!IsLocalEligible(context))
         {
             _sessions.TryRemove(sessionId, out _);
             DeleteCookie(context);
             return null;
-        }
-
-        if (session.Mode != ConsoleAccessMode.LocalAuto)
-        {
-            if (lifecycle.Current.OrganizationState == ConsoleOrganizationState.Detached ||
-                session.CloudSubjectKey is null ||
-                lifecycle.IsSubjectRemoved(session.CloudSubjectKey))
-            {
-                _sessions.TryRemove(sessionId, out _);
-                DeleteCookie(context);
-                return null;
-            }
-
-            if (lifecycle.Current.OrganizationState == ConsoleOrganizationState.RestrictedOffboarding)
-            {
-                ApplyRestriction(session);
-            }
         }
 
         session.LastSeenAt = now;
@@ -302,7 +253,7 @@ public sealed class InMemoryConsoleSessionStore(
         if (!IsLocalEligible(context))
         {
             throw new InvalidOperationException(
-                "Local automatic console access requires an un-enrolled SingleOwner installation with explicit loopback-only exposure.");
+                "Local automatic console access requires a SingleOwner installation with explicit loopback-only exposure.");
         }
 
         if (!localAccessArm.TryConsumeCandidate(context))
@@ -334,46 +285,6 @@ public sealed class InMemoryConsoleSessionStore(
         return ToIdentity(session, now + options.Value.EffectiveIdleLifetime);
     }
 
-    public ConsoleSessionIdentity CreateCloud(
-        HttpContext context,
-        AuthenticatedConsoleAuthority authority)
-    {
-        if (!lifecycle.IsEnrolled ||
-            authority.Membership != ConsoleMembershipState.Active)
-        {
-            throw new InvalidOperationException("An enrolled installation and active membership are required.");
-        }
-
-        var now = timeProvider.GetUtcNow();
-        var sessionId = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
-        var session = new ConsoleSessionRecord
-        {
-            SessionId = sessionId,
-            Mode = ConsoleAccessMode.CloudAuthenticated,
-            UserId = authority.UserId,
-            WorkspaceId = authority.WorkspaceId,
-            ActorId = "console:cloud-user",
-            CreatedAt = now,
-            LastSeenAt = now,
-            ExpiresAt = now + options.Value.EffectiveAbsoluteLifetime,
-            Scopes = new HashSet<string>(authority.Scopes, StringComparer.OrdinalIgnoreCase),
-            Capabilities = authority.Capabilities,
-            Restricted = authority.Entitlement == ConsoleEntitlementState.Restricted,
-            CloudSubjectKey = authority.SubjectKey,
-            OrganizationId = authority.OrganizationId,
-            Membership = authority.Membership,
-            Entitlement = authority.Entitlement,
-            CloudOwner = authority.Owner
-        };
-        if (lifecycle.Current.OrganizationState == ConsoleOrganizationState.RestrictedOffboarding)
-        {
-            ApplyRestriction(session);
-        }
-        _sessions[sessionId] = session;
-        AppendCookie(context, sessionId, session.ExpiresAt, secure: true);
-        return ToIdentity(session, now + options.Value.EffectiveIdleLifetime);
-    }
-
     public void Revoke(HttpContext context)
     {
         if (context.Request.Cookies.TryGetValue(ConsoleAccessOptions.CookieName, out var sessionId))
@@ -398,30 +309,9 @@ public sealed class InMemoryConsoleSessionStore(
         }
     }
 
-    public void RevokeSubject(string subjectKey) =>
-        RevokeAll(session => string.Equals(session.CloudSubjectKey, subjectKey, StringComparison.Ordinal));
-
-    public void RestrictSubject(string subjectKey)
-    {
-        foreach (var session in _sessions.Values.Where(item =>
-            item.Mode != ConsoleAccessMode.LocalAuto &&
-            string.Equals(item.CloudSubjectKey, subjectKey, StringComparison.Ordinal)))
-        {
-            ApplyRestriction(session);
-        }
-    }
-
-    public void RestrictCloudSessions()
-    {
-        foreach (var session in _sessions.Values.Where(item => item.Mode != ConsoleAccessMode.LocalAuto))
-        {
-            ApplyRestriction(session);
-        }
-    }
-
     public bool IsLocalEligible(HttpContext context)
     {
-        if (identityOptions.Value.Mode != LuthnIdentityMode.SingleOwner || lifecycle.IsEnrolled)
+        if (identityOptions.Value.Mode != LuthnIdentityMode.SingleOwner)
         {
             return false;
         }
@@ -431,15 +321,6 @@ public sealed class InMemoryConsoleSessionStore(
             options.Value,
             hostOptions.Value,
             environment);
-    }
-
-    private static void ApplyRestriction(ConsoleSessionRecord session)
-    {
-        session.Restricted = true;
-        session.Entitlement = ConsoleEntitlementState.Restricted;
-        session.Scopes.Clear();
-        session.Scopes.UnionWith(RestrictedScopes);
-        session.Capabilities = RestrictedCapabilities;
     }
 
     internal static void AppendCookie(
@@ -481,12 +362,7 @@ public sealed class InMemoryConsoleSessionStore(
             idleExpiresAt < session.ExpiresAt ? idleExpiresAt : session.ExpiresAt,
             session.Scopes,
             session.Capabilities,
-            session.Restricted,
-            session.CloudSubjectKey,
-            session.OrganizationId,
-            session.Membership,
-            session.Entitlement,
-            session.CloudOwner);
+            session.Restricted);
 }
 
 public static class ConsoleSessionEndpoints
@@ -505,20 +381,13 @@ public static class ConsoleSessionEndpoints
         return app;
     }
 
-    private static async Task<Ok<ConsoleSessionDto>> Read(
+    private static Ok<ConsoleSessionDto> Read(
         HttpContext context,
         IConsoleSessionStore sessions,
         IConsoleLocalAccessArmStore localAccessArm,
-        IAntiforgery antiforgery,
-        IConsoleInstallationState installationState,
-        IConsoleCloudSessionValidator cloudSessionValidator,
-        CancellationToken cancellationToken)
+        IAntiforgery antiforgery)
     {
-        var validation = await cloudSessionValidator.ValidateAsync(
-            context,
-            sessions.Authenticate(context),
-            cancellationToken);
-        var session = validation.Session;
+        var session = sessions.Authenticate(context);
         if (session is not null)
         {
             WriteAntiforgeryHeader(context, antiforgery);
@@ -530,27 +399,18 @@ public static class ConsoleSessionEndpoints
         {
             localAccessArm.EnsureCandidate(context);
         }
-        var nextAction = "cloud-login";
-        if (!installationState.IsEnrolled && localEligible)
-        {
-            nextAction = localAccessArm.IsCandidateApproved(context)
-                ? "create-local-session"
-                : "arm-local-session";
-        }
+        var nextAction = localEligible
+            ? localAccessArm.IsCandidateApproved(context) ? "create-local-session" : "arm-local-session"
+            : "local-access-unavailable";
 
         return TypedResults.Ok(new ConsoleSessionDto(
-            installationState.IsEnrolled || !localEligible
-                ? ConsoleAccessMode.CloudLoginRequired
-                : ConsoleAccessMode.LocalAuto,
-            installationState.IsEnrolled || !localEligible
-                ? ConsoleSessionState.LoginRequired
-                : ConsoleSessionState.Anonymous,
+            ConsoleAccessMode.LocalAuto,
+            ConsoleSessionState.Anonymous,
             null,
             null,
             [],
             nextAction,
-            true,
-            validation.Reason));
+            true));
     }
 
     private static IResult ArmLocal(
@@ -626,7 +486,7 @@ public static class ConsoleSessionEndpoints
         {
             return TypedResults.Problem(
                 title: "Local console access is unavailable.",
-                detail: "Local access requires an un-enrolled SingleOwner installation with explicit loopback-only exposure.",
+                detail: "Local access requires a SingleOwner installation with explicit loopback-only exposure.",
                 statusCode: StatusCodes.Status403Forbidden);
         }
 
@@ -674,18 +534,15 @@ public static class ConsoleSessionEndpoints
         return TypedResults.NoContent();
     }
 
-    internal static ConsoleSessionDto ToDto(
-        ConsoleSessionIdentity session,
-        string? reason = null) =>
+    internal static ConsoleSessionDto ToDto(ConsoleSessionIdentity session) =>
         new(
             session.Mode,
-            session.Restricted ? ConsoleSessionState.Restricted : ConsoleSessionState.Active,
+            ConsoleSessionState.Active,
             session.ExpiresAt,
             session.IdleExpiresAt,
             session.Capabilities,
-            session.Restricted ? "offboarding" : "continue",
-            true,
-            reason);
+            "continue",
+            true);
 
     internal static void WriteAntiforgeryHeader(HttpContext context, IAntiforgery antiforgery)
     {

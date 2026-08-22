@@ -28,7 +28,7 @@ context.
   by default.
 - Raw/private records stay behind Vault, policy, controlled access, and audit.
 - The local operator console is the authority for sensitive-access review in
-  Local and Hub modes. Operator detail may show only bounded safe reference
+  Local and multi-user self-host modes. Operator detail may show only bounded safe reference
   metadata and redacted summaries; approve/deny decisions require an explicit
   reason and never expose raw Vault/source content.
 - Sensitive-access approval and external-publication approval are independent
@@ -40,14 +40,9 @@ context.
   services are optional adapters behind Luthn policy.
 - Local-only operation is the invariant. External publication requires an
   operator action and exports only a versioned public-safe projection through a
-  durable local outbox. The public repository contains no active cloud client.
-- The approved team topology uses one central OSS Hub per Organization, not one
-  full installation per member PC. The public runtime now implements the
-  opt-in Hub data-plane baseline: encrypted durable ingress, server-derived
-  Workspace identity, bounded processing, dead-letter/replay, aggregate status,
-  and disabled/fake relay boundaries. Cloud enrollment, Cloud identity control,
-  and real outbound transport remain outside this repository. See
-  [`cloud-hub-data-plane.md`](cloud-hub-data-plane.md).
+  durable local outbox. The public repository contains no active outbound client.
+- Multi-user self-host deployments use server-configured identity bindings and
+  disabled-by-default ingress and outbound relay boundaries.
 - Local self-host smoke flows should run without provider credentials.
 - The repository must remain safe to expose: no credentials, private source
   records, customer originals, local agent artifacts, local planning state, or
@@ -62,21 +57,6 @@ Raw/private source
   -> Vault / Core graph / shared memory / Wiki projection / Ignore / NeedsReview
   -> Agent API returns Core-filtered, wiki-safe memory and context
 ```
-
-Optional future team sharing follows a separate boundary:
-
-```text
-Approved shared memory
-  -> explicit external-publication approval
-  -> versioned safe projection in local durable outbox
-  -> disabled transport boundary
-  -> future commercial cloud adapter outside this repository
-```
-
-The team Hub extension adds an asynchronous ingress and classification boundary
-before the existing publication outbox. Member Agents use Cloud-issued remote
-MCP/OAuth plus an Agent-native lifecycle integration rather than installing the
-full runtime on every PC.
 
 Runtime projects:
 
@@ -151,8 +131,6 @@ git diff --check
 - `docs/agent-quickstart.md`: agent and MCP connection path.
 - `docs/licensing.md`: package license boundary.
 - `docs/architecture.md`: Core model reference.
-- `docs/cloud-hub-data-plane.md`: implemented opt-in central Hub data-plane
-  baseline, queue/identity/capacity evidence, and the remaining Cloud boundary.
 - `docs/project-structure.md`: structure and historical mapping reference.
 - `docs/data-boundaries.md`: concrete data classification examples.
 - `docs/source-references.md`: source reference shape.

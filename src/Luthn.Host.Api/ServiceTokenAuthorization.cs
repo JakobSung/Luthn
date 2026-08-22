@@ -377,27 +377,6 @@ public static class ServiceTokenAuthorization
             return (false, null);
         }
 
-        var authenticatedSession = session;
-        var cloudValidation = await httpContext.RequestServices
-            .GetRequiredService<IConsoleCloudSessionValidator>()
-            .ValidateAsync(httpContext, session, httpContext.RequestAborted);
-        session = cloudValidation.Session;
-        if (session is null)
-        {
-            await AuthorizationAudit.RecordScopeDeniedAsync(
-                httpContext,
-                authenticatedSession.WorkspaceId,
-                authenticatedSession.UserId,
-                "user",
-                authenticatedSession.ActorId,
-                requiredScope,
-                action: "authorization.session_expired");
-            return (true, TypedResults.Problem(
-                title: "Cloud console session expired.",
-                detail: cloudValidation.Detail ?? "Cloud console authentication is no longer active. Sign in again; Local access will not be restored automatically.",
-                statusCode: StatusCodes.Status401Unauthorized));
-        }
-
         if (!HasConsoleScope(session.Scopes, requiredScope))
         {
             await AuthorizationAudit.RecordScopeDeniedAsync(
@@ -432,8 +411,7 @@ public static class ServiceTokenAuthorization
             session.WorkspaceId,
             LuthnActorKind.User,
             session.ActorId,
-            IsOperator: true,
-            HubOrganizationId: session.OrganizationId);
+            IsOperator: true);
         httpContext.Items[ActorItemKey] = session.ActorId;
         return (true, await ContinueWhenSensitiveMemoryProtectionIsReady(context, next));
     }

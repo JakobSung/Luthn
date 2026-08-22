@@ -5,11 +5,7 @@ namespace Luthn.Sdk.Console;
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ConsoleAccessMode
 {
-    LocalAuto,
-    CloudLoginRequired,
-    CloudAuthenticated,
-    RestrictedOffboarding,
-    LocalReclaimRequired
+    LocalAuto
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -17,9 +13,6 @@ public enum ConsoleSessionState
 {
     Anonymous,
     Active,
-    LoginRequired,
-    Restricted,
-    Revoked,
     Expired
 }
 
@@ -33,11 +26,7 @@ public enum ConsoleCapability
     SourceIntake,
     PublicationOperate,
     AgentConnectionRead,
-    ConfigurationWrite,
-    EnrollmentManage,
-    OffboardingExport,
-    InstallationDetach,
-    LocalReclaim
+    ConfigurationWrite
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -48,5 +37,4 @@ public sealed record ConsoleSessionDto(
     [property: JsonPropertyName("idleExpiresAt")] DateTimeOffset? IdleExpiresAt,
     [property: JsonPropertyName("capabilities")] IReadOnlyList<ConsoleCapability> Capabilities,
     [property: JsonPropertyName("nextAction")] string NextAction,
-    [property: JsonPropertyName("serverDerived")] bool ServerDerived,
-    [property: JsonPropertyName("reason")] string? Reason = null);
+    [property: JsonPropertyName("serverDerived")] bool ServerDerived);

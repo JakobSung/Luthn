@@ -106,7 +106,7 @@ public sealed record SensitiveAccessRequestDto(
 
 /// <summary>
 /// Local or self-hosted Hub operator context for a sensitive record reference.
-/// This contract is not agent-safe and must not be included in Cloud safe-projection sync.
+/// This contract is not agent-safe and must not be included in safe-projection sync.
 /// </summary>
 public sealed record SensitiveAccessOperatorReferenceDto(
     [property: JsonPropertyName("sourceSystem")] string SourceSystem,

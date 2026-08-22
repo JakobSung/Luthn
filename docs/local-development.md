@@ -91,8 +91,7 @@ The opt-in Hub baseline is disabled by default. To exercise it locally, use
 `Luthn__Hub__Ingress__WorkerEnabled=true`. Ingress encrypts the bounded capsule,
 derives organization/workspace/member/agent/session identity from the trusted
 token, and returns only a metadata receipt. The disabled/fake relay makes no
-Cloud request; see [Central team Hub data plane](cloud-hub-data-plane.md) for
-the limits and Cloud boundary.
+external request.
 
 Agent installation, reconfiguration, and disconnect remain host CLI operations.
 
@@ -114,12 +113,7 @@ keep the equivalent secrets at `~/.config/luthn/service-token` and
 and `operator-token`). Do not print or commit these files.
 
 Those credentials remain necessary for agents and direct API clients. They are
-not human-console sessions and are not upgraded into one. For lifecycle tests,
-set `Luthn:Console:Enrollment:Adapter=Fake` and
-`Luthn:Console:CloudLogin:Provider=Fake`; both default to `Disabled`, make no
-network call, and must never be described as live Cloud authentication. The
-fake recovery verifier is also disabled unless a focused test explicitly
-enables it.
+not human-console sessions and are not upgraded into one.
 
 Use the menu by task:
 

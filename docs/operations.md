@@ -320,11 +320,11 @@ recovery source.
 
 ## OSS console modes and language
 
-The operator console is the approval authority in both personal Local mode and
-central OSS Hub mode. Its banner comes from `/api/operator/console-profile`,
-which derives mode from server identity configuration and always reports the
-public OSS build as zero-outbound. Do not add a browser control that changes
-tenant identity, enables Cloud transport, or bypasses Host API authorization.
+The operator console is the approval authority in personal Local and multi-user
+self-host modes. Its banner comes from `/api/operator/console-profile`, which
+derives mode from server identity configuration and always reports the public
+OSS build as zero-outbound. Do not add a browser control that changes tenant
+identity, enables outbound transport, or bypasses Host API authorization.
 
 English and Korean static labels use an allowlisted browser preference. Tokens
 remain session-only, while the language preference may persist locally because
@@ -334,10 +334,10 @@ external-publication decisions so one approval cannot imply the other.
 
 ## Central OSS Hub runtime foundation
 
-Personal self-host remains the default: Hub ingress, its classification worker,
-and the outbound relay are all disabled unless the operator explicitly enables
-them. The public build contains no real Cloud transport. To run the initial Hub
-data plane, configure multi-user service-token identity bindings and set:
+Personal self-host remains the default: ingress, its classification worker, and
+the outbound relay are all disabled unless the operator explicitly enables them.
+To run the optional self-host data plane, configure multi-user service-token
+identity bindings and set:
 
 ```dotenv
 Luthn__Hub__Ingress__Enabled=true
@@ -405,6 +405,4 @@ docker compose --env-file .env --profile sync-worker up -d worker
 
 The default Compose stack does not start this profile. Even when started, the
 public build registers only the disabled transport, performs no outbound
-connection, and leaves pending outbox rows untouched. Do not deploy a real
-cloud adapter until its endpoint authentication, tenant isolation, deletion,
-backup/restore, and audit boundaries are separately reviewed.
+connection, and leaves pending outbox rows untouched.

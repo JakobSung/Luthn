@@ -6,14 +6,9 @@ Luthn은 한 설치에 Codex와 Claude Code를 동시에 연결할 수 있습니
 같은 Luthn API와 정책을 통과한 안전한 공유 기억을 사용하지만, 호스트 설정과
 연결 수명주기는 서로 독립적입니다.
 
-이 문서는 현재 구현된 개인/셀프호스트 연결과 선택 활성화 OSS Hub 기준선을 설명합니다.
-Hub는 server가 정한 identity와 metadata-only 감사를 사용해 암호화 durable ingress를
-받을 수 있지만 기본값은 비활성이고 Cloud 연결을 만들지 않습니다. 미래 팀 Cloud 모드도
-중앙 OSS Hub 하나를 사용하며 구성원 PC마다 전체 runtime을 설치하지 않습니다. 구성원은
-OAuth로 Cloud remote MCP endpoint를 등록하고 Agent-native hook, plugin 또는 관리형
-설정으로 lifecycle capture를 활성화합니다. MCP만으로는 회상과 도구는 제공할 수 있지만
-자동 수집까지 보장하지 않습니다. 자세한 내용은
-[중앙 팀 Hub data plane](cloud-hub-data-plane.ko.md)에 있습니다.
+이 문서는 현재 구현된 개인·셀프호스트 연결 수명주기를 설명합니다. Codex와 Claude Code는
+서로 독립적인 로컬 통합으로 유지됩니다. MCP는 회상과 도구를 제공하고, 자동 수집은
+설정된 Agent-native hook 또는 plugin이 담당합니다.
 
 ## 동시에 연결하기
 

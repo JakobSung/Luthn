@@ -59,7 +59,7 @@
           <li>
             <span>01</span>
             <strong data-i18n="orientation.stepAccessTitle">Set up access</strong>
-            <p data-i18n="orientation.stepAccessBody">Use Console access to connect one bounded Personal Local session. Enrolled installations require Cloud login.</p>
+            <p data-i18n="orientation.stepAccessBody">Use Console access to connect one bounded Personal Local session.</p>
             <button type="button" class="text-button" data-console-nav="settings" data-i18n="orientation.stepAccessAction">Open access settings</button>
           </li>
           <li>
@@ -86,7 +86,7 @@
           <span id="authPanelStatus" class="inline-status" aria-live="polite" data-i18n="auth.starting">Starting secure session</span>
         </div>
         <p class="auth-intro" data-i18n="auth.description">The Host keeps the credential server-side. The browser receives only a bounded HttpOnly session cookie and never reads a service or decision token.</p>
-        <p class="auth-scope-note" data-i18n="auth.scopeNote">LocalAuto is available from this screen only for an un-enrolled SingleOwner installation bound to loopback. Cloud mode requires login.</p>
+        <p class="auth-scope-note" data-i18n="auth.scopeNote">LocalAuto is available only for a SingleOwner installation bound to loopback. Authorize the browser with the installed `luthn console` command first.</p>
         <div class="auth-explainer">
           <article>
             <span class="auth-step">01</span>
@@ -95,11 +95,6 @@
           </article>
           <article>
             <span class="auth-step">02</span>
-            <strong data-i18n="auth.decisionTitle">Luthn Cloud = login required</strong>
-            <p data-i18n="auth.decisionBody">After enrollment, LocalAuto is revoked and human access is derived from Cloud membership.</p>
-          </article>
-          <article>
-            <span class="auth-step">03</span>
             <strong data-i18n="auth.identityTitle">Agent credentials stay separate</strong>
             <p data-i18n="auth.identityBody">Existing service tokens continue to authenticate agents and API clients, never a human console session.</p>
           </article>
@@ -114,7 +109,7 @@
             <dd id="sessionExpiry">Checking</dd>
           </div>
         </dl>
-        <section class="enrollment-card local-access-card" aria-labelledby="localAccessTitle">
+        <section class="local-access-card" aria-labelledby="localAccessTitle">
           <div class="panel-heading compact">
             <div>
               <p class="eyebrow" data-i18n="auth.localEyebrow">Personal Local access</p>
@@ -124,54 +119,9 @@
           <p id="localAccessDetail" class="security-note" data-i18n="auth.localReadyDetail">Local access is ready to connect from this console.</p>
           <button id="connectLocal" type="button" data-i18n="auth.connectLocal">Connect local access</button>
         </section>
-        <section class="enrollment-card" aria-labelledby="enrollmentTitle">
-          <div class="panel-heading compact">
-            <div>
-              <p class="eyebrow" data-i18n="enrollment.eyebrow">Optional Cloud connection</p>
-              <h3 id="enrollmentTitle" data-i18n="enrollment.title">Connect this installation to Luthn Cloud</h3>
-            </div>
-            <span id="enrollmentStatus" class="inline-status" aria-live="polite">Checking</span>
-          </div>
-          <ol class="enrollment-steps">
-            <li><strong data-i18n="enrollment.stepExplain">1. Review what changes</strong><span data-i18n="enrollment.stepExplainBody">Local data authority stays in OSS; human console access changes to Cloud login after activation.</span></li>
-            <li><strong data-i18n="enrollment.stepAccount">2. Verify Cloud account</strong><span data-i18n="enrollment.stepAccountBody">The provider verifies the person. This public OSS adapter never asks for a Cloud password.</span></li>
-            <li><strong data-i18n="enrollment.stepDestination">3. Verify destination</strong><span data-i18n="enrollment.stepDestinationBody">The provider, not the browser payload, determines the destination.</span></li>
-            <li><strong data-i18n="enrollment.stepInstallation">4. Confirm installation</strong><span data-i18n="enrollment.stepInstallationBody">The one-time grant is bound to this installation fingerprint.</span></li>
-            <li><strong data-i18n="enrollment.stepComplete">5. Activate Cloud login</strong><span data-i18n="enrollment.stepCompleteBody">Only durable grant verification revokes LocalAuto.</span></li>
-          </ol>
-          <p><span data-i18n="enrollment.fingerprint">Installation fingerprint</span>: <code id="enrollmentFingerprint">Unavailable</code></p>
-          <div class="row-actions">
-            <button id="startEnrollment" type="button" data-i18n="enrollment.start">Start connection</button>
-            <button id="verifyEnrollment" type="button" class="secondary" data-i18n="enrollment.verify">Verify and activate</button>
-          </div>
-          <p id="enrollmentDetail" class="security-note" data-i18n="enrollment.disabled">Cloud enrollment is disabled by default. Local operation remains unchanged.</p>
-        </section>
-        <section class="enrollment-card" aria-labelledby="lifecycleTitle">
-          <div class="panel-heading compact">
-            <div>
-              <p class="eyebrow" data-i18n="lifecycle.eyebrow">Cloud access lifecycle</p>
-              <h3 id="lifecycleTitle" data-i18n="lifecycle.title">Membership, offboarding, and Local reclaim</h3>
-            </div>
-            <span id="lifecycleStatus" class="inline-status" aria-live="polite">Checking</span>
-          </div>
-          <p id="lifecycleDetail" data-i18n="lifecycle.active">Cloud access is evaluated server-side. Loss never falls back to Local automatically.</p>
-          <p><span data-i18n="lifecycle.actions">Available actions</span>: <strong id="lifecycleActions">Checking</strong></p>
-          <div class="row-actions lifecycle-actions">
-            <button id="reconnectCloud" type="button" data-i18n="lifecycle.reconnect">Reconnect</button>
-            <button id="reclaimCloudOwner" type="button" class="secondary" data-i18n="lifecycle.reclaimOwner">Detach and reclaim with owner reauthentication</button>
-            <button id="reclaimOffline" type="button" class="secondary" data-i18n="lifecycle.reclaimOffline">Use offline recovery verifier</button>
-          </div>
-          <div id="fakeLifecycleActions" class="row-actions lifecycle-actions" hidden>
-            <button id="simulateMembershipRemoval" type="button" class="secondary" data-i18n="lifecycle.simulateMember">Simulate membership removal</button>
-            <button id="simulateRestriction" type="button" class="secondary" data-i18n="lifecycle.simulateRestriction">Simulate Organization restriction</button>
-          </div>
-          <p class="security-note" data-i18n="lifecycle.recoveryNote">Recovery proof transport and production identity providers remain outside this public OSS implementation.</p>
-        </section>
         <div class="row-actions auth-actions">
-          <button id="cloudLogin" type="button" data-i18n="auth.cloudLogin">Sign in with Luthn Cloud</button>
           <button id="logoutSession" type="button" class="secondary" data-i18n="auth.logout">End this session</button>
         </div>
-        <p id="cloudLoginDetail" class="security-note" data-i18n="auth.cloudUnavailable">Cloud login is not configured in this OSS build.</p>
         <p class="security-note" data-i18n="auth.securityNote">No console credential is placed in the page, URL, browser storage, logs, or exports.</p>
       </section>
 
@@ -183,7 +133,7 @@
         <p id="consoleModeDetail">Loading the server-derived console profile.</p>
         <dl class="mode-boundaries">
           <div>
-            <dt data-i18n="mode.transport">Cloud transport</dt>
+            <dt data-i18n="mode.transport">Outbound transport</dt>
             <dd id="consoleTransport" data-i18n="mode.transportDisabled">Disabled — zero outbound</dd>
           </div>
           <div>
@@ -283,7 +233,7 @@
             <button id="revokePublication" type="button" class="secondary">Revoke</button>
           </div>
         </form>
-        <pre id="publicationOutput" class="result compact" aria-live="polite">Cloud transport is disabled by default. Approved envelopes remain in the local durable outbox.</pre>
+        <pre id="publicationOutput" class="result compact" aria-live="polite">Outbound transport is disabled by default. Approved envelopes remain in the local durable outbox.</pre>
       </section>
 
       <section class="panel wide" data-console-view="intake" hidden>
