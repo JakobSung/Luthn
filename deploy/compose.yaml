@@ -101,6 +101,26 @@ services:
     volumes:
       - operator-data:/var/lib/luthn/operator
 
+  # This worker is deliberately opt-in. A separate, provider-neutral Compose
+  # overlay may attach a local extension service on the internal network; the
+  # base installation keeps safe-projection delivery disabled.
+  worker:
+    profiles: ["extensions"]
+    image: *luthn-image
+    command: worker
+    environment:
+      ConnectionStrings__LuthnDb: *luthn-database
+      Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
+      Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
+      Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
+      Luthn__Extensions__SafeProjection__Enabled: ${Luthn__Extensions__SafeProjection__Enabled:-false}
+      Luthn__Extensions__SafeProjection__Endpoint: ${Luthn__Extensions__SafeProjection__Endpoint:-http://luthn-extension:8080/v1/safe-projections}
+      Luthn__Extensions__SafeProjection__SharedSecretFile: ${Luthn__Extensions__SafeProjection__SharedSecretFile:-/run/secrets/local-extension-token}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   seed:
     profiles: ["tools"]
     image: *luthn-image

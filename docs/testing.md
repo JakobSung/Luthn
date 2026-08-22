@@ -89,6 +89,7 @@ check.
 | `full` | `dotnet format Luthn.sln --no-restore --verify-no-changes` | Prove the reviewed delivery head has no formatting drift. |
 | `environmental` | `bash scripts/tests/test-agent-connector-lifecycle.sh` | Exercise the connector lifecycle against the local distribution runtime, including restart and ownership behavior. |
 | `environmental` | `bash scripts/tests/test-claude-connector-lifecycle.sh` | Exercise the Claude connector lifecycle against the local distribution runtime. |
+| `environmental` | `bash scripts/tests/test-remote-mcp-profile.sh` | Exercise the explicit, mutually exclusive local and remote MCP profile transition and rollback behavior. |
 | `environmental` | `bash scripts/tests/test-distribution-lifecycle.sh` | Exercise Docker distribution startup, migration, update, rollback, safe projection, and persistence behavior. |
 | `environmental` | `bash scripts/tests/test-postgres-integration-smoke.sh` | Start an isolated PostgreSQL container and run the opt-in integration smoke test. |
 | `environmental` | `pwsh -File scripts/tests/test-windows-codex-hook-smoke.ps1` | Validate the Windows Codex hook smoke path. |
@@ -125,6 +126,7 @@ live filesystem, and rejects missing, duplicate, or unknown-tier entries.
 | --- | --- | --- | --- |
 | `scripts/tests/test-agent-connector-lifecycle.sh` | `environmental` | `bash scripts/tests/test-agent-connector-lifecycle.sh` | Live connector lifecycle, restart, ownership, and rollback behavior. |
 | `scripts/tests/test-claude-connector-lifecycle.sh` | `environmental` | `bash scripts/tests/test-claude-connector-lifecycle.sh` | Claude connector lifecycle and failure handling. |
+| `scripts/tests/test-remote-mcp-profile.sh` | `environmental` | `bash scripts/tests/test-remote-mcp-profile.sh` | Explicit remote MCP profile transition, local-profile recovery, and ownership-state rollback behavior. |
 | `scripts/tests/test-distribution-lifecycle.sh` | `environmental` | `bash scripts/tests/test-distribution-lifecycle.sh` | Docker distribution startup, update, rollback, persistence, and safe projection. |
 | `scripts/tests/test-local-script-safety.sh` | `fast` | `bash scripts/tests/test-local-script-safety.sh` | Local script safety and generated configuration checks. |
 | `scripts/tests/test-postgres-integration-smoke.sh` | `environmental` | `bash scripts/tests/test-postgres-integration-smoke.sh` | Opt-in PostgreSQL integration smoke coverage. |

@@ -3,19 +3,45 @@ using System.Text.Json.Serialization;
 using Luthn.Core.Common;
 using Luthn.Core.Memory;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace Luthn.Core.Persistence;
 
 public static class SafeProjectionSyncServiceCollectionExtensions
 {
-    public static IServiceCollection AddSafeProjectionSyncFoundation(this IServiceCollection services)
+    public static IServiceCollection AddSafeProjectionSyncFoundation(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
+        services.AddOptions<LocalExtensionSafeProjectionOptions>()
+            .Bind(configuration.GetSection(LocalExtensionSafeProjectionOptions.SectionName))
+            .Validate(
+                options => options.IsValid,
+                "The local safe-projection extension configuration is invalid.")
+            .ValidateOnStart();
+        services.AddHttpClient(LocalExtensionSafeProjectionSyncTransport.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+            UseProxy = false,
+        });
         services.TryAddSingleton<IHubOutboundRelayTransport, DisabledHubOutboundRelayTransport>();
         services.TryAddSingleton<ISafeProjectionSyncTransport>(provider =>
-            new HubRelaySafeProjectionSyncTransport(
-                provider.GetRequiredService<IHubOutboundRelayTransport>()));
+        {
+            var options = provider.GetRequiredService<IOptions<LocalExtensionSafeProjectionOptions>>().Value;
+            return options.Enabled
+                ? new LocalExtensionSafeProjectionSyncTransport(
+                    provider.GetRequiredService<IHttpClientFactory>()
+                        .CreateClient(LocalExtensionSafeProjectionSyncTransport.HttpClientName),
+                    provider.GetRequiredService<IOptions<LocalExtensionSafeProjectionOptions>>())
+                : new HubRelaySafeProjectionSyncTransport(
+                    provider.GetRequiredService<IHubOutboundRelayTransport>());
+        });
         services.AddScoped<LocalInstallationIdentityService>();
         services.AddScoped<SafeProjectionPublicationService>();
         services.AddScoped<SafeProjectionOutboxProcessor>();
@@ -398,7 +424,11 @@ public sealed class SafeProjectionOutboxProcessor(
             .Where(record =>
                 (record.State == SafeProjectionSyncOutboxState.Pending ||
                     record.State == SafeProjectionSyncOutboxState.Failed) &&
-                record.AttemptCount < maxAttempts &&
+                (record.AttemptCount < maxAttempts ||
+                    (record.State == SafeProjectionSyncOutboxState.Failed &&
+                        (record.LastErrorCode == "extension.backpressured" ||
+                            record.LastErrorCode == "extension.unavailable" ||
+                            record.LastErrorCode == "extension.timeout"))) &&
                 (record.NextAttemptAt == null || record.NextAttemptAt <= now) &&
                 !db.SafeProjectionSyncOutbox.Any(older =>
                     older.WorkspaceId == record.WorkspaceId &&
@@ -459,7 +489,7 @@ public sealed class SafeProjectionOutboxProcessor(
             {
                 record.State = SafeProjectionSyncOutboxState.Failed;
                 record.LastErrorCode = Bound(result.ErrorCode, 128) ?? "transport.rejected";
-                record.NextAttemptAt = record.AttemptCount < maxAttempts
+                record.NextAttemptAt = result.Retryable || record.AttemptCount < maxAttempts
                     ? now.Add(Backoff(record.AttemptCount))
                     : null;
                 failed++;
@@ -570,7 +600,11 @@ public sealed class SafeProjectionOutboxProcessor(
                     record.Id == id &&
                     (record.State == SafeProjectionSyncOutboxState.Pending ||
                         record.State == SafeProjectionSyncOutboxState.Failed) &&
-                    record.AttemptCount < maxAttempts &&
+                    (record.AttemptCount < maxAttempts ||
+                        (record.State == SafeProjectionSyncOutboxState.Failed &&
+                            (record.LastErrorCode == "extension.backpressured" ||
+                                record.LastErrorCode == "extension.unavailable" ||
+                                record.LastErrorCode == "extension.timeout"))) &&
                     (record.NextAttemptAt == null || record.NextAttemptAt <= now) &&
                     !db.SafeProjectionSyncOutbox.Any(older =>
                         older.WorkspaceId == record.WorkspaceId &&
@@ -592,7 +626,7 @@ public sealed class SafeProjectionOutboxProcessor(
             cancellationToken);
         if (record is null ||
             record.State is not (SafeProjectionSyncOutboxState.Pending or SafeProjectionSyncOutboxState.Failed) ||
-            record.AttemptCount >= maxAttempts ||
+            (record.AttemptCount >= maxAttempts && !IsRetryableFailure(record)) ||
             record.NextAttemptAt is { } nextAttemptAt && nextAttemptAt > now ||
             await db.SafeProjectionSyncOutbox.AnyAsync(
                 older =>
@@ -641,6 +675,10 @@ public sealed class SafeProjectionOutboxProcessor(
 
     private static TimeSpan Backoff(int attemptCount) =>
         TimeSpan.FromSeconds(Math.Min(300, Math.Pow(2, Math.Clamp(attemptCount, 1, 8))));
+
+    private static bool IsRetryableFailure(SafeProjectionSyncOutboxRecord record) =>
+        record.State == SafeProjectionSyncOutboxState.Failed &&
+        record.LastErrorCode is "extension.backpressured" or "extension.unavailable" or "extension.timeout";
 
     private static string? Bound(string? value, int maxLength)
     {
