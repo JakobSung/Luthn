@@ -2544,7 +2544,7 @@ function Get-ClaudeStopGroups {
     return @($hooks["Stop"])
 }
 
-function Get-ClaudeHookArguments { return @("-NoProfile", "-File", $script:BinDir + "\\luthn.ps1", "claude-hook") }
+function Get-ClaudeHookArguments { return @("-NoProfile", "-File", (Join-Path $script:BinDir "luthn.ps1"), "claude-hook") }
 
 function Test-ClaudeHookInstalled {
     param([string]$Path = $script:ClaudeSettingsFile, [string]$Command = (Get-PwshPath), [string[]]$Arguments = (Get-ClaudeHookArguments))
