@@ -465,7 +465,12 @@ esac
     Assert-True ($claudeConnect.ExitCode -eq 0) "Claude Code connection should succeed: $($claudeConnect.Output)"
     Assert-True ([IO.File]::Exists($claudeOwnershipState)) "Claude connection should record ownership state"
     $claudeSettings = [IO.File]::ReadAllText($claudeSettingsFile) | ConvertFrom-Json
-    Assert-True (@($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.claude-agent-connector.v1" }).Count -eq 1) "Claude connection should install one managed Stop hook"
+    $claudeHookGroups = @($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.claude-agent-connector.v1" })
+    Assert-True ($claudeHookGroups.Count -eq 1) "Claude connection should install one managed Stop hook"
+    $claudeHookArguments = @($claudeHookGroups[0].hooks[0].args)
+    $expectedClaudeHookArguments = @("-NoProfile", "-File", $installedCli, "claude-hook")
+    Assert-True ($claudeHookArguments.Count -eq $expectedClaudeHookArguments.Count) "Claude Stop hook should keep the CLI path in one argument"
+    Assert-True (@(Compare-Object $claudeHookArguments $expectedClaudeHookArguments -SyncWindow 0).Count -eq 0) "Claude Stop hook should use the installed CLI path"
     Assert-True (@($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "Claude connection should preserve unrelated hooks"
     Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("luthn:auto-recall:start")) "Claude connection should enable lightweight recall by default"
     Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("Agent memory mutation boundary")) "Claude instructions should include the agent mutation boundary"
