@@ -118,9 +118,10 @@ never loads the protected value.
 Sensitive-access approval and external-publication approval are separate
 decisions. The console uses Host API contracts, never direct database access,
 and the public runtime keeps outbound transport disabled by default. Personal
-`SingleOwner` installs use `luthn console` to authorize one bounded server-side
-session on the loopback-bound console; browser JavaScript never receives the service or
-decision credential.
+On macOS and Linux, `SingleOwner` installs use the installed Host Helper to authorize
+one explicit, bounded server-side browser session on the loopback console. `luthn
+console` remains the local recovery path and is the current Windows path. Browser
+JavaScript never receives the service or decision credential.
 
 Audit data is metadata-only. Use it to reconstruct a decision timeline, trace
 classification or provider failures, review configuration changes, investigate

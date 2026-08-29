@@ -48,8 +48,10 @@ DOTNET_ENVIRONMENT=Testing dotnet run --project src/Luthn.Host.Api/Luthn.Host.Ap
 
 먼저 `콘솔 접근` 탭에서 세션 상태를 확인한 뒤 작업 메뉴를 선택합니다. 개발·패키지형
 개인 설치는 `Luthn__Console__LocalOnly=true`를 명시하고 공개 port를 `127.0.0.1`에
-바인딩합니다. 미등록 `SingleOwner`에서는 `luthn console`이 권한 없는 HttpOnly 브라우저
-후보 하나만 승인한 뒤 제한된 서버측 LocalAuto 세션을 발급합니다. 자격이나 bootstrap
+바인딩합니다. 미등록 `SingleOwner`의 macOS와 Linux에서는 설치된 Host Helper가 명시적으로
+요청한 HttpOnly 브라우저 후보 하나만 승인한 뒤 제한된 서버측 LocalAuto 세션을 발급합니다.
+터미널 명령은 필요하지 않습니다. `luthn console`은 로컬 복구 경로이며 현재 Windows
+콘솔 접근 경로입니다. 자격이나 bootstrap
 값을 URL·API 본문에 전달하지 않으며 URL 직접 접속만으로는 발급하지 않습니다.
 브라우저는 service/decision bearer 값을 읽거나 저장하거나 전송하지 않으며, cookie 인증
 변경 요청에는 Host가 반환한 same-origin CSRF header가 필요합니다.

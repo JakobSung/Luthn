@@ -86,7 +86,7 @@
           <span id="authPanelStatus" class="inline-status" aria-live="polite" data-i18n="auth.starting">Starting secure session</span>
         </div>
         <p class="auth-intro" data-i18n="auth.description">The Host keeps the credential server-side. The browser receives only a bounded HttpOnly session cookie and never reads a service or decision token.</p>
-        <p class="auth-scope-note" data-i18n="auth.scopeNote">LocalAuto is available only for a SingleOwner installation bound to loopback. Authorize the browser with the installed `luthn console` command first.</p>
+        <p class="auth-scope-note" data-i18n="auth.scopeNote">LocalAuto is available only for a SingleOwner installation bound to loopback. The installed Host Helper authorizes one explicit browser request without a terminal command.</p>
         <div class="auth-explainer">
           <article>
             <span class="auth-step">01</span>
@@ -202,6 +202,57 @@
               <tr class="connection-message-row"><td colspan="7">Loading agent connections.</td></tr>
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section class="panel wide mcp-profiles-panel" data-console-view="overview" aria-labelledby="mcpProfilesTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">MCP profile</p>
+            <h2 id="mcpProfilesTitle">Active MCP connections</h2>
+          </div>
+          <div class="panel-heading-actions">
+            <span id="mcpProfilesStatus" class="inline-status" role="status" aria-live="polite">Waiting for the local helper.</span>
+            <button id="refreshMcpProfiles" type="button" class="secondary">Refresh</button>
+          </div>
+        </div>
+        <p class="security-note">Only bounded MCP names, transport types, authentication state, and remote host names are shown. Commands, environment variables, tokens, and local paths never appear here.</p>
+        <div id="mcpProfileCards" class="mcp-profile-grid" aria-live="polite">
+          <p class="empty-state">No host MCP observation is available yet.</p>
+        </div>
+      </section>
+
+      <section id="remoteProfileOffer" class="panel wide remote-profile-offer" data-console-view="remote-profile-offer" aria-labelledby="remoteProfileOfferTitle" hidden>
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Browser-confirmed transition</p>
+            <h2 id="remoteProfileOfferTitle">Connect this Agent to a team MCP</h2>
+          </div>
+          <span id="remoteProfileOfferStatus" class="inline-status" role="status" aria-live="polite">Review required</span>
+        </div>
+        <dl class="mode-boundaries remote-profile-boundaries">
+          <div>
+            <dt>Service</dt>
+            <dd id="remoteProfileService">Not received</dd>
+          </div>
+          <div>
+            <dt>Remote host</dt>
+            <dd id="remoteProfileHost">Not received</dd>
+          </div>
+          <div>
+            <dt>Agent</dt>
+            <dd>
+              <select id="remoteProfileAgent" aria-label="Agent to switch">
+                <option value="codex">Codex</option>
+                <option value="claude">Claude Code</option>
+              </select>
+            </dd>
+          </div>
+        </dl>
+        <p class="security-note">The remote connection is verified before the Luthn-owned local MCP is disabled. A failed verification keeps the local profile unchanged.</p>
+        <div class="row-actions">
+          <button id="approveRemoteProfile" type="button">Connect</button>
+          <button id="rejectRemoteProfile" type="button" class="secondary">Cancel</button>
         </div>
       </section>
 

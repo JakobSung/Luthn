@@ -99,9 +99,11 @@ Agent installation, reconfiguration, and disconnect remain host CLI operations.
 
 Open `Console access` before choosing a workflow. Development and packaged
 personal installs explicitly set `Luthn__Console__LocalOnly=true` and bind the
-published port to `127.0.0.1`. An un-enrolled `SingleOwner` then receives a
-bounded server-side LocalAuto session after `luthn console` approves exactly one
-unprivileged HttpOnly browser candidate. The browser does not read, store, or send
+published port to `127.0.0.1`. On macOS and Linux, an un-enrolled `SingleOwner`
+receives a bounded server-side LocalAuto session after the installed Host Helper
+approves exactly one explicit HttpOnly browser candidate. `luthn console` remains
+the local recovery path and is the current Windows console access path. The browser
+does not read, store, or send
 a service/decision bearer or bootstrap value. Cookie-authenticated mutations require the
 same-origin antiforgery header returned by the Host.
 

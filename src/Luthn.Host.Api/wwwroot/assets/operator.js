@@ -12,7 +12,13 @@ const state = {
   selectedAuditEvent: null,
   auditNextCursor: "",
   auditBaseQuery: "",
-  consoleProfile: null
+  consoleProfile: null,
+  mcpProfiles: null,
+  remoteProfileOffer: null,
+  remoteProfileActionId: "",
+  remoteProfilePollTimer: null,
+  localProfileActionId: "",
+  localProfilePollTimer: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -30,13 +36,13 @@ const renderLocalAccess = () => {
   const localMode = session?.mode === "LocalAuto";
   const connectable = localMode &&
     session?.state === "Anonymous" &&
-    ["arm-local-session", "create-local-session"].includes(session?.nextAction);
+    ["arm-local-session", "await-host-helper", "create-local-session"].includes(session?.nextAction);
   button.hidden = !localMode;
   button.disabled = state.localConnectPending || !connectable;
 
   if (state.localAccessError && !state.localConnectPending) {
     detail.textContent = state.localAccessError;
-  } else if (state.localConnectPending || session?.nextAction === "create-local-session") {
+  } else if (state.localConnectPending || ["await-host-helper", "create-local-session"].includes(session?.nextAction)) {
     detail.textContent = t("auth.localConnectingDetail");
   } else if (session?.state === "Active" && localMode) {
     detail.textContent = t("auth.localActiveDetail");
@@ -94,6 +100,8 @@ const renderSessionGuidance = () => {
   const guidance = "Local console access is required to view agent connections.";
   renderConnectionMessage(guidance);
   $("#connectionsStatus").textContent = "Access required";
+  renderMcpProfileMessage("Local console access is required to view MCP profiles.");
+  $("#mcpProfilesStatus").textContent = "Access required";
   $("#syncStatus").textContent = "Access required";
   writeResult($("#publicationOutput"), guidance);
   $("#providerStatus").textContent = "Console access required";
@@ -220,7 +228,12 @@ const connectLocalAccess = async () => {
   try {
     let session = state.consoleSession;
     if (session?.nextAction === "arm-local-session") {
-      session = await refreshConsoleSession();
+      await requestJson("/api/operator/session/local/request", { method: "POST" });
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+        session = await refreshConsoleSession();
+        if (session?.nextAction === "create-local-session" || session?.state === "Active") break;
+      }
     }
     if (session?.state !== "Active" &&
         session?.nextAction === "create-local-session") {
@@ -234,6 +247,7 @@ const connectLocalAccess = async () => {
     renderAuthStatus();
     setAction("local access connected", "Local console authority is active");
     refreshAgentConnections();
+    refreshMcpProfiles();
     refreshSyncStatus();
     refreshProviderSettings();
     refreshAccessPolicy();
@@ -512,6 +526,280 @@ const refreshAgentConnections = async () => {
   } finally {
     refreshButton.disabled = false;
   }
+};
+
+const renderMcpProfileMessage = (message) => {
+  const paragraph = document.createElement("p");
+  paragraph.className = "empty-state";
+  paragraph.textContent = message;
+  $("#mcpProfileCards").replaceChildren(paragraph);
+};
+
+const renderMcpProfiles = (snapshot) => {
+  state.mcpProfiles = snapshot;
+  const clients = Array.isArray(snapshot?.clients) ? snapshot.clients : [];
+  if (clients.length === 0) {
+    renderMcpProfileMessage(snapshot?.helperOnline
+      ? "No supported Agent MCP profiles were reported."
+      : "The local Host Helper is offline or has not reported yet.");
+  } else {
+    const cards = clients.map((client) => {
+      const card = document.createElement("article");
+      card.className = "mcp-profile-card";
+      const heading = document.createElement("div");
+      heading.className = "channel-heading";
+      const name = document.createElement("strong");
+      name.textContent = client.agentKind === "claude" ? "Claude Code" : "Codex";
+      heading.append(name, createStatusBadge(client.mode));
+
+      const entries = document.createElement("dl");
+      entries.className = "mcp-entry-list";
+      const values = Array.isArray(client.entries) ? client.entries : [];
+      if (values.length === 0) {
+        entries.append(createChannelDetail("MCP", "No registrations"));
+      } else {
+        values.forEach((entry) => {
+          const enabled = entry.enabled ? "enabled" : "disabled";
+          const authority = entry.endpointHost ? ` · ${entry.endpointHost}` : "";
+          const auth = entry.authStatus ? ` · ${entry.authStatus}` : "";
+          entries.append(createChannelDetail(
+            boundedText(entry.name, 128),
+            `${boundedText(entry.transport, 16)} · ${enabled}${auth}${authority}`
+          ));
+        });
+      }
+      card.append(heading, entries);
+      const ownsRemoteProfile = values.some((entry) => entry.name === "luthn-remote");
+      if (ownsRemoteProfile && ["remote", "conflict"].includes(client.mode)) {
+        const restore = document.createElement("button");
+        restore.type = "button";
+        restore.className = "secondary mcp-profile-restore";
+        restore.textContent = "Use local MCP";
+        restore.disabled = Boolean(state.localProfileActionId);
+        restore.addEventListener("click", () => restoreLocalMcpProfile(client.agentKind));
+        card.append(restore);
+      }
+      return card;
+    });
+    $("#mcpProfileCards").replaceChildren(...cards);
+  }
+
+  const helperLabel = snapshot?.helperOnline ? "Helper online" : "Helper offline";
+  const seen = snapshot?.lastSeenAt ? ` · ${formatTimestamp(snapshot.lastSeenAt)}` : "";
+  $("#mcpProfilesStatus").textContent = `${helperLabel}${seen}`;
+
+  const action = snapshot?.action;
+  if (action && action.id === state.remoteProfileActionId) {
+    renderRemoteProfileAction(action);
+  } else if (action && action.id === state.localProfileActionId) {
+    renderLocalProfileAction(action);
+  }
+};
+
+const clearLocalProfilePoll = () => {
+  if (state.localProfilePollTimer) {
+    window.clearTimeout(state.localProfilePollTimer);
+    state.localProfilePollTimer = null;
+  }
+};
+
+const renderLocalProfileAction = (action) => {
+  if (!["succeeded", "failed", "expired"].includes(action.state)) return;
+  const succeeded = action.state === "succeeded";
+  setAction(
+    succeeded ? "Local MCP restored" : "Local MCP not restored",
+    succeeded ? "Open a new Agent session to use local Luthn" : boundedText(action.failureCode, 64, "profile.change_failed")
+  );
+  state.localProfileActionId = "";
+  clearLocalProfilePoll();
+  window.setTimeout(refreshMcpProfiles, 250);
+};
+
+const pollLocalProfileAction = async () => {
+  try {
+    const snapshot = await requestJson("/api/operator/mcp-profiles", { cache: "no-store" });
+    renderMcpProfiles(snapshot);
+    if (snapshot?.action?.id === state.localProfileActionId &&
+        ["pending", "claimed"].includes(snapshot.action.state)) {
+      state.localProfilePollTimer = window.setTimeout(pollLocalProfileAction, 1000);
+    }
+  } catch {
+    setAction("Local MCP status unavailable", "No MCP profile was changed by the browser");
+    state.localProfileActionId = "";
+    clearLocalProfilePoll();
+  }
+};
+
+const restoreLocalMcpProfile = async (agentKind) => {
+  if (!hasConsoleSession() || state.localProfileActionId || state.remoteProfileActionId) return;
+  try {
+    const action = await requestJson("/api/operator/mcp-profiles/actions", {
+      method: "POST",
+      body: JSON.stringify({
+        agentKind,
+        operation: "restore-local",
+        displayName: "Local Luthn",
+        remoteUrl: null,
+        oauthClientId: null,
+        oauthResource: null
+      })
+    });
+    state.localProfileActionId = action.id;
+    setAction("Restoring local MCP", "Waiting for the installed Host Helper");
+    clearLocalProfilePoll();
+    state.localProfilePollTimer = window.setTimeout(pollLocalProfileAction, 500);
+    renderMcpProfiles(state.mcpProfiles);
+  } catch (error) {
+    setAction("Local MCP was not changed", error.message);
+  }
+};
+
+const refreshMcpProfiles = async () => {
+  const button = $("#refreshMcpProfiles");
+  button.disabled = true;
+  try {
+    renderMcpProfiles(await requestJson("/api/operator/mcp-profiles", { cache: "no-store" }));
+  } catch (error) {
+    renderMcpProfileMessage("MCP profile status is unavailable.");
+    $("#mcpProfilesStatus").textContent = error.message.includes("401") || error.message.includes("403")
+      ? "Login required"
+      : "Unavailable";
+  } finally {
+    button.disabled = false;
+  }
+};
+
+const clearRemoteProfilePoll = () => {
+  if (state.remoteProfilePollTimer) {
+    window.clearTimeout(state.remoteProfilePollTimer);
+    state.remoteProfilePollTimer = null;
+  }
+};
+
+const notifyRemoteProfileOpener = (status, failureCode = null) => {
+  const offer = state.remoteProfileOffer;
+  if (!offer || !window.opener) return;
+  window.opener.postMessage({
+    type: "luthn.remote-profile.result",
+    nonce: offer.nonce,
+    status,
+    failureCode
+  }, offer.sourceOrigin);
+};
+
+const renderRemoteProfileAction = (action) => {
+  $("#remoteProfileOfferStatus").textContent = boundedText(action.state, 32);
+  const terminal = ["succeeded", "failed", "expired"].includes(action.state);
+  $("#approveRemoteProfile").disabled = !terminal;
+  $("#rejectRemoteProfile").disabled = !terminal;
+  if (action.state === "succeeded") {
+    setAction("Remote MCP connected", "Open a new Agent session to use the remote profile");
+    notifyRemoteProfileOpener("succeeded");
+  } else if (action.state === "failed" || action.state === "expired") {
+    const failure = boundedText(action.failureCode, 64, "profile.change_failed");
+    setAction("Remote MCP not connected", failure);
+    notifyRemoteProfileOpener(action.state, failure);
+  }
+  if (terminal) {
+    clearRemoteProfilePoll();
+    state.remoteProfileActionId = "";
+    refreshMcpProfiles();
+  }
+};
+
+const pollRemoteProfileAction = async () => {
+  try {
+    const snapshot = await requestJson("/api/operator/mcp-profiles", { cache: "no-store" });
+    renderMcpProfiles(snapshot);
+    if (snapshot?.action?.id === state.remoteProfileActionId &&
+        ["pending", "claimed"].includes(snapshot.action.state)) {
+      state.remoteProfilePollTimer = window.setTimeout(pollRemoteProfileAction, 1000);
+    }
+  } catch {
+    $("#remoteProfileOfferStatus").textContent = "Status unavailable";
+    clearRemoteProfilePoll();
+  }
+};
+
+const approveRemoteProfileOffer = async () => {
+  const offer = state.remoteProfileOffer;
+  if (!offer || !hasConsoleSession()) {
+    $("#remoteProfileOfferStatus").textContent = "Local access required";
+    return;
+  }
+
+  $("#approveRemoteProfile").disabled = true;
+  $("#rejectRemoteProfile").disabled = true;
+  $("#remoteProfileOfferStatus").textContent = "Waiting for Host Helper";
+  try {
+    const action = await requestJson("/api/operator/mcp-profiles/actions", {
+      method: "POST",
+      body: JSON.stringify({
+        agentKind: $("#remoteProfileAgent").value,
+        operation: "activate-remote",
+        displayName: offer.displayName,
+        remoteUrl: offer.remoteUrl,
+        oauthClientId: offer.oauthClientId || null,
+        oauthResource: offer.oauthResource || null
+      })
+    });
+    state.remoteProfileActionId = action.id;
+    renderRemoteProfileAction(action);
+    clearRemoteProfilePoll();
+    state.remoteProfilePollTimer = window.setTimeout(pollRemoteProfileAction, 500);
+  } catch (error) {
+    $("#remoteProfileOfferStatus").textContent = error.message;
+    $("#approveRemoteProfile").disabled = false;
+    $("#rejectRemoteProfile").disabled = false;
+  }
+};
+
+const rejectRemoteProfileOffer = () => {
+  notifyRemoteProfileOpener("cancelled");
+  state.remoteProfileOffer = null;
+  state.remoteProfileActionId = "";
+  clearRemoteProfilePoll();
+  $("#remoteProfileOffer").hidden = true;
+};
+
+const receiveRemoteProfileOffer = (event) => {
+  const value = event.data;
+  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const nonce = fragment.get("remote-profile");
+  if (!nonce || !/^[A-Za-z0-9_-]{22,128}$/.test(nonce) ||
+      event.source !== window.opener ||
+      value?.type !== "luthn.remote-profile.offer" || value?.nonce !== nonce) return;
+
+  try {
+    const remote = new URL(value.remoteUrl);
+    if (remote.protocol !== "https:" || remote.origin !== event.origin ||
+        remote.username || remote.password || remote.search || remote.hash ||
+        typeof value.displayName !== "string" || !value.displayName.trim() ||
+        value.displayName.length > 128) return;
+
+    state.remoteProfileOffer = {
+      nonce,
+      sourceOrigin: event.origin,
+      displayName: value.displayName.trim(),
+      remoteUrl: remote.href,
+      oauthClientId: typeof value.oauthClientId === "string" ? value.oauthClientId : null,
+      oauthResource: typeof value.oauthResource === "string" ? value.oauthResource : null
+    };
+    $("#remoteProfileService").textContent = state.remoteProfileOffer.displayName;
+    $("#remoteProfileHost").textContent = remote.host;
+    $("#remoteProfileOfferStatus").textContent = "Review required";
+    $("#remoteProfileOffer").hidden = false;
+    $("#remoteProfileOffer").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch {
+    // Invalid cross-origin offers fail closed without revealing local state.
+  }
+};
+
+const announceRemoteProfileReady = () => {
+  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const nonce = fragment.get("remote-profile");
+  if (!window.opener || !nonce || !/^[A-Za-z0-9_-]{22,128}$/.test(nonce)) return;
+  window.opener.postMessage({ type: "luthn.remote-profile.ready", nonce }, "*");
 };
 
 const refreshSyncStatus = async () => {
@@ -1376,6 +1664,10 @@ document.querySelectorAll("[data-audit-preset]").forEach((button) => {
 $("#previewExample").addEventListener("click", fillPreviewExample);
 $("#intakeExample").addEventListener("click", fillIntakeExample);
 $("#refreshConnections").addEventListener("click", refreshAgentConnections);
+$("#refreshMcpProfiles").addEventListener("click", refreshMcpProfiles);
+$("#approveRemoteProfile").addEventListener("click", approveRemoteProfileOffer);
+$("#rejectRemoteProfile").addEventListener("click", rejectRemoteProfileOffer);
+window.addEventListener("message", receiveRemoteProfileOffer);
 $("#refreshSyncStatus").addEventListener("click", refreshSyncStatus);
 $("#readPublication").addEventListener("click", readPublication);
 $("#approvePublication").addEventListener("click", () => changePublication("approve"));
@@ -1393,6 +1685,7 @@ const initializeConsole = async () => {
 
   if (hasConsoleSession()) {
     refreshAgentConnections();
+    refreshMcpProfiles();
     refreshSyncStatus();
     refreshProviderSettings();
     refreshAccessPolicy();
@@ -1403,4 +1696,5 @@ const initializeConsole = async () => {
   }
 };
 
+announceRemoteProfileReady();
 initializeConsole();

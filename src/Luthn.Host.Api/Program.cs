@@ -144,6 +144,7 @@ builder.Services.AddAntiforgery(options =>
 });
 builder.Services.AddSingleton<IConsoleLocalAccessArmStore, InMemoryConsoleLocalAccessArmStore>();
 builder.Services.AddSingleton<IConsoleSessionStore, InMemoryConsoleSessionStore>();
+builder.Services.AddSingleton<HostMcpProfileStore>();
 builder.Services.AddOptions<HubIngressOptions>()
     .Bind(builder.Configuration.GetSection("Luthn:Hub:Ingress"))
     .Validate(options => options.IsValid, "Luthn Hub ingress limits are invalid.")
@@ -218,6 +219,7 @@ app.MapOperationalMetrics();
 app.MapSearchTelemetry();
 app.MapHubIngress();
 app.MapHubOperationalStatus();
+app.MapHostMcpProfiles();
 
 app.Run();
 

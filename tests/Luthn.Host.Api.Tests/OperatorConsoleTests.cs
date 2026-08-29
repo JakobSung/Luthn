@@ -72,6 +72,8 @@ public sealed class OperatorConsoleContractTests
 
         Assert.Contains("id=\"externalPublicationTitle\"", index, StringComparison.Ordinal);
         Assert.Contains("id=\"connectLocal\"", index, StringComparison.Ordinal);
+        Assert.Contains("id=\"mcpProfilesTitle\"", index, StringComparison.Ordinal);
+        Assert.Contains("id=\"remoteProfileOffer\"", index, StringComparison.Ordinal);
         Assert.Contains("data-i18n=\"access.title\"", index, StringComparison.Ordinal);
         Assert.Contains("data-i18n=\"audit.title\"", index, StringComparison.Ordinal);
         Assert.Contains("name=\"category\"", index, StringComparison.Ordinal);
@@ -80,6 +82,8 @@ public sealed class OperatorConsoleContractTests
         Assert.Contains("id=\"auditDetailFields\"", index, StringComparison.Ordinal);
         Assert.Contains("data-audit-preset=\"hub\"", index, StringComparison.Ordinal);
         Assert.Contains("/api/operator/console-profile", script, StringComparison.Ordinal);
+        Assert.Contains("/api/operator/mcp-profiles", script, StringComparison.Ordinal);
+        Assert.Contains("luthn.remote-profile.offer", script, StringComparison.Ordinal);
         Assert.Contains("/api/access-requests/", script, StringComparison.Ordinal);
         Assert.Contains("/api/external-publication/", script, StringComparison.Ordinal);
         Assert.Contains("/api/audit-events/export", script, StringComparison.Ordinal);
