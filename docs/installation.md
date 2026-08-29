@@ -316,19 +316,21 @@ export. It is not a raw-content viewer or a database administration surface.
 ### Console access and menus
 
 Open `Console access` to inspect the current session. A packaged personal
-`SingleOwner` install is loopback-bound. Run `luthn console` to authorize one
-bounded `LocalAuto` session without key entry. The installed CLI reads the
-OS-protected local operator credential, opens the browser, and approves its single
-unprivileged HttpOnly candidate. Multiple or missing candidates fail closed. The
-CLI never places the credential or a bootstrap token in the browser, URL, API body,
-or command arguments. The
+`SingleOwner` install is loopback-bound. On macOS and Linux, select `Connect local
+access`; the installed Host Helper approves exactly one explicit browser candidate
+and creates a bounded `LocalAuto` session without key entry or a terminal command.
+`luthn console` remains the local recovery path and is the current Windows console
+access path. Multiple or missing candidates fail closed. The helper and CLI never
+place the credential or a bootstrap token in the browser, URL, API body, or command
+arguments. The
 browser receives only an opaque HttpOnly, host-only,
 SameSite session cookie; mutation requests also require same-origin antiforgery
 proof. Service and decision credentials stay in protected server configuration
 for agents and non-console API clients and are never copied into the page, URL,
 browser storage, logs, or exports.
 
-Opening the URL directly does not authorize a new session. LocalAuto fails closed
+Opening the URL alone does not authorize a new session; the user must select the
+local-access action. LocalAuto fails closed
 when the installation is multi-user, forwarded, or not explicitly local-only.
 The packaged loopback bridge is limited to its direct local HTTP origin. Packaged
 Compose sets `Luthn__Console__TrustedLocalBridge=true`; the Host accepts that bridge

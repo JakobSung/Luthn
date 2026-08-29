@@ -66,6 +66,9 @@ public interface IConsoleLocalAccessArmStore
 {
     void EnsureCandidate(HttpContext context);
     bool ArmSingleCandidate();
+    bool RequestCandidateApproval(HttpContext context);
+    bool ArmSingleRequestedCandidate();
+    bool IsCandidateApprovalRequested(HttpContext context);
     bool IsCandidateApproved(HttpContext context);
     bool TryConsumeCandidate(HttpContext context);
 }
@@ -112,6 +115,48 @@ public sealed class InMemoryConsoleLocalAccessArmStore(
 
         candidates[0].Value.ApprovedUntil = now + options.Value.EffectiveLocalArmLifetime;
         return true;
+    }
+
+    public bool RequestCandidateApproval(HttpContext context)
+    {
+        var now = timeProvider.GetUtcNow();
+        Prune(now);
+        if (!TryReadCandidate(context, out var candidateId) ||
+            !_candidates.TryGetValue(candidateId, out var candidate) ||
+            now >= candidate.ExpiresAt)
+        {
+            return false;
+        }
+
+        candidate.ApprovalRequested = true;
+        return true;
+    }
+
+    public bool ArmSingleRequestedCandidate()
+    {
+        var now = timeProvider.GetUtcNow();
+        Prune(now);
+        var candidates = _candidates
+            .Where(pair => now < pair.Value.ExpiresAt && pair.Value.ApprovalRequested)
+            .Take(2)
+            .ToArray();
+        if (candidates.Length != 1)
+        {
+            return false;
+        }
+
+        candidates[0].Value.ApprovalRequested = false;
+        candidates[0].Value.ApprovedUntil = now + options.Value.EffectiveLocalArmLifetime;
+        return true;
+    }
+
+    public bool IsCandidateApprovalRequested(HttpContext context)
+    {
+        var now = timeProvider.GetUtcNow();
+        return TryReadCandidate(context, out var candidateId) &&
+            _candidates.TryGetValue(candidateId, out var candidate) &&
+            now < candidate.ExpiresAt &&
+            candidate.ApprovalRequested;
     }
 
     public bool IsCandidateApproved(HttpContext context)
@@ -168,6 +213,7 @@ public sealed class InMemoryConsoleLocalAccessArmStore(
     private sealed class LocalConsoleCandidate(DateTimeOffset expiresAt)
     {
         public DateTimeOffset ExpiresAt { get; } = expiresAt;
+        public bool ApprovalRequested { get; set; }
         public DateTimeOffset? ApprovedUntil { get; set; }
     }
 }
@@ -374,6 +420,11 @@ public static class ConsoleSessionEndpoints
         group.MapPost("/local/arm", ArmLocal)
             .RequireServiceScope(ServiceScopes.ConfigWrite)
             .WithName("ArmLocalConsoleSession");
+        group.MapPost("/local/request", RequestLocal)
+            .WithName("RequestLocalConsoleSession");
+        group.MapPost("/local/arm-requested", ArmRequestedLocal)
+            .RequireServiceScope(ServiceScopes.ConfigWrite)
+            .WithName("ArmRequestedLocalConsoleSession");
         group.MapPost("/local/connect", ConnectLocal)
             .WithName("ConnectLocalConsoleSession");
         group.MapPost("/local", CreateLocal).WithName("CreateLocalConsoleSession");
@@ -400,7 +451,11 @@ public static class ConsoleSessionEndpoints
             localAccessArm.EnsureCandidate(context);
         }
         var nextAction = localEligible
-            ? localAccessArm.IsCandidateApproved(context) ? "create-local-session" : "arm-local-session"
+            ? localAccessArm.IsCandidateApproved(context)
+                ? "create-local-session"
+                : localAccessArm.IsCandidateApprovalRequested(context)
+                    ? "await-host-helper"
+                    : "arm-local-session"
             : "local-access-unavailable";
 
         return TypedResults.Ok(new ConsoleSessionDto(
@@ -434,6 +489,51 @@ public static class ConsoleSessionEndpoints
             return TypedResults.Problem(
                 title: "Local console authorization could not continue.",
                 detail: "Open one local console window and retry. Multiple or missing browser candidates fail closed.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        return TypedResults.NoContent();
+    }
+
+    private static IResult RequestLocal(
+        HttpContext context,
+        IConsoleSessionStore sessions,
+        IConsoleLocalAccessArmStore localAccessArm)
+    {
+        if (!ConsoleRequestSecurity.IsSameOriginOrNonBrowser(context.Request) ||
+            !sessions.IsLocalEligible(context) ||
+            !localAccessArm.RequestCandidateApproval(context))
+        {
+            return TypedResults.Problem(
+                title: "Local console authorization could not continue.",
+                detail: "Open one eligible loopback console window and retry.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        return TypedResults.Ok(new { state = "requested" });
+    }
+
+    private static IResult ArmRequestedLocal(
+        HttpContext context,
+        IConsoleSessionStore sessions,
+        IConsoleLocalAccessArmStore localAccessArm)
+    {
+        var principal = ServiceTokenAuthorization.GetPrincipal(context);
+        if (!ServiceTokenAuthorization.IsServiceTokenAuthenticated(context) ||
+            !principal.IsOperator ||
+            !sessions.IsLocalEligible(context))
+        {
+            return TypedResults.Problem(
+                title: "Local console access is unavailable.",
+                detail: "The installed local operator credential and an eligible loopback-only installation are required.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!localAccessArm.ArmSingleRequestedCandidate())
+        {
+            return TypedResults.Problem(
+                title: "Local browser authorization is not pending.",
+                detail: "Exactly one explicit browser request is required.",
                 statusCode: StatusCodes.Status409Conflict);
         }
 
@@ -494,7 +594,7 @@ public static class ConsoleSessionEndpoints
         {
             return TypedResults.Problem(
                 title: "Local console authorization could not continue.",
-                detail: "Authorize this browser with the installed `luthn console` command, then retry. Multiple or missing browser candidates fail closed.",
+                detail: "Request authorization from the installed Host Helper, then retry. Multiple or missing browser candidates fail closed.",
                 statusCode: StatusCodes.Status409Conflict);
         }
 

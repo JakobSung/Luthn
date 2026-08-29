@@ -1085,3 +1085,69 @@ tbody tr:last-child td {
     width: 100%;
   }
 }
+.mcp-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.mcp-profile-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 1rem;
+}
+
+.mcp-profile-card .channel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mcp-profile-card .channel-heading strong {
+  font-size: 14px;
+}
+
+.mcp-profile-card .state-badge.conflict {
+  border-color: #745f2d;
+  color: var(--warning);
+}
+
+.mcp-profile-card .state-badge.none {
+  color: var(--muted);
+}
+
+.mcp-entry-list {
+  display: grid;
+  gap: 0.7rem;
+  margin: 1rem 0 0;
+}
+
+.mcp-profile-restore {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.mcp-entry-list div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.mcp-entry-list dt {
+  font-weight: 700;
+}
+
+.mcp-entry-list dd {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.remote-profile-offer {
+  border-color: var(--accent);
+}
+
+.remote-profile-boundaries select {
+  max-width: 100%;
+}

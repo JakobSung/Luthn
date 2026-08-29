@@ -141,15 +141,17 @@ Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를
 ### 콘솔 접근과 메뉴
 
 `콘솔 접근` 탭에서 현재 세션을 확인합니다. 패키지형 개인 `SingleOwner` 설치는 loopback에
-바인딩됩니다. `luthn console`을 실행하면 브라우저의 권한 없는 HttpOnly 후보 하나를
-운영체제에서 보호하는 로컬 운영자 자격으로 승인한 뒤 제한된 `LocalAuto` 세션을 시작합니다.
-후보가 없거나 둘 이상이면 차단합니다. 운영자 자격과 bootstrap token은 브라우저·URL·API
+바인딩됩니다. macOS와 Linux에서는 `로컬 access 연결`을 선택하면 설치된 Host Helper가
+명시적으로 요청한 HttpOnly 브라우저 후보 하나만 승인하고 제한된 `LocalAuto` 세션을
+시작합니다. 터미널 명령은 필요하지 않습니다. `luthn console`은 로컬 복구 경로이며
+현재 Windows 콘솔 접근 경로입니다. 후보가 없거나 둘 이상이면 차단합니다. 운영자 자격과
+bootstrap token은 브라우저·URL·API
 본문·명령 인자에 넣지 않습니다. 브라우저에는 불투명한
 HttpOnly·host-only·SameSite 세션 cookie만 전달하며 변경 요청에는 same-origin CSRF 검증도
 적용합니다. Service/decision 자격 증명은 Agent와 비콘솔 API client를 위한 보호된 서버
 설정에만 남고 페이지·URL·브라우저 저장소·로그·export로 복사하지 않습니다.
 
-URL만 직접 열어서는 새 세션을 승인하지 않습니다. MultiUser, forwarded 노출,
+URL만 직접 열어서는 새 세션을 승인하지 않으며 사용자가 로컬 access 동작을 선택해야 합니다. MultiUser, forwarded 노출,
 명시적 local-only가 아닌 설치에서는 LocalAuto를 fail-closed로 차단합니다.
 패키지형 loopback bridge는 직접 연결된 로컬 HTTP origin으로 제한됩니다. 패키지 Compose는
 `Luthn__Console__TrustedLocalBridge=true`를 설정하며 Host는 loopback Host, 사설 container

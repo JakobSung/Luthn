@@ -76,6 +76,49 @@ public sealed class ConsoleSessionSecurityTests
     }
 
     [Fact]
+    public async Task EligiblePersonalInstallCanRequestBrowserAuthorizationFromHostHelper()
+    {
+        using var factory = CreateFactory();
+        using var browser = factory.CreateClient();
+        using var helper = factory.CreateClient();
+        helper.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", OperatorBearer);
+
+        using var candidate = await browser.GetAsync("/api/operator/session");
+        using var requested = await browser.PostAsync("/api/operator/session/local/request", null);
+        using var waiting = await browser.GetAsync("/api/operator/session");
+        using var arm = await helper.PostAsync("/api/operator/session/local/arm-requested", null);
+        using var connected = await browser.PostAsync("/api/operator/session/local/connect", null);
+        using var body = await JsonDocument.ParseAsync(await connected.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, candidate.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, requested.StatusCode);
+        Assert.Equal("await-host-helper", (await JsonDocument.ParseAsync(await waiting.Content.ReadAsStreamAsync()))
+            .RootElement.GetProperty("nextAction").GetString());
+        Assert.Equal(HttpStatusCode.NoContent, arm.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, connected.StatusCode);
+        Assert.Equal("Active", body.RootElement.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task HostHelperDoesNotArmAnUnrequestedBrowserCandidate()
+    {
+        using var factory = CreateFactory();
+        using var browser = factory.CreateClient();
+        using var helper = factory.CreateClient();
+        helper.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", OperatorBearer);
+
+        using var candidate = await browser.GetAsync("/api/operator/session");
+        using var arm = await helper.PostAsync("/api/operator/session/local/arm-requested", null);
+        using var connected = await browser.PostAsync("/api/operator/session/local/connect", null);
+
+        Assert.Equal(HttpStatusCode.OK, candidate.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, arm.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, connected.StatusCode);
+    }
+
+    [Fact]
     public async Task LocalSessionRequiresAndConsumesOneOperatorAuthorization()
     {
         using var factory = CreateFactory();
