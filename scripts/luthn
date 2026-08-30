@@ -2240,6 +2240,35 @@ stop_write_paths() {
   done
 }
 
+run_post_update_bootstrap() {
+  local bootstrap_status=0
+  if [[ ! -x "$cli_path" ]]; then
+    echo "The installed Luthn CLI is unavailable for post-update bootstrap: $cli_path" >&2
+    return 1
+  fi
+
+  "$cli_path" __post-update-bootstrap || bootstrap_status=$?
+  if (( bootstrap_status == 0 )); then
+    return 0
+  fi
+  if (( bootstrap_status == 2 )); then
+    echo "warning: the installed target CLI predates post-update bootstrap" >&2
+    return 0
+  fi
+  return "$bootstrap_status"
+}
+
+post_update_bootstrap() {
+  (( $# == 0 )) || {
+    echo "usage: luthn __post-update-bootstrap" >&2
+    return 2
+  }
+  require_installation
+  if has_codex_connector_state || [[ -f "$claude_state_file" ]]; then
+    host_helper_start
+  fi
+}
+
 update_luthn() {
   require_installation
   require_docker
@@ -2532,8 +2561,9 @@ update_luthn() {
   record_state ready "$target_image" "$current_id" "$previous_id" "$backup_path"
   refresh_codex_connection_observation || \
     echo "warning: updated Codex connector status could not be reported" >&2
-  if has_codex_connector_state || [[ -f "$claude_state_file" ]]; then
-    host_helper_start >/dev/null 2>&1 || echo "warning: the browser MCP helper could not be started" >&2
+  if ! run_post_update_bootstrap; then
+    echo "Luthn services were updated, but the newly installed CLI could not finish post-update bootstrap. Re-run 'luthn update' after correcting the reported error." >&2
+    return 1
   fi
   echo "Luthn update completed: $target_channel -> $target_image"
   echo "Revision: ${previous_revision:-unavailable} -> ${target_revision:-unavailable}"
@@ -3460,6 +3490,7 @@ case "$command" in
     case "${1:-}" in codex) disconnect_codex;; claude) disconnect_claude;; *) echo "usage: luthn disconnect codex|claude" >&2; exit 2;; esac
     ;;
   profile) shift; manage_profile "$@" ;;
+  __post-update-bootstrap) shift; post_update_bootstrap "$@" ;;
   host-helper) shift; manage_host_helper "$@" ;;
   codex-hook) run_codex_hook ;;
   adapter) run_adapter ;;

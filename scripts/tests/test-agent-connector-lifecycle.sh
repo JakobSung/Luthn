@@ -18,6 +18,7 @@ docker_log="$tmp_root/docker.log"
 docker_fail_marker="$tmp_root/docker-api-recreate-failed"
 docker_stop_count="$tmp_root/docker-stop-count"
 no_codex_bin="$tmp_root/no-codex-bin"
+export LUTHN_HOST_HELPER_DISABLE_AUTOSTART=true
 mkdir -p "$home_dir" "$data_dir" "$config_dir" "$state_dir" "$bin_dir" "$fake_bin" "$codex_home"
 
 cli="$bin_dir/luthn"
@@ -1090,6 +1091,116 @@ assert doctor["status"] == "ready"
 names = {check["name"] for check in doctor["checks"]}
 assert {"docker", "compose", "docker-daemon", "installation", "api-health", "api-readiness", "migrations", "runtime-drift", "update-check"} <= names
 PY
+)
+
+echo "[bootstrap] update hands post-update bootstrap to the replaced CLI"
+bootstrap_root="$tmp_root/update-bootstrap-handoff"
+bootstrap_data="$bootstrap_root/data"
+bootstrap_config="$bootstrap_root/config"
+bootstrap_state="$bootstrap_root/state"
+bootstrap_bin="$bootstrap_root/bin"
+bootstrap_marker="$bootstrap_root/target-bootstrap-ran"
+caller_marker="$bootstrap_root/caller-bootstrap-ran"
+mkdir -p "$bootstrap_data/runtime" "$bootstrap_config" \
+  "$bootstrap_state/connectors" "$bootstrap_bin"
+cp "$repo_root/scripts/luthn" "$bootstrap_bin/luthn"
+chmod 0755 "$bootstrap_bin/luthn"
+printf 'services: {}\n' >"$bootstrap_data/compose.yaml"
+cat >"$bootstrap_config/luthn.env" <<EOF
+LUTHN_IMAGE=test/luthn:old
+LUTHN_BASE_URL=http://127.0.0.1:8080
+EOF
+cat >"$bootstrap_state/connectors/codex.env" <<'EOF'
+AGENT_ID=codex
+SETUP_STATE=configured
+EOF
+(
+  export HOME="$home_dir"
+  export PATH="$fake_bin:$PATH"
+  export LUTHN_DATA_DIR="$bootstrap_data"
+  export LUTHN_CONFIG_DIR="$bootstrap_config"
+  export LUTHN_STATE_DIR="$bootstrap_state"
+  export LUTHN_BIN_DIR="$bootstrap_bin"
+  export LUTHN_COMPOSE_FILE="$bootstrap_data/compose.yaml"
+  export LUTHN_CONFIG_FILE="$bootstrap_config/luthn.env"
+  export LUTHN_CLI_PATH="$bootstrap_bin/luthn"
+  export LUTHN_TEST_BOOTSTRAP_MARKER="$bootstrap_marker"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  require_installation() { :; }
+  require_docker() { :; }
+  require_command() { :; }
+  pull_image() { :; }
+  image_id_for_container() { printf '%s' sha256:running; }
+  image_label() { :; }
+  probe_image_mcp_schema_version() { :; }
+  operator_credential_slot_available() { :; }
+  ensure_connector_scopes() { :; }
+  ensure_operator_credential() { :; }
+  download_runtime() {
+    cat >"$cli_path" <<'TARGET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "__post-update-bootstrap" && $# == 1 ]]; then
+  printf '%s\n' target-cli >"${LUTHN_TEST_BOOTSTRAP_MARKER:?}"
+  exit 0
+fi
+exit 91
+TARGET
+    chmod 0755 "$cli_path"
+  }
+  reconcile_codex_managed_configuration() { :; }
+  compose_cmd() {
+    if [[ " $* " == *" pg_dump "* ]]; then
+      printf '%s\n' backup
+    fi
+  }
+  wait_for_postgres() { :; }
+  stop_write_paths() { :; }
+  wait_for_api() { :; }
+  record_state() { :; }
+  refresh_codex_connection_observation() { :; }
+  host_helper_start() { touch "$caller_marker"; }
+  docker() {
+    if [[ " $* " == *"{{.Id}}"* ]]; then
+      printf '%s\n' sha256:target
+    fi
+  }
+  update_output="$(update_luthn test/luthn:new)"
+  [[ "$update_output" == *"Luthn update completed"* ]]
+)
+grep -q '^target-cli$' "$bootstrap_marker"
+[[ ! -e "$caller_marker" ]]
+
+cat >"$bootstrap_bin/luthn" <<'TARGET'
+#!/usr/bin/env bash
+exit 2
+TARGET
+chmod 0755 "$bootstrap_bin/luthn"
+(
+  export LUTHN_CLI_PATH="$bootstrap_bin/luthn"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  legacy_output="$(run_post_update_bootstrap 2>&1)"
+  grep -q 'target CLI predates post-update bootstrap' <<<"$legacy_output"
+)
+
+cat >"$bootstrap_bin/luthn" <<'TARGET'
+#!/usr/bin/env bash
+exit 73
+TARGET
+chmod 0755 "$bootstrap_bin/luthn"
+(
+  export LUTHN_CLI_PATH="$bootstrap_bin/luthn"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  if run_post_update_bootstrap; then
+    echo "expected target bootstrap failure" >&2
+    exit 1
+  fi
 )
 
 echo "Agent connector lifecycle tests passed."

@@ -14,6 +14,7 @@ fake_bin="$tmp_root/fake-bin"
 claude_home="$home_dir/.claude"
 claude_mcp_state="$tmp_root/claude-mcp-state"
 cli="$bin_dir/luthn"
+export LUTHN_HOST_HELPER_DISABLE_AUTOSTART=true
 
 mkdir -p "$home_dir" "$data_dir" "$config_dir" "$state_dir" "$bin_dir" "$fake_bin" "$claude_home"
 cp "$repo_root/scripts/luthn" "$cli"
