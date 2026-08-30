@@ -57,15 +57,18 @@ public sealed class SensitiveRecordReferenceRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
     public string SourceEventId { get; set; } = "";
+    public string? MemoryItemId { get; set; }
     public string SourceSystem { get; set; } = "";
     public string SourceType { get; set; } = "";
     public DateTimeOffset ReceivedAt { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
     public bool ContainsSensitiveMaterial { get; set; }
     public string ReferenceLabel { get; set; } = "";
     public string RedactedSummary { get; set; } = "";
     public string WorkspaceId { get; set; } = "";
     public string OwnerUserId { get; set; } = "local-owner";
     public SourceEventRecord? SourceEvent { get; set; }
+    public SharedMemoryItemRecord? MemoryItem { get; set; }
 }
 
 public enum SensitiveAccessRequestStatus
@@ -82,6 +85,56 @@ public enum SensitiveAccessDecisionKind
     Denied
 }
 
+public enum SensitiveAccessMode
+{
+    RedactedSummary,
+    ProtectedMemory
+}
+
+public static class ProtectedAccessPolicyLimits
+{
+    public const int DefaultGrantDurationSeconds = 3600;
+    public const int DefaultMaximumSuccessfulReads = 1;
+    public const int MinimumGrantDurationSeconds = 60;
+    public const int MaximumGrantDurationSeconds = 3600;
+    public const int MinimumSuccessfulReads = 1;
+    public const int MaximumSuccessfulReads = 3;
+
+    public static bool IsValidGrantDuration(int seconds) =>
+        seconds is >= MinimumGrantDurationSeconds and <= MaximumGrantDurationSeconds;
+
+    public static bool IsValidMaximumSuccessfulReads(int maximumSuccessfulReads) =>
+        maximumSuccessfulReads is >= MinimumSuccessfulReads and <= MaximumSuccessfulReads;
+}
+
+public static class SensitiveAccessPolicyLimits
+{
+    public const int DefaultRequestTimeoutSeconds = 600;
+    public const int DefaultGrantDurationSeconds = 600;
+    public const int DefaultMaximumSuccessfulReads = 1;
+    public const int MinimumDurationSeconds = 60;
+    public const int MaximumDurationSeconds = 3600;
+    public const int MinimumSuccessfulReads = 1;
+    public const int MaximumSuccessfulReads = 10;
+
+    public static bool IsValidDuration(int seconds) =>
+        seconds is >= MinimumDurationSeconds and <= MaximumDurationSeconds;
+
+    public static bool IsValidMaximumSuccessfulReads(int maximumSuccessfulReads) =>
+        maximumSuccessfulReads is >= MinimumSuccessfulReads and <= MaximumSuccessfulReads;
+}
+
+public sealed class SensitiveAccessPolicyRevisionRecord : IWorkspaceScopedRecord
+{
+    public string WorkspaceId { get; set; } = "";
+    public int Revision { get; set; } = 1;
+    public int RequestTimeoutSeconds { get; set; } = SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds;
+    public int GrantDurationSeconds { get; set; } = SensitiveAccessPolicyLimits.DefaultGrantDurationSeconds;
+    public int MaximumSuccessfulReads { get; set; } = SensitiveAccessPolicyLimits.DefaultMaximumSuccessfulReads;
+    public DateTimeOffset CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = "";
+}
+
 public sealed class SensitiveAccessRequestRecord : IWorkspaceScopedRecord
 {
     public string Id { get; set; } = "";
@@ -90,6 +143,9 @@ public sealed class SensitiveAccessRequestRecord : IWorkspaceScopedRecord
     public string SessionId { get; set; } = "";
     public string RequestReason { get; set; } = "";
     public string RedactedSummary { get; set; } = "";
+    public SensitiveAccessMode AccessMode { get; set; } = SensitiveAccessMode.RedactedSummary;
+    public string AccessHandleDigest { get; set; } = "";
+    public string RequesterBindingDigest { get; set; } = "";
     public SensitiveAccessRequestStatus Status { get; set; } = SensitiveAccessRequestStatus.Pending;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
@@ -98,7 +154,11 @@ public sealed class SensitiveAccessRequestRecord : IWorkspaceScopedRecord
     public DateTimeOffset? DecidedAt { get; set; }
     public string WorkspaceId { get; set; } = "";
     public string OwnerUserId { get; set; } = "local-owner";
+    public int PolicyRevision { get; set; } = 1;
+    public int RequestTimeoutSeconds { get; set; } = SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds;
     public SensitiveRecordReferenceRecord? SensitiveRecordReference { get; set; }
+    public SensitiveAccessPolicyRevisionRecord? Policy { get; set; }
+    public SensitiveAccessGrantRecord? Grant { get; set; }
 }
 
 public sealed class SensitiveAccessDecisionRecord
@@ -112,6 +172,31 @@ public sealed class SensitiveAccessDecisionRecord
     public string PayloadClass { get; set; } = "";
     public string RedactionState { get; set; } = "";
     public SensitiveAccessRequestRecord? SensitiveAccessRequest { get; set; }
+}
+
+public sealed class SensitiveAccessGrantRecord : IWorkspaceScopedRecord
+{
+    public string SensitiveAccessRequestId { get; set; } = "";
+    public string WorkspaceId { get; set; } = "";
+    public string OwnerUserId { get; set; } = "local-owner";
+    public int PolicyRevision { get; set; } = 1;
+    public int GrantDurationSeconds { get; set; } = SensitiveAccessPolicyLimits.DefaultGrantDurationSeconds;
+    public DateTimeOffset StartsAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public int MaximumSuccessfulReads { get; set; } = SensitiveAccessPolicyLimits.DefaultMaximumSuccessfulReads;
+    public int SuccessfulReadCount { get; set; }
+    public SensitiveAccessRequestRecord? SensitiveAccessRequest { get; set; }
+    public SensitiveAccessPolicyRevisionRecord? Policy { get; set; }
+}
+
+public sealed class SensitiveAccessTombstoneRecord : IWorkspaceScopedRecord
+{
+    public string Id { get; set; } = "";
+    public SensitiveAccessRequestStatus Status { get; set; } = SensitiveAccessRequestStatus.Expired;
+    public DateTimeOffset ExpiredAt { get; set; }
+    public DateTimeOffset CleanedAt { get; set; }
+    public string WorkspaceId { get; set; } = "";
+    public string OwnerUserId { get; set; } = "local-owner";
 }
 
 public sealed class SharedMemoryItemRecord : IWorkspaceScopedRecord
@@ -148,6 +233,7 @@ public sealed class SensitiveMemoryPayloadRecord
     public int ContractVersion { get; set; } = 1;
     public string ProtectionScheme { get; set; } = "";
     public string ProtectedPayload { get; set; } = "";
+    public DateTimeOffset? ExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -256,6 +342,44 @@ public sealed class AgentConnectionChannelRecord : IWorkspaceScopedRecord
     public string? FailureCode { get; set; }
     public DateTimeOffset FirstObservedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public enum HubIngressQueueState
+{
+    Pending,
+    Processing,
+    Completed,
+    Failed,
+    DeadLetter
+}
+
+public sealed class HubIngressQueueRecord : IWorkspaceScopedRecord
+{
+    public string Id { get; set; } = "";
+    public string ReceiptId { get; set; } = "";
+    public string OrganizationId { get; set; } = "";
+    public string WorkspaceId { get; set; } = "";
+    public string MemberUserId { get; set; } = "";
+    public string AgentConnectionId { get; set; } = "";
+    public string AgentId { get; set; } = "";
+    public string SessionId { get; set; } = "";
+    public string TurnId { get; set; } = "";
+    public string IdempotencyKey { get; set; } = "";
+    public string ContentDigest { get; set; } = "";
+    public int CapsuleSizeBytes { get; set; }
+    public string ProtectionScheme { get; set; } = "";
+    public string ProtectedCapsule { get; set; } = "";
+    public HubIngressQueueState State { get; set; } = HubIngressQueueState.Pending;
+    public int AttemptCount { get; set; }
+    public DateTimeOffset AcceptedAt { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public DateTimeOffset? LeaseExpiresAt { get; set; }
+    public DateTimeOffset? ProcessingStartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public string? LastErrorCode { get; set; }
+    public string? Sensitivity { get; set; }
+    public string? StorageDecision { get; set; }
+    public bool? ContainsSensitiveMaterial { get; set; }
 }
 
 public static class AuditEventPayloadVersions

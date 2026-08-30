@@ -11,7 +11,7 @@ Install and configure Luthn locally by following the instructions here:
 https://raw.githubusercontent.com/JakobSung/Luthn/refs/heads/main/docs/installation.md
 ```
 
-에이전트는 운영체제를 확인해 해당 절차만 사용하고, 기존 Docker volume·Luthn·Codex·Claude Code 설정·hook·관계없는 MCP 등록을 보존해야 합니다. token이나 자격 증명 파일을 출력하면 안 됩니다. 새 설치의 완료 조건은 `luthn status`의 health와 readiness가 모두 `ready`인 것, 운영자 화면 URL 확인, `luthn mcp --list-tools`의 `get_context_pack` 확인, 선택한 Codex 또는 Claude Code MCP 등록 확인입니다. provider를 `unconfigured`으로 바꾸거나 mock을 비활성화한 경우에만 setup-required/not_ready 상태를 정확히 안내해야 합니다. 사용자만 할 수 있는 재시작·hook Trust가 남으면 정확히 안내해야 합니다.
+에이전트는 운영체제를 확인해 해당 절차만 사용하고, 기존 Docker volume·Luthn·Codex·Claude Code 설정·hook·관계없는 MCP 등록을 보존해야 합니다. token이나 자격 증명 파일을 출력하면 안 됩니다. 새 설치의 완료 조건은 `luthn status`의 health와 readiness가 모두 `ready`인 것, 운영자 화면 URL 확인, `luthn mcp --list-tools`의 `get_context_pack` 확인, 선택한 Codex 또는 Claude Code MCP 등록 확인입니다. 지원되는 로컬 분류 provider가 없으면 setup-required/not_ready 상태를 정확히 안내해야 합니다. 사용자만 할 수 있는 재시작·hook Trust가 남으면 정확히 안내해야 합니다.
 
 ## 요구 사항
 
@@ -53,9 +53,8 @@ curl -fsSL https://raw.githubusercontent.com/JakobSung/Luthn/main/scripts/instal
 설치 과정은 `~/.local/bin/luthn` CLI와 원본 없는 Compose 묶음을 설치하고,
 `ghcr.io/jakobsung/luthn:stable`을 변경 불가 digest로 확정해 로컬 서비스 token을
 만들며, PostgreSQL 시작·migration·공개 안전 예제 자료 입력·health 확인을
-수행합니다. 새 설치는 결정론적 로컬 `mock` 분류기와 `AllowMock=true`로 시작하므로
-외부 provider 없이도 `/readyz`가 `ready`입니다. 운영자가 provider를
-`unconfigured`으로 바꾸거나 mock 분류를 비활성화한 경우에만
+수행합니다. 새 설치는 `LocalDeterministic`으로 시작하므로 모델 process, 자격 증명,
+network 분류 호출 없이도 `/readyz`가 `ready`입니다. 지원되는 로컬 provider가 없으면
 setup-required/not_ready가 됩니다. `--connect-codex`는 Codex hook, MCP, 기본
 자동 회상을 설정합니다. 설치된 Claude Code CLI를 연결하려면 `--connect-claude`를
 사용하거나 설치 뒤 `luthn connect claude`를 실행합니다.
@@ -137,11 +136,30 @@ luthn update check --json
 luthn doctor --json
 ```
 
-Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를 보고합니다. 운영자 화면은 <http://127.0.0.1:8080/>이며 API port는 기본적으로 loopback에만 연결됩니다.
+Compose service, health, readiness, 화면 URL, image 참조/식별자/digest를 보고합니다. 운영자 화면은 <http://127.0.0.1:8080/>이며 API port는 기본적으로 loopback에만 연결됩니다. 화면은 민감 접근 요청과 외부 공개 결정을 처리하는 로컬 승인 정본입니다. Host API를 통해 제한된 운영자 상세를 읽고 명시적 결정 사유를 요구합니다. 기존 승인은 server가 재검증한 redacted summary를 반환할 수 있습니다. protected-memory 승인은 1~60분(기본 60분), 1~3회(기본 1회)를 선택하지만 보호된 title·summary는 요청자에게만 전달되고 콘솔에는 표시되지 않습니다. 자격증명과 key는 절대 전달하지 않습니다. 감사 센터는 제한된 filter와 export로 결정·실패·설정·ingress·publication·보존을 metadata-only로 조사하며 원문 조회나 database 관리 화면이 아닙니다.
+
+### 콘솔 접근과 메뉴
+
+`콘솔 접근` 탭에서 현재 세션을 확인합니다. 패키지형 개인 `SingleOwner` 설치는 loopback에
+바인딩됩니다. macOS와 Linux에서는 `로컬 access 연결`을 선택하면 설치된 Host Helper가
+명시적으로 요청한 HttpOnly 브라우저 후보 하나만 승인하고 제한된 `LocalAuto` 세션을
+시작합니다. 터미널 명령은 필요하지 않습니다. `luthn console`은 로컬 복구 경로이며
+현재 Windows 콘솔 접근 경로입니다. 후보가 없거나 둘 이상이면 차단합니다. 운영자 자격과
+bootstrap token은 브라우저·URL·API
+본문·명령 인자에 넣지 않습니다. 브라우저에는 불투명한
+HttpOnly·host-only·SameSite 세션 cookie만 전달하며 변경 요청에는 same-origin CSRF 검증도
+적용합니다. Service/decision 자격 증명은 Agent와 비콘솔 API client를 위한 보호된 서버
+설정에만 남고 페이지·URL·브라우저 저장소·로그·export로 복사하지 않습니다.
+
+URL만 직접 열어서는 새 세션을 승인하지 않으며 사용자가 로컬 access 동작을 선택해야 합니다. MultiUser, forwarded 노출,
+명시적 local-only가 아닌 설치에서는 LocalAuto를 fail-closed로 차단합니다.
+패키지형 loopback bridge는 직접 연결된 로컬 HTTP origin으로 제한됩니다. 패키지 Compose는
+`Luthn__Console__TrustedLocalBridge=true`를 설정하며 Host는 loopback Host, 사설 container
+endpoint, forwarded header 비활성 조건을 모두 만족할 때만 이 bridge를 신뢰합니다.
 
 ### 분류 기본값
 
-새 설치는 로컬 `mock` 분류기를 사용하므로 별도 provider 설정 없이 분류가 필요한 쓰기와 `/readyz`가 바로 동작합니다. mock은 결정론적 로컬 분류기이므로 provider 기반 분류가 필요하면 운영자 화면에서 원하는 provider로 교체하세요. `luthn install`과 `luthn update`는 이전 기본값 조합인 `unconfigured`/`false`만 `mock`/`true`로 바꾸며, 그 밖의 설정 값은 유지합니다.
+새 설치는 `LocalDeterministic`을 사용하므로 별도 모델 runtime 없이 분류가 필요한 쓰기와 `/readyz`가 바로 동작합니다. 선택적 `LocalHttp`는 `localhost`, loopback IP, `host.docker.internal`만 허용하며 redirect는 실패 처리합니다. 기존 상용 provider, `Mock`, `ExternalHttp` runtime 값은 `Unconfigured`로 전환하고 endpoint·model·인증·credential 값은 제거합니다.
 
 ### 자동 turn memory 보존기간
 
@@ -256,7 +274,7 @@ Claude Code 연결은 사용자 범위의 `luthn` MCP 등록, Luthn 소유 Stop 
 Luthn이 소유한 hook, 자동 회상 블록, 일치하는 MCP 등록과 비밀이 아닌 소유
 상태만 제거하며 관계없는 Claude 설정과 MCP 등록은 보존합니다.
 
-예상 MCP tool은 `get_context_pack`, `search_safe_context`, `get_wiki_proposal`, `classify_preview`, `create_shared_memory`, `query_shared_memory`, `get_shared_memory_item`, `create_sensitive_access_request`, `get_sensitive_access_request`, `get_sensitive_access_result`입니다. 기본 connector token에는 `access.request`가 포함되어 새 설치와 update 뒤 요청·상태·결과 도구가 바로 동작합니다. 승인·거절은 MCP 밖의 신뢰된 운영자 경로에 남습니다.
+예상 MCP tool은 `get_context_pack`, `search_safe_context`, `get_wiki_proposal`, `classify_preview`, `create_shared_memory`, `query_shared_memory`, `get_shared_memory_item`, `request_protected_information_access`, `get_protected_information_result`, `create_sensitive_access_request`, `get_sensitive_access_request`, `get_sensitive_access_result`입니다. 기본 connector token에는 `access.request`가 포함되어 새 설치와 update 뒤 제한된 요청·상태·결과 도구가 바로 동작합니다. 승인·거절은 MCP 밖의 신뢰된 운영자 경로에 남습니다. 요청자 handle은 Agent가 표시하거나 저장하면 안 됩니다. Agent 설정에 대해서는 운영자 화면이 관측 surface로만 동작하며 host agent를 설치·재구성·Trust·해제하지 않습니다. 승인·감사 section은 별도로 Host API를 사용하고 database에 직접 접근하지 않습니다.
 
 ## 비밀 값
 

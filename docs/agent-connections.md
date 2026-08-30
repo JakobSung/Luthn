@@ -6,6 +6,11 @@ Luthn can connect Codex and Claude Code to one installation at the same time.
 Both agents use the same Luthn API and policy-approved safe memory, while their
 host configuration and connection lifecycle remain independent.
 
+This document describes the currently implemented personal and self-hosted
+connection lifecycle. Codex and Claude Code remain independent local
+integrations: MCP provides recall and tools, while an Agent-native hook or
+plugin is responsible for lifecycle capture when configured.
+
 ## Connect Both Agents
 
 The commands can be run in either order:

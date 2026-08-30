@@ -1,0 +1,20 @@
+name: Public/private boundary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Reject managed-service implementation details
+        run: bash scripts/tests/test-public-source-boundary.sh
+      - name: Validate operator console JavaScript
+        run: node --check src/Luthn.Host.Api/wwwroot/assets/operator.js

@@ -5,6 +5,27 @@ namespace Luthn.Core.Tests;
 
 public sealed class SafeProjectionSyncTests
 {
+    [Theory]
+    [InlineData("/Users/alice/private.txt")]
+    [InlineData("..")]
+    [InlineData("record with spaces")]
+    public void CreateUpsertRejectsPathLikeOrNonOpaqueLocalRecordId(string localRecordId)
+    {
+        Assert.Throws<ArgumentException>(() => SafeProjectionSyncPolicy.CreateUpsert(
+            workspaceId: "workspace-1",
+            originInstanceId: "instance-1",
+            localRecordId: localRecordId,
+            revision: 1,
+            safeSummary: "Approved safe summary.",
+            publicationState: ExternalPublicationState.ApprovedForExternal,
+            sensitivity: SensitivityLevel.Public,
+            visibility: MemoryVisibility.SharedAcrossAgents,
+            createdAt: DateTimeOffset.UtcNow,
+            updatedAt: DateTimeOffset.UtcNow,
+            decidedAt: DateTimeOffset.UtcNow,
+            expiresAt: null));
+    }
+
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
 
     [Fact]
@@ -44,6 +65,44 @@ public sealed class SafeProjectionSyncTests
         Assert.Null(envelope.Title);
         Assert.Null(envelope.SafeSummary);
         Assert.Empty(envelope.CoreTags);
+    }
+
+    [Fact]
+    public void UpsertRetainsTheLocalExtensionWorkspaceIdentityGrammar()
+    {
+        var envelope = SafeProjectionSyncPolicy.CreateUpsert(
+            workspaceId: "personal:user@example.com",
+            originInstanceId: "instance-1",
+            localRecordId: "memory-1",
+            revision: 1,
+            safeSummary: "Approved safe summary.",
+            publicationState: ExternalPublicationState.ApprovedForExternal,
+            sensitivity: SensitivityLevel.Public,
+            visibility: MemoryVisibility.SharedAcrossAgents,
+            createdAt: Now.AddMinutes(-2),
+            updatedAt: Now.AddMinutes(-1),
+            decidedAt: Now,
+            expiresAt: null);
+
+        Assert.Equal("personal:user@example.com", envelope.WorkspaceId);
+    }
+
+    [Fact]
+    public void UpsertRejectsOutOfOrderTimeline()
+    {
+        Assert.Throws<ArgumentException>(() => SafeProjectionSyncPolicy.CreateUpsert(
+            workspaceId: "workspace-1",
+            originInstanceId: "instance-1",
+            localRecordId: "memory-1",
+            revision: 1,
+            safeSummary: "Approved safe summary.",
+            publicationState: ExternalPublicationState.ApprovedForExternal,
+            sensitivity: SensitivityLevel.Public,
+            visibility: MemoryVisibility.SharedAcrossAgents,
+            createdAt: Now,
+            updatedAt: Now.AddMinutes(-1),
+            decidedAt: Now,
+            expiresAt: null));
     }
 
     [Fact]

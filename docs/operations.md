@@ -270,6 +270,105 @@ terminating API availability. Externally approved, revoked, outbox-linked,
 manually created, non-turn, unexpired, Session, and Durable memory are never
 automatic cleanup candidates.
 
+## Audit retention cleanup
+
+Audit retention is classified independently from operational metrics. The
+defaults retain Access, Security, and Publication events for 365 days,
+Configuration and Retention events for 730 days, and Ingestion events for 90
+days. Cleanup is disabled by default so an operator must make deletion an
+explicit deployment decision:
+
+```dotenv
+Luthn__Audit__Retention__CleanupEnabled=false
+Luthn__Audit__Retention__CleanupIntervalMinutes=60
+Luthn__Audit__Retention__CleanupBatchSize=100
+Luthn__Audit__Retention__AccessDays=365
+Luthn__Audit__Retention__SecurityDays=365
+Luthn__Audit__Retention__ConfigurationDays=730
+Luthn__Audit__Retention__PublicationDays=365
+Luthn__Audit__Retention__IngestionDays=90
+Luthn__Audit__Retention__RetentionDays=730
+```
+
+Retention days must be 1 through 3650, the interval 1 through 1440 minutes,
+and the batch size 1 through 1000. Invalid settings fail startup validation.
+When enabled, each pass deletes only expired metadata within the global batch
+limit and writes one installation-scoped `audit.retention.pruned` metadata-only
+event. It does not copy deleted identifiers or content into logs, metrics, or
+the retention event. Export audit metadata before cleanup only when policy or
+an investigation requires it; the audit export is not a backup or content
+recovery mechanism.
+
+### Audit operating use
+
+Use the audit center for a bounded operational question, not as a general data
+viewer:
+
+- trace one sensitive-access request from creation through detail review,
+  approve/deny, expiry, and result read by filtering its `subjectId`;
+- investigate classification, provider, or Hub worker failures with the
+  outcome, correlation, and UTC time filters;
+- review operator classification-provider changes in installation scope;
+- confirm publication, ingress/backpressure, dead-letter/replay, and retention
+  outcomes without opening protected content.
+
+The API returns cursor-paginated metadata and the export is limited to
+metadata-only event fields. It never contains raw source, Vault data, encrypted
+payloads, credentials, prompts, transcripts, or local paths. Preserve an export
+only when an investigation or policy requires it; it is not a backup or a
+recovery source.
+
+## OSS console modes and language
+
+The operator console is the approval authority in personal Local and multi-user
+self-host modes. Its banner comes from `/api/operator/console-profile`, which
+derives mode from server identity configuration and always reports the public
+OSS build as zero-outbound. Do not add a browser control that changes tenant
+identity, enables outbound transport, or bypasses Host API authorization.
+
+English and Korean static labels use an allowlisted browser preference. Tokens
+remain session-only, while the language preference may persist locally because
+it contains no identity or protected data. Dynamic API values must continue to
+use text-only DOM rendering. Keep sensitive-access decisions separate from
+external-publication decisions so one approval cannot imply the other.
+
+## Central OSS Hub runtime foundation
+
+Personal self-host remains the default: ingress, its classification worker, and
+the outbound relay are all disabled unless the operator explicitly enables them.
+To run the optional self-host data plane, configure multi-user service-token
+identity bindings and set:
+
+```dotenv
+Luthn__Hub__Ingress__Enabled=true
+Luthn__Hub__Ingress__WorkerEnabled=true
+Luthn__Hub__Ingress__MaxCapsuleBytes=16384
+Luthn__Hub__Ingress__OrganizationPendingLimit=5000
+Luthn__Hub__Ingress__WorkspacePendingLimit=1000
+Luthn__Hub__Ingress__MemberPendingLimit=500
+Luthn__Hub__Ingress__AgentPendingLimit=250
+Luthn__Hub__Ingress__WorkerBatchSize=20
+Luthn__Hub__Ingress__WorkerPerWorkspaceBatchLimit=5
+Luthn__Hub__Ingress__WorkerLeaseSeconds=120
+Luthn__Hub__Ingress__WorkerMaxAttempts=5
+```
+
+Keep the persisted Data Protection key ring and PostgreSQL backup as one
+recovery set. A missing or incompatible key ring moves affected work to a
+metadata-only dead letter; it must never cause a public/safe downgrade. Use
+`GET /api/hub/status` for aggregate queue, retry, dead-letter, outbox, relay,
+bounded worker duration, and content-free provider-latency count/total/max evidence. Use the operator-only replay route after fixing
+the provider or protection problem; replay runs the current classifier and
+policy again.
+
+The deterministic harness covers 10 normal users, 50 users with one item each,
+a 50-request burst with explicit admission/backpressure accounting, controlled
+5-second and 30-second-equivalent provider delays, expired-lease restart recovery, and relay
+outage/reconnect with revoke-first ordering. These are correctness and recovery
+baselines, not production throughput or latency SLOs. Record actual hardware,
+PostgreSQL configuration, provider, throughput, p50/p95/p99, CPU/memory,
+failures, retries, and queue/sync lag before setting capacity.
+
 ## External Memory Service Adapter Boundary
 
 External memory services are optional adapters. They are not a second raw
@@ -306,6 +405,4 @@ docker compose --env-file .env --profile sync-worker up -d worker
 
 The default Compose stack does not start this profile. Even when started, the
 public build registers only the disabled transport, performs no outbound
-connection, and leaves pending outbox rows untouched. Do not deploy a real
-cloud adapter until its endpoint authentication, tenant isolation, deletion,
-backup/restore, and audit boundaries are separately reviewed.
+connection, and leaves pending outbox rows untouched.

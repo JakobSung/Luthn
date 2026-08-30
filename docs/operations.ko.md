@@ -115,6 +115,95 @@ API를 종료하지 않은 채 다음 interval에 다시 시도합니다. 외부
 outbox 연결, 직접 생성, turn이 아닌 source, 미만료, Session, Durable memory는
 자동 정리 후보가 아닙니다.
 
+## 감사 보존 정리
+
+감사 보존은 운영 metric과 분리해 분류합니다. 기본 보존 기간은 Access, Security,
+Publication 365일, Configuration, Retention 730일, Ingestion 90일입니다. 삭제는
+운영자가 명시적으로 결정해야 하므로 cleanup 기본값은 비활성입니다.
+
+```dotenv
+Luthn__Audit__Retention__CleanupEnabled=false
+Luthn__Audit__Retention__CleanupIntervalMinutes=60
+Luthn__Audit__Retention__CleanupBatchSize=100
+Luthn__Audit__Retention__AccessDays=365
+Luthn__Audit__Retention__SecurityDays=365
+Luthn__Audit__Retention__ConfigurationDays=730
+Luthn__Audit__Retention__PublicationDays=365
+Luthn__Audit__Retention__IngestionDays=90
+Luthn__Audit__Retention__RetentionDays=730
+```
+
+보존 기간은 1~3650일, interval은 1~1440분, batch는 1~1000개이며 범위를 벗어나면
+startup validation이 실패합니다. 활성화된 정리는 전체 batch 한도 안에서 만료된
+metadata만 삭제하고 installation 범위의 metadata-only `audit.retention.pruned`
+사건 하나를 남깁니다. 삭제한 식별자나 내용을 log, metric, retention 사건으로
+복사하지 않습니다. 정책 또는 조사에 필요할 때만 삭제 전에 감사 metadata를
+export하며, 이 export를 backup이나 내용 복구 수단으로 사용하지 않습니다.
+
+### 감사 운영 사용
+
+감사 센터는 일반 데이터 화면이 아니라 제한된 운영 질문에 사용합니다.
+
+- 민감 접근 요청의 `subjectId`로 생성, 상세 검토, 승인·반려, 만료와 결과 조회 순서를
+  추적합니다.
+- outcome, correlation과 UTC 시간 filter로 분류·provider·Hub worker 실패를 조사합니다.
+- installation 범위에서 운영자 classification-provider 설정 변경을 확인합니다.
+- 보호된 내용을 열지 않고 publication, ingress/backpressure, dead-letter/replay와
+  retention 결과를 확인합니다.
+
+API는 cursor pagination metadata를 반환하고 export도 metadata-only 사건 필드로
+제한합니다. 원본 source, Vault, 암호화 payload, credential, prompt, transcript, local
+path는 포함하지 않습니다. 조사나 정책상 필요할 때만 export를 보존하며 backup이나
+복구 원본으로 사용하지 않습니다.
+
+## OSS console mode와 언어
+
+운영 console은 개인 Local mode와 다중 사용자 self-host mode에서 승인 권한의 정본입니다.
+banner는 `/api/operator/console-profile`에서 server identity 설정으로 결정한 mode를
+받으며 공개 OSS build는 항상 외부 전송 없음으로 표시합니다. browser에서 tenant
+identity를 바꾸거나 외부 전송을 켜거나 Host API authorization을 우회하는 control을
+추가하지 않습니다.
+
+영어·한국어 정적 label은 allowlist된 browser preference를 사용합니다. token은
+session에만 두고, identity나 보호 데이터를 포함하지 않는 언어 preference만 local에
+보존할 수 있습니다. 동적 API 값은 계속 text-only DOM rendering을 사용합니다. 민감
+접근 결정과 외부 공개 결정을 분리해 한쪽 승인이 다른 쪽 승인을 뜻하지 않게 합니다.
+
+## 중앙 OSS Hub runtime 기반
+
+개인 self-host가 기본입니다. 운영자가 명시적으로 켜기 전에는 ingress, 분류 worker,
+outbound relay가 모두 비활성입니다. 선택 self-host data plane을 실행하려면 multi-user
+service-token identity를 server 설정에 바인딩하고 다음 값을 설정합니다.
+
+```dotenv
+Luthn__Hub__Ingress__Enabled=true
+Luthn__Hub__Ingress__WorkerEnabled=true
+Luthn__Hub__Ingress__MaxCapsuleBytes=16384
+Luthn__Hub__Ingress__OrganizationPendingLimit=5000
+Luthn__Hub__Ingress__WorkspacePendingLimit=1000
+Luthn__Hub__Ingress__MemberPendingLimit=500
+Luthn__Hub__Ingress__AgentPendingLimit=250
+Luthn__Hub__Ingress__WorkerBatchSize=20
+Luthn__Hub__Ingress__WorkerPerWorkspaceBatchLimit=5
+Luthn__Hub__Ingress__WorkerLeaseSeconds=120
+Luthn__Hub__Ingress__WorkerMaxAttempts=5
+```
+
+Data Protection key ring과 PostgreSQL backup을 하나의 복구 세트로 보존합니다.
+key ring이 없거나 호환되지 않으면 해당 작업은 metadata-only dead letter가 되며
+공개·안전 데이터로 낮춰 처리하면 안 됩니다. `GET /api/hub/status`로 aggregate
+queue, retry, dead-letter, outbox, relay, 제한된 worker duration과 content-free
+provider latency count/total/max를 확인합니다. provider나
+보호 문제를 해결한 뒤 운영자 전용 replay를 사용하면 현재 classifier와 policy를
+다시 적용합니다.
+
+결정적 harness는 정상 사용자 10명, 사용자 50명의 각 1개 작업, 명시적
+admission/backpressure 합계를 확인하는 50개 burst, 제어된 5초·30초 상당 provider 지연,
+만료 lease restart 회복, relay 장애·재연결과 revoke-first 순서를 검증합니다. 이는
+정확성·복구 baseline이지 production 처리량·지연 SLO가 아닙니다. capacity를 정하기
+전에 실제 hardware, PostgreSQL 설정, provider, 처리량, p50/p95/p99, CPU/memory,
+실패, retry, queue/sync lag를 기록해야 합니다.
+
 ## 외부 기억 서비스 Adapter 경계
 
 외부 기억 서비스는 선택적 adapter이며 두 번째 원본 저장 경로가 아닙니다. `metadata-only`, `safe-projection-only`인 `public-agent-allowed-safe-projections`만 내보냅니다. 항목은 공개이고 `PublicSafe` 또는 `SharedAcrossAgents`로 보이며 만료되지 않아야 합니다. 별도 안전 분류 경로가 생길 때까지 `title`과 Core tag는 비워 둡니다.
@@ -127,4 +216,4 @@ outbox 연결, 직접 생성, turn이 아닌 source, 미만료, Session, Durable
 docker compose --env-file .env --profile sync-worker up -d worker
 ```
 
-기본 stack은 worker를 시작하지 않습니다. 시작해도 공개 build는 비활성 transport만 등록해 외부 연결을 하지 않고 pending outbox를 그대로 둡니다. 실제 cloud adapter는 endpoint 인증, tenant 격리, 삭제, backup/복원, 감사 경계를 별도로 검토한 뒤에만 배포합니다.
+기본 stack은 worker를 시작하지 않습니다. 시작해도 공개 build는 비활성 transport만 등록해 외부 연결을 하지 않고 pending outbox를 그대로 둡니다.

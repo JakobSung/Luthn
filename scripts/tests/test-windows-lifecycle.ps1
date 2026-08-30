@@ -401,8 +401,8 @@ esac
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__IsOperator=true$") "the local operator credential should have the explicit operator role"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__0=access\.decide$" -and [IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Auth__Tokens__1__Scopes__1=config\.write$") "the local operator credential should allow operator configuration"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^LUTHN_ENVIRONMENT=Production$") "new installs should use the Production environment"
-    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=mock$") "new installs should select the mock classifier"
-    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__AllowMock=true$") "new installs should enable mock classification"
+    Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__Provider=LocalDeterministic$") "new installs should select local deterministic classification"
+    Assert-True (-not ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Classification__(AllowMock|Credential)=")) "new installs should not retain legacy classification settings"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Memory__AutomaticTurnRetentionDays=30$") "new installs should default automatic turn memory retention to 30 days"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Memory__AutomaticTurnCleanupEnabled=true$") "new installs should enable automatic turn cleanup"
     Assert-True ([IO.File]::ReadAllText($configFile) -cmatch "(?m)^Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60$") "new installs should default automatic turn cleanup to an hourly interval"
@@ -423,9 +423,10 @@ esac
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("Agent memory mutation boundary")) "Codex instructions should include the agent mutation boundary"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("For every question about a named or specific agent")) "Codex instructions should require agent-specific recall"
     Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("search_safe_context") -and [IO.File]::ReadAllText($codexInstructionsFile).Contains("could not verify the requested context")) "Codex instructions should define bounded recall fallback"
+    Assert-True ([IO.File]::ReadAllText($codexInstructionsFile).Contains("request_and_wait_for_protected_information_access") -and -not [IO.File]::ReadAllText($codexInstructionsFile).Contains("operator console")) "Codex instructions should orchestrate protected-detail confirmation in one call"
     $connectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
     Assert-True ($connectorState.version -eq 2 -and $connectorState.integration -ceq "host-hook-mcp") "Windows connector state should record the hook and MCP integration"
-    Assert-True ($connectorState.connectorVersion -ceq "4") "Windows connector state should record the managed template version"
+    Assert-True ($connectorState.connectorVersion -ceq "8") "Windows connector state should record the managed template version"
     Assert-True ($connectorState.helperDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the selected CLI digest"
     Assert-True ($connectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "Windows connector state should record the managed template digest"
     Assert-True ($connectorState.hookInstalled -and $connectorState.autoRecall) "connector state should record default auto-recall"
@@ -464,7 +465,12 @@ esac
     Assert-True ($claudeConnect.ExitCode -eq 0) "Claude Code connection should succeed: $($claudeConnect.Output)"
     Assert-True ([IO.File]::Exists($claudeOwnershipState)) "Claude connection should record ownership state"
     $claudeSettings = [IO.File]::ReadAllText($claudeSettingsFile) | ConvertFrom-Json
-    Assert-True (@($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.claude-agent-connector.v1" }).Count -eq 1) "Claude connection should install one managed Stop hook"
+    $claudeHookGroups = @($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "luthn.claude-agent-connector.v1" })
+    Assert-True ($claudeHookGroups.Count -eq 1) "Claude connection should install one managed Stop hook"
+    $claudeHookArguments = @($claudeHookGroups[0].hooks[0].args)
+    $expectedClaudeHookArguments = @("-NoProfile", "-File", $installedCli, "claude-hook")
+    Assert-True ($claudeHookArguments.Count -eq $expectedClaudeHookArguments.Count) "Claude Stop hook should keep the CLI path in one argument"
+    Assert-True (@(Compare-Object $claudeHookArguments $expectedClaudeHookArguments -SyncWindow 0).Count -eq 0) "Claude Stop hook should use the installed CLI path"
     Assert-True (@($claudeSettings.hooks.Stop | Where-Object { $_.matcher -ceq "other.owner" }).Count -eq 1) "Claude connection should preserve unrelated hooks"
     Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("luthn:auto-recall:start")) "Claude connection should enable lightweight recall by default"
     Assert-True ([IO.File]::ReadAllText($claudeInstructionsFile).Contains("Agent memory mutation boundary")) "Claude instructions should include the agent mutation boundary"
@@ -576,7 +582,7 @@ esac
     $version = $versionResult.Output | ConvertFrom-Json
     Assert-True ($version.installedImageReference -ceq $resolvedOfficialImage) "version should report the immutable installed image reference"
     Assert-True ($version.updateChannel -ceq "ghcr.io/jakobsung/luthn:stable") "version should report the selected update channel"
-    Assert-True ($version.cliTemplateVersion -ceq "4" -and $version.connectorTemplateVersion -ceq "4") "version should report CLI and connector template versions"
+    Assert-True ($version.cliTemplateVersion -ceq "4" -and $version.connectorTemplateVersion -ceq "8") "version should report CLI and connector template versions"
     Assert-True ($version.mcpSchemaVersion -ceq "0.1.0") "version should fall back to the legacy MCP server version when the image label and schemaVersion field are absent"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($tokenFile))) "version JSON must not expose the service token"
     Assert-True ($versionResult.Output -notmatch [regex]::Escape([IO.File]::ReadAllText($operatorTokenFile))) "version JSON must not expose the operator token"
@@ -938,11 +944,11 @@ esac
 
     $connectorUpdate = Invoke-LuthnProcess $installedCli @("update", $targetImage)
     Assert-True ($connectorUpdate.ExitCode -eq 0) "update should reconcile a stale connector template: $($connectorUpdate.Output)"
-    Assert-True ($connectorUpdate.Output -match "Reconciling Codex connector template version 4") "update should report connector template reconciliation"
+    Assert-True ($connectorUpdate.Output -match "Reconciling Codex connector template version 8") "update should report connector template reconciliation"
     Assert-True ($connectorUpdate.Output -match "Restart required: Luthn MCP compatibility changed") "connector template changes should require a Codex host restart"
     Assert-True ($connectorUpdate.Output -match "Agent notice: restart the current Codex host before invoking Luthn tools again\.") "connector template changes should emit the bounded agent notice"
     $reconciledConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
-    Assert-True ($reconciledConnectorState.connectorVersion -ceq "4") "successful update should record the current connector template version"
+    Assert-True ($reconciledConnectorState.connectorVersion -ceq "8") "successful update should record the current connector template version"
     Assert-True ($reconciledConnectorState.helperDigest -cmatch "^[0-9a-f]{64}$" -and $reconciledConnectorState.helperDigest -cne ("0" * 64)) "successful update should replace a same-version stale helper digest"
     Assert-True ($reconciledConnectorState.templateDigest -cmatch "^[0-9a-f]{64}$") "successful update should record the current managed template digest"
     $reconciledHooks = [IO.File]::ReadAllText($codexHooksFile) | ConvertFrom-Json
@@ -1050,7 +1056,7 @@ esac
     $legacyRollback = Invoke-LuthnProcess $installedCli @("update", "ghcr.io/jakobsung/luthn:legacy")
     Assert-True ($legacyRollback.ExitCode -eq 0) "update should roll back to a pre-manifest Windows runtime: $($legacyRollback.Output)"
     $legacyConnectorState = [IO.File]::ReadAllText($codexOwnershipState) | ConvertFrom-Json
-    Assert-True ($legacyConnectorState.connectorVersion -ceq "4") "legacy rollback should retain version-only connector state"
+    Assert-True ($legacyConnectorState.connectorVersion -ceq "8") "legacy rollback should retain version-only connector state"
     Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "helperDigest")) "legacy rollback state should not require a helper digest"
     Assert-True (-not ($legacyConnectorState.PSObject.Properties.Name -contains "templateDigest")) "legacy rollback state should not require a template digest"
 

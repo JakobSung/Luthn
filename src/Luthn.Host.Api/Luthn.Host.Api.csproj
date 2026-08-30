@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Luthn.Core\Luthn.Core.csproj" />
     <ProjectReference Include="..\Luthn.Core.Persistence\Luthn.Core.Persistence.csproj" />
+    <ProjectReference Include="..\Luthn.Sdk\Luthn.Sdk.csproj" />
   </ItemGroup>
 
   <ItemGroup>

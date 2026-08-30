@@ -30,6 +30,7 @@ public static class TurnSummaryEndpoints
         AgentSafeMemoryProjectionSelector projectionSelector,
         ISensitiveMemoryPayloadProtector payloadProtector,
         IOptions<LuthnMemoryOptions> memoryOptions,
+        TimeProvider timeProvider,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -55,20 +56,49 @@ public static class TurnSummaryEndpoints
         var contentDigest = NormalizeDigest(request.ContentDigest) ?? ComputeSha256Digest(request.Summary);
         var actor = ServiceTokenAuthorization.GetActor(httpContext);
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        var summaryId = CreateStableSummaryId(request, contentDigest, principal.WorkspaceId);
+        var summaryId = CreateStableSummaryId(
+            request,
+            contentDigest,
+            principal.WorkspaceId,
+            principal.UserId);
         var sourceEventId = summaryId;
         var existingSource = await db.SourceEvents
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                record => record.Id == sourceEventId && record.WorkspaceId == principal.WorkspaceId,
+                record => record.Id == sourceEventId &&
+                    record.WorkspaceId == principal.WorkspaceId &&
+                    record.OwnerUserId == principal.UserId,
                 cancellationToken);
+        if (existingSource is null)
+        {
+            var legacySourceEventId = CreateLegacyStableSummaryId(
+                request,
+                contentDigest,
+                principal.WorkspaceId);
+            existingSource = await db.SourceEvents
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    record => record.Id == legacySourceEventId &&
+                        record.WorkspaceId == principal.WorkspaceId &&
+                        record.OwnerUserId == principal.UserId,
+                    cancellationToken);
+            if (existingSource is not null)
+            {
+                sourceEventId = legacySourceEventId;
+            }
+        }
         if (existingSource is not null)
         {
-            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.WorkspaceId, cancellationToken);
+            var existing = await BuildExistingResponseAsync(
+                db,
+                sourceEventId,
+                principal.WorkspaceId,
+                principal.UserId,
+                cancellationToken);
             return TypedResults.Ok(existing);
         }
 
-        var receivedAt = DateTimeOffset.UtcNow;
+        var receivedAt = timeProvider.GetUtcNow();
         var memoryItemId = $"memory-{sourceEventId}";
         var provenanceError = CollectionProvenance.TryCreate(
             sourceEventId,
@@ -88,6 +118,7 @@ public static class TurnSummaryEndpoints
         }
         var sourceId = new PublicRecordId(sourceEventId);
         var resolvedTitle = ResolveTitle(request);
+        var correlationId = AuditCorrelationIds.CreateOperationId();
         var providerAuditEventId = $"audit-{Guid.NewGuid():N}";
         db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
             principal,
@@ -98,7 +129,8 @@ public static class TurnSummaryEndpoints
             projectionSelector.Boundary.RedactionState,
             receivedAt,
             subjectType: "source_event",
-            outcome: "started",
+            outcome: AuditOutcomes.Started,
+            correlationId: correlationId,
             id: providerAuditEventId));
         await db.SaveChangesAsync(cancellationToken);
 
@@ -122,11 +154,34 @@ public static class TurnSummaryEndpoints
         }
         catch (ClassificationProviderException error)
         {
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "turn_summary.classification_provider.failed",
+                sourceEventId,
+                "metadata-only",
+                projectionSelector.Boundary.RedactionState,
+                timeProvider.GetUtcNow(),
+                subjectType: "source_event",
+                outcome: AuditOutcomes.Failed,
+                correlationId: correlationId));
+            await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
 
         var classification = projection.Classification;
         var decision = projection.Decision;
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "turn_summary.classification_provider.completed",
+            sourceEventId,
+            projectionSelector.Boundary.PayloadClass,
+            projectionSelector.Boundary.RedactionState,
+            timeProvider.GetUtcNow(),
+            subjectType: "source_event",
+            outcome: AuditOutcomes.Completed,
+            correlationId: correlationId));
         var allowsAgentContext = decision.AllowsAgentContext &&
             classification.Sensitivity == SensitivityLevel.Public &&
             !classification.ContainsSensitiveMaterial;
@@ -205,23 +260,46 @@ public static class TurnSummaryEndpoints
                 recallMetadata.TopicTags,
                 request.SessionId.Trim())
             : null;
+        SensitiveMemoryPayloadRecord? protectedPayload = null;
         if (projection.RetainsEncryptedOriginal && allowsAgentContext)
         {
-            db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.ProtectOriginalForSafeProjection(
+            protectedPayload = SensitiveMemoryPersistence.ProtectOriginalForSafeProjection(
                 memoryRecord,
                 originalPayload!,
                 payloadProtector,
                 projectionSelector.SensitiveDataDetector,
-                receivedAt));
+                receivedAt);
         }
         else if (SensitiveMemoryPersistence.RequiresProtection(memoryRecord))
         {
             var payload = originalPayload ?? SensitiveMemoryPersistence.FromRecord(memoryRecord);
-            db.SensitiveMemoryPayloads.Add(SensitiveMemoryPersistence.Protect(
+            protectedPayload = SensitiveMemoryPersistence.Protect(
                 memoryRecord,
                 payload,
                 payloadProtector,
-                receivedAt));
+                receivedAt);
+        }
+
+        string? sensitiveReferenceId = null;
+        if (protectedPayload is not null)
+        {
+            sensitiveReferenceId = $"sensitive-{sourceEventId}";
+            db.SensitiveMemoryPayloads.Add(protectedPayload);
+            db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
+            {
+                Id = sensitiveReferenceId,
+                SourceEventId = sourceEventId,
+                MemoryItemId = memoryRecord.Id,
+                SourceSystem = request.SourceAgent.Trim(),
+                SourceType = "turn-summary",
+                ReceivedAt = receivedAt,
+                ExpiresAt = memoryRecord.ExpiresAt,
+                ContainsSensitiveMaterial = true,
+                ReferenceLabel = $"sensitive-turn-summary:{sourceEventId}",
+                RedactedSummary = allowsAgentContext ? memoryRecord.SafeSummary : "",
+                WorkspaceId = principal.WorkspaceId,
+                OwnerUserId = principal.UserId
+            });
         }
         db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
             principal,
@@ -236,7 +314,8 @@ public static class TurnSummaryEndpoints
                     : "encrypted-payload-only",
             receivedAt,
             subjectType: "source_event",
-            outcome: "completed",
+            outcome: AuditOutcomes.Completed,
+            correlationId: correlationId,
             id: auditEventId));
         try
         {
@@ -248,12 +327,18 @@ public static class TurnSummaryEndpoints
                     db,
                     sourceEventId,
                     principal.WorkspaceId,
+                    principal.UserId,
                     cancellationToken))
             {
                 throw;
             }
 
-            var existing = await BuildExistingResponseAsync(db, sourceEventId, principal.WorkspaceId, cancellationToken);
+            var existing = await BuildExistingResponseAsync(
+                db,
+                sourceEventId,
+                principal.WorkspaceId,
+                principal.UserId,
+                cancellationToken);
             return TypedResults.Ok(existing);
         }
 
@@ -262,6 +347,7 @@ public static class TurnSummaryEndpoints
             sourceEventId,
             classificationResultId,
             memoryItemId,
+            sensitiveReferenceId,
             auditEventId,
             allowsAgentContext,
             duplicate: false,
@@ -275,20 +361,32 @@ public static class TurnSummaryEndpoints
         LuthnDbContext db,
         string sourceEventId,
         string workspaceId,
+        string ownerUserId,
         CancellationToken cancellationToken)
     {
         var classification = await (
                 from classificationRecord in db.ClassificationResults.AsNoTracking()
                 join source in db.SourceEvents.AsNoTracking()
                     on classificationRecord.SourceEventId equals source.Id
-                where classificationRecord.SourceEventId == sourceEventId && source.WorkspaceId == workspaceId
+                where classificationRecord.SourceEventId == sourceEventId &&
+                    source.WorkspaceId == workspaceId &&
+                    source.OwnerUserId == ownerUserId
                 select classificationRecord)
             .SingleAsync(cancellationToken);
         var memory = await db.SharedMemoryItems
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                record => record.Id == $"memory-{sourceEventId}" && record.WorkspaceId == workspaceId,
+                record => record.Id == $"memory-{sourceEventId}" &&
+                    record.WorkspaceId == workspaceId &&
+                    record.OwnerUserId == ownerUserId,
                 cancellationToken);
+        var sensitiveReferenceId = await db.SensitiveRecordReferences
+            .AsNoTracking()
+            .Where(record => record.SourceEventId == sourceEventId &&
+                record.WorkspaceId == workspaceId &&
+                record.OwnerUserId == ownerUserId)
+            .Select(record => record.Id)
+            .SingleOrDefaultAsync(cancellationToken);
         var audit = await db.AuditEvents
             .AsNoTracking()
             .Where(record => record.SubjectId == sourceEventId &&
@@ -308,6 +406,7 @@ public static class TurnSummaryEndpoints
             sourceEventId,
             classification.Id,
             memory?.Id,
+            sensitiveReferenceId,
             audit?.Id ?? "",
             memory?.AllowsAgentContext ?? false,
             duplicate: true,
@@ -319,13 +418,16 @@ public static class TurnSummaryEndpoints
         LuthnDbContext db,
         string sourceEventId,
         string workspaceId,
+        string ownerUserId,
         CancellationToken cancellationToken)
     {
         db.ChangeTracker.Clear();
         return await db.SourceEvents
             .AsNoTracking()
             .AnyAsync(
-                record => record.Id == sourceEventId && record.WorkspaceId == workspaceId,
+                record => record.Id == sourceEventId &&
+                    record.WorkspaceId == workspaceId &&
+                    record.OwnerUserId == ownerUserId,
                 cancellationToken);
     }
 
@@ -363,6 +465,7 @@ public static class TurnSummaryEndpoints
         string sourceEventId,
         string classificationResultId,
         string? memoryItemId,
+        string? sensitiveReferenceId,
         string auditEventId,
         bool allowsAgentContext,
         bool duplicate,
@@ -373,6 +476,7 @@ public static class TurnSummaryEndpoints
             sourceEventId,
             classificationResultId,
             memoryItemId,
+            sensitiveReferenceId,
             auditEventId,
             allowsAgentContext,
             duplicate,
@@ -483,6 +587,26 @@ public static class TurnSummaryEndpoints
     private static string CreateStableSummaryId(
         TurnSummaryIntakeRequest request,
         string contentDigest,
+        string workspaceId,
+        string ownerUserId)
+    {
+        var stableInput = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? EncodeStableKeyParts(
+                "derived",
+                workspaceId,
+                ownerUserId,
+                request.SourceAgent.Trim(),
+                request.SessionId.Trim(),
+                request.TurnId?.Trim(),
+                request.TurnRange?.Trim(),
+                contentDigest)
+            : EncodeStableKeyParts("explicit", workspaceId, ownerUserId, request.IdempotencyKey.Trim());
+        return $"turn-summary-{HashFragment(stableInput)}";
+    }
+
+    private static string CreateLegacyStableSummaryId(
+        TurnSummaryIntakeRequest request,
+        string contentDigest,
         string workspaceId)
     {
         var stableInput = string.IsNullOrWhiteSpace(request.IdempotencyKey)
@@ -557,6 +681,7 @@ public sealed record TurnSummaryIntakeResponse(
     string SourceEventId,
     string ClassificationResultId,
     string? MemoryItemId,
+    string? SensitiveReferenceId,
     string AuditEventId,
     bool AllowsAgentContext,
     bool Duplicate,

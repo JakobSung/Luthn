@@ -7,12 +7,17 @@ namespace Luthn.Core.Persistence;
 
 public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : DbContext(options)
 {
+    private bool _allowAuditRetentionDelete;
+
     public DbSet<SourceEventRecord> SourceEvents => Set<SourceEventRecord>();
     public DbSet<ClassificationResultRecord> ClassificationResults => Set<ClassificationResultRecord>();
     public DbSet<WikiProposalRecord> WikiProposals => Set<WikiProposalRecord>();
     public DbSet<SensitiveRecordReferenceRecord> SensitiveRecordReferences => Set<SensitiveRecordReferenceRecord>();
+    public DbSet<SensitiveAccessPolicyRevisionRecord> SensitiveAccessPolicyRevisions => Set<SensitiveAccessPolicyRevisionRecord>();
     public DbSet<SensitiveAccessRequestRecord> SensitiveAccessRequests => Set<SensitiveAccessRequestRecord>();
     public DbSet<SensitiveAccessDecisionRecord> SensitiveAccessDecisions => Set<SensitiveAccessDecisionRecord>();
+    public DbSet<SensitiveAccessGrantRecord> SensitiveAccessGrants => Set<SensitiveAccessGrantRecord>();
+    public DbSet<SensitiveAccessTombstoneRecord> SensitiveAccessTombstones => Set<SensitiveAccessTombstoneRecord>();
     public DbSet<SharedMemoryItemRecord> SharedMemoryItems => Set<SharedMemoryItemRecord>();
     public DbSet<SensitiveMemoryPayloadRecord> SensitiveMemoryPayloads => Set<SensitiveMemoryPayloadRecord>();
     public DbSet<CollectionProvenanceRecord> CollectionProvenance => Set<CollectionProvenanceRecord>();
@@ -20,7 +25,53 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public DbSet<SafeProjectionSyncOutboxRecord> SafeProjectionSyncOutbox => Set<SafeProjectionSyncOutboxRecord>();
     public DbSet<SafeProjectionSyncCheckpointRecord> SafeProjectionSyncCheckpoints => Set<SafeProjectionSyncCheckpointRecord>();
     public DbSet<AgentConnectionChannelRecord> AgentConnectionChannels => Set<AgentConnectionChannelRecord>();
+    public DbSet<HubIngressQueueRecord> HubIngressQueue => Set<HubIngressQueueRecord>();
     public DbSet<AuditEventRecord> AuditEvents => Set<AuditEventRecord>();
+
+    public async Task<int> DeleteAuditEventsForRetentionAsync(
+        IReadOnlyCollection<string> auditEventIds,
+        AuditEventRecord retentionAudit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(auditEventIds);
+        ArgumentNullException.ThrowIfNull(retentionAudit);
+        if (auditEventIds.Count is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(auditEventIds),
+                "Audit retention deletion requires between 1 and 1000 event ids.");
+        }
+        if (retentionAudit.ScopeKind != AuditEventScopeKind.Installation ||
+            !string.Equals(retentionAudit.Action, "audit.retention.pruned", StringComparison.Ordinal) ||
+            !string.Equals(retentionAudit.PayloadClass, "metadata-only", StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "Audit retention deletion requires an installation-scoped metadata-only retention audit.",
+                nameof(retentionAudit));
+        }
+
+        var candidates = await AuditEvents
+            .Where(record => auditEventIds.Contains(record.Id))
+            .ToArrayAsync(cancellationToken);
+        if (candidates.Length == 0)
+        {
+            return 0;
+        }
+
+        AuditEvents.RemoveRange(candidates);
+        AuditEvents.Add(retentionAudit);
+        _allowAuditRetentionDelete = true;
+        try
+        {
+            await SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            _allowAuditRetentionDelete = false;
+        }
+
+        return candidates.Length;
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -100,6 +151,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
             entity.Property(record => record.SourceEventId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.MemoryItemId).HasMaxLength(128);
             entity.Property(record => record.SourceSystem).HasMaxLength(128).IsRequired();
             entity.Property(record => record.SourceType).HasMaxLength(128).IsRequired();
             entity.Property(record => record.ReferenceLabel).HasMaxLength(256).IsRequired();
@@ -107,10 +159,41 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new { record.WorkspaceId, record.ReceivedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.OwnerUserId, record.ExpiresAt });
             entity.HasOne(record => record.SourceEvent)
                 .WithMany()
                 .HasForeignKey(record => record.SourceEventId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(record => record.MemoryItem)
+                .WithMany()
+                .HasForeignKey(record => record.MemoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SensitiveAccessPolicyRevisionRecord>(entity =>
+        {
+            entity.ToTable("sensitive_access_policy_revisions", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_workspace_id",
+                    "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_revision",
+                    "\"Revision\" > 0");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_request_timeout",
+                    "\"RequestTimeoutSeconds\" BETWEEN 60 AND 3600");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_grant_duration",
+                    "\"GrantDurationSeconds\" BETWEEN 60 AND 3600");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_policy_revisions_maximum_successful_reads",
+                    "\"MaximumSuccessfulReads\" BETWEEN 1 AND 10");
+            });
+            entity.HasKey(record => new { record.WorkspaceId, record.Revision });
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength);
+            entity.Property(record => record.CreatedBy).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => new { record.WorkspaceId, record.CreatedAt });
         });
 
         modelBuilder.Entity<SensitiveAccessRequestRecord>(entity =>
@@ -119,6 +202,10 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             {
                 table.HasCheckConstraint("CK_sensitive_access_requests_owner_user_id", "\"OwnerUserId\" <> ''");
                 table.HasCheckConstraint("CK_sensitive_access_requests_workspace_id", "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_requests_policy_revision", "\"PolicyRevision\" > 0");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_requests_request_timeout",
+                    "\"RequestTimeoutSeconds\" BETWEEN 60 AND 3600");
             });
             entity.HasKey(record => record.Id);
             entity.Property(record => record.Id).HasMaxLength(128);
@@ -127,15 +214,28 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.SessionId).HasMaxLength(128).IsRequired();
             entity.Property(record => record.RequestReason).HasMaxLength(1000).IsRequired();
             entity.Property(record => record.RedactedSummary).HasMaxLength(4000).IsRequired();
+            entity.Property(record => record.AccessMode)
+                .HasConversion<string>()
+                .HasMaxLength(64)
+                .HasDefaultValue(SensitiveAccessMode.RedactedSummary);
+            entity.Property(record => record.AccessHandleDigest).HasMaxLength(80).HasDefaultValue("");
+            entity.Property(record => record.RequesterBindingDigest).HasMaxLength(80).HasDefaultValue("");
             entity.Property(record => record.Status).HasConversion<string>().HasMaxLength(64);
             entity.Property(record => record.DecidedBy).HasMaxLength(128);
             entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
             entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
             entity.HasIndex(record => new { record.Status, record.ExpiresAt, record.UpdatedAt });
             entity.HasIndex(record => new { record.WorkspaceId, record.Status, record.UpdatedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.OwnerUserId, record.AccessHandleDigest })
+                .IsUnique()
+                .HasFilter("\"AccessMode\" = 'ProtectedMemory' AND \"AccessHandleDigest\" <> ''");
             entity.HasOne(record => record.SensitiveRecordReference)
                 .WithMany()
                 .HasForeignKey(record => record.SensitiveRecordReferenceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(record => record.Policy)
+                .WithMany()
+                .HasForeignKey(record => new { record.WorkspaceId, record.PolicyRevision })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -154,6 +254,58 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
                 .WithMany()
                 .HasForeignKey(record => record.SensitiveAccessRequestId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SensitiveAccessGrantRecord>(entity =>
+        {
+            entity.ToTable("sensitive_access_grants", table =>
+            {
+                table.HasCheckConstraint("CK_sensitive_access_grants_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_grants_workspace_id", "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_grants_policy_revision", "\"PolicyRevision\" > 0");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_grants_grant_duration",
+                    "\"GrantDurationSeconds\" BETWEEN 60 AND 3600");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_grants_maximum_successful_reads",
+                    "\"MaximumSuccessfulReads\" BETWEEN 1 AND 10");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_grants_successful_read_count",
+                    "\"SuccessfulReadCount\" >= 0 AND \"SuccessfulReadCount\" <= \"MaximumSuccessfulReads\"");
+                table.HasCheckConstraint(
+                    "CK_sensitive_access_grants_time_window",
+                    "\"StartsAt\" < \"ExpiresAt\"");
+            });
+            entity.HasKey(record => record.SensitiveAccessRequestId);
+            entity.Property(record => record.SensitiveAccessRequestId).HasMaxLength(128);
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SuccessfulReadCount).IsConcurrencyToken();
+            entity.HasIndex(record => new { record.WorkspaceId, record.OwnerUserId, record.ExpiresAt });
+            entity.HasOne(record => record.SensitiveAccessRequest)
+                .WithOne(record => record.Grant)
+                .HasForeignKey<SensitiveAccessGrantRecord>(record => record.SensitiveAccessRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(record => record.Policy)
+                .WithMany()
+                .HasForeignKey(record => new { record.WorkspaceId, record.PolicyRevision })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SensitiveAccessTombstoneRecord>(entity =>
+        {
+            entity.ToTable("sensitive_access_tombstones", table =>
+            {
+                table.HasCheckConstraint("CK_sensitive_access_tombstones_owner_user_id", "\"OwnerUserId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_tombstones_workspace_id", "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint("CK_sensitive_access_tombstones_expired_status", "\"Status\" = 'Expired'");
+            });
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.Status).HasConversion<string>().HasMaxLength(64);
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
+            entity.Property(record => record.OwnerUserId).HasMaxLength(128).IsRequired();
+            entity.HasIndex(record => new { record.WorkspaceId, record.OwnerUserId, record.CleanedAt });
         });
 
         modelBuilder.Entity<SharedMemoryItemRecord>(entity =>
@@ -213,6 +365,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.Property(record => record.ContractVersion).HasDefaultValue(1);
             entity.Property(record => record.ProtectionScheme).HasMaxLength(64).IsRequired();
             entity.Property(record => record.ProtectedPayload).HasColumnType("text").IsRequired();
+            entity.HasIndex(record => record.ExpiresAt);
             entity.HasOne<SharedMemoryItemRecord>()
                 .WithOne()
                 .HasForeignKey<SensitiveMemoryPayloadRecord>(record => record.MemoryItemId)
@@ -338,6 +491,47 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
             entity.HasIndex(record => new { record.WorkspaceId, record.UpdatedAt });
         });
 
+        modelBuilder.Entity<HubIngressQueueRecord>(entity =>
+        {
+            entity.ToTable("hub_ingress_queue", table =>
+            {
+                table.HasCheckConstraint("CK_hub_ingress_queue_workspace_id", "\"WorkspaceId\" <> ''");
+                table.HasCheckConstraint("CK_hub_ingress_queue_organization_id", "\"OrganizationId\" <> ''");
+                table.HasCheckConstraint("CK_hub_ingress_queue_member_user_id", "\"MemberUserId\" <> ''");
+                table.HasCheckConstraint("CK_hub_ingress_queue_capsule_size", "\"CapsuleSizeBytes\" > 0");
+            });
+            entity.HasKey(record => record.Id);
+            entity.Property(record => record.Id).HasMaxLength(128);
+            entity.Property(record => record.ReceiptId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.OrganizationId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.WorkspaceId).HasMaxLength(WorkspaceIds.MaxLength).IsRequired();
+            entity.Property(record => record.MemberUserId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.AgentConnectionId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.AgentId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.SessionId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.TurnId).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.IdempotencyKey).HasMaxLength(128).IsRequired();
+            entity.Property(record => record.ContentDigest).HasMaxLength(71).IsRequired();
+            entity.Property(record => record.ProtectionScheme).HasMaxLength(64).IsRequired();
+            entity.Property(record => record.ProtectedCapsule).HasColumnType("text").IsRequired();
+            entity.Property(record => record.State).HasConversion<string>().HasMaxLength(32);
+            entity.Property(record => record.LastErrorCode).HasMaxLength(64);
+            entity.Property(record => record.Sensitivity).HasMaxLength(32);
+            entity.Property(record => record.StorageDecision).HasMaxLength(32);
+            entity.HasIndex(record => record.ReceiptId).IsUnique();
+            entity.HasIndex(record => new
+            {
+                record.WorkspaceId,
+                record.AgentConnectionId,
+                record.IdempotencyKey
+            }).IsUnique();
+            entity.HasIndex(record => new { record.State, record.NextAttemptAt, record.AcceptedAt });
+            entity.HasIndex(record => new { record.OrganizationId, record.State, record.AcceptedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.State, record.AcceptedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.MemberUserId, record.AcceptedAt });
+            entity.HasIndex(record => new { record.WorkspaceId, record.AgentId, record.AcceptedAt });
+        });
+
         modelBuilder.Entity<AuditEventRecord>(entity =>
         {
             entity.ToTable("audit_events", table =>
@@ -385,6 +579,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ValidateWorkspaceScopes();
+        ValidateSensitiveAccessPoliciesAndGrants();
         ValidateAuditScopes();
         RejectProvenanceUpdates();
         UpdateSearchIndexes();
@@ -396,6 +591,7 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         CancellationToken cancellationToken = default)
     {
         ValidateWorkspaceScopes();
+        ValidateSensitiveAccessPoliciesAndGrants();
         ValidateAuditScopes();
         RejectProvenanceUpdates();
         UpdateSearchIndexes();
@@ -433,12 +629,81 @@ public sealed class LuthnDbContext(DbContextOptions<LuthnDbContext> options) : D
         }
 
         var mutatedEntry = ChangeTracker.Entries<AuditEventRecord>()
-            .FirstOrDefault(entry => entry.State is EntityState.Modified or EntityState.Deleted);
+            .FirstOrDefault(entry =>
+                entry.State == EntityState.Modified ||
+                (entry.State == EntityState.Deleted && !_allowAuditRetentionDelete));
         if (mutatedEntry is not null)
         {
             throw new InvalidOperationException("Audit event records are immutable.");
         }
     }
+
+    private void ValidateSensitiveAccessPoliciesAndGrants()
+    {
+        var invalidPolicy = ChangeTracker.Entries<SensitiveAccessPolicyRevisionRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (entry.Entity.Revision < 1 ||
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.RequestTimeoutSeconds) ||
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.GrantDurationSeconds) ||
+                 !SensitiveAccessPolicyLimits.IsValidMaximumSuccessfulReads(entry.Entity.MaximumSuccessfulReads)));
+        if (invalidPolicy is not null)
+        {
+            throw new InvalidOperationException(
+                "Sensitive access policy revisions require 60..3600 second durations and 1..10 successful reads.");
+        }
+
+        var invalidRequestSnapshot = ChangeTracker.Entries<SensitiveAccessRequestRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (entry.Entity.PolicyRevision < 1 ||
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.RequestTimeoutSeconds) ||
+                 (entry.Entity.AccessMode == SensitiveAccessMode.ProtectedMemory &&
+                    (!IsSha256Digest(entry.Entity.AccessHandleDigest) ||
+                     !IsSha256Digest(entry.Entity.RequesterBindingDigest))) ||
+                 (entry.Entity.AccessMode == SensitiveAccessMode.RedactedSummary &&
+                    (!string.IsNullOrEmpty(entry.Entity.AccessHandleDigest) ||
+                     !string.IsNullOrEmpty(entry.Entity.RequesterBindingDigest)))));
+        if (invalidRequestSnapshot is not null)
+        {
+            throw new InvalidOperationException(
+                "Sensitive access requests require a valid policy snapshot and access-mode binding metadata.");
+        }
+
+        var invalidGrant = ChangeTracker.Entries<SensitiveAccessGrantRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (entry.Entity.PolicyRevision < 1 ||
+                 string.IsNullOrWhiteSpace(entry.Entity.OwnerUserId) ||
+                 !SensitiveAccessPolicyLimits.IsValidDuration(entry.Entity.GrantDurationSeconds) ||
+                 !SensitiveAccessPolicyLimits.IsValidMaximumSuccessfulReads(entry.Entity.MaximumSuccessfulReads) ||
+                 entry.Entity.SuccessfulReadCount < 0 ||
+                 entry.Entity.SuccessfulReadCount > entry.Entity.MaximumSuccessfulReads ||
+                 entry.Entity.StartsAt >= entry.Entity.ExpiresAt));
+        if (invalidGrant is not null)
+        {
+            throw new InvalidOperationException(
+                "Sensitive access grants require a valid policy snapshot, bounded reads, and an active time window.");
+        }
+
+        var invalidTombstone = ChangeTracker.Entries<SensitiveAccessTombstoneRecord>()
+            .FirstOrDefault(entry =>
+                entry.State is EntityState.Added or EntityState.Modified &&
+                (entry.Entity.Status != SensitiveAccessRequestStatus.Expired ||
+                 string.IsNullOrWhiteSpace(entry.Entity.OwnerUserId) ||
+                 entry.Entity.ExpiredAt > entry.Entity.CleanedAt));
+        if (invalidTombstone is not null)
+        {
+            throw new InvalidOperationException(
+                "Sensitive access tombstones require Expired status, owner scope, and an expiry no later than cleanup.");
+        }
+    }
+
+    private static bool IsSha256Digest(string value) =>
+        value.Length == 71 &&
+        value.StartsWith("sha256:", StringComparison.Ordinal) &&
+        value.AsSpan(7).ToString().All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private void RejectProvenanceUpdates()
     {

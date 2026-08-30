@@ -94,7 +94,27 @@ topic metadata is persisted on wiki and shared-memory safe projections. Recall
 filters project scope before ranking, preselects bounded candidates newest-first,
 and uses `CreatedAt` or `UpdatedAt` for deterministic bounded recency scoring.
 
-## Cloud-Ready Local-First Foundation
+## Operator approval and audit model
+
+Sensitive access is a controlled operator workflow, not an agent capability. A
+request carries a bounded purpose, session, and expiry. The Local/Hub operator
+console reads a separate detail projection containing only existing safe
+reference metadata and a redacted summary, then records an explicit approve or
+deny reason. Legacy approved results contain only a server-validated redacted
+summary. The additive protected-memory mode issues a requester-bound opaque
+capability and, after approval, decrypts only the stored original title and
+summary for a bounded duration and read count. The operator console never loads
+that content. Credential, access-key, and private-key categories are blocked
+unconditionally, and unrestricted Vault/source read routes remain absent.
+
+External-publication approval is a separate decision from sensitive-access
+approval. Audit events record the request, decision, result read, classification
+or provider outcome, configuration change, ingestion, processing, and
+retention action as metadata-only events. Cursor queries and metadata-only
+exports support investigation, but audit is not a content store or recovery
+backup.
+
+## Local-First Safe-Projection Foundation
 
 Every shared-memory record starts as `LocalOnly`. Agent visibility and external
 publication are independent decisions: an agent-safe record is not queued for
@@ -117,9 +137,18 @@ backoff, supersedes unsent older revisions, stores acknowledgements/checkpoints,
 and emits revocation tombstones. A newer revision is not sent while an older
 revision for the same local record is still processing.
 The only transport registered by this repository is `disabled`; it makes no
-network request and leaves queued records untouched. A real Luthn Ontology
-transport, tenant/auth service, billing, and shared team data plane belong to a
-separate commercial repository.
+network request and leaves queued records untouched.
+
+### Central OSS Hub runtime
+
+The approved team topology keeps this safe-projection outbox but moves Agent
+capture into one Organization-level OSS Hub. Member PCs do not run the full
+runtime. The public runtime now implements the opt-in baseline: Hub ingress
+persists an encrypted capsule and metadata-only audit event before returning
+`202`, a bounded Workspace-fair worker handles leases/retries/dead letters and
+explicit replay, and `/api/hub/status` exposes aggregate content-free status.
+The relay boundary remains disabled or fake, so no external request is made by
+the OSS build.
 
 ## Plugin Ingestion Contract
 

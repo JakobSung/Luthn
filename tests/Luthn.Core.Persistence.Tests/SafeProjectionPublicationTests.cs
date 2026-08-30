@@ -159,6 +159,42 @@ public sealed class SafeProjectionPublicationTests
     }
 
     [Fact]
+    public async Task ProcessorKeepsRetryingBackpressureAfterThePermanentFailureLimit()
+    {
+        await using var db = CreateDbContext();
+        var now = DateTimeOffset.Parse("2026-07-13T01:00:00Z");
+        db.SafeProjectionSyncOutbox.Add(CreateOutbox(now));
+        await db.SaveChangesAsync();
+        var transport = new SequencedTransport(
+            new SafeProjectionSyncTransportResult(false, ErrorCode: "extension.backpressured", Retryable: true),
+            new SafeProjectionSyncTransportResult(false, ErrorCode: "extension.backpressured", Retryable: true),
+            new SafeProjectionSyncTransportResult(false, ErrorCode: "extension.backpressured", Retryable: true),
+            new SafeProjectionSyncTransportResult(false, ErrorCode: "extension.backpressured", Retryable: true),
+            new SafeProjectionSyncTransportResult(false, ErrorCode: "extension.backpressured", Retryable: true),
+            new SafeProjectionSyncTransportResult(true, "checkpoint-after-backpressure"));
+        var processor = new SafeProjectionOutboxProcessor(db, transport);
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var result = await processor.ProcessBatchAsync(now, cancellationToken: CancellationToken.None);
+            var record = await db.SafeProjectionSyncOutbox.SingleAsync();
+
+            Assert.Equal(1, result.FailedCount);
+            Assert.Equal(SafeProjectionSyncOutboxState.Failed, record.State);
+            Assert.NotNull(record.NextAttemptAt);
+            now = record.NextAttemptAt!.Value;
+        }
+
+        var acknowledged = await processor.ProcessBatchAsync(now, cancellationToken: CancellationToken.None);
+        var finalRecord = await db.SafeProjectionSyncOutbox.SingleAsync();
+
+        Assert.Equal(1, acknowledged.AcknowledgedCount);
+        Assert.Equal(6, transport.SendCount);
+        Assert.Equal(6, finalRecord.AttemptCount);
+        Assert.Equal(SafeProjectionSyncOutboxState.Acknowledged, finalRecord.State);
+    }
+
+    [Fact]
     public async Task ProcessorRecoversExpiredLeaseAfterRestart()
     {
         await using var db = CreateDbContext();

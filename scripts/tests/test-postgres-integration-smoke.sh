@@ -20,12 +20,12 @@ docker run -d --rm \
   postgres:18-alpine >/dev/null
 
 for _ in $(seq 1 60); do
-  if docker exec "$container" pg_isready -U luthn -d "$database" >/dev/null 2>&1; then
+  if docker exec "$container" pg_isready -h 127.0.0.1 -U luthn -d "$database" >/dev/null 2>&1; then
     break
   fi
   sleep 0.25
 done
-docker exec "$container" pg_isready -U luthn -d "$database" >/dev/null
+docker exec "$container" pg_isready -h 127.0.0.1 -U luthn -d "$database" >/dev/null
 
 port="$(docker port "$container" 5432/tcp | head -n 1 | awk -F: '{print $NF}')"
 test -n "$port"

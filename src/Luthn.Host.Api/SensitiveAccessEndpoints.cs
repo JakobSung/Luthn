@@ -1,107 +1,306 @@
 using Luthn.Core.Classification;
-using Luthn.Core.Common;
 using Luthn.Core.Persistence;
 using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
+using System.Text.Json.Serialization;
 
 namespace Luthn.Host.Api;
 
 public static class SensitiveAccessEndpoints
 {
-    private const int MaxRedactedOutputLength = 1000;
-    private const int MaxStoredRedactedSummaryLength = 4000;
     private const int MinExpirySeconds = 60;
     private const int MaxExpirySeconds = 3600;
-    private const int DefaultExpirySeconds = 600;
-    private static readonly SemaphoreSlim NonRelationalDecisionLock = new(1, 1);
+    private const int MinProtectedWaitSeconds = 1;
+    private const int MaxProtectedWaitSeconds = 60;
+    private const int MinProtectedPollIntervalMs = 100;
+    private const int MaxProtectedPollIntervalMs = 5000;
 
     public static IEndpointRouteBuilder MapSensitiveAccessRequests(this IEndpointRouteBuilder app)
     {
         var requests = app.MapGroup("/api/access-requests");
 
-        requests.MapGet("", ListRequests)
-            .RequireServiceScope(ServiceScopes.AccessDecide)
+        requests.MapGet("", ListRequestsEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessReview)
             .WithName("ListSensitiveAccessRequests");
 
-        requests.MapPost("", CreateRequest)
+        requests.MapGet("/policy", ReadPolicyEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessConfigure)
+            .WithName("ReadSensitiveAccessPolicy");
+
+        requests.MapPut("/policy", UpdatePolicyEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessConfigure)
+            .WithName("UpdateSensitiveAccessPolicy");
+
+        requests.MapPost("", CreateRequestEndpoint)
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("CreateSensitiveAccessRequest");
 
-        requests.MapGet("/{id}", ReadRequest)
+        requests.MapPost("/resolve", ResolveProtectedInformationAccessEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessRequest)
+            .WithName("ResolveProtectedInformationAccess");
+
+        requests.MapPost("/protected-result", ReadProtectedInformationResultEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessRequest)
+            .WithName("ReadProtectedInformationResult");
+
+        requests.MapPost("/protected-wait", WaitForProtectedInformationAccessEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessRequest)
+            .WithName("WaitForProtectedInformationAccess");
+
+        requests.MapGet("/{id}", ReadRequestEndpoint)
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("ReadSensitiveAccessRequest");
 
-        requests.MapGet("/{id}/result", ReadRequestResult)
+        requests.MapGet("/{id}/operator-detail", ReadOperatorDetailEndpoint)
+            .RequireServiceScope(ServiceScopes.AccessReview)
+            .WithName("ReadSensitiveAccessOperatorDetail");
+
+        requests.MapGet("/{id}/result", ReadRequestResultEndpoint)
             .RequireServiceScope(ServiceScopes.AccessRequest)
             .WithName("ReadSensitiveAccessRequestResult");
 
-        requests.MapPost("/{id}/approve", ApproveRequest)
+        requests.MapPost("/{id}/approve", ApproveRequestEndpoint)
             .RequireServiceScope(ServiceScopes.AccessDecide)
             .WithName("ApproveSensitiveAccessRequest");
 
-        requests.MapPost("/{id}/deny", DenyRequest)
+        requests.MapPost("/{id}/deny", DenyRequestEndpoint)
             .RequireServiceScope(ServiceScopes.AccessDecide)
             .WithName("DenySensitiveAccessRequest");
 
         return app;
     }
 
-    public static async Task<Results<Ok<SensitiveAccessRequestsResponse>, BadRequest<ProblemDetails>>> ListRequests(
+    private static async Task<Results<Ok<SensitiveAccessRequestsResponse>, BadRequest<ProblemDetails>>> ListRequestsEndpoint(
         string? status,
         int? limit,
-        LuthnDbContext db,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await ListRequestsCore(status, limit, workflow, httpContext, cancellationToken);
+
+    private static async Task<Ok<SensitiveAccessPolicyResponse>> ReadPolicyEndpoint(
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await ReadPolicyCore(workflow, httpContext, cancellationToken);
+
+    private static async Task<Results<Ok<SensitiveAccessPolicyResponse>, BadRequest<ProblemDetails>>> UpdatePolicyEndpoint(
+        SensitiveAccessPolicyUpdateRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await UpdatePolicyCore(request, workflow, httpContext, cancellationToken);
+
+    private static async Task<Results<
+        Created<SensitiveAccessRequestResponse>,
+        BadRequest<ProblemDetails>,
+        NotFound>> CreateRequestEndpoint(
+        SensitiveAccessRequestCreateRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await CreateRequestCore(request, workflow, httpContext, cancellationToken);
+
+    private static async Task<Results<
+        Ok<ProtectedInformationAccessResponse>,
+        BadRequest<ProblemDetails>>> ResolveProtectedInformationAccessEndpoint(
+        ProtectedInformationAccessRequest request,
+        ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        var take = Math.Clamp(limit ?? 25, 1, 100);
-        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        await ExpirePendingRequestsAsync(db, requestId: null, principal, cancellationToken);
-        var query = db.SensitiveAccessRequests
-            .AsNoTracking()
-            .Where(record =>
-                record.WorkspaceId == principal.WorkspaceId &&
-                (principal.IsOperator || record.OwnerUserId == principal.UserId));
-        if (!string.IsNullOrWhiteSpace(status))
+        httpContext.Response.Headers.CacheControl = "no-store";
+        httpContext.Response.Headers.Pragma = "no-cache";
+        var validationError = ValidateProtectedInformationAccessRequest(request);
+        if (validationError is not null)
         {
-            if (!Enum.TryParse<SensitiveAccessRequestStatus>(
-                status.Trim(),
-                ignoreCase: true,
-                out var parsedStatus))
-            {
-                return TypedResults.BadRequest(new ProblemDetails
-                {
-                    Title = "Invalid sensitive access request filter.",
-                    Detail = "status must be Pending, Approved, Denied, or Expired."
-                });
-            }
-
-            query = query.Where(record => record.Status == parsedStatus);
+            return TypedResults.BadRequest(validationError);
         }
 
-        var requests = await query
-            .OrderByDescending(record => record.UpdatedAt)
-            .ThenByDescending(record => record.CreatedAt)
-            .Take(take)
-            .Select(record => new SensitiveAccessRequestListItem(
-                record,
-                record.RedactedSummary != ""))
-            .ToArrayAsync(cancellationToken);
-
-        return TypedResults.Ok(new SensitiveAccessRequestsResponse(
-            requests.Select(item => ToResponse(item.Request, item.RedactedOutputAvailable)).ToArray()));
+        var resolution = await workflow.ResolveProtectedInformationAccessAsync(
+            request,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        return TypedResults.Ok(new ProtectedInformationAccessResponse(
+            resolution.Status,
+            resolution.Message,
+            resolution.RequestId,
+            resolution.AccessHandle));
     }
 
-    public static async Task<Results<
+    private static async Task<Results<Ok<ProtectedInformationResultResponse>, BadRequest<ProblemDetails>>> ReadProtectedInformationResultEndpoint(
+        ProtectedInformationResultRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        httpContext.Response.Headers.Pragma = "no-cache";
+        var validationError = ValidateProtectedInformationResultRequest(request);
+        if (validationError is not null)
+        {
+            return TypedResults.BadRequest(validationError);
+        }
+
+        var result = await workflow.ReadProtectedInformationResultAsync(
+            request.AccessHandle.Trim(),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result));
+    }
+
+    private static async Task<Results<Ok<ProtectedInformationAccessWaitResponse>, BadRequest<ProblemDetails>>> WaitForProtectedInformationAccessEndpoint(
+        ProtectedInformationAccessWaitRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        httpContext.Response.Headers.Pragma = "no-cache";
+        var validationError = ValidateProtectedInformationAccessWaitRequest(request);
+        if (validationError is not null)
+        {
+            return TypedResults.BadRequest(validationError);
+        }
+
+        var result = await workflow.WaitForProtectedInformationAccessAsync(
+            request.AccessHandle.Trim(),
+            TimeSpan.FromSeconds(request.MaxWaitSeconds),
+            TimeSpan.FromMilliseconds(request.PollIntervalMs),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
+        return TypedResults.Ok(new ProtectedInformationAccessWaitResponse(
+            result.Status,
+            result.Message));
+    }
+
+    private static async Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestEndpoint(
+        string id,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await ReadRequestCore(id, workflow, httpContext, cancellationToken);
+
+    private static async Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadOperatorDetailEndpoint(
+        string id,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await ReadOperatorDetailCore(id, workflow, httpContext, cancellationToken);
+
+    private static async Task<Results<Ok<SensitiveAccessResultResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestResultEndpoint(
+        string id,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        await ReadRequestResultCore(id, workflow, httpContext, cancellationToken);
+
+    private static Task<Results<
+        Ok<SensitiveAccessRequestResponse>,
+        BadRequest<ProblemDetails>,
+        NotFound,
+        ProblemHttpResult>> ApproveRequestEndpoint(
+        string id,
+        SensitiveAccessDecisionRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        DecideRequestCore(
+            id,
+            request,
+            SensitiveAccessRequestStatus.Approved,
+            workflow,
+            httpContext,
+            cancellationToken);
+
+    private static Task<Results<
+        Ok<SensitiveAccessRequestResponse>,
+        BadRequest<ProblemDetails>,
+        NotFound,
+        ProblemHttpResult>> DenyRequestEndpoint(
+        string id,
+        SensitiveAccessDecisionRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        DecideRequestCore(
+            id,
+            request,
+            SensitiveAccessRequestStatus.Denied,
+            workflow,
+            httpContext,
+            cancellationToken);
+
+    private static async Task<Results<Ok<SensitiveAccessRequestsResponse>, BadRequest<ProblemDetails>>> ListRequestsCore(
+        string? status,
+        int? limit,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var result = await workflow.ListRequestsAsync(
+            status,
+            Math.Clamp(limit ?? 25, 1, 100),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
+        if (result.ValidationError is not null)
+        {
+            return TypedResults.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid sensitive access request filter.",
+                Detail = result.ValidationError
+            });
+        }
+
+        return TypedResults.Ok(new SensitiveAccessRequestsResponse(
+            result.Requests.Select(SensitiveAccessEndpointMapping.ToResponse).ToArray(),
+            result.Tombstones.Select(SensitiveAccessEndpointMapping.ToResponse).ToArray()));
+    }
+
+    private static async Task<Ok<SensitiveAccessPolicyResponse>> ReadPolicyCore(
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        var policy = await workflow.GetPolicyAsync(
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
+        return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(policy));
+    }
+
+    private static async Task<Results<Ok<SensitiveAccessPolicyResponse>, BadRequest<ProblemDetails>>> UpdatePolicyCore(
+        SensitiveAccessPolicyUpdateRequest request,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        var result = await workflow.CreatePolicyRevisionAsync(
+            new SensitiveAccessPolicyUpdate(
+                request.RequestTimeoutSeconds,
+                request.GrantDurationSeconds,
+                request.MaximumSuccessfulReads),
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        return result.ValidationError is null
+            ? TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result.Policy!))
+            : TypedResults.BadRequest(ApiValidation.CreateProblem(
+                "Invalid sensitive access policy.",
+                result.ValidationError));
+    }
+
+    private static async Task<Results<
         Created<SensitiveAccessRequestResponse>,
         BadRequest<ProblemDetails>,
-        NotFound>> CreateRequest(
+        NotFound>> CreateRequestCore(
         SensitiveAccessRequestCreateRequest request,
-        LuthnDbContext db,
+        ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
-        IOperationalMetrics metrics,
         CancellationToken cancellationToken)
     {
         var validationError = ValidateCreateRequest(request);
@@ -110,123 +309,193 @@ public static class SensitiveAccessEndpoints
             return TypedResults.BadRequest(validationError);
         }
 
-        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        var reference = await db.SensitiveRecordReferences
-            .AsNoTracking()
-            .Where(record => record.Id == request.SensitiveReferenceId.Trim() &&
-                record.WorkspaceId == principal.WorkspaceId &&
-                record.OwnerUserId == principal.UserId)
-            .Select(record => new { record.Id, record.WorkspaceId, record.OwnerUserId })
-            .SingleOrDefaultAsync(cancellationToken);
-        if (reference is null)
+        var created = await workflow.CreateRequestAsync(
+            request,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        if (created is null)
         {
             return TypedResults.NotFound();
         }
-
-        var observedAt = DateTimeOffset.UtcNow;
-        var sessionId = string.IsNullOrWhiteSpace(request.SessionId)
-            ? $"legacy-{Guid.NewGuid():N}"
-            : request.SessionId.Trim();
-        var expiresInSeconds = request.ExpiresInSeconds ?? DefaultExpirySeconds;
-        var actor = ServiceTokenAuthorization.GetActor(httpContext);
-        var accessRequest = new SensitiveAccessRequestRecord
-        {
-            Id = $"access-{Guid.NewGuid():N}",
-            SensitiveRecordReferenceId = reference.Id,
-            RequestedBy = actor,
-            SessionId = sessionId,
-            RequestReason = request.Reason.Trim(),
-            Status = SensitiveAccessRequestStatus.Pending,
-            CreatedAt = observedAt,
-            ExpiresAt = observedAt.AddSeconds(expiresInSeconds),
-            UpdatedAt = observedAt,
-            WorkspaceId = reference.WorkspaceId,
-            OwnerUserId = reference.OwnerUserId
-        };
-
-        db.SensitiveAccessRequests.Add(accessRequest);
-        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
-            principal,
-            actor,
-            "sensitive_access.requested",
-            accessRequest.Id,
-            "metadata-only",
-            "sensitive-boundary-only",
-            observedAt,
-            subjectType: "sensitive_access_request",
-            outcome: "requested"));
-
-        await db.SaveChangesAsync(cancellationToken);
-        metrics.RecordSensitiveAccessRequest();
 
         return TypedResults.Created(
-            $"/api/access-requests/{accessRequest.Id}",
-            ToResponse(accessRequest, redactedOutputAvailable: false));
+            $"/api/access-requests/{created.Id}",
+            SensitiveAccessEndpointMapping.ToResponse(created));
     }
 
-    public static async Task<Results<Ok<SensitiveAccessRequestResponse>, NotFound>> ReadRequest(
+    private static async Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestCore(
         string id,
-        LuthnDbContext db,
+        ISensitiveAccessWorkflow workflow,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
-        var request = await db.SensitiveAccessRequests
-            .SingleOrDefaultAsync(
-                record => record.Id == id &&
-                    record.WorkspaceId == principal.WorkspaceId &&
-                    record.OwnerUserId == principal.UserId,
-                cancellationToken);
-
-        if (request is null)
-        {
-            return TypedResults.NotFound();
-        }
-
-        var redactedOutputAvailable = await HasRedactedOutputAsync(
-            request.Id,
-            db,
+        var request = await workflow.ReadRequestAsync(
+            id,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
             cancellationToken);
-        return TypedResults.Ok(ToResponse(request, redactedOutputAvailable));
-    }
-
-    public static async Task<Results<Ok<SensitiveAccessResultResponse>, NotFound>> ReadRequestResult(
-        string id,
-        LuthnDbContext db,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
-        var request = await db.SensitiveAccessRequests
-            .SingleOrDefaultAsync(
-                record => record.Id == id &&
-                    record.WorkspaceId == principal.WorkspaceId &&
-                    record.OwnerUserId == principal.UserId,
-                cancellationToken);
-
         if (request is not null)
         {
-            var response = ToResultResponse(request, request.RedactedSummary);
-            var observedAt = DateTimeOffset.UtcNow;
-            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
-                principal,
-                ServiceTokenAuthorization.GetActor(httpContext),
-                "sensitive_access.result_read",
-                request.Id,
-                response.PayloadClass,
-                response.RedactionState,
-                observedAt,
-                subjectType: "sensitive_access_request",
-                outcome: "read"));
-            await db.SaveChangesAsync(cancellationToken);
-
-            return TypedResults.Ok(response);
+            return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(request));
         }
 
-        return TypedResults.NotFound();
+        var tombstone = await workflow.ReadTombstoneAsync(
+            id,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken);
+        return tombstone is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(tombstone));
     }
+
+    private static async Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadOperatorDetailCore(
+        string id,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        var detail = await workflow.ReadOperatorDetailAsync(
+            id,
+            principal,
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        if (detail is not null)
+        {
+            return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(detail));
+        }
+
+        var tombstone = await workflow.ReadTombstoneAsync(
+            id,
+            principal,
+            cancellationToken,
+            ServiceTokenAuthorization.GetActor(httpContext),
+            "sensitive_access.operator_detail_read");
+        return tombstone is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(tombstone));
+    }
+
+    private static async Task<Results<Ok<SensitiveAccessResultResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestResultCore(
+        string id,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
+        httpContext.Response.Headers.Pragma = "no-cache";
+        var result = await workflow.ReadRequestResultAsync(
+            id,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            ServiceTokenAuthorization.GetActor(httpContext),
+            cancellationToken);
+        if (result is not null)
+        {
+            return TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result));
+        }
+
+        var tombstone = await workflow.ReadTombstoneAsync(
+            id,
+            ServiceTokenAuthorization.GetPrincipal(httpContext),
+            cancellationToken,
+            ServiceTokenAuthorization.GetActor(httpContext),
+            "sensitive_access.result_read");
+        return tombstone is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(tombstone));
+    }
+
+    private static async Task<Results<
+        Ok<SensitiveAccessRequestResponse>,
+        BadRequest<ProblemDetails>,
+        NotFound,
+        ProblemHttpResult>> DecideRequestCore(
+        string id,
+        SensitiveAccessDecisionRequest request,
+        SensitiveAccessRequestStatus status,
+        ISensitiveAccessWorkflow workflow,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        SensitiveAccessDecisionResult result;
+        try
+        {
+            result = await workflow.DecideRequestAsync(
+                id,
+                request,
+                status,
+                ServiceTokenAuthorization.GetPrincipal(httpContext),
+                ServiceTokenAuthorization.GetActor(httpContext),
+                cancellationToken);
+        }
+        catch (ClassificationProviderException error)
+        {
+            return ApiProblems.ClassificationProviderUnavailable(error);
+        }
+
+        return result.Outcome switch
+        {
+            SensitiveAccessDecisionOutcome.Succeeded =>
+                TypedResults.Ok(SensitiveAccessEndpointMapping.ToResponse(result.Request!)),
+            SensitiveAccessDecisionOutcome.NotFound => TypedResults.NotFound(),
+            SensitiveAccessDecisionOutcome.AlreadyDecided => TypedResults.BadRequest(new ProblemDetails
+            {
+                Title = "Sensitive access request is already decided.",
+                Detail = "Only non-expired pending sensitive access requests can be approved or denied."
+            }),
+            _ => TypedResults.BadRequest(CreateValidationProblem(result.ValidationError!))
+        };
+    }
+
+    public static Task<Results<Ok<SensitiveAccessRequestsResponse>, BadRequest<ProblemDetails>>> ListRequests(
+        string? status,
+        int? limit,
+        LuthnDbContext db,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        ListRequestsCore(
+            status,
+            limit,
+            CompatibilityWorkflow(db),
+            httpContext,
+            cancellationToken);
+
+    public static Task<Results<
+        Created<SensitiveAccessRequestResponse>,
+        BadRequest<ProblemDetails>,
+        NotFound>> CreateRequest(
+        SensitiveAccessRequestCreateRequest request,
+        LuthnDbContext db,
+        HttpContext httpContext,
+        IOperationalMetrics metrics,
+        CancellationToken cancellationToken) =>
+        CreateRequestCore(
+            request,
+            CompatibilityWorkflow(db, metrics),
+            httpContext,
+            cancellationToken);
+
+    public static Task<Results<Ok<SensitiveAccessRequestResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequest(
+        string id,
+        LuthnDbContext db,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        ReadRequestCore(id, CompatibilityWorkflow(db), httpContext, cancellationToken);
+
+    public static Task<Results<Ok<SensitiveAccessOperatorDetailResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadOperatorDetail(
+        string id,
+        LuthnDbContext db,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        ReadOperatorDetailCore(id, CompatibilityWorkflow(db), httpContext, cancellationToken);
+
+    public static Task<Results<Ok<SensitiveAccessResultResponse>, Ok<SensitiveAccessTombstoneResponse>, NotFound>> ReadRequestResult(
+        string id,
+        LuthnDbContext db,
+        HttpContext httpContext,
+        CancellationToken cancellationToken) =>
+        ReadRequestResultCore(id, CompatibilityWorkflow(db), httpContext, cancellationToken);
 
     public static Task<Results<
         Ok<SensitiveAccessRequestResponse>,
@@ -241,18 +510,12 @@ public static class SensitiveAccessEndpoints
         HttpContext httpContext,
         IOperationalMetrics metrics,
         CancellationToken cancellationToken) =>
-        DecideRequest(
+        DecideRequestCore(
             id,
             request,
-            classifier,
-            policyEngine,
             SensitiveAccessRequestStatus.Approved,
-            SensitiveAccessDecisionKind.Approved,
-            "sensitive_access.approved",
-            "approved-redacted-output-unavailable",
-            db,
+            CompatibilityWorkflow(db, metrics, classifier, policyEngine),
             httpContext,
-            metrics,
             cancellationToken);
 
     public static Task<Results<
@@ -266,228 +529,20 @@ public static class SensitiveAccessEndpoints
         HttpContext httpContext,
         IOperationalMetrics metrics,
         CancellationToken cancellationToken) =>
-        DecideRequest(
+        DecideRequestCore(
             id,
             request,
-            null,
-            null,
             SensitiveAccessRequestStatus.Denied,
-            SensitiveAccessDecisionKind.Denied,
-            "sensitive_access.denied",
-            "denied-no-output",
-            db,
+            CompatibilityWorkflow(db, metrics),
             httpContext,
-            metrics,
             cancellationToken);
 
-    private static async Task<Results<
-        Ok<SensitiveAccessRequestResponse>,
-        BadRequest<ProblemDetails>,
-        NotFound,
-        ProblemHttpResult>> DecideRequest(
-        string id,
-        SensitiveAccessDecisionRequest request,
-        IContentClassifier? classifier,
-        IPolicyEngine? policyEngine,
-        SensitiveAccessRequestStatus status,
-        SensitiveAccessDecisionKind decisionKind,
-        string auditAction,
-        string redactionState,
+    private static SensitiveAccessWorkflow CompatibilityWorkflow(
         LuthnDbContext db,
-        HttpContext httpContext,
-        IOperationalMetrics metrics,
-        CancellationToken cancellationToken)
-    {
-        var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
-        await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
-        var accessRequest = await db.SensitiveAccessRequests
-            .SingleOrDefaultAsync(
-                record => record.Id == id &&
-                    record.WorkspaceId == principal.WorkspaceId &&
-                    (principal.IsOperator || record.OwnerUserId == principal.UserId),
-                cancellationToken);
-        if (accessRequest is null)
-        {
-            return TypedResults.NotFound();
-        }
-
-        if (accessRequest.Status != SensitiveAccessRequestStatus.Pending)
-        {
-            return TypedResults.BadRequest(new ProblemDetails
-            {
-                Title = "Sensitive access request is already decided.",
-                Detail = "Only non-expired pending sensitive access requests can be approved or denied."
-            });
-        }
-
-        var decisionError = ValidateDecisionRequest(request);
-        if (decisionError is not null)
-        {
-            return TypedResults.BadRequest(decisionError);
-        }
-
-        var actor = ServiceTokenAuthorization.GetActor(httpContext);
-        ValidatedRedactedSummary redactedSummary;
-        try
-        {
-            redactedSummary = await ValidateDecisionRedactedSummaryAsync(
-                accessRequest,
-                request,
-                classifier,
-                policyEngine,
-                status,
-                cancellationToken);
-        }
-        catch (ClassificationProviderException error)
-        {
-            return ApiProblems.ClassificationProviderUnavailable(error);
-        }
-        if (redactedSummary.Error is not null)
-        {
-            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
-                principal,
-                actor,
-                "sensitive_access.redacted_summary_rejected",
-                accessRequest.Id,
-                "metadata-only",
-                "rejected-no-output",
-                DateTimeOffset.UtcNow,
-                subjectType: "sensitive_access_request",
-                outcome: "rejected"));
-            await db.SaveChangesAsync(cancellationToken);
-            return TypedResults.BadRequest(redactedSummary.Error);
-        }
-
-        var isRelational = db.Database.IsRelational();
-        if (!isRelational)
-        {
-            await NonRelationalDecisionLock.WaitAsync(cancellationToken);
-        }
-
-        var observedAt = DateTimeOffset.UtcNow;
-        var decisionRecord = new SensitiveAccessDecisionRecord
-        {
-            Id = $"decision-{Guid.NewGuid():N}",
-            SensitiveAccessRequestId = accessRequest.Id,
-            Decision = decisionKind,
-            DecidedBy = actor,
-            DecisionReason = request.Reason?.Trim() ?? "",
-            DecidedAt = observedAt,
-            PayloadClass = "metadata-only",
-            RedactionState = redactionState
-        };
-        var auditRecord = AuditEventFactory.ForWorkspace(
-            principal,
-            actor,
-            auditAction,
-            accessRequest.Id,
-            "metadata-only",
-            redactionState,
-            observedAt,
-            subjectType: "sensitive_access_request",
-            outcome: status.ToString().ToLowerInvariant());
-        var transitioned = false;
-        try
-        {
-            if (isRelational)
-            {
-                db.Entry(accessRequest).State = EntityState.Detached;
-                var strategy = db.Database.CreateExecutionStrategy();
-                await strategy.ExecuteInTransactionAsync(
-                    async operationCancellationToken =>
-                    {
-                        if (db.Entry(decisionRecord).State == EntityState.Added)
-                        {
-                            db.Entry(decisionRecord).State = EntityState.Detached;
-                            db.Entry(auditRecord).State = EntityState.Detached;
-                        }
-                        transitioned = await db.SensitiveAccessRequests
-                            .Where(record =>
-                                record.Id == id &&
-                                record.Status == SensitiveAccessRequestStatus.Pending &&
-                                record.ExpiresAt > observedAt)
-                            .ExecuteUpdateAsync(setters => setters
-                                .SetProperty(record => record.Status, status)
-                                .SetProperty(record => record.DecidedBy, actor)
-                                .SetProperty(record => record.DecidedAt, observedAt)
-                                .SetProperty(record => record.RedactedSummary, redactedSummary.Value ?? "")
-                                .SetProperty(record => record.UpdatedAt, observedAt), operationCancellationToken) == 1;
-                        if (!transitioned)
-                        {
-                            transitioned = await db.SensitiveAccessDecisions
-                                .AsNoTracking()
-                                .AnyAsync(record => record.Id == decisionRecord.Id, operationCancellationToken);
-                            return;
-                        }
-
-                        if (db.Entry(decisionRecord).State == EntityState.Detached)
-                        {
-                            db.SensitiveAccessDecisions.Add(decisionRecord);
-                            db.AuditEvents.Add(auditRecord);
-                        }
-                        await db.SaveChangesAsync(acceptAllChangesOnSuccess: false, operationCancellationToken);
-                    },
-                    operationCancellationToken => db.SensitiveAccessDecisions
-                        .AsNoTracking()
-                        .AnyAsync(record => record.Id == decisionRecord.Id, operationCancellationToken),
-                    cancellationToken);
-                db.ChangeTracker.AcceptAllChanges();
-            }
-            else
-            {
-                await db.Entry(accessRequest).ReloadAsync(cancellationToken);
-                transitioned = accessRequest.Status == SensitiveAccessRequestStatus.Pending &&
-                    accessRequest.ExpiresAt > observedAt;
-                if (transitioned)
-                {
-                    accessRequest.Status = status;
-                    accessRequest.DecidedBy = actor;
-                    accessRequest.DecidedAt = observedAt;
-                    accessRequest.RedactedSummary = redactedSummary.Value ?? "";
-                    accessRequest.UpdatedAt = observedAt;
-                }
-                if (transitioned)
-                {
-                    db.SensitiveAccessDecisions.Add(decisionRecord);
-                    db.AuditEvents.Add(auditRecord);
-                    await db.SaveChangesAsync(cancellationToken);
-                }
-            }
-
-            if (!transitioned)
-            {
-                await ExpirePendingRequestsAsync(db, id, principal, cancellationToken);
-                return TypedResults.BadRequest(new ProblemDetails
-                {
-                    Title = "Sensitive access request is already decided.",
-                    Detail = "Only non-expired pending sensitive access requests can be approved or denied."
-                });
-            }
-
-        }
-        finally
-        {
-            if (!isRelational)
-            {
-                NonRelationalDecisionLock.Release();
-            }
-        }
-        metrics.RecordSensitiveAccessDecision(decisionKind == SensitiveAccessDecisionKind.Approved ? "approved" : "denied");
-
-        accessRequest.Status = status;
-        accessRequest.DecidedBy = actor;
-        accessRequest.DecidedAt = observedAt;
-        accessRequest.RedactedSummary = redactedSummary.Value ?? "";
-        accessRequest.UpdatedAt = observedAt;
-
-        var redactedOutputAvailable = status == SensitiveAccessRequestStatus.Approved &&
-            await HasRedactedOutputAsync(
-                accessRequest.Id,
-                db,
-                cancellationToken);
-
-        return TypedResults.Ok(ToResponse(accessRequest, redactedOutputAvailable));
-    }
+        IOperationalMetrics? metrics = null,
+        IContentClassifier? classifier = null,
+        IPolicyEngine? policyEngine = null) =>
+        new(db, metrics ?? NullOperationalMetrics.Instance, TimeProvider.System, classifier, policyEngine);
 
     private static ProblemDetails? ValidateCreateRequest(
         SensitiveAccessRequestCreateRequest request)
@@ -529,74 +584,109 @@ public static class SensitiveAccessEndpoints
         if (request.ExpiresInSeconds is int expiresInSeconds &&
             (expiresInSeconds < MinExpirySeconds || expiresInSeconds > MaxExpirySeconds))
         {
-            return CreateValidationProblem($"expiresInSeconds must be between {MinExpirySeconds} and {MaxExpirySeconds}.");
-        }
-
-        return null;
-    }
-
-    private static ProblemDetails? ValidateDecisionRequest(
-        SensitiveAccessDecisionRequest request)
-    {
-        if (request.Reason is not null &&
-            request.Reason.Trim().Length > ApiValidation.ReasonMaxLength)
-        {
             return CreateValidationProblem(
-                $"reason must be {ApiValidation.ReasonMaxLength} characters or fewer.");
+                $"expiresInSeconds must be between {MinExpirySeconds} and {MaxExpirySeconds}.");
         }
 
         return null;
     }
 
-    private static async Task<ValidatedRedactedSummary> ValidateDecisionRedactedSummaryAsync(
-        SensitiveAccessRequestRecord accessRequest,
-        SensitiveAccessDecisionRequest request,
-        IContentClassifier? classifier,
-        IPolicyEngine? policyEngine,
-        SensitiveAccessRequestStatus status,
-        CancellationToken cancellationToken)
+    private static ProblemDetails? ValidateProtectedInformationAccessRequest(
+        ProtectedInformationAccessRequest request)
     {
-        if (status != SensitiveAccessRequestStatus.Approved ||
-            string.IsNullOrWhiteSpace(request.RedactedSummary))
+        const string title = "Invalid confirmation request.";
+        var memoryItemIdError = ApiValidation.ValidateRequiredText(
+            request.MemoryItemId,
+            "memoryItemId",
+            ApiValidation.PublicRecordIdMaxLength,
+            title);
+        if (memoryItemIdError is not null)
         {
-            return new(null, null);
+            return memoryItemIdError;
         }
 
-        if (classifier is null || policyEngine is null)
+        return string.IsNullOrWhiteSpace(request.Reason)
+            ? null
+            : ApiValidation.ValidateRequiredText(
+                request.Reason,
+                "reason",
+                ApiValidation.ReasonMaxLength,
+                title);
+    }
+
+    private static ProblemDetails? ValidateProtectedInformationResultRequest(
+        ProtectedInformationResultRequest request)
+    {
+        const string title = "Invalid protected information result request.";
+        var error = ApiValidation.ValidateRequiredText(
+            request.AccessHandle,
+            "accessHandle",
+            64,
+            title);
+        if (error is not null)
         {
-            return new(null, CreateValidationProblem("redactedSummary can only be provided for approval decisions."));
+            return error;
         }
 
-        var candidate = request.RedactedSummary.Trim();
-        if (candidate.Length > MaxStoredRedactedSummaryLength)
+        return request.AccessHandle.Length == 64 &&
+            request.AccessHandle.All(character =>
+                char.IsAsciiHexDigit(character) &&
+                !char.IsUpper(character))
+            ? null
+            : ApiValidation.CreateProblem(
+                title,
+                "accessHandle must be a 64-character lowercase hexadecimal value.");
+    }
+
+    private static ProblemDetails? ValidateProtectedInformationAccessWaitRequest(
+        ProtectedInformationAccessWaitRequest request)
+    {
+        const string title = "Invalid protected information wait request.";
+        var error = ApiValidation.ValidateRequiredText(
+            request.AccessHandle,
+            "accessHandle",
+            64,
+            title);
+        if (error is not null)
         {
-            return new(null, CreateValidationProblem(
-                $"redactedSummary must be {MaxStoredRedactedSummaryLength} characters or fewer."));
+            return error;
         }
 
-        var classification = ClassificationResultNormalizer.Normalize(await classifier.ClassifyAsync(
-            new PublicRecordId($"{accessRequest.Id}-redacted-summary"),
-            candidate,
-            "redacted-summary",
-            cancellationToken));
-        var decision = policyEngine.Decide(classification);
-        if (classification.ContainsSensitiveMaterial || !decision.AllowsAgentContext)
+        if (request.AccessHandle.Length != 64 ||
+            request.AccessHandle.Any(character =>
+                !char.IsAsciiHexDigit(character) || char.IsUpper(character)))
         {
-            return new(null, CreateValidationProblem("redactedSummary must classify as public agent-safe content."));
+            return ApiValidation.CreateProblem(
+                title,
+                "accessHandle must be a 64-character lowercase hexadecimal value.");
         }
 
-        return new(candidate, null);
+        if (request.MaxWaitSeconds is < MinProtectedWaitSeconds or > MaxProtectedWaitSeconds)
+        {
+            return ApiValidation.CreateProblem(
+                title,
+                $"maxWaitSeconds must be between {MinProtectedWaitSeconds} and {MaxProtectedWaitSeconds}.");
+        }
+
+        return request.PollIntervalMs is < MinProtectedPollIntervalMs or > MaxProtectedPollIntervalMs
+            ? ApiValidation.CreateProblem(
+                title,
+                $"pollIntervalMs must be between {MinProtectedPollIntervalMs} and {MaxProtectedPollIntervalMs}.")
+            : null;
     }
 
     private static ProblemDetails CreateValidationProblem(string detail) =>
         ApiValidation.CreateProblem("Invalid sensitive access request.", detail);
+}
 
-    private static SensitiveAccessRequestResponse ToResponse(
-        SensitiveAccessRequestRecord request,
-        bool redactedOutputAvailable) =>
+internal static class SensitiveAccessEndpointMapping
+{
+    private const int MaxRedactedOutputLength = 1000;
+
+    internal static SensitiveAccessRequestResponse ToResponse(SensitiveAccessRequestState request) =>
         new(
             request.Id,
-            request.SensitiveRecordReferenceId,
+            request.SensitiveReferenceId,
             request.Status.ToString(),
             request.RequestedBy,
             request.SessionId,
@@ -605,61 +695,168 @@ public static class SensitiveAccessEndpoints
             request.DecidedBy,
             request.DecidedAt,
             RedactedOutputAvailable: request.Status == SensitiveAccessRequestStatus.Approved &&
-                redactedOutputAvailable,
+                request.RedactedOutputAvailable,
             OutputPolicy: ToOutputPolicy(
                 request.Status,
-                request.Status == SensitiveAccessRequestStatus.Approved && redactedOutputAvailable));
+                request.Status == SensitiveAccessRequestStatus.Approved && request.RedactedOutputAvailable,
+                request.AccessMode,
+                request.StatusCode))
+        {
+            AccessMode = request.AccessMode.ToString(),
+            StatusCode = request.StatusCode,
+            RequestExpiresAt = request.RequestExpiresAt,
+            GrantExpiresAt = request.GrantExpiresAt,
+            RemainingReads = request.RemainingReads,
+            MaxReads = request.MaxReads,
+            UsedReads = UsedReads(request.MaxReads, request.RemainingReads)
+        };
 
-    private static SensitiveAccessResultResponse ToResultResponse(
-        SensitiveAccessRequestRecord request,
-        string? safeSummary)
+    internal static SensitiveAccessTombstoneResponse ToResponse(SensitiveAccessTombstoneState tombstone) =>
+        new(
+            tombstone.Id,
+            SensitiveAccessRequestStatus.Expired.ToString(),
+            "expired-no-output");
+
+    internal static SensitiveAccessPolicyResponse ToResponse(SensitiveAccessPolicyState policy) =>
+        new(
+            policy.Revision,
+            policy.RequestTimeoutSeconds,
+            policy.GrantDurationSeconds,
+            policy.MaximumSuccessfulReads,
+            policy.CreatedAt);
+
+    internal static SensitiveAccessOperatorDetailResponse ToResponse(
+        SensitiveAccessOperatorDetailState detail) =>
+        new(
+            detail.Id,
+            detail.SensitiveReferenceId,
+            detail.Status.ToString(),
+            detail.RequestedBy,
+            detail.SessionId,
+            detail.RequestReason,
+            detail.CreatedAt,
+            detail.ExpiresAt,
+            detail.Decision?.ToString(),
+            detail.DecidedBy,
+            detail.DecidedAt,
+            detail.DecisionReason,
+            RedactedOutputAvailable: detail.Status == SensitiveAccessRequestStatus.Approved &&
+                detail.RedactedOutputAvailable,
+            OutputPolicy: ToOutputPolicy(
+                detail.Status,
+                detail.Status == SensitiveAccessRequestStatus.Approved && detail.RedactedOutputAvailable,
+                detail.AccessMode,
+                detail.StatusCode),
+            Reference: new SensitiveAccessOperatorReferenceResponse(
+                detail.Reference.SourceSystem,
+                detail.Reference.SourceType,
+                detail.Reference.ReferenceLabel,
+                detail.Reference.RedactedSummary,
+                detail.Reference.ReceivedAt),
+            PayloadClass: "operator-sensitive-metadata",
+            RedactionState: "local-operator-only")
+        {
+            AccessMode = detail.AccessMode.ToString(),
+            StatusCode = detail.StatusCode,
+            RequestExpiresAt = detail.RequestExpiresAt,
+            GrantExpiresAt = detail.GrantExpiresAt,
+            RemainingReads = detail.RemainingReads,
+            MaxReads = detail.MaxReads,
+            UsedReads = UsedReads(detail.MaxReads, detail.RemainingReads)
+        };
+
+    internal static SensitiveAccessResultResponse ToResponse(SensitiveAccessResultState result)
     {
-        var redactedOutputAvailable = request.Status == SensitiveAccessRequestStatus.Approved &&
-            !string.IsNullOrWhiteSpace(safeSummary);
-        var outputPolicy = ToOutputPolicy(request.Status, redactedOutputAvailable);
+        var redactedOutputAvailable = result.RedactedOutputAvailable;
+        var outputPolicy = ToOutputPolicy(
+            result.Status,
+            redactedOutputAvailable,
+            result.AccessMode,
+            result.StatusCode);
         var redactedOutput = redactedOutputAvailable
-            ? BoundRedactedOutput(safeSummary!)
+            ? BoundRedactedOutput(result.RedactedOutput!)
             : null;
         var payloadClass = redactedOutputAvailable ? "redacted-output" : "metadata-only";
-        IReadOnlyList<string> reasons = request.Status switch
+        IReadOnlyList<string> reasons = result.StatusCode switch
         {
-            SensitiveAccessRequestStatus.Approved when redactedOutputAvailable =>
+            SensitiveAccessStatusCodes.ResultReturned =>
                 ["Approved limited output is sourced from a public-safe redacted summary."],
-            SensitiveAccessRequestStatus.Approved =>
-                ["Approval is recorded, but no public-safe redacted summary is available."],
-            SensitiveAccessRequestStatus.Denied =>
+            SensitiveAccessStatusCodes.GrantActive =>
+                result.AccessMode == SensitiveAccessMode.ProtectedMemory
+                    ? ["Approval is active; use the requester-bound protected result operation."]
+                    : ["Approval is recorded, but no public-safe redacted summary is available."],
+            SensitiveAccessStatusCodes.GrantConsumed =>
+                ["The approved grant has no remaining reads; no output is available."],
+            SensitiveAccessStatusCodes.GrantExpired =>
+                ["The approved grant expired; no output is available."],
+            SensitiveAccessStatusCodes.RequestDenied =>
                 ["The sensitive access request was denied; no output is available."],
-            SensitiveAccessRequestStatus.Expired =>
+            SensitiveAccessStatusCodes.RequestExpired =>
                 ["The sensitive access request expired before a decision; no output is available."],
             _ =>
                 ["The sensitive access request is pending decision; no output is available."]
         };
 
         return new SensitiveAccessResultResponse(
-            request.Id,
-            request.SensitiveRecordReferenceId,
-            request.Status.ToString(),
+            result.Id,
+            result.SensitiveReferenceId,
+            result.Status.ToString(),
             outputPolicy,
             redactedOutputAvailable,
             redactedOutput,
             payloadClass,
             outputPolicy,
-            reasons);
+            reasons)
+        {
+            AccessMode = result.AccessMode.ToString(),
+            StatusCode = result.StatusCode,
+            RequestExpiresAt = result.RequestExpiresAt,
+            GrantExpiresAt = result.GrantExpiresAt,
+            RemainingReads = result.RemainingReads,
+            MaxReads = result.MaxReads,
+            UsedReads = UsedReads(result.MaxReads, result.RemainingReads)
+        };
     }
 
-    private static string ToOutputPolicy(
+    internal static ProtectedInformationResultResponse ToResponse(
+        ProtectedInformationResultState result) =>
+        new(
+            result.Status,
+            result.ContentAvailable,
+            result.ContentAvailable ? result.Title : null,
+            result.ContentAvailable ? result.Content : null,
+            result.GrantExpiresAt,
+            result.RemainingReads,
+            result.MaxReads,
+            result.Reasons);
+
+    internal static string ToOutputPolicy(
         SensitiveAccessRequestStatus status,
-        bool redactedOutputAvailable) =>
-        status switch
-        {
-            SensitiveAccessRequestStatus.Approved when redactedOutputAvailable =>
-                "approved-redacted-output-available",
-            SensitiveAccessRequestStatus.Approved =>
-                "approved-redacted-output-unavailable",
-            SensitiveAccessRequestStatus.Denied => "denied-no-output",
-            SensitiveAccessRequestStatus.Expired => "expired-no-output",
-            _ => "pending-approval"
-        };
+        bool redactedOutputAvailable,
+        SensitiveAccessMode accessMode = SensitiveAccessMode.RedactedSummary,
+        string? statusCode = null) =>
+        accessMode == SensitiveAccessMode.ProtectedMemory
+            ? status switch
+            {
+                SensitiveAccessRequestStatus.Approved when statusCode == SensitiveAccessStatusCodes.GrantActive =>
+                    "approved-protected-output-authorized",
+                SensitiveAccessRequestStatus.Approved when statusCode == SensitiveAccessStatusCodes.GrantConsumed =>
+                    "approved-protected-output-consumed",
+                SensitiveAccessRequestStatus.Approved => "approved-protected-output-expired",
+                SensitiveAccessRequestStatus.Denied => "denied-no-output",
+                SensitiveAccessRequestStatus.Expired => "expired-no-output",
+                _ => "pending-approval"
+            }
+            : status switch
+            {
+                SensitiveAccessRequestStatus.Approved when redactedOutputAvailable =>
+                    "approved-redacted-output-available",
+                SensitiveAccessRequestStatus.Approved =>
+                    "approved-redacted-output-unavailable",
+                SensitiveAccessRequestStatus.Denied => "denied-no-output",
+                SensitiveAccessRequestStatus.Expired => "expired-no-output",
+                _ => "pending-approval"
+            };
 
     private static string BoundRedactedOutput(string value)
     {
@@ -670,8 +867,7 @@ public static class SensitiveAccessEndpoints
         }
 
         var end = MaxRedactedOutputLength;
-        if (end < trimmed.Length &&
-            char.IsHighSurrogate(trimmed[end - 1]) &&
+        if (char.IsHighSurrogate(trimmed[end - 1]) &&
             char.IsLowSurrogate(trimmed[end]))
         {
             end--;
@@ -680,145 +876,23 @@ public static class SensitiveAccessEndpoints
         return trimmed[..end];
     }
 
-    private static Task<bool> HasRedactedOutputAsync(
-        string requestId,
-        LuthnDbContext db,
-        CancellationToken cancellationToken) =>
-        db.SensitiveAccessRequests
-            .Where(request => request.Id == requestId)
-            .Select(request => request.RedactedSummary != "")
-            .SingleOrDefaultAsync(cancellationToken);
-
-    private static async Task ExpirePendingRequestsAsync(
-        LuthnDbContext db,
-        string? requestId,
-        LuthnRequestPrincipal principal,
-        CancellationToken cancellationToken)
-    {
-        var observedAt = DateTimeOffset.UtcNow;
-        var candidates = await db.SensitiveAccessRequests
-            .AsNoTracking()
-            .Where(request =>
-                request.Status == SensitiveAccessRequestStatus.Pending &&
-                request.ExpiresAt <= observedAt &&
-                request.WorkspaceId == principal.WorkspaceId &&
-                (principal.IsOperator || request.OwnerUserId == principal.UserId) &&
-                (requestId == null || request.Id == requestId))
-            .Select(request => request.Id)
-            .ToArrayAsync(cancellationToken);
-        if (candidates.Length == 0)
-        {
-            return;
-        }
-
-        if (db.Database.IsRelational())
-        {
-            var auditRecords = candidates.ToDictionary(
-                candidateId => candidateId,
-                candidateId => AuditEventFactory.ForWorkspace(
-                    principal.WorkspaceId,
-                    actorUserId: null,
-                    actorKind: "system",
-                    actor: "local-expiry",
-                    action: "sensitive_access.expired",
-                    subjectId: candidateId,
-                    payloadClass: "metadata-only",
-                    redactionState: "expired-no-output",
-                    occurredAt: observedAt,
-                    subjectType: "sensitive_access_request",
-                    outcome: "expired"));
-            var transitionedCandidateIds = new HashSet<string>(StringComparer.Ordinal);
-            var strategy = db.Database.CreateExecutionStrategy();
-            await strategy.ExecuteInTransactionAsync(
-                async operationCancellationToken =>
-                {
-                    foreach (var auditRecord in auditRecords.Values)
-                    {
-                        if (db.Entry(auditRecord).State == EntityState.Added)
-                        {
-                            db.Entry(auditRecord).State = EntityState.Detached;
-                        }
-                    }
-                    transitionedCandidateIds.Clear();
-                    foreach (var candidateId in candidates)
-                    {
-                        var transitioned = await db.SensitiveAccessRequests
-                            .Where(request =>
-                                request.Id == candidateId &&
-                                request.Status == SensitiveAccessRequestStatus.Pending &&
-                                request.ExpiresAt <= observedAt)
-                            .ExecuteUpdateAsync(setters => setters
-                                .SetProperty(request => request.Status, SensitiveAccessRequestStatus.Expired)
-                                .SetProperty(request => request.UpdatedAt, observedAt), operationCancellationToken) == 1;
-                        if (transitioned)
-                        {
-                            transitionedCandidateIds.Add(candidateId);
-                            var auditRecord = auditRecords[candidateId];
-                            if (db.Entry(auditRecord).State == EntityState.Detached)
-                            {
-                                db.AuditEvents.Add(auditRecord);
-                            }
-                        }
-                    }
-
-                    await db.SaveChangesAsync(acceptAllChangesOnSuccess: false, operationCancellationToken);
-                },
-                async operationCancellationToken =>
-                {
-                    if (transitionedCandidateIds.Count == 0)
-                    {
-                        return true;
-                    }
-
-                    var auditIds = transitionedCandidateIds
-                        .Select(candidateId => auditRecords[candidateId].Id)
-                        .ToArray();
-                    return await db.AuditEvents
-                        .AsNoTracking()
-                        .CountAsync(record => auditIds.Contains(record.Id), operationCancellationToken) == auditIds.Length;
-                },
-                cancellationToken);
-            db.ChangeTracker.AcceptAllChanges();
-            return;
-        }
-
-        foreach (var candidateId in candidates)
-        {
-            var request = await db.SensitiveAccessRequests
-                .SingleAsync(record => record.Id == candidateId, cancellationToken);
-            var transitioned = request.Status == SensitiveAccessRequestStatus.Pending &&
-                request.ExpiresAt <= observedAt;
-            if (!transitioned)
-            {
-                continue;
-            }
-
-            request.Status = SensitiveAccessRequestStatus.Expired;
-            request.UpdatedAt = observedAt;
-            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
-                principal.WorkspaceId,
-                actorUserId: null,
-                actorKind: "system",
-                actor: "local-expiry",
-                action: "sensitive_access.expired",
-                subjectId: candidateId,
-                payloadClass: "metadata-only",
-                redactionState: "expired-no-output",
-                occurredAt: observedAt,
-                subjectType: "sensitive_access_request",
-                outcome: "expired"));
-        }
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    private sealed record SensitiveAccessRequestListItem(
-        SensitiveAccessRequestRecord Request,
-        bool RedactedOutputAvailable);
-
-    private sealed record ValidatedRedactedSummary(
-        string? Value,
-        ProblemDetails? Error);
+    private static int? UsedReads(int? maxReads, int? remainingReads) =>
+        maxReads is null || remainingReads is null
+            ? null
+            : Math.Max(0, maxReads.Value - remainingReads.Value);
 }
+
+public sealed record SensitiveAccessPolicyUpdateRequest(
+    int RequestTimeoutSeconds,
+    int GrantDurationSeconds,
+    int MaximumSuccessfulReads);
+
+public sealed record SensitiveAccessPolicyResponse(
+    int Revision,
+    int RequestTimeoutSeconds,
+    int GrantDurationSeconds,
+    int MaximumSuccessfulReads,
+    DateTimeOffset CreatedAt);
 
 public sealed record SensitiveAccessRequestCreateRequest
 {
@@ -828,14 +902,60 @@ public sealed record SensitiveAccessRequestCreateRequest
     public int? ExpiresInSeconds { get; init; }
 }
 
+public sealed record ProtectedInformationAccessRequest
+{
+    public string MemoryItemId { get; init; } = "";
+    public string? Reason { get; init; }
+}
+
+public sealed record ProtectedInformationAccessResponse(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("requestId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestId,
+    [property: JsonPropertyName("accessHandle"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AccessHandle);
+
+public sealed record ProtectedInformationResultRequest
+{
+    public string AccessHandle { get; init; } = "";
+}
+
+public sealed record ProtectedInformationAccessWaitRequest
+{
+    public string AccessHandle { get; init; } = "";
+    public int MaxWaitSeconds { get; init; } = 30;
+    public int PollIntervalMs { get; init; } = 250;
+}
+
+public sealed record ProtectedInformationAccessWaitResponse(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message);
+
+public sealed record ProtectedInformationResultResponse(
+    string Status,
+    bool ContentAvailable,
+    string? Title,
+    string? Content,
+    DateTimeOffset? GrantExpiresAt,
+    int? RemainingReads,
+    int? MaxReads,
+    IReadOnlyList<string> Reasons);
+
 public sealed record SensitiveAccessDecisionRequest
 {
     public string? Reason { get; init; }
     public string? RedactedSummary { get; init; }
+    public int? GrantDurationSeconds { get; init; }
+    public int? MaximumSuccessfulReads { get; init; }
 }
 
 public sealed record SensitiveAccessRequestsResponse(
-    IReadOnlyList<SensitiveAccessRequestResponse> Requests);
+    IReadOnlyList<SensitiveAccessRequestResponse> Requests,
+    IReadOnlyList<SensitiveAccessTombstoneResponse> Tombstones);
+
+public sealed record SensitiveAccessTombstoneResponse(
+    string Id,
+    string Status,
+    string OutputPolicy);
 
 public sealed record SensitiveAccessRequestResponse(
     string Id,
@@ -848,7 +968,89 @@ public sealed record SensitiveAccessRequestResponse(
     string? DecidedBy,
     DateTimeOffset? DecidedAt,
     bool RedactedOutputAvailable,
-    string OutputPolicy);
+    string OutputPolicy)
+{
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = SensitiveAccessMode.RedactedSummary.ToString();
+
+    [JsonPropertyName("statusCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusCode { get; init; }
+
+    [JsonPropertyName("requestExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+
+    [JsonPropertyName("grantExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+
+    [JsonPropertyName("remainingReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("maxReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxReads { get; init; }
+
+    [JsonPropertyName("usedReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? UsedReads { get; init; }
+}
+
+public sealed record SensitiveAccessOperatorReferenceResponse(
+    string SourceSystem,
+    string SourceType,
+    string ReferenceLabel,
+    string RedactedSummary,
+    DateTimeOffset ReceivedAt);
+
+public sealed record SensitiveAccessOperatorDetailResponse(
+    string Id,
+    string SensitiveReferenceId,
+    string Status,
+    string RequestedBy,
+    string SessionId,
+    string RequestReason,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    string? Decision,
+    string? DecidedBy,
+    DateTimeOffset? DecidedAt,
+    string? DecisionReason,
+    bool RedactedOutputAvailable,
+    string OutputPolicy,
+    SensitiveAccessOperatorReferenceResponse Reference,
+    string PayloadClass,
+    string RedactionState)
+{
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = SensitiveAccessMode.RedactedSummary.ToString();
+
+    [JsonPropertyName("statusCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusCode { get; init; }
+
+    [JsonPropertyName("requestExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+
+    [JsonPropertyName("grantExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+
+    [JsonPropertyName("remainingReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("maxReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxReads { get; init; }
+
+    [JsonPropertyName("usedReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? UsedReads { get; init; }
+}
 
 public sealed record SensitiveAccessResultResponse(
     string Id,
@@ -859,4 +1061,32 @@ public sealed record SensitiveAccessResultResponse(
     string? RedactedOutput,
     string PayloadClass,
     string RedactionState,
-    IReadOnlyList<string> Reasons);
+    IReadOnlyList<string> Reasons)
+{
+    [JsonPropertyName("accessMode")]
+    public string AccessMode { get; init; } = SensitiveAccessMode.RedactedSummary.ToString();
+
+    [JsonPropertyName("statusCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusCode { get; init; }
+
+    [JsonPropertyName("requestExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RequestExpiresAt { get; init; }
+
+    [JsonPropertyName("grantExpiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? GrantExpiresAt { get; init; }
+
+    [JsonPropertyName("remainingReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemainingReads { get; init; }
+
+    [JsonPropertyName("maxReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxReads { get; init; }
+
+    [JsonPropertyName("usedReads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? UsedReads { get; init; }
+}

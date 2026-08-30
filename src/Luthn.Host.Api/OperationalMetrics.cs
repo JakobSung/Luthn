@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 
 namespace Luthn.Host.Api;
 
@@ -7,6 +8,7 @@ public interface IOperationalMetrics
     void RecordClassificationProviderRequest(string provider, string outcome, TimeSpan duration);
     void RecordSensitiveAccessRequest();
     void RecordSensitiveAccessDecision(string outcome);
+    void RecordSensitiveAccessLifecycle(string eventName) { }
     void RecordSafeSearchCandidates(string source, int count);
     void RecordSearchRequest(string surface, string outcome, string cacheStatus, TimeSpan duration, int resultCount);
     void RecordSearchFeedback(string judgment);
@@ -15,11 +17,17 @@ public interface IOperationalMetrics
 
 public sealed class OperationalMetrics : IOperationalMetrics
 {
+    private static readonly Meter SensitiveAccessMeter = new("Luthn.Host.Api.SensitiveAccess");
+    private static readonly Counter<long> SensitiveAccessLifecycle =
+        SensitiveAccessMeter.CreateCounter<long>(
+            "luthn.sensitive_access.lifecycle",
+            description: "Sensitive-access lifecycle events with bounded metadata-only labels.");
     private static readonly long[] SearchDurationBucketUpperBoundsMilliseconds =
         [10, 50, 100, 500, 1_000, 5_000, SearchTelemetry.MaximumDurationMilliseconds];
 
     private readonly ConcurrentDictionary<string, ProviderMetricAggregate> _providers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> _accessDecisions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long> _accessLifecycle = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SearchMetricAggregate> _search = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SearchRequestMetricAggregate> _searchRequests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> _searchFeedback = new(StringComparer.Ordinal);
@@ -35,6 +43,14 @@ public sealed class OperationalMetrics : IOperationalMetrics
 
     public void RecordSensitiveAccessRequest() => Interlocked.Increment(ref _accessRequests);
     public void RecordSensitiveAccessDecision(string outcome) => _accessDecisions.AddOrUpdate(BoundAccessOutcome(outcome), 1, static (_, current) => current + 1);
+    public void RecordSensitiveAccessLifecycle(string eventName)
+    {
+        var boundedEvent = BoundAccessLifecycleEvent(eventName);
+        _accessLifecycle.AddOrUpdate(boundedEvent, 1, static (_, current) => current + 1);
+        SensitiveAccessLifecycle.Add(
+            1,
+            new KeyValuePair<string, object?>("event", boundedEvent));
+    }
 
     public void RecordSafeSearchCandidates(string source, int count) =>
         _search.GetOrAdd(BoundSearchSource(source), static key => new SearchMetricAggregate(key)).Record(Math.Max(0, count));
@@ -89,7 +105,10 @@ public sealed class OperationalMetrics : IOperationalMetrics
         "metadata-only",
         new OperationalMetricExportBoundary("local-runtime", "no-external-publication", "aggregate-low-cardinality"),
         _providers.Values.OrderBy(metric => metric.Provider, StringComparer.Ordinal).ThenBy(metric => metric.Outcome, StringComparer.Ordinal).Select(metric => metric.ToSnapshot()).ToArray(),
-        new SensitiveAccessMetricSnapshot(Interlocked.Read(ref _accessRequests), _accessDecisions.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => new OutcomeCountSnapshot(pair.Key, pair.Value)).ToArray()),
+        new SensitiveAccessMetricSnapshot(
+            Interlocked.Read(ref _accessRequests),
+            _accessDecisions.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => new OutcomeCountSnapshot(pair.Key, pair.Value)).ToArray(),
+            _accessLifecycle.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => new LifecycleCountSnapshot(pair.Key, pair.Value)).ToArray()),
         _search.Values.OrderBy(metric => metric.Source, StringComparer.Ordinal).Select(metric => metric.ToSnapshot()).ToArray(),
         _searchRequests.Values
             .OrderBy(metric => metric.Surface, StringComparer.Ordinal)
@@ -101,9 +120,26 @@ public sealed class OperationalMetrics : IOperationalMetrics
             .Select(pair => new SearchFeedbackMetricSnapshot(pair.Key, pair.Value))
             .ToArray());
 
-    private static string BoundProvider(string provider) => provider switch { "ExternalHttp" or "OpenAi" or "OpenRouter" or "Anthropic" or "GoogleAi" => provider, _ => "other" };
+    private static string BoundProvider(string provider) => provider switch
+    {
+        "LocalDeterministic" or "LocalHttp" or "Unconfigured" => provider,
+        _ => "other"
+    };
     private static string BoundProviderOutcome(string outcome) => outcome switch { "succeeded" or "http_failure" or "timeout" or "http_exception" or "retry" or "canceled" => outcome, _ => "other" };
     private static string BoundAccessOutcome(string outcome) => outcome switch { "approved" or "denied" => outcome, _ => "other" };
+    private static string BoundAccessLifecycleEvent(string eventName) => eventName switch
+    {
+        "policy_updated" or
+        "request_reused" or
+        "request_expired" or
+        "grant_created" or
+        "grant_expired" or
+        "grant_consumed" or
+        "result_returned" or
+        "result_unavailable" or
+        "bypass_rejected" => eventName,
+        _ => "other"
+    };
     private static string BoundSearchSource(string source) => source switch { "wiki_proposals" or "shared_memory_items" => source, _ => "other" };
 
     private sealed class ProviderMetricAggregate(string provider, string outcome)
@@ -200,6 +236,7 @@ public sealed class NullOperationalMetrics : IOperationalMetrics
     public void RecordClassificationProviderRequest(string provider, string outcome, TimeSpan duration) { }
     public void RecordSensitiveAccessRequest() { }
     public void RecordSensitiveAccessDecision(string outcome) { }
+    public void RecordSensitiveAccessLifecycle(string eventName) { }
     public void RecordSafeSearchCandidates(string source, int count) { }
     public void RecordSearchRequest(string surface, string outcome, string cacheStatus, TimeSpan duration, int resultCount) { }
     public void RecordSearchFeedback(string judgment) { }
@@ -215,13 +252,25 @@ public sealed record OperationalMetricsSnapshot(
     IReadOnlyList<SearchRequestMetricSnapshot> SearchRequests,
     IReadOnlyList<SearchFeedbackMetricSnapshot> SearchFeedback)
 {
-    public static readonly OperationalMetricsSnapshot Empty = new("metadata-only", new OperationalMetricExportBoundary("local-runtime", "no-external-publication", "aggregate-low-cardinality"), [], new SensitiveAccessMetricSnapshot(0, []), [], [], []);
+    public static readonly OperationalMetricsSnapshot Empty = new("metadata-only", new OperationalMetricExportBoundary("local-runtime", "no-external-publication", "aggregate-low-cardinality"), [], new SensitiveAccessMetricSnapshot(0, [], []), [], [], []);
 }
 
 public sealed record OperationalMetricExportBoundary(string Scope, string Publication, string DetailLevel);
 public sealed record ProviderMetricSnapshot(string Provider, string Outcome, long Count, long TotalDurationMilliseconds);
-public sealed record SensitiveAccessMetricSnapshot(long Requests, IReadOnlyList<OutcomeCountSnapshot> Decisions);
+public sealed record SensitiveAccessMetricSnapshot(
+    long Requests,
+    IReadOnlyList<OutcomeCountSnapshot> Decisions,
+    IReadOnlyList<LifecycleCountSnapshot> Lifecycle)
+{
+    public SensitiveAccessMetricSnapshot(
+        long requests,
+        IReadOnlyList<OutcomeCountSnapshot> decisions)
+        : this(requests, decisions, [])
+    {
+    }
+}
 public sealed record OutcomeCountSnapshot(string Outcome, long Count);
+public sealed record LifecycleCountSnapshot(string Event, long Count);
 public sealed record SearchMetricSnapshot(string Source, long Observations, long TotalCandidates, long MaxCandidates);
 public sealed record SearchRequestMetricSnapshot(
     string Surface,

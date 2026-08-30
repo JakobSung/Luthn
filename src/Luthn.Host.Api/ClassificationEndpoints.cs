@@ -84,6 +84,7 @@ public static class ClassificationEndpoints
 
         var occurredAt = DateTimeOffset.UtcNow;
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
+        var correlationId = AuditCorrelationIds.CreateOperationId();
         db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
             principal,
             ServiceTokenAuthorization.GetActor(httpContext),
@@ -93,16 +94,42 @@ public static class ClassificationEndpoints
             service.ProviderBoundary.RedactionState,
             occurredAt,
             subjectType: "source_event",
-            outcome: "started"));
+            outcome: AuditOutcomes.Started,
+            correlationId: correlationId));
         await db.SaveChangesAsync(cancellationToken);
 
         var normalizedRequest = request with { SourceId = sourceId.Value };
         try
         {
-            return TypedResults.Ok(await service.PreviewAsync(normalizedRequest, cancellationToken));
+            var response = await service.PreviewAsync(normalizedRequest, cancellationToken);
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                ServiceTokenAuthorization.GetActor(httpContext),
+                "classification.provider.completed",
+                sourceId.Value,
+                service.ProviderBoundary.PayloadClass,
+                service.ProviderBoundary.RedactionState,
+                DateTimeOffset.UtcNow,
+                subjectType: "source_event",
+                outcome: AuditOutcomes.Completed,
+                correlationId: correlationId));
+            await db.SaveChangesAsync(cancellationToken);
+            return TypedResults.Ok(response);
         }
         catch (ClassificationProviderException error)
         {
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                ServiceTokenAuthorization.GetActor(httpContext),
+                "classification.provider.failed",
+                sourceId.Value,
+                "metadata-only",
+                service.ProviderBoundary.RedactionState,
+                DateTimeOffset.UtcNow,
+                subjectType: "source_event",
+                outcome: AuditOutcomes.Failed,
+                correlationId: correlationId));
+            await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
     }
@@ -113,7 +140,6 @@ public static class ClassificationEndpoints
         IOptions<LuthnAuthOptions> authOptions,
         IOptions<LuthnIdentityOptions> identityOptions,
         IOptions<LuthnHostOperationalOptions> hostOptions,
-        IOptions<ClassificationProviderOptions> classificationOptions,
         IOperatorClassificationSettingsStore classificationSettings,
         SensitiveMemoryProtectionState sensitiveMemoryProtection,
         CancellationToken cancellationToken)
@@ -191,8 +217,7 @@ public static class ClassificationEndpoints
         try
         {
             providerIssue = GetClassificationProviderReadinessIssue(
-                classificationSettings.Current,
-                classificationOptions.Value);
+                classificationSettings.Current);
         }
         catch (InvalidOperationException error)
         {
@@ -203,9 +228,9 @@ public static class ClassificationEndpoints
             checks.Add(new ReadinessCheck("classification-provider", "not_ready", providerIssue));
             return NotReady("classification-provider", checks);
         }
-        var providerDetail = classificationSettings.Current.Provider == OperatorClassificationProviderKind.ExternalHttp
-            ? "Self-hosted-capable ExternalHttp provider configuration is ready for the current environment."
-            : "Classification provider configuration is ready for the current environment.";
+        var providerDetail = classificationSettings.Current.Provider == OperatorClassificationProviderKind.LocalHttp
+            ? "Same-device LocalHttp provider configuration is ready for the current environment."
+            : "LocalDeterministic provider configuration is ready for the current environment.";
         checks.Add(new ReadinessCheck("classification-provider", "ready", providerDetail));
         checks.Add(new ReadinessCheck(
             "classification-guard",
@@ -232,32 +257,22 @@ public static class ClassificationEndpoints
         statusCode: StatusCodes.Status503ServiceUnavailable);
 
     private static string? GetClassificationProviderReadinessIssue(
-        OperatorClassificationProviderSettings settings,
-        ClassificationProviderOptions options)
+        OperatorClassificationProviderSettings settings)
     {
         if (settings.Provider == OperatorClassificationProviderKind.Unconfigured)
         {
             return ClassificationProviderOptions.ProviderRequiredMessage;
         }
 
-        if (settings.Provider == OperatorClassificationProviderKind.Mock)
+        if (settings.Provider == OperatorClassificationProviderKind.LocalDeterministic)
         {
-            if (!options.AllowMock)
-            {
-                return ClassificationProviderOptions.MockDisabledMessage;
-            }
-
             return null;
         }
 
-        if (settings.Provider != OperatorClassificationProviderKind.ExternalHttp && !settings.HasApiKey)
+        if (settings.Provider != OperatorClassificationProviderKind.LocalHttp ||
+            !LocalHttpEndpointValidator.TryValidate(settings.Endpoint, out _))
         {
-            return $"{settings.Provider} provider requires an API key.";
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.Endpoint))
-        {
-            return $"{settings.Provider} provider requires an endpoint.";
+            return LocalHttpEndpointValidator.ValidationMessage;
         }
 
         return null;

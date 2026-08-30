@@ -1,3 +1,6 @@
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using Luthn.Core.Memory;
 using Luthn.Core.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -31,9 +34,9 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
             batchSize,
             LuthnMemoryOptions.MaximumAutomaticTurnCleanupBatchSize);
 
-        var strategy = db.Database.CreateExecutionStrategy();
         try
         {
+            var strategy = db.Database.CreateExecutionStrategy();
             return await strategy.ExecuteAsync(
                 () => ProcessBatchWithinExecutionStrategyAsync(now, batchSize, cancellationToken));
         }
@@ -49,13 +52,14 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
         int batchSize,
         CancellationToken cancellationToken)
     {
+        var lifecycleGateHeld = false;
         await using var transaction = db.Database.IsRelational()
-            ? await db.Database.BeginTransactionAsync(cancellationToken)
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
             : null;
 
         try
         {
-            var candidates = await (
+            var ordinaryCandidates = await (
                     from memory in db.SharedMemoryItems
                     join provenance in db.CollectionProvenance
                         on memory.Id equals provenance.MemoryItemId
@@ -73,15 +77,73 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                         && !db.SafeProjectionSyncOutbox.Any(
                             outbox => outbox.WorkspaceId == memory.WorkspaceId &&
                                 outbox.LocalRecordId == memory.Id)
+                        && !db.SensitiveRecordReferences.Any(
+                            reference =>
+                                reference.MemoryItemId == memory.Id ||
+                                reference.SourceEventId == source.Id)
                     orderby memory.ExpiresAt, memory.CreatedAt, memory.Id
                     select new AutomaticTurnCleanupCandidate(
                         memory.Id,
                         source.Id,
                         memory.WorkspaceId,
-                        memory.OwnerUserId))
+                        memory.OwnerUserId,
+                        memory.ExpiresAt!.Value,
+                        SensitiveReferenceId: null))
                 .AsNoTracking()
                 .Take(batchSize)
                 .ToArrayAsync(cancellationToken);
+
+            var sensitiveCandidates = await (
+                    from reference in db.SensitiveRecordReferences
+                    join memory in db.SharedMemoryItems
+                        on reference.MemoryItemId equals memory.Id
+                    join payload in db.SensitiveMemoryPayloads
+                        on memory.Id equals payload.MemoryItemId
+                    join provenance in db.CollectionProvenance
+                        on memory.Id equals provenance.MemoryItemId
+                    join source in db.SourceEvents
+                        on provenance.SourceEventId equals source.Id
+                    where reference.MemoryItemId != null
+                        && reference.ExpiresAt != null
+                        && reference.ExpiresAt <= now
+                        && reference.SourceEventId == source.Id
+                        && reference.SourceSystem == source.SourceSystem
+                        && reference.SourceType == "turn-summary"
+                        && source.SourceType == "turn-summary"
+                        && memory.RetentionKind == MemoryRetentionKind.Ephemeral
+                        && memory.ExpiresAt == reference.ExpiresAt
+                        && payload.ExpiresAt == reference.ExpiresAt
+                        && memory.ExternalPublicationState == ExternalPublicationState.LocalOnly
+                        && reference.WorkspaceId == memory.WorkspaceId
+                        && reference.WorkspaceId == source.WorkspaceId
+                        && reference.WorkspaceId == provenance.WorkspaceId
+                        && reference.OwnerUserId == memory.OwnerUserId
+                        && reference.OwnerUserId == source.OwnerUserId
+                        && reference.OwnerUserId == provenance.AuthenticatedUserId
+                        && !db.SafeProjectionSyncOutbox.Any(
+                            outbox => outbox.WorkspaceId == memory.WorkspaceId &&
+                                outbox.LocalRecordId == memory.Id)
+                        && !db.SensitiveRecordReferences.Any(other =>
+                            other.Id != reference.Id &&
+                            (other.MemoryItemId == memory.Id || other.SourceEventId == source.Id))
+                    orderby reference.ExpiresAt, memory.CreatedAt, memory.Id
+                    select new AutomaticTurnCleanupCandidate(
+                        memory.Id,
+                        source.Id,
+                        memory.WorkspaceId,
+                        memory.OwnerUserId,
+                        reference.ExpiresAt.GetValueOrDefault(),
+                        reference.Id))
+                .AsNoTracking()
+                .Take(batchSize)
+                .ToArrayAsync(cancellationToken);
+
+            var candidates = ordinaryCandidates
+                .Concat(sensitiveCandidates)
+                .OrderBy(candidate => candidate.ExpiresAt)
+                .ThenBy(candidate => candidate.MemoryItemId, StringComparer.Ordinal)
+                .Take(batchSize)
+                .ToArray();
 
             if (candidates.Length == 0)
             {
@@ -93,8 +155,18 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                 return new AutomaticTurnCleanupResult(0);
             }
 
+            if (candidates.Any(candidate => candidate.SensitiveReferenceId is not null))
+            {
+                await SensitiveAccessLifecycleGate.Instance.WaitAsync(cancellationToken);
+                lifecycleGateHeld = true;
+            }
+
             var memoryIds = candidates.Select(candidate => candidate.MemoryItemId).ToArray();
             var sourceEventIds = candidates.Select(candidate => candidate.SourceEventId).ToArray();
+            var sensitiveReferenceIds = candidates
+                .Where(candidate => candidate.SensitiveReferenceId is not null)
+                .Select(candidate => candidate.SensitiveReferenceId!)
+                .ToArray();
             var memories = await db.SharedMemoryItems
                 .Where(record => memoryIds.Contains(record.Id))
                 .ToArrayAsync(cancellationToken);
@@ -103,6 +175,28 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                 .ToArrayAsync(cancellationToken);
             var classifications = await db.ClassificationResults
                 .Where(record => sourceEventIds.Contains(record.SourceEventId))
+                .ToArrayAsync(cancellationToken);
+            var wikiProposals = await db.WikiProposals
+                .Where(record => sourceEventIds.Contains(record.SourceEventId))
+                .ToArrayAsync(cancellationToken);
+            var payloads = await db.SensitiveMemoryPayloads
+                .Where(record => memoryIds.Contains(record.MemoryItemId))
+                .ToArrayAsync(cancellationToken);
+            var references = await db.SensitiveRecordReferences
+                .Where(record => sensitiveReferenceIds.Contains(record.Id))
+                .ToArrayAsync(cancellationToken);
+            var accessRequests = await db.SensitiveAccessRequests
+                .Where(record => sensitiveReferenceIds.Contains(record.SensitiveRecordReferenceId))
+                .ToArrayAsync(cancellationToken);
+            var accessRequestIds = accessRequests.Select(record => record.Id).ToArray();
+            var accessDecisions = await db.SensitiveAccessDecisions
+                .Where(record => accessRequestIds.Contains(record.SensitiveAccessRequestId))
+                .ToArrayAsync(cancellationToken);
+            var accessGrants = await db.SensitiveAccessGrants
+                .Where(record => accessRequestIds.Contains(record.SensitiveAccessRequestId))
+                .ToArrayAsync(cancellationToken);
+            var existingTombstones = await db.SensitiveAccessTombstones
+                .Where(record => accessRequestIds.Contains(record.Id))
                 .ToArrayAsync(cancellationToken);
             var provenanceLinks = await db.CollectionProvenance
                 .AsNoTracking()
@@ -125,11 +219,8 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
 
             if (!db.Database.IsRelational())
             {
-                await db.SensitiveMemoryPayloads
-                    .Where(record => memoryIds.Contains(record.MemoryItemId))
-                    .LoadAsync(cancellationToken);
                 await db.CollectionProvenance
-                    .Where(record => memoryIds.Contains(record.MemoryItemId) ||
+                    .Where(record => memoryIds.Contains(record.MemoryItemId!) ||
                         sourceEventIds.Contains(record.SourceEventId!))
                     .LoadAsync(cancellationToken);
             }
@@ -154,7 +245,13 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                         provenance.SourceEventId == candidate.SourceEventId &&
                         provenance.WorkspaceId == candidate.WorkspaceId &&
                         provenance.AuthenticatedUserId == candidate.OwnerUserId) &&
-                    !outboxMemoryIds.Contains(candidate.MemoryItemId))
+                    !outboxMemoryIds.Contains(candidate.MemoryItemId) &&
+                    IsSensitiveCandidateComplete(
+                        candidate,
+                        references,
+                        payloads,
+                        existingTombstones,
+                        accessRequests))
                 .ToArray();
             if (completeCandidates.Length != candidates.Length)
             {
@@ -162,21 +259,75 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                     "An automatic turn cleanup candidate changed before the batch could be deleted.");
             }
 
-            db.ClassificationResults.RemoveRange(classifications);
-            db.SharedMemoryItems.RemoveRange(memories);
-            db.SourceEvents.RemoveRange(sources);
-            db.AuditEvents.AddRange(completeCandidates.Select(candidate => AuditEventFactory.ForWorkspace(
-                candidate.WorkspaceId,
+            var graphCleanupAudits = completeCandidates
+                .Where(candidate => !db.AuditEvents.Local.Any(audit =>
+                    audit.Id == CleanupAuditId(candidate.WorkspaceId, candidate.SourceEventId)))
+                .Select(candidate => AuditEventFactory.ForWorkspace(
+                    candidate.WorkspaceId,
+                    actorUserId: null,
+                    actorKind: "system",
+                    actor: "luthn-retention-cleanup",
+                    action: "turn_summary.retention.pruned",
+                    subjectId: candidate.SourceEventId,
+                    payloadClass: "metadata-only",
+                    redactionState: "expired-turn-capsule-deleted",
+                    occurredAt: now,
+                    subjectType: "source_event",
+                    outcome: "pruned",
+                    id: CleanupAuditId(candidate.WorkspaceId, candidate.SourceEventId)))
+                .ToArray();
+            var accessCleanupAudits = accessRequests.Select(request => AuditEventFactory.ForWorkspace(
+                request.WorkspaceId,
                 actorUserId: null,
                 actorKind: "system",
                 actor: "luthn-retention-cleanup",
-                action: "turn_summary.retention.pruned",
-                subjectId: candidate.SourceEventId,
+                action: "sensitive_access.content_pruned",
+                subjectId: request.Id,
                 payloadClass: "metadata-only",
-                redactionState: "expired-turn-capsule-deleted",
+                redactionState: "expired-no-output",
                 occurredAt: now,
-                subjectType: "source_event",
-                outcome: "pruned")));
+                subjectType: "sensitive_access_request",
+                outcome: "pruned",
+                id: AccessCleanupAuditId(request.WorkspaceId, request.Id)))
+                .ToArray();
+            var cleanupAudits = graphCleanupAudits.Concat(accessCleanupAudits).ToArray();
+            var cleanupAuditIds = cleanupAudits.Select(audit => audit.Id).ToArray();
+            var existingCleanupAuditIds = await db.AuditEvents
+                .AsNoTracking()
+                .Where(audit => cleanupAuditIds.Contains(audit.Id))
+                .Select(audit => audit.Id)
+                .ToArrayAsync(cancellationToken);
+
+            var tombstones = accessRequests
+                .Where(request => existingTombstones.All(tombstone => tombstone.Id != request.Id))
+                .Select(request =>
+                {
+                    var candidate = completeCandidates.Single(item =>
+                        item.SensitiveReferenceId == request.SensitiveRecordReferenceId);
+                    return new SensitiveAccessTombstoneRecord
+                    {
+                        Id = request.Id,
+                        Status = SensitiveAccessRequestStatus.Expired,
+                        ExpiredAt = candidate.ExpiresAt,
+                        CleanedAt = now,
+                        WorkspaceId = request.WorkspaceId,
+                        OwnerUserId = request.OwnerUserId
+                    };
+                })
+                .ToArray();
+
+            db.SensitiveAccessTombstones.AddRange(tombstones);
+            db.SensitiveAccessGrants.RemoveRange(accessGrants);
+            db.SensitiveAccessDecisions.RemoveRange(accessDecisions);
+            db.SensitiveAccessRequests.RemoveRange(accessRequests);
+            db.SensitiveRecordReferences.RemoveRange(references);
+            db.WikiProposals.RemoveRange(wikiProposals);
+            db.ClassificationResults.RemoveRange(classifications);
+            db.SensitiveMemoryPayloads.RemoveRange(payloads);
+            db.SharedMemoryItems.RemoveRange(memories);
+            db.SourceEvents.RemoveRange(sources);
+            db.AuditEvents.AddRange(cleanupAudits.Where(audit =>
+                !existingCleanupAuditIds.Contains(audit.Id)));
 
             await db.SaveChangesAsync(cancellationToken);
             if (transaction is not null)
@@ -193,7 +344,16 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
                 await transaction.RollbackAsync(CancellationToken.None);
             }
 
+            db.ChangeTracker.Clear();
+
             throw;
+        }
+        finally
+        {
+            if (lifecycleGateHeld)
+            {
+                SensitiveAccessLifecycleGate.Instance.Release();
+            }
         }
     }
 
@@ -201,7 +361,62 @@ public sealed class AutomaticTurnRetentionCleanupProcessor(LuthnDbContext db)
         string MemoryItemId,
         string SourceEventId,
         string WorkspaceId,
-        string OwnerUserId);
+        string OwnerUserId,
+        DateTimeOffset ExpiresAt,
+        string? SensitiveReferenceId);
+
+    private static bool IsSensitiveCandidateComplete(
+        AutomaticTurnCleanupCandidate candidate,
+        IReadOnlyCollection<SensitiveRecordReferenceRecord> references,
+        IReadOnlyCollection<SensitiveMemoryPayloadRecord> payloads,
+        IReadOnlyCollection<SensitiveAccessTombstoneRecord> tombstones,
+        IReadOnlyCollection<SensitiveAccessRequestRecord> requests)
+    {
+        if (candidate.SensitiveReferenceId is null)
+        {
+            return true;
+        }
+
+        var reference = references.SingleOrDefault(record => record.Id == candidate.SensitiveReferenceId);
+        if (reference is null ||
+            reference.MemoryItemId != candidate.MemoryItemId ||
+            reference.SourceEventId != candidate.SourceEventId ||
+            reference.WorkspaceId != candidate.WorkspaceId ||
+            reference.OwnerUserId != candidate.OwnerUserId ||
+            reference.SourceType != "turn-summary" ||
+            reference.ExpiresAt != candidate.ExpiresAt ||
+            !payloads.Any(payload =>
+                payload.MemoryItemId == candidate.MemoryItemId &&
+                payload.ExpiresAt == candidate.ExpiresAt))
+        {
+            return false;
+        }
+
+        return requests
+            .Where(request => request.SensitiveRecordReferenceId == reference.Id)
+            .All(request =>
+                request.WorkspaceId == candidate.WorkspaceId &&
+                request.OwnerUserId == candidate.OwnerUserId &&
+                tombstones.All(tombstone =>
+                    tombstone.Id != request.Id ||
+                    (tombstone.WorkspaceId == request.WorkspaceId &&
+                     tombstone.OwnerUserId == request.OwnerUserId &&
+                     tombstone.Status == SensitiveAccessRequestStatus.Expired)));
+    }
+
+    private static string CleanupAuditId(string workspaceId, string sourceEventId)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"turn_summary.retention.pruned\n{workspaceId}\n{sourceEventId}"));
+        return $"audit-retention-{Convert.ToHexString(digest).ToLowerInvariant()}";
+    }
+
+    private static string AccessCleanupAuditId(string workspaceId, string requestId)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"sensitive_access.content_pruned\n{workspaceId}\n{requestId}"));
+        return $"audit-sensitive-cleanup-{Convert.ToHexString(digest).ToLowerInvariant()}";
+    }
 }
 
 internal sealed class AutomaticTurnRetentionCleanupHostedService(

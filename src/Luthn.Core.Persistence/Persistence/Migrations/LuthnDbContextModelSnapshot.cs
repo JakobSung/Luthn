@@ -343,6 +343,142 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Luthn.Core.Persistence.HubIngressQueueRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("AcceptedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AgentConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("AgentId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CapsuleSizeBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool?>("ContainsSensitiveMaterial")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ContentDigest")
+                        .IsRequired()
+                        .HasMaxLength(71)
+                        .HasColumnType("character varying(71)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MemberUserId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset?>("ProcessingStartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProtectedCapsule")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProtectionScheme")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ReceiptId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Sensitivity")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("StorageDecision")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("TurnId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReceiptId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "State", "AcceptedAt");
+
+                    b.HasIndex("State", "NextAttemptAt", "AcceptedAt");
+
+                    b.HasIndex("WorkspaceId", "AgentConnectionId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("WorkspaceId", "AgentId", "AcceptedAt");
+
+                    b.HasIndex("WorkspaceId", "MemberUserId", "AcceptedAt");
+
+                    b.HasIndex("WorkspaceId", "State", "AcceptedAt");
+
+                    b.ToTable("hub_ingress_queue", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_hub_ingress_queue_capsule_size", "\"CapsuleSizeBytes\" > 0");
+
+                            t.HasCheckConstraint("CK_hub_ingress_queue_member_user_id", "\"MemberUserId\" <> ''");
+
+                            t.HasCheckConstraint("CK_hub_ingress_queue_organization_id", "\"OrganizationId\" <> ''");
+
+                            t.HasCheckConstraint("CK_hub_ingress_queue_workspace_id", "\"WorkspaceId\" <> ''");
+                        });
+                });
+
             modelBuilder.Entity("Luthn.Core.Persistence.LocalInstallationStateRecord", b =>
                 {
                     b.Property<string>("Id")
@@ -534,11 +670,128 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                     b.ToTable("sensitive_access_decisions", (string)null);
                 });
 
+            modelBuilder.Entity("Luthn.Core.Persistence.SensitiveAccessGrantRecord", b =>
+                {
+                    b.Property<string>("SensitiveAccessRequestId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("GrantDurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaximumSuccessfulReads")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OwnerUserId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("PolicyRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("StartsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("SuccessfulReadCount")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.HasKey("SensitiveAccessRequestId");
+
+                    b.HasIndex("WorkspaceId", "PolicyRevision");
+
+                    b.HasIndex("WorkspaceId", "OwnerUserId", "ExpiresAt");
+
+                    b.ToTable("sensitive_access_grants", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_sensitive_access_grants_grant_duration", "\"GrantDurationSeconds\" BETWEEN 60 AND 3600");
+
+                            t.HasCheckConstraint("CK_sensitive_access_grants_maximum_successful_reads", "\"MaximumSuccessfulReads\" BETWEEN 1 AND 10");
+
+                            t.HasCheckConstraint("CK_sensitive_access_grants_owner_user_id", "\"OwnerUserId\" <> ''");
+
+                            t.HasCheckConstraint("CK_sensitive_access_grants_policy_revision", "\"PolicyRevision\" > 0");
+
+                            t.HasCheckConstraint("CK_sensitive_access_grants_successful_read_count", "\"SuccessfulReadCount\" >= 0 AND \"SuccessfulReadCount\" <= \"MaximumSuccessfulReads\"");
+
+                            t.HasCheckConstraint("CK_sensitive_access_grants_time_window", "\"StartsAt\" < \"ExpiresAt\"");
+
+                            t.HasCheckConstraint("CK_sensitive_access_grants_workspace_id", "\"WorkspaceId\" <> ''");
+                        });
+                });
+
+            modelBuilder.Entity("Luthn.Core.Persistence.SensitiveAccessPolicyRevisionRecord", b =>
+                {
+                    b.Property<string>("WorkspaceId")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("GrantDurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaximumSuccessfulReads")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RequestTimeoutSeconds")
+                        .HasColumnType("integer");
+
+                    b.HasKey("WorkspaceId", "Revision");
+
+                    b.HasIndex("WorkspaceId", "CreatedAt");
+
+                    b.ToTable("sensitive_access_policy_revisions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_sensitive_access_policy_revisions_grant_duration", "\"GrantDurationSeconds\" BETWEEN 60 AND 3600");
+
+                            t.HasCheckConstraint("CK_sensitive_access_policy_revisions_maximum_successful_reads", "\"MaximumSuccessfulReads\" BETWEEN 1 AND 10");
+
+                            t.HasCheckConstraint("CK_sensitive_access_policy_revisions_request_timeout", "\"RequestTimeoutSeconds\" BETWEEN 60 AND 3600");
+
+                            t.HasCheckConstraint("CK_sensitive_access_policy_revisions_revision", "\"Revision\" > 0");
+
+                            t.HasCheckConstraint("CK_sensitive_access_policy_revisions_workspace_id", "\"WorkspaceId\" <> ''");
+                        });
+                });
+
             modelBuilder.Entity("Luthn.Core.Persistence.SensitiveAccessRequestRecord", b =>
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<string>("AccessHandleDigest")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("AccessMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasDefaultValue("RedactedSummary");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -558,6 +811,9 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<int>("PolicyRevision")
+                        .HasColumnType("integer");
+
                     b.Property<string>("RedactedSummary")
                         .IsRequired()
                         .HasMaxLength(4000)
@@ -567,6 +823,16 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("RequesterBindingDigest")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasDefaultValue("");
+
+                    b.Property<int>("RequestTimeoutSeconds")
+                        .HasColumnType("integer");
 
                     b.Property<string>("RequestedBy")
                         .IsRequired()
@@ -600,6 +866,12 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
 
                     b.HasIndex("SensitiveRecordReferenceId");
 
+                    b.HasIndex("WorkspaceId", "OwnerUserId", "AccessHandleDigest")
+                        .IsUnique()
+                        .HasFilter("\"AccessMode\" = 'ProtectedMemory' AND \"AccessHandleDigest\" <> ''");
+
+                    b.HasIndex("WorkspaceId", "PolicyRevision");
+
                     b.HasIndex("Status", "ExpiresAt", "UpdatedAt");
 
                     b.HasIndex("WorkspaceId", "Status", "UpdatedAt");
@@ -608,7 +880,52 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_sensitive_access_requests_owner_user_id", "\"OwnerUserId\" <> ''");
 
+                            t.HasCheckConstraint("CK_sensitive_access_requests_policy_revision", "\"PolicyRevision\" > 0");
+
+                            t.HasCheckConstraint("CK_sensitive_access_requests_request_timeout", "\"RequestTimeoutSeconds\" BETWEEN 60 AND 3600");
+
                             t.HasCheckConstraint("CK_sensitive_access_requests_workspace_id", "\"WorkspaceId\" <> ''");
+                        });
+                });
+
+            modelBuilder.Entity("Luthn.Core.Persistence.SensitiveAccessTombstoneRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("CleanedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OwnerUserId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId", "OwnerUserId", "CleanedAt");
+
+                    b.ToTable("sensitive_access_tombstones", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_sensitive_access_tombstones_expired_status", "\"Status\" = 'Expired'");
+
+                            t.HasCheckConstraint("CK_sensitive_access_tombstones_owner_user_id", "\"OwnerUserId\" <> ''");
+
+                            t.HasCheckConstraint("CK_sensitive_access_tombstones_workspace_id", "\"WorkspaceId\" <> ''");
                         });
                 });
 
@@ -626,6 +943,9 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("ProtectedPayload")
                         .IsRequired()
                         .HasColumnType("text");
@@ -640,6 +960,8 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
 
                     b.HasKey("MemoryItemId");
 
+                    b.HasIndex("ExpiresAt");
+
                     b.ToTable("sensitive_memory_payloads", (string)null);
                 });
 
@@ -651,6 +973,13 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
 
                     b.Property<bool>("ContainsSensitiveMaterial")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MemoryItemId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.Property<string>("OwnerUserId")
                         .IsRequired()
@@ -692,9 +1021,13 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("MemoryItemId");
+
                     b.HasIndex("SourceEventId");
 
                     b.HasIndex("WorkspaceId", "ReceivedAt");
+
+                    b.HasIndex("WorkspaceId", "OwnerUserId", "ExpiresAt");
 
                     b.ToTable("sensitive_record_references", null, t =>
                         {
@@ -1005,6 +1338,25 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                     b.Navigation("SensitiveAccessRequest");
                 });
 
+            modelBuilder.Entity("Luthn.Core.Persistence.SensitiveAccessGrantRecord", b =>
+                {
+                    b.HasOne("Luthn.Core.Persistence.SensitiveAccessRequestRecord", "SensitiveAccessRequest")
+                        .WithOne("Grant")
+                        .HasForeignKey("Luthn.Core.Persistence.SensitiveAccessGrantRecord", "SensitiveAccessRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Luthn.Core.Persistence.SensitiveAccessPolicyRevisionRecord", "Policy")
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId", "PolicyRevision")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Policy");
+
+                    b.Navigation("SensitiveAccessRequest");
+                });
+
             modelBuilder.Entity("Luthn.Core.Persistence.SensitiveAccessRequestRecord", b =>
                 {
                     b.HasOne("Luthn.Core.Persistence.SensitiveRecordReferenceRecord", "SensitiveRecordReference")
@@ -1012,6 +1364,14 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         .HasForeignKey("SensitiveRecordReferenceId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("Luthn.Core.Persistence.SensitiveAccessPolicyRevisionRecord", "Policy")
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId", "PolicyRevision")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Policy");
 
                     b.Navigation("SensitiveRecordReference");
                 });
@@ -1027,11 +1387,18 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
 
             modelBuilder.Entity("Luthn.Core.Persistence.SensitiveRecordReferenceRecord", b =>
                 {
+                    b.HasOne("Luthn.Core.Persistence.SharedMemoryItemRecord", "MemoryItem")
+                        .WithMany()
+                        .HasForeignKey("MemoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Luthn.Core.Persistence.SourceEventRecord", "SourceEvent")
                         .WithMany()
                         .HasForeignKey("SourceEventId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("MemoryItem");
 
                     b.Navigation("SourceEvent");
                 });
@@ -1045,6 +1412,11 @@ namespace Luthn.Core.Persistence.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("SourceEvent");
+                });
+
+            modelBuilder.Entity("Luthn.Core.Persistence.SensitiveAccessRequestRecord", b =>
+                {
+                    b.Navigation("Grant");
                 });
 #pragma warning restore 612, 618
         }

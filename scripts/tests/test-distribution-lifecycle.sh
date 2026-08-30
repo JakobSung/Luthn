@@ -20,21 +20,31 @@ export LUTHN_OPERATOR_TOKEN_FILE="$test_root/config/operator-token"
 export LUTHN_PROJECT_NAME="luthn-test-$test_id"
 export LUTHN_POSTGRES_VOLUME="luthn-test-$test_id-postgres"
 export LUTHN_OPERATOR_VOLUME="luthn-test-$test_id-operator"
+export LUTHN_EXTENSION_VOLUME_NAME="luthn-test-$test_id-extension"
+export LUTHN_HOST_HELPER_LAUNCHD_LABEL="com.luthn.host-helper.test-$test_id"
 export LUTHN_PORT="$port"
 export LUTHN_IMAGE="$image"
 export LUTHN_SKIP_PULL=true
 export LUTHN_SOURCE_BASE_URL="file://$repo_root"
 
 mkdir -p "$HOME"
+export LUTHN_TEST_CONSOLE_URL_FILE="$test_root/console-url"
+export LUTHN_TEST_CONSOLE_COOKIE_FILE="$test_root/console-cookie"
 mkdir -p "$test_root/forbidden-bin"
 for forbidden_command in git dotnet; do
   printf '#!/usr/bin/env bash\necho "host %s must not be invoked" >&2\nexit 99\n' \
     "$forbidden_command" >"$test_root/forbidden-bin/$forbidden_command"
   chmod 0755 "$test_root/forbidden-bin/$forbidden_command"
 done
+printf '#!/usr/bin/env bash\nprintf "%%s" "$1" >"$LUTHN_TEST_CONSOLE_URL_FILE"\ncurl -sS -c "$LUTHN_TEST_CONSOLE_COOKIE_FILE" "${1%%/}/api/operator/session" >/dev/null\n' \
+  >"$test_root/forbidden-bin/open"
+chmod 0755 "$test_root/forbidden-bin/open"
 export PATH="$test_root/forbidden-bin:$PATH"
 
 cleanup() {
+  if [[ -x "$LUTHN_CLI_PATH" ]]; then
+    "$LUTHN_CLI_PATH" host-helper stop >/dev/null 2>&1 || true
+  fi
   if [[ -f "$LUTHN_DATA_DIR/compose.yaml" && -f "$LUTHN_CONFIG_DIR/luthn.env" ]]; then
     docker compose \
       --project-name "$LUTHN_PROJECT_NAME" \
@@ -42,7 +52,8 @@ cleanup() {
       -f "$LUTHN_DATA_DIR/compose.yaml" \
       down --volumes --remove-orphans >/dev/null 2>&1 || true
   fi
-  docker volume rm "$LUTHN_POSTGRES_VOLUME" "$LUTHN_OPERATOR_VOLUME" >/dev/null 2>&1 || true
+  docker volume rm "$LUTHN_POSTGRES_VOLUME" "$LUTHN_OPERATOR_VOLUME" \
+    "$LUTHN_EXTENSION_VOLUME_NAME" >/dev/null 2>&1 || true
   rm -rf "$test_root"
 }
 trap cleanup EXIT HUP INT TERM
@@ -92,15 +103,17 @@ grep -q '^Luthn__Auth__Tokens__0__IsOperator=false$' "$LUTHN_CONFIG_DIR/luthn.en
 operator_key_manifest_before="$(operator_key_manifest)"
 test -n "$operator_key_manifest_before"
 grep -q '^LUTHN_ENVIRONMENT=Production$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Classification__Provider=mock$' "$LUTHN_CONFIG_DIR/luthn.env"
-grep -q '^Luthn__Classification__AllowMock=true$' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Classification__Provider=LocalDeterministic$' "$LUTHN_CONFIG_DIR/luthn.env"
+! grep -q '^Luthn__Classification__AllowMock=' "$LUTHN_CONFIG_DIR/luthn.env"
+! grep -q '^Luthn__Classification__Credential=' "$LUTHN_CONFIG_DIR/luthn.env"
+grep -q '^Luthn__Console__TrustedLocalBridge=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnRetentionDays=30$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnCleanupEnabled=true$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60$' "$LUTHN_CONFIG_DIR/luthn.env"
 grep -q '^Luthn__Memory__AutomaticTurnCleanupBatchSize=100$' "$LUTHN_CONFIG_DIR/luthn.env"
 evaluation_output="$(docker run --rm "$image" classification-eval)"
 grep -q '"datasetVersion": 1' <<<"$evaluation_output"
-grep -q '"provider": "mock"' <<<"$evaluation_output"
+grep -q '"provider": "local-deterministic"' <<<"$evaluation_output"
 curl -fsS "$base_url/healthz" >/dev/null
 operator_config_body="$test_root/operator-config.json"
 operator_config_status="$(curl -sS -o "$operator_config_body" -w '%{http_code}' "$base_url/api/operator/classification-provider" \
@@ -115,6 +128,24 @@ grep -q '"status":403' "$agent_config_body"
 curl -fsS "$base_url/readyz" >/dev/null
 console_html="$(curl -fsS "$base_url/")"
 grep -q '<title>Luthn Operator Console</title>' <<<"$console_html"
+direct_console_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base_url/api/operator/session/local")"
+test "$direct_console_status" = "403"
+console_command_output="$("$cli" console)"
+console_url="$(cat "$LUTHN_TEST_CONSOLE_URL_FILE")"
+test "$console_url" = "$base_url/"
+test -s "$LUTHN_TEST_CONSOLE_COOKIE_FILE"
+if grep -Fq "$operator_token_before" <<<"$console_command_output$console_url"; then
+  echo "operator token leaked from the console bootstrap command" >&2
+  exit 1
+fi
+console_session_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  -b "$LUTHN_TEST_CONSOLE_COOKIE_FILE" -c "$LUTHN_TEST_CONSOLE_COOKIE_FILE" \
+  "$base_url/api/operator/session/local")"
+test "$console_session_status" = "200"
+console_replay_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  -b "$LUTHN_TEST_CONSOLE_COOKIE_FILE" -c "$LUTHN_TEST_CONSOLE_COOKIE_FILE" \
+  "$base_url/api/operator/session/local")"
+test "$console_replay_status" = "403"
 fresh_preview_body="$test_root/fresh-preview.json"
 fresh_preview_status="$(curl -sS -o "$fresh_preview_body" -w '%{http_code}' -X POST "$base_url/api/classification/preview" \
   -H 'content-type: application/json' \
@@ -137,6 +168,7 @@ connection_list="$(curl -fsS "$base_url/api/agent-connections" \
 grep -q '"state":"Active"' <<<"$connection_list"
 
 sensitive_reference_id="lifecycle-sensitive-reference"
+upgraded_sensitive_reference_id="lifecycle-upgraded-sensitive-reference"
 docker compose \
   --project-name "$LUTHN_PROJECT_NAME" \
   --env-file "$LUTHN_CONFIG_DIR/luthn.env" \
@@ -144,17 +176,20 @@ docker compose \
   exec -T postgres psql -v ON_ERROR_STOP=1 -U luthn -d luthn >/dev/null <<'SQL'
 BEGIN;
 INSERT INTO source_events
-  ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial", "OwnerUserId")
+  ("Id", "SourceSystem", "SourceType", "ReceivedAt", "ContentDigest", "ContainsSensitiveMaterial", "OwnerUserId", "WorkspaceId")
 VALUES
-  ('lifecycle-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-fixture', true, 'local-owner');
+  ('lifecycle-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-fixture', true, 'local-owner', 'default'),
+  ('lifecycle-upgraded-sensitive-source', 'lifecycle', 'note', now(), 'sha256:lifecycle-upgraded-fixture', true, 'local-owner', 'default');
 INSERT INTO collection_provenance
-  ("Id", "ContractVersion", "SourceEventId", "AuthenticatedActor", "ActorTrust", "ClaimsTrust", "AuthenticatedUserId", "ReceivedAt")
+  ("Id", "ContractVersion", "SourceEventId", "AuthenticatedActor", "ActorTrust", "ClaimsTrust", "AuthenticatedUserId", "ReceivedAt", "WorkspaceId")
 VALUES
-  ('provenance-lifecycle-sensitive-source', 1, 'lifecycle-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now());
+  ('provenance-lifecycle-sensitive-source', 1, 'lifecycle-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now(), 'default'),
+  ('provenance-lifecycle-upgraded-sensitive-source', 1, 'lifecycle-upgraded-sensitive-source', 'lifecycle-test', 'local-runtime', 'no-claims', 'local-owner', now(), 'default');
 INSERT INTO sensitive_record_references
-  ("Id", "SourceEventId", "SourceSystem", "SourceType", "ReceivedAt", "ContainsSensitiveMaterial", "ReferenceLabel", "RedactedSummary", "OwnerUserId")
+  ("Id", "SourceEventId", "SourceSystem", "SourceType", "ReceivedAt", "ContainsSensitiveMaterial", "ReferenceLabel", "RedactedSummary", "OwnerUserId", "WorkspaceId")
 VALUES
-  ('lifecycle-sensitive-reference', 'lifecycle-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-sensitive-source', 'Public-safe lifecycle summary.', 'local-owner');
+  ('lifecycle-sensitive-reference', 'lifecycle-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-sensitive-source', 'Public-safe lifecycle summary.', 'local-owner', 'default'),
+  ('lifecycle-upgraded-sensitive-reference', 'lifecycle-upgraded-sensitive-source', 'lifecycle', 'note', now(), true, 'sensitive-record:lifecycle-upgraded-sensitive-source', 'Public-safe upgraded lifecycle summary.', 'local-owner', 'default');
 COMMIT;
 SQL
 access_request="$(curl -fsS -X POST "$base_url/api/access-requests" \
@@ -273,10 +308,33 @@ Luthn__Auth__Tokens__1__Scopes__1=*
 Luthn__Auth__Tokens__1__ExpiresAt=2099-01-01T00:00:00Z
 EOF
 mv "$LUTHN_CONFIG_DIR/luthn.env.legacy" "$LUTHN_CONFIG_DIR/luthn.env"
+mkdir -p "$LUTHN_DATA_DIR/extensions/managed"
+cat >"$LUTHN_DATA_DIR/extensions/managed/compose.yaml" <<EOF
+services:
+  luthn-extension:
+    image: $image
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["trap 'exit 0' TERM INT; while :; do sleep 3600; done"]
+    volumes:
+      - extension-state:/var/lib/luthn-extension
+    restart: unless-stopped
+  worker:
+    profiles: ["extensions"]
+volumes:
+  extension-state:
+    name: $LUTHN_EXTENSION_VOLUME_NAME
+EOF
+docker compose --project-name "$LUTHN_PROJECT_NAME" --env-file "$LUTHN_CONFIG_DIR/luthn.env" \
+  -f "$LUTHN_DATA_DIR/compose.yaml" -f "$LUTHN_DATA_DIR/extensions/managed/compose.yaml" \
+  --profile extensions up -d luthn-extension worker >/dev/null
 update_write_probe="$test_root/update-write-probe.sh"
 cat >"$update_write_probe" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+if docker ps -q --filter "label=com.docker.compose.project=$LUTHN_PROJECT_NAME" --filter "label=com.docker.compose.service=luthn-extension" | grep -q .; then
+  echo "managed extension remained active during update backup/migration window" >&2
+  exit 1
+fi
 if curl -fsS -X POST "$base_url/api/agent/turn-summaries" \\
   -H 'content-type: application/json' \\
   -H "Authorization: Bearer $token_before" \\
@@ -287,6 +345,8 @@ fi
 EOF
 chmod 0755 "$update_write_probe"
 LUTHN_UPDATE_AFTER_STOP_HOOK="$update_write_probe" "$cli" update "$image"
+test -n "$(docker ps -q --filter "label=com.docker.compose.project=$LUTHN_PROJECT_NAME" --filter "label=com.docker.compose.service=luthn-extension")"
+test -n "$(docker ps -q --filter "label=com.docker.compose.project=$LUTHN_PROJECT_NAME" --filter "label=com.docker.compose.service=worker")"
 token_after="$(cat "$LUTHN_SERVICE_TOKEN_FILE")"
 operator_token_after="$(cat "$LUTHN_OPERATOR_TOKEN_FILE")"
 test "$token_before" = "$token_after"
@@ -316,7 +376,7 @@ grep -q 'Lifecycle sentinel' <<<"$context_output"
 upgraded_access_request="$(curl -fsS -X POST "$base_url/api/access-requests" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer $token_after" \
-  --data "{\"sensitiveReferenceId\":\"$sensitive_reference_id\",\"reason\":\"Verify the upgraded operator credential.\",\"sessionId\":\"distribution-upgraded-operator\",\"expiresInSeconds\":600}")"
+  --data "{\"sensitiveReferenceId\":\"$upgraded_sensitive_reference_id\",\"reason\":\"Verify the upgraded operator credential.\",\"sessionId\":\"distribution-upgraded-operator\",\"expiresInSeconds\":600}")"
 upgraded_access_request_id="$(printf '%s' "$upgraded_access_request" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 test -n "$upgraded_access_request_id"
 operator_request_list="$(curl -fsS "$base_url/api/access-requests" \
@@ -352,6 +412,7 @@ fi
 echo "[6/8] reset"
 "$cli" reset --yes
 curl -fsS "$base_url/readyz" >/dev/null
+test -n "$(docker ps -q --filter "label=com.docker.compose.project=$LUTHN_PROJECT_NAME" --filter "label=com.docker.compose.service=luthn-extension")"
 
 echo "[7/8] uninstall preserves state"
 "$cli" uninstall
@@ -362,9 +423,21 @@ test -d "$LUTHN_STATE_DIR/backups"
 test ! -e "$LUTHN_CLI_PATH"
 docker volume inspect "$LUTHN_POSTGRES_VOLUME" >/dev/null
 docker volume inspect "$LUTHN_OPERATOR_VOLUME" >/dev/null
+docker volume inspect "$LUTHN_EXTENSION_VOLUME_NAME" >/dev/null
 
 echo "[8/8] reinstall and purge"
 "$repo_root/scripts/install.sh"
+mkdir -p "$LUTHN_DATA_DIR/extensions/managed"
+cat >"$LUTHN_DATA_DIR/extensions/managed/compose.yaml" <<EOF
+services:
+  luthn-extension:
+    image: alpine:3.21
+  worker: {}
+volumes:
+  extension-state:
+    name: $LUTHN_EXTENSION_VOLUME_NAME
+EOF
+docker volume create "$LUTHN_EXTENSION_VOLUME_NAME" >/dev/null
 if "$cli" uninstall --purge-data >/dev/null 2>&1; then
   echo "purge unexpectedly succeeded without --yes" >&2
   exit 1
@@ -379,6 +452,10 @@ if docker volume inspect "$LUTHN_POSTGRES_VOLUME" >/dev/null 2>&1; then
 fi
 if docker volume inspect "$LUTHN_OPERATOR_VOLUME" >/dev/null 2>&1; then
   echo "operator volume still exists after purge" >&2
+  exit 1
+fi
+if docker volume inspect "$LUTHN_EXTENSION_VOLUME_NAME" >/dev/null 2>&1; then
+  echo "managed extension volume still exists after purge" >&2
   exit 1
 fi
 

@@ -7,13 +7,14 @@ namespace Luthn.Core.Classification;
 /// </summary>
 public static class ClassificationTaxonomy
 {
-    public const string Version = "1";
+    public const string Version = "2";
 
     private static readonly CategoryDefinition[] Definitions =
     [
         Restricted("credential", "credential", "credentials", "password", "passcode", "자격 증명", "자격증명", "비밀번호", "암호 번호"),
         Restricted("private key", "private key", "private-key", "개인 키", "개인키", "비밀 키", "비밀키"),
         Restricted("access key", "access key", "access-key", "api key", "api-key", "secret key", "접근 키", "접근키", "액세스 키", "액세스키", "api 키"),
+        Restricted("access handle", "access handle", "protected access handle", "접근 핸들", "보호된 접근 핸들"),
         Restricted("customer original", "customer original", "customer raw", "raw customer", "고객 원문", "고객원문", "고객 원본", "고객원본"),
         Confidential("contract", "contract", "contracts", "계약", "계약서"),
         Confidential("invoice", "invoice", "invoices", "청구서", "송장"),

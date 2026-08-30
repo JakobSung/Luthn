@@ -20,8 +20,20 @@ codex_disconnect_pending_state_file="${LUTHN_CODEX_DISCONNECT_PENDING_STATE_FILE
 claude_state_file="${LUTHN_CLAUDE_STATE_FILE:-$connector_state_dir/claude-code.env}"
 claude_pending_state_file="${LUTHN_CLAUDE_PENDING_STATE_FILE:-$connector_state_dir/claude-code.pending.env}"
 cli_template_version="4"
-codex_connector_version="4"
-mcp_schema_version="3"
+codex_connector_version="8"
+mcp_schema_version="6"
+host_helper_version="1.0.0"
+host_helper_pid_file="${LUTHN_HOST_HELPER_PID_FILE:-$state_dir/host-helper.pid}"
+host_helper_log_file="${LUTHN_HOST_HELPER_LOG_FILE:-$state_dir/host-helper.log}"
+host_helper_launchd_label="${LUTHN_HOST_HELPER_LAUNCHD_LABEL:-com.luthn.host-helper}"
+host_helper_launchd_file="${LUTHN_HOST_HELPER_LAUNCHD_FILE:-$HOME/Library/LaunchAgents/$host_helper_launchd_label.plist}"
+host_helper_systemd_file="${LUTHN_HOST_HELPER_SYSTEMD_FILE:-$HOME/.config/systemd/user/luthn-host-helper.service}"
+extension_dir="${LUTHN_EXTENSION_DIR:-$data_dir/extensions/managed}"
+extension_compose_file="${LUTHN_EXTENSION_COMPOSE_FILE:-$extension_dir/compose.yaml}"
+extension_state_key_file="${LUTHN_EXTENSION_STATE_KEY_FILE:-$config_dir/extension-state-key}"
+extension_token_file="${LUTHN_EXTENSION_TOKEN_FILE:-$config_dir/extension-local-token}"
+extension_image_ref_file="${LUTHN_EXTENSION_IMAGE_REF_FILE:-$extension_dir/image-ref}"
+extension_volume_name="${LUTHN_EXTENSION_VOLUME_NAME:-${project_name}-extension-state}"
 distribution_ref="${LUTHN_DISTRIBUTION_REF:-main}"
 source_base_url="${LUTHN_SOURCE_BASE_URL:-https://raw.githubusercontent.com/JakobSung/Luthn/${distribution_ref}}"
 image_repository="ghcr.io/jakobsung/luthn"
@@ -38,6 +50,7 @@ commands:
                                    Install Luthn and optionally configure an agent.
   version [--json]                Show installed runtime and compatibility versions.
   status                          Show services, readiness, console, and image.
+  console                         Authorize once and open the local operator console.
   update check [--json]           Check the configured update channel without pulling.
   update [image]                  Back up, pull, migrate, restart, and verify.
   doctor [--json]                 Diagnose runtime, update, and Codex integration state.
@@ -48,6 +61,10 @@ commands:
                                    Configure Codex or Claude Code; recall is enabled by default.
   connection status codex|claude Show connector state.
   disconnect codex|claude        Remove only Luthn-owned connector configuration.
+  profile remote codex|claude --url HTTPS_URL [--oauth-client-id ID] [--oauth-resource URI]
+                                   Explicitly replace the owned local MCP registration with a remote OAuth MCP profile.
+  profile local codex|claude     Restore the owned local MCP profile. Network outages never trigger this automatically.
+  host-helper start|stop|status  Manage the installed local browser-to-MCP helper.
   adapter                         Upload a turn-summary JSON payload from stdin.
   mcp [--list-tools]              Run the MCP stdio server from the image.
   help                            Show this help.
@@ -507,12 +524,13 @@ LUTHN_DOCKER_CONNECTION_STRING=Host=postgres;Port=5432;Database=luthn;Username=l
 POSTGRES_DB=luthn
 POSTGRES_USER=luthn
 POSTGRES_HOST_AUTH_METHOD=trust
-Luthn__Classification__Provider=mock
-Luthn__Classification__AllowMock=true
+Luthn__Classification__Provider=LocalDeterministic
 Luthn__Memory__AutomaticTurnRetentionDays=30
 Luthn__Memory__AutomaticTurnCleanupEnabled=true
 Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60
 Luthn__Memory__AutomaticTurnCleanupBatchSize=100
+Luthn__Console__LocalOnly=true
+Luthn__Console__TrustedLocalBridge=true
 Luthn__Auth__RequireServiceToken=true
 Luthn__Identity__Mode=SingleOwner
 Luthn__Identity__SingleOwnerUserId=local-owner
@@ -625,13 +643,16 @@ ensure_config_value() {
   fi
 }
 
-upgrade_legacy_classification_default() {
+normalize_classification_provider() {
   provider="$(read_config Luthn__Classification__Provider)"
-  allow_mock="$(read_config Luthn__Classification__AllowMock)"
-  if [[ "$provider" == "unconfigured" && "$allow_mock" == "false" ]]; then
-    set_config Luthn__Classification__Provider mock
-    set_config Luthn__Classification__AllowMock true
+  if [[ "$provider" != "LocalDeterministic" && "$provider" != "LocalHttp" && "$provider" != "Unconfigured" ]]; then
+    set_config Luthn__Classification__Provider Unconfigured
   fi
+  remove_config Luthn__Classification__AllowMock
+  remove_config Luthn__Classification__Credential
+  remove_config Luthn__Classification__Model
+  remove_config Luthn__Classification__AuthHeaderName
+  remove_config_prefix Luthn__Classification__ExternalHttp__
 }
 
 pull_image() {
@@ -882,6 +903,94 @@ compose_cmd() {
   docker compose --project-name "$project_name" --env-file "$config_file" -f "$compose_file" "$@"
 }
 
+compose_with_extension_cmd() {
+  docker compose --project-name "$project_name" --env-file "$config_file" \
+    -f "$compose_file" -f "$extension_compose_file" "$@"
+}
+
+extension_configured() {
+  [[ -f "$extension_compose_file" ]]
+}
+
+validate_extension_volume_name() {
+  [[ "$extension_volume_name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]
+}
+
+start_extension_services() {
+  extension_configured || return 0
+  compose_with_extension_cmd --profile extensions up -d luthn-extension worker >/dev/null
+}
+
+stop_extension_services() {
+  extension_configured || return 0
+  if compose_with_extension_cmd --profile extensions stop worker luthn-extension >/dev/null 2>&1; then
+    return 0
+  fi
+  for service in worker luthn-extension; do
+    ids="$(docker ps -q \
+      --filter "label=com.docker.compose.project=$project_name" \
+      --filter "label=com.docker.compose.service=$service")"
+    if [[ -n "$ids" ]]; then
+      # shellcheck disable=SC2086
+      docker stop $ids >/dev/null || return 1
+    fi
+  done
+  for service in worker luthn-extension; do
+    if [[ -n "$(docker ps -q \
+      --filter "label=com.docker.compose.project=$project_name" \
+      --filter "label=com.docker.compose.service=$service")" ]]; then
+      return 1
+    fi
+  done
+}
+
+remove_extension_containers() {
+  extension_configured || return 0
+  if compose_with_extension_cmd --profile extensions rm -sf luthn-extension worker >/dev/null 2>&1; then
+    return 0
+  fi
+  for service in worker luthn-extension; do
+    ids="$(docker ps -aq \
+      --filter "label=com.docker.compose.project=$project_name" \
+      --filter "label=com.docker.compose.service=$service")"
+    if [[ -n "$ids" ]]; then
+      # shellcheck disable=SC2086
+      docker rm -f $ids >/dev/null || return 1
+    fi
+  done
+  for service in worker luthn-extension; do
+    if [[ -n "$(docker ps -aq \
+      --filter "label=com.docker.compose.project=$project_name" \
+      --filter "label=com.docker.compose.service=$service")" ]]; then
+      return 1
+    fi
+  done
+}
+
+host_helper_remove_extension() {
+  remove_persistent_state="${1:-false}"
+  validate_extension_volume_name || {
+    echo "The managed extension volume name is invalid; cleanup stopped." >&2
+    return 1
+  }
+  remove_extension_containers || return 1
+  if [[ "$remove_persistent_state" == "true" ]]; then
+    if ! docker volume rm "$extension_volume_name" >/dev/null 2>&1 &&
+        docker volume inspect "$extension_volume_name" >/dev/null 2>&1; then
+      return 1
+    fi
+  fi
+  if [[ -f "$extension_image_ref_file" ]]; then
+    image_ref="$(tr -d '\r\n' <"$extension_image_ref_file")"
+    if [[ "$image_ref" =~ ^luthn-managed-addon:[A-Za-z0-9_.-]+$ ]]; then
+      docker image rm "$image_ref" >/dev/null 2>&1 || true
+    fi
+  fi
+  rm -f "$extension_compose_file" "$extension_state_key_file" \
+    "$extension_token_file" "$extension_image_ref_file"
+  rmdir "$extension_dir" >/dev/null 2>&1 || true
+}
+
 stop_api_fail_closed() {
   if compose_cmd stop api >/dev/null 2>&1; then
     return 0
@@ -920,25 +1029,13 @@ classification_setup_pending() {
   local body="$2"
   [[ "$status_code" == "503" ]] \
     && [[ "$body" == *"classification-provider"* ]] \
-    && { [[ "$body" == *"No classification provider is configured"* ]] \
-      || [[ "$body" == *"The mock classification provider is disabled"* ]] \
-      || [[ "$body" == *"Production classification requires an operator-configured non-mock provider"* ]]; }
+    && [[ "$body" == *"No supported local classification provider is configured"* ]]
 }
 
 classification_setup_required_by_config() {
-  local provider allow_mock
-  provider="$(read_config Luthn__Classification__Provider mock)"
-  allow_mock="$(read_config Luthn__Classification__AllowMock true)"
-  if [[ "$provider" == "unconfigured" ]]; then
-    return 0
-  fi
-  if [[ "$provider" != "mock" ]]; then
-    return 1
-  fi
-  case "$allow_mock" in
-    true|True|TRUE) return 1 ;;
-    *) return 0 ;;
-  esac
+  local provider
+  provider="$(read_config Luthn__Classification__Provider LocalDeterministic)"
+  [[ "$provider" != "LocalDeterministic" && "$provider" != "LocalHttp" ]]
 }
 
 wait_for_api() {
@@ -1128,9 +1225,8 @@ install_luthn() {
     ensure_config_value POSTGRES_DB luthn
     ensure_config_value POSTGRES_USER luthn
     ensure_config_value POSTGRES_HOST_AUTH_METHOD trust
-    ensure_config_value Luthn__Classification__Provider mock
-    ensure_config_value Luthn__Classification__AllowMock true
-    upgrade_legacy_classification_default
+    ensure_config_value Luthn__Classification__Provider LocalDeterministic
+    normalize_classification_provider
     ensure_config_value Luthn__Memory__AutomaticTurnRetentionDays 30
     ensure_config_value Luthn__Memory__AutomaticTurnCleanupEnabled true
     ensure_config_value Luthn__Memory__AutomaticTurnCleanupIntervalMinutes 60
@@ -1240,6 +1336,63 @@ show_status() {
   if [[ -n "$image_id" && -n "$selected_id" && "$image_id" != "$selected_id" ]]; then
     echo "Runtime drift: a locally selected image is not running; run 'luthn update'."
   fi
+}
+
+open_console() {
+  if (( $# > 0 )); then
+    echo "usage: luthn console" >&2
+    return 2
+  fi
+
+  require_installation
+  require_command curl
+  local base_url configured_operator_token_file operator_token console_status
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  configured_operator_token_file="$(read_config LUTHN_OPERATOR_TOKEN_FILE "$operator_token_file")"
+  if [[ ! -f "$configured_operator_token_file" ]]; then
+    echo "Local operator credential is unavailable. Run: luthn update" >&2
+    return 1
+  fi
+  operator_token="$(<"$configured_operator_token_file")"
+  if [[ -z "$operator_token" ]]; then
+    echo "Local operator credential is empty. Run: luthn update" >&2
+    return 1
+  fi
+  if [[ ! "$operator_token" =~ ^[A-Za-z0-9._~-]+$ ]]; then
+    unset operator_token
+    echo "Local operator credential has an invalid format. Run: luthn update" >&2
+    return 1
+  fi
+
+  if command -v open >/dev/null 2>&1; then
+    open "$base_url/"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$base_url/" >/dev/null 2>&1
+  else
+    unset operator_token
+    echo "No graphical browser opener is available. Run 'luthn console' on the local workstation." >&2
+    return 1
+  fi
+
+  console_status=""
+  for _ in $(seq 1 20); do
+    console_status="$(printf 'Authorization: Bearer %s\n' "$operator_token" \
+      | curl --header @- --silent --show-error --output /dev/null \
+          --write-out '%{http_code}' --request POST \
+          "$base_url/api/operator/session/local/arm")"
+    if [[ "$console_status" == "204" ]]; then
+      unset operator_token
+      echo "Opening the local console: $base_url/"
+      return 0
+    fi
+    if [[ "$console_status" != "409" ]]; then
+      break
+    fi
+    sleep 0.25
+  done
+  unset operator_token
+  echo "Local console authorization failed with HTTP ${console_status:-unavailable}. Keep one console window open and retry." >&2
+  return 1
 }
 
 doctor_add_check() {
@@ -1786,6 +1939,10 @@ connect_codex() {
     echo "usage: luthn connect codex [--no-auto-recall]" >&2
     return 2
   fi
+  if [[ -f "$remote_codex_profile_state_file" ]]; then
+    echo "An owned remote Codex MCP profile is active. Run '$cli_path profile local codex' before configuring the local MCP profile." >&2
+    return 1
+  fi
 
   require_installation
   require_docker
@@ -1954,6 +2111,7 @@ connect_codex() {
   fi
   recall_status=disabled
   [[ "$auto_recall_enabled" == "true" ]] && recall_status=enabled
+  host_helper_start >/dev/null 2>&1 || echo "warning: the browser MCP helper could not be started" >&2
 
   cat <<EOF
 Codex connector files are configured, but automatic memory capture is not ready yet.
@@ -1989,7 +2147,9 @@ show_codex_connection_status() {
   instructions_file="$(codex_state_value INSTRUCTIONS_FILE)"
   [[ -n "$instructions_file" ]] || instructions_file="$(codex_instructions_path)"
 
-  if [[ -f "$codex_state_file" ]]; then
+  if [[ -f "$remote_codex_profile_state_file" ]]; then
+    echo "MCP profile: remote"
+  elif [[ -f "$codex_state_file" ]]; then
     echo "Local connector: configured"
   else
     echo "Local connector: not configured"
@@ -2003,7 +2163,13 @@ show_codex_connection_status() {
     echo "  automatic-ingestion: missing"
   fi
 
-  if command -v codex >/dev/null 2>&1 && codex_mcp_registration_status; then
+  if [[ -f "$remote_codex_profile_state_file" ]]; then
+    if command -v codex >/dev/null 2>&1 && codex mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+      echo "  remote-mcp: configured"
+    else
+      echo "  remote-mcp: missing or changed"
+    fi
+  elif command -v codex >/dev/null 2>&1 && codex_mcp_registration_status; then
     echo "  mcp: configured"
   else
     echo "  mcp: missing or changed"
@@ -2041,6 +2207,15 @@ EOF
 disconnect_codex() {
   require_installation
   require_command python3
+  if [[ -f "$remote_codex_profile_state_file" ]]; then
+    require_command codex
+    if ! codex mcp get "$remote_mcp_name" >/dev/null 2>&1 ||
+      ! codex mcp remove "$remote_mcp_name" >/dev/null; then
+      echo "The Luthn-owned remote Codex MCP could not be removed; local connector cleanup was not started." >&2
+      return 1
+    fi
+    rm -f "$remote_codex_profile_state_file"
+  fi
   if [[ -f "$codex_disconnect_pending_state_file" ]] \
     && ! has_codex_connector_state \
     && ! command -v codex >/dev/null 2>&1; then
@@ -2147,6 +2322,8 @@ run_codex_hook() {
 }
 
 stop_write_paths() {
+  extension_stop_failed=false
+  stop_extension_services || extension_stop_failed=true
   compose_cmd stop api >/dev/null 2>&1 || true
   for service in mcp adapter; do
     ids="$(docker ps -q \
@@ -2157,6 +2334,36 @@ stop_write_paths() {
       docker stop $ids >/dev/null
     fi
   done
+  [[ "$extension_stop_failed" == "false" ]]
+}
+
+run_post_update_bootstrap() {
+  local bootstrap_status=0
+  if [[ ! -x "$cli_path" ]]; then
+    echo "The installed Luthn CLI is unavailable for post-update bootstrap: $cli_path" >&2
+    return 1
+  fi
+
+  "$cli_path" __post-update-bootstrap || bootstrap_status=$?
+  if (( bootstrap_status == 0 )); then
+    return 0
+  fi
+  if (( bootstrap_status == 2 )); then
+    echo "warning: the installed target CLI predates post-update bootstrap" >&2
+    return 0
+  fi
+  return "$bootstrap_status"
+}
+
+post_update_bootstrap() {
+  (( $# == 0 )) || {
+    echo "usage: luthn __post-update-bootstrap" >&2
+    return 2
+  }
+  require_installation
+  if has_codex_connector_state || [[ -f "$claude_state_file" ]] || extension_configured; then
+    host_helper_start
+  fi
 }
 
 update_luthn() {
@@ -2404,7 +2611,11 @@ update_luthn() {
   compose_cmd up -d postgres
   wait_for_postgres
   echo "Stopping API and MCP write paths..."
-  stop_write_paths
+  if ! stop_write_paths; then
+    record_state failed "$target_image" "$target_id" "$previous_id" "$backup_path"
+    echo "Update stopped because the managed extension write path could not be stopped safely." >&2
+    return 1
+  fi
   if [[ -n "${LUTHN_UPDATE_AFTER_STOP_HOOK:-}" ]]; then
     "$LUTHN_UPDATE_AFTER_STOP_HOOK"
   fi
@@ -2422,6 +2633,8 @@ update_luthn() {
     if ! compose_cmd up -d api; then
       echo "Update failed while backing up PostgreSQL, and the previous API could not be restarted." >&2
     else
+      start_extension_services || \
+        echo "warning: the managed extension could not be restarted after backup failure" >&2
       echo "Update failed while backing up PostgreSQL. The previous API was restarted." >&2
     fi
     return 1
@@ -2439,10 +2652,18 @@ update_luthn() {
 
   compose_cmd up -d api
   if ! wait_for_api; then
-    stop_write_paths
+    stop_write_paths || true
     [[ -n "$previous_id" ]] && set_config LUTHN_IMAGE "$previous_id" || set_config LUTHN_IMAGE "$previous_ref"
     record_state failed "$target_image" "$target_id" "$previous_id" "$backup_path"
     echo "Update failed readiness. API is stopped; the backup and previous image ID are recorded." >&2
+    return 1
+  fi
+
+  if ! start_extension_services; then
+    stop_write_paths || true
+    [[ -n "$previous_id" ]] && set_config LUTHN_IMAGE "$previous_id" || set_config LUTHN_IMAGE "$previous_ref"
+    record_state failed "$target_image" "$target_id" "$previous_id" "$backup_path"
+    echo "Update failed while restoring the managed extension. API and write paths are stopped for recovery." >&2
     return 1
   fi
 
@@ -2451,6 +2672,10 @@ update_luthn() {
   record_state ready "$target_image" "$current_id" "$previous_id" "$backup_path"
   refresh_codex_connection_observation || \
     echo "warning: updated Codex connector status could not be reported" >&2
+  if ! run_post_update_bootstrap; then
+    echo "Luthn services were updated, but the newly installed CLI could not finish post-update bootstrap. Re-run 'luthn update' after correcting the reported error." >&2
+    return 1
+  fi
   echo "Luthn update completed: $target_channel -> $target_image"
   echo "Revision: ${previous_revision:-unavailable} -> ${target_revision:-unavailable}"
   if [[ "$compatibility_changed" == "true" ]]; then
@@ -2467,11 +2692,18 @@ reset_luthn() {
   fi
   require_installation
   require_docker
+  extension_was_configured=false
+  extension_configured && extension_was_configured=true
+  stop_extension_services
+  remove_extension_containers
   compose_cmd down --volumes --remove-orphans
   docker volume rm \
     "$(read_config LUTHN_POSTGRES_VOLUME luthn-postgres)" \
     "$(read_config LUTHN_OPERATOR_VOLUME luthn-operator)" >/dev/null 2>&1 || true
   start_stack true
+  if [[ "$extension_was_configured" == "true" ]]; then
+    start_extension_services
+  fi
   current_id="$(image_id_for_container)"
   record_state ready "$(read_config LUTHN_IMAGE "$default_image")" "$current_id"
   refresh_codex_connection_observation || \
@@ -2498,14 +2730,14 @@ uninstall_luthn() {
   fi
 
   require_docker
-  if has_codex_connector_artifact; then
+  if has_codex_connector_artifact || [[ -f "$remote_codex_profile_state_file" ]]; then
     if ! disconnect_codex; then
       echo "Uninstall stopped because Codex connector cleanup did not complete." >&2
       echo "Restore Codex prerequisites, run 'luthn disconnect codex', and retry." >&2
       return 1
     fi
   fi
-  if [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]]; then
+  if [[ -f "$claude_state_file" || -f "$claude_pending_state_file" || -f "$remote_claude_profile_state_file" ]]; then
     if ! disconnect_claude; then
       echo "Uninstall stopped because Claude Code connector cleanup did not complete." >&2
       echo "Restore Claude Code prerequisites, run 'luthn disconnect claude', and retry." >&2
@@ -2514,10 +2746,25 @@ uninstall_luthn() {
   fi
   if [[ -f "$compose_file" && -f "$config_file" ]]; then
     if [[ "$purge_data" == "true" ]]; then
+      host_helper_remove_extension true || {
+        echo "Uninstall stopped because the managed extension could not be removed safely." >&2
+        return 1
+      }
+    else
+      stop_extension_services
+      remove_extension_containers
+    fi
+    if [[ "$purge_data" == "true" ]]; then
       compose_cmd down --volumes --remove-orphans
     else
       compose_cmd down --remove-orphans
     fi
+  fi
+
+  host_helper_stop >/dev/null 2>&1 || true
+  rm -f "$host_helper_launchd_file" "$host_helper_systemd_file"
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
   fi
 
   if [[ "$purge_data" == "true" ]]; then
@@ -2614,6 +2861,10 @@ connect_claude() {
   auto_recall=true
   case "${1:-}" in --auto-recall) shift;; --no-auto-recall) auto_recall=false; shift;; esac
   (( $# == 0 )) || { echo "usage: luthn connect claude [--no-auto-recall]" >&2; return 2; }
+  if [[ -f "$remote_claude_profile_state_file" ]]; then
+    echo "An owned remote Claude Code MCP profile is active. Run '$cli_path profile local claude' before configuring the local MCP profile." >&2
+    return 1
+  fi
   require_installation; require_docker; require_command curl; require_command python3; require_command claude
   ensure_codex_connector_helper || { echo "Claude Code connector helper is unavailable." >&2; return 1; }
   helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"
@@ -2659,22 +2910,46 @@ connect_claude() {
   if ! record_claude_connector_state "$claude_state_file" configured "$settings" "$instructions" "$auto_recall" "$claude_registration_digest" "$settings_existed" "$instructions_existed"; then rollback_claude_connect "$settings" "$settings_backup" "$settings_existed" "$instructions" "$instructions_backup" "$instructions_existed" "$mcp_added" "$config_backup"; return 1; fi
   rm -f "$claude_pending_state_file" "$settings_backup" "$instructions_backup" "$config_backup"
   report_claude_observation "automatic-ingestion:true:Unknown:Unknown:" "mcp:true:Verified:Succeeded:" >/dev/null 2>&1 || true
+  host_helper_start >/dev/null 2>&1 || echo "warning: the browser MCP helper could not be started" >&2
   echo "Claude Code connector is configured. Restart Claude Code, complete a turn, then run: $cli_path connection status claude"
 }
 
 show_claude_connection_status() {
   require_installation; require_command python3
   helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"; [[ -n "$settings" ]] || settings="$(claude_settings_path)"; [[ -n "$instructions" ]] || instructions="$(claude_instructions_path)"; hook_args=(); while IFS= read -r value; do hook_args+=("$value"); done < <(claude_hook_args)
-  [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] && echo "Local connector: $(claude_state_value SETUP_STATE)" || echo "Local connector: not configured"
+  if [[ -f "$remote_claude_profile_state_file" ]]; then
+    echo "MCP profile: remote"
+  elif [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]]; then
+    echo "Local connector: $(claude_state_value SETUP_STATE)"
+  else
+    echo "Local connector: not configured"
+  fi
   if [[ -f "$helper" ]] && python3 "$helper" claude-hooks check --path "$settings" --command python3 "${hook_args[@]}"; then echo "  automatic-ingestion: configured"; else echo "  automatic-ingestion: missing"; fi
-  recorded_digest="$(claude_state_value MCP_DIGEST)"; if command -v claude >/dev/null 2>&1 && claude_registration_snapshot && { [[ -z "$recorded_digest" ]] || [[ "$recorded_digest" == "$claude_registration_digest" ]]; }; then echo "  mcp: configured"; else echo "  mcp: missing or changed"; fi
+  if [[ -f "$remote_claude_profile_state_file" ]]; then
+    if command -v claude >/dev/null 2>&1 && claude mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+      echo "  remote-mcp: configured"
+    else
+      echo "  remote-mcp: missing or changed"
+    fi
+  else
+    recorded_digest="$(claude_state_value MCP_DIGEST)"; if command -v claude >/dev/null 2>&1 && claude_registration_snapshot && { [[ -z "$recorded_digest" ]] || [[ "$recorded_digest" == "$claude_registration_digest" ]]; }; then echo "  mcp: configured"; else echo "  mcp: missing or changed"; fi
+  fi
   if [[ -f "$helper" ]] && python3 "$helper" claude-instructions check --path "$instructions"; then echo "  lightweight-recall: enabled"; else echo "  lightweight-recall: disabled"; fi
   service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"; base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"; [[ -f "$helper" && -f "$service_token_file" ]] && python3 "$helper" status --base-url "$base_url" --token-file "$service_token_file" --agent-id claude-code || true
 }
 
 disconnect_claude() {
   require_installation; require_command python3
-  [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] || { echo "No Luthn-owned Claude Code configuration was recorded."; return 0; }
+  if [[ -f "$remote_claude_profile_state_file" ]]; then
+    require_command claude
+    if ! claude mcp get "$remote_mcp_name" >/dev/null 2>&1 ||
+      ! claude mcp remove "$remote_mcp_name" >/dev/null; then
+      echo "The Luthn-owned remote Claude Code MCP could not be removed; local connector cleanup was not started." >&2
+      return 1
+    fi
+    rm -f "$remote_claude_profile_state_file"
+  fi
+  [[ -f "$claude_state_file" || -f "$claude_pending_state_file" ]] || { echo "Luthn-owned remote Claude Code MCP configuration was removed."; return 0; }
   helper="$(codex_helper_path)"; settings="$(claude_state_value SETTINGS_FILE)"; instructions="$(claude_state_value INSTRUCTIONS_FILE)"; [[ -n "$settings" ]] || settings="$(claude_settings_path)"; [[ -n "$instructions" ]] || instructions="$(claude_instructions_path)"
   [[ -f "$helper" ]] || ensure_codex_connector_helper || return 1
   require_command claude
@@ -2725,11 +3000,837 @@ run_mcp() {
   fi
 }
 
+remote_codex_profile_state_file="${LUTHN_REMOTE_CODEX_PROFILE_STATE_FILE:-$connector_state_dir/codex.remote-profile.env}"
+remote_claude_profile_state_file="${LUTHN_REMOTE_CLAUDE_PROFILE_STATE_FILE:-$connector_state_dir/claude-code.remote-profile.env}"
+remote_mcp_name="luthn-remote"
+
+validate_remote_mcp_url() {
+  python3 - "$1" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+value = sys.argv[1]
+parsed = urlparse(value)
+if parsed.username or parsed.password or parsed.query or parsed.fragment:
+    raise SystemExit(1)
+if parsed.scheme == "https" and parsed.hostname:
+    raise SystemExit(0)
+if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+write_remote_profile_state() {
+  destination="$1"; agent="$2"; url="$3"; client_id="$4"; resource="$5"
+  ensure_directories || return 1
+  state_tmp="$(mktemp "${destination}.XXXXXX")" || return 1
+  if ! cat >"$state_tmp" <<EOF
+PROFILE_VERSION=1
+AGENT=$agent
+CONFIGURATION_OWNER=luthn
+LOCAL_MCP_NAME=luthn
+REMOTE_MCP_NAME=$remote_mcp_name
+REMOTE_URL=$url
+OAUTH_CLIENT_ID=$client_id
+OAUTH_RESOURCE=$resource
+UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  then rm -f "$state_tmp"; return 1; fi
+  chmod 0600 "$state_tmp" && mv "$state_tmp" "$destination" || { rm -f "$state_tmp"; return 1; }
+}
+
+remote_profile_value() {
+  state="$1"; key="$2"
+  [[ -f "$state" ]] || return 0
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$state"
+}
+
+parse_remote_profile_options() {
+  remote_url=""; remote_oauth_client_id=""; remote_oauth_resource=""
+  while (( $# > 0 )); do
+    case "$1" in
+      --url) remote_url="${2:-}"; shift 2 ;;
+      --oauth-client-id) remote_oauth_client_id="${2:-}"; shift 2 ;;
+      --oauth-resource) remote_oauth_resource="${2:-}"; shift 2 ;;
+      *) echo "unknown remote profile option: $1" >&2; return 2 ;;
+    esac
+  done
+  if [[ -z "$remote_url" ]] || ! validate_remote_mcp_url "$remote_url"; then
+    echo "A remote MCP profile requires an absolute HTTPS URL (or explicit loopback HTTP for development)." >&2
+    return 2
+  fi
+  if [[ -n "$remote_oauth_client_id" ]] && { (( ${#remote_oauth_client_id} > 256 )) || ! printf '%s' "$remote_oauth_client_id" | grep -Eq '^[A-Za-z0-9._:-]+$'; }; then
+    echo "The OAuth client ID is invalid." >&2; return 2
+  fi
+  if [[ -n "$remote_oauth_resource" ]] && ! validate_remote_mcp_url "$remote_oauth_resource"; then
+    echo "The OAuth resource must be an absolute HTTPS URI (or loopback HTTP for development)." >&2; return 2
+  fi
+}
+
+activate_remote_codex_profile() {
+  parse_remote_profile_options "$@" || return $?
+  require_installation; require_command codex; require_command python3
+  [[ -f "$codex_state_file" ]] || { echo "The Luthn-owned local Codex connector must be configured first." >&2; return 1; }
+  codex_mcp_registration_status || { echo "The owned local Codex MCP registration is missing or changed; no profile was switched." >&2; return 1; }
+  if codex mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+    echo "An MCP registration named '$remote_mcp_name' already exists; it was preserved." >&2; return 1
+  fi
+  remote_args=(mcp add "$remote_mcp_name" --url "$remote_url")
+  [[ -n "$remote_oauth_client_id" ]] && remote_args+=(--oauth-client-id "$remote_oauth_client_id")
+  [[ -n "$remote_oauth_resource" ]] && remote_args+=(--oauth-resource "$remote_oauth_resource")
+  if ! codex "${remote_args[@]}"; then return 1; fi
+  if ! codex mcp login "$remote_mcp_name"; then
+    codex mcp remove "$remote_mcp_name" >/dev/null 2>&1 || true
+    echo "Remote OAuth did not complete; the local MCP profile was preserved." >&2; return 1
+  fi
+  if ! write_remote_profile_state "$remote_codex_profile_state_file" codex "$remote_url" "$remote_oauth_client_id" "$remote_oauth_resource"; then
+    codex mcp remove "$remote_mcp_name" >/dev/null 2>&1 || true
+    echo "Remote profile ownership could not be recorded; the local MCP profile was preserved." >&2; return 1
+  fi
+  if ! codex mcp remove luthn >/dev/null; then
+    if codex mcp remove "$remote_mcp_name" >/dev/null 2>&1; then
+      rm -f "$remote_codex_profile_state_file"
+      echo "The local MCP could not be disabled; remote configuration was rolled back." >&2
+    else
+      echo "The local MCP could not be disabled; remote profile ownership was preserved for recovery." >&2
+    fi
+    return 1
+  fi
+  echo "The remote Codex MCP profile is active. Local automatic capture remains unchanged."
+}
+
+restore_local_codex_profile() {
+  require_installation; require_command codex
+  [[ -f "$remote_codex_profile_state_file" ]] || { echo "No Luthn-owned remote Codex profile is active."; return 0; }
+  remote_url="$(remote_profile_value "$remote_codex_profile_state_file" REMOTE_URL)"
+  remote_client_id="$(remote_profile_value "$remote_codex_profile_state_file" OAUTH_CLIENT_ID)"
+  remote_resource="$(remote_profile_value "$remote_codex_profile_state_file" OAUTH_RESOURCE)"
+  if ! codex mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+    echo "The owned remote Codex MCP could not be removed; local MCP was not changed." >&2; return 1
+  fi
+  local_registration=absent
+  if codex mcp get luthn >/dev/null 2>&1; then
+    if ! codex_mcp_registration_status; then
+      echo "An unrelated local MCP registration named 'luthn' was preserved; no profile was changed." >&2
+      return 1
+    fi
+    local_registration=owned
+  fi
+  if ! codex mcp remove "$remote_mcp_name" >/dev/null; then
+    echo "The owned remote Codex MCP could not be removed; local MCP was not changed." >&2; return 1
+  fi
+  if [[ "$local_registration" == "owned" ]]; then
+    rm -f "$remote_codex_profile_state_file"
+    echo "The owned local Codex MCP profile is active. The duplicate remote profile was removed."
+    return 0
+  fi
+  if ! codex mcp add luthn -- "$cli_path" mcp >/dev/null; then
+    rollback_args=(mcp add "$remote_mcp_name" --url "$remote_url")
+    [[ -n "$remote_client_id" ]] && rollback_args+=(--oauth-client-id "$remote_client_id")
+    [[ -n "$remote_resource" ]] && rollback_args+=(--oauth-resource "$remote_resource")
+    if codex "${rollback_args[@]}" >/dev/null 2>&1 && codex mcp login "$remote_mcp_name" >/dev/null; then
+      echo "Local MCP could not be restored; the remote profile was restored for recovery." >&2
+    else
+      echo "Local MCP could not be restored, and remote profile recovery was incomplete." >&2
+    fi
+    return 1
+  fi
+  rm -f "$remote_codex_profile_state_file"
+  echo "The owned local Codex MCP profile is active."
+}
+
+activate_remote_claude_profile() {
+  parse_remote_profile_options "$@" || return $?
+  [[ -z "$remote_oauth_resource" ]] || { echo "Claude Code does not expose an OAuth resource option; omit --oauth-resource." >&2; return 2; }
+  require_installation; require_command claude; require_command python3
+  [[ -f "$claude_state_file" ]] || { echo "The Luthn-owned local Claude Code connector must be configured first." >&2; return 1; }
+  claude_registration_snapshot || { echo "The owned local Claude Code MCP registration is missing or changed; no profile was switched." >&2; return 1; }
+  if claude mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+    echo "An MCP registration named '$remote_mcp_name' already exists; it was preserved." >&2; return 1
+  fi
+  remote_args=(mcp add --scope user --transport http "$remote_mcp_name" "$remote_url")
+  [[ -n "$remote_oauth_client_id" ]] && remote_args+=(--client-id "$remote_oauth_client_id")
+  if ! claude "${remote_args[@]}" || ! claude mcp login "$remote_mcp_name"; then
+    claude mcp remove "$remote_mcp_name" >/dev/null 2>&1 || true
+    echo "Remote OAuth did not complete; the local MCP profile was preserved." >&2; return 1
+  fi
+  if ! write_remote_profile_state "$remote_claude_profile_state_file" claude "$remote_url" "$remote_oauth_client_id" ""; then
+    claude mcp remove "$remote_mcp_name" >/dev/null 2>&1 || true
+    echo "Remote profile ownership could not be recorded; the local MCP profile was preserved." >&2; return 1
+  fi
+  if ! claude mcp remove luthn >/dev/null; then
+    if claude mcp remove "$remote_mcp_name" >/dev/null 2>&1; then
+      rm -f "$remote_claude_profile_state_file"
+      echo "The local MCP could not be disabled; remote configuration was rolled back." >&2
+    else
+      echo "The local MCP could not be disabled; remote profile ownership was preserved for recovery." >&2
+    fi
+    return 1
+  fi
+  echo "The remote Claude Code MCP profile is active. Local automatic capture remains unchanged."
+}
+
+restore_local_claude_profile() {
+  require_installation; require_command claude
+  [[ -f "$remote_claude_profile_state_file" ]] || { echo "No Luthn-owned remote Claude Code profile is active."; return 0; }
+  remote_url="$(remote_profile_value "$remote_claude_profile_state_file" REMOTE_URL)"
+  remote_client_id="$(remote_profile_value "$remote_claude_profile_state_file" OAUTH_CLIENT_ID)"
+  if ! claude mcp get "$remote_mcp_name" >/dev/null 2>&1; then
+    echo "The owned remote Claude Code MCP could not be removed; local MCP was not changed." >&2; return 1
+  fi
+  local_registration=absent
+  if claude mcp get luthn >/dev/null 2>&1; then
+    recorded_digest="$(claude_state_value MCP_DIGEST)"
+    if [[ -z "$recorded_digest" ]] || ! claude_registration_snapshot || [[ "$claude_registration_digest" != "$recorded_digest" ]]; then
+      echo "An unverified local Claude Code MCP registration named 'luthn' was preserved; no profile was changed." >&2
+      return 1
+    fi
+    local_registration=owned
+  fi
+  if ! claude mcp remove "$remote_mcp_name" >/dev/null; then
+    echo "The owned remote Claude Code MCP could not be removed; local MCP was not changed." >&2; return 1
+  fi
+  if [[ "$local_registration" == "owned" ]]; then
+    rm -f "$remote_claude_profile_state_file"
+    echo "The owned local Claude Code MCP profile is active. The duplicate remote profile was removed."
+    return 0
+  fi
+  if ! claude mcp add --scope user luthn -- "$cli_path" mcp >/dev/null; then
+    rollback_args=(mcp add --scope user --transport http "$remote_mcp_name" "$remote_url")
+    [[ -n "$remote_client_id" ]] && rollback_args+=(--client-id "$remote_client_id")
+    if claude "${rollback_args[@]}" >/dev/null 2>&1 && claude mcp login "$remote_mcp_name" >/dev/null; then
+      echo "Local MCP could not be restored; the remote profile was restored for recovery." >&2
+    else
+      echo "Local MCP could not be restored, and remote profile recovery was incomplete." >&2
+    fi
+    return 1
+  fi
+  rm -f "$remote_claude_profile_state_file"
+  echo "The owned local Claude Code MCP profile is active."
+}
+
+host_helper_auth_config() {
+  destination="$1"
+  service_token_file="$(read_config LUTHN_SERVICE_TOKEN_FILE "$token_file")"
+  [[ -f "$service_token_file" ]] || return 1
+  service_token="$(tr -d '\r\n' <"$service_token_file")"
+  [[ -n "$service_token" ]] || return 1
+  umask 077
+  cat >"$destination" <<EOF
+silent
+show-error
+fail
+header = "Authorization: Bearer $service_token"
+header = "Content-Type: application/json"
+EOF
+}
+
+host_helper_observation_json() {
+  codex_snapshot="$1"
+  claude_local="$2"
+  claude_remote="$3"
+  python3 - "$codex_snapshot" "$host_helper_version" "$claude_local" "$claude_remote" <<'PY'
+import json
+import sys
+from urllib.parse import urlparse
+
+path, version, claude_local, claude_remote = sys.argv[1:]
+try:
+    with open(path, encoding="utf-8") as source:
+        configured = json.load(source)
+except (OSError, json.JSONDecodeError):
+    configured = []
+
+entries = []
+for item in configured[:64] if isinstance(configured, list) else []:
+    name = item.get("name")
+    transport = item.get("transport") or {}
+    kind = transport.get("type")
+    if not isinstance(name, str) or kind not in {"stdio", "streamable_http"}:
+        continue
+    endpoint_host = None
+    if kind == "streamable_http":
+        try:
+            endpoint_host = urlparse(transport.get("url") or "").hostname
+        except ValueError:
+            endpoint_host = None
+    auth = item.get("auth_status")
+    entries.append({
+        "name": name,
+        "transport": "http" if kind == "streamable_http" else "stdio",
+        "enabled": item.get("enabled") is True,
+        "authStatus": auth if isinstance(auth, str) else None,
+        "endpointHost": endpoint_host,
+    })
+
+local = any(item["name"] == "luthn" and item["transport"] == "stdio" and item["enabled"] for item in entries)
+remote = any(
+    item["name"].startswith("luthn-") and
+    item["transport"] == "http" and
+    item["enabled"]
+    for item in entries
+)
+codex_mode = "conflict" if local and remote else "local" if local else "remote" if remote else "none"
+
+claude_entries = []
+if claude_local == "true":
+    claude_entries.append({"name": "luthn", "transport": "stdio", "enabled": True, "authStatus": None, "endpointHost": None})
+if claude_remote == "true":
+    claude_entries.append({"name": "luthn-remote", "transport": "http", "enabled": True, "authStatus": None, "endpointHost": None})
+claude_mode = "conflict" if claude_local == "true" and claude_remote == "true" else "local" if claude_local == "true" else "remote" if claude_remote == "true" else "none"
+
+print(json.dumps({
+    "helperVersion": version,
+    "clients": [
+        {"agentKind": "codex", "mode": codex_mode, "entries": entries},
+        {"agentKind": "claude", "mode": claude_mode, "entries": claude_entries},
+    ],
+}, separators=(",", ":")))
+PY
+}
+
+host_helper_report() (
+  require_installation || return 1
+  require_command curl || return 1
+  require_command python3 || return 1
+  ensure_directories || return 1
+  snapshot="$(mktemp "$state_dir/codex-mcp.XXXXXX")" || return 1
+  auth_config="$(mktemp "$state_dir/host-helper-auth.XXXXXX")" || return 1
+  trap 'rm -f "$snapshot" "$auth_config"' EXIT
+  if command -v codex >/dev/null 2>&1; then
+    codex mcp list --json >"$snapshot" 2>/dev/null || printf '[]' >"$snapshot"
+  else
+    printf '[]' >"$snapshot"
+  fi
+  claude_local=false
+  claude_remote=false
+  if command -v claude >/dev/null 2>&1; then
+    claude mcp get luthn >/dev/null 2>&1 && claude_local=true
+    claude mcp get "$remote_mcp_name" >/dev/null 2>&1 && claude_remote=true
+  fi
+  observation="$(host_helper_observation_json "$snapshot" "$claude_local" "$claude_remote")"
+  host_helper_auth_config "$auth_config" || return 1
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  curl --config "$auth_config" \
+    --request POST \
+    --data-binary "$observation" \
+    "$base_url/api/host/mcp-profiles/observations" >/dev/null
+)
+
+host_helper_complete_action() {
+  action_id="$1"
+  outcome="$2"
+  failure_code="${3:-}"
+  auth_config="$4"
+  base_url="$5"
+  completion="$(python3 - "$outcome" "$failure_code" <<'PY'
+import json, sys
+print(json.dumps({"outcome": sys.argv[1], "failureCode": sys.argv[2] or None}, separators=(",", ":")))
+PY
+)"
+  curl --config "$auth_config" \
+    --request POST \
+    --data-binary "$completion" \
+    "$base_url/api/host/mcp-profiles/actions/$action_id/complete" >/dev/null
+}
+
+host_helper_complete_extension_action() {
+  action_id="$1"
+  outcome="$2"
+  failure_code="${3:-}"
+  verification_code="${4:-}"
+  auth_config="$5"
+  base_url="$6"
+  completion="$(python3 - "$outcome" "$failure_code" "$verification_code" <<'PY'
+import json, sys
+print(json.dumps({
+    "outcome": sys.argv[1],
+    "failureCode": sys.argv[2] or None,
+    "verificationCode": sys.argv[3] or None,
+}, separators=(",", ":")))
+PY
+)"
+  curl --config "$auth_config" \
+    --request POST \
+    --data-binary "$completion" \
+    "$base_url/api/host/managed-extensions/actions/$action_id/complete" >/dev/null
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  else openssl dgst -sha256 "$1" | awk '{print $NF}'
+  fi
+}
+
+host_helper_prepare_extension() (
+  action_file="$1"
+  require_docker || return 1
+  require_command curl || return 1
+  require_command openssl || return 1
+  require_command python3 || return 1
+  ensure_directories || return 1
+  validate_extension_volume_name || return 1
+  mkdir -p "$extension_dir"
+  chmod 0700 "$extension_dir"
+
+  IFS=$'\t' read -r package_uri expected_digest package_version runtime_base_image service_origin expires_at provisioning_token < <(
+    python3 - "$action_file" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    action = json.load(source)["action"]
+manifest = action["manifest"]
+values = (
+    manifest["packageUri"], manifest["packageSha256"], manifest["packageVersion"],
+    manifest["runtimeBaseImage"], manifest["serviceOrigin"], manifest["expiresAt"],
+    action["provisioningToken"],
+)
+if any(not isinstance(value, str) or "\t" in value or "\n" in value for value in values):
+    raise SystemExit(1)
+print("\t".join(values))
+PY
+  ) || return 1
+  [[ "$expected_digest" =~ ^sha256:[0-9a-fA-F]{64}$ ]] || return 1
+  [[ "$runtime_base_image" =~ ^mcr\.microsoft\.com/dotnet/aspnet:10\.0@sha256:[0-9a-fA-F]{64}$ ]] || return 1
+
+  package_file="$(mktemp "$state_dir/extension-package.XXXXXX")" || return 1
+  extract_dir="$(mktemp -d "$state_dir/extension-publish.XXXXXX")" || return 1
+  auth_file="$(mktemp "$state_dir/extension-download.XXXXXX")" || return 1
+  build_file="$extract_dir/Dockerfile"
+  trap 'rm -rf "$package_file" "$extract_dir" "$auth_file"' EXIT
+  chmod 0600 "$package_file" "$auth_file"
+  cat >"$auth_file" <<EOF
+silent
+show-error
+fail
+location
+max-redirs = 0
+header = "Authorization: Bearer $provisioning_token"
+EOF
+  curl --config "$auth_file" --request POST --output "$package_file" "$package_uri" || return 1
+  actual_digest="$(sha256_file "$package_file")" || return 1
+  normalized_actual="$(printf '%s' "$actual_digest" | tr 'A-F' 'a-f')"
+  normalized_expected="$(printf '%s' "$expected_digest" | tr 'A-F' 'a-f')"
+  [[ "sha256:$normalized_actual" == "$normalized_expected" ]] || return 1
+
+  python3 - "$package_file" "$extract_dir/app" <<'PY'
+import os, pathlib, sys, tarfile
+archive, destination = sys.argv[1:]
+root = pathlib.Path(destination)
+root.mkdir(mode=0o700)
+with tarfile.open(archive, "r:gz") as source:
+    members = source.getmembers()
+    if len(members) > 512 or sum(item.size for item in members) > 128 * 1024 * 1024:
+        raise SystemExit(1)
+    for item in members:
+        path = pathlib.PurePosixPath(item.name)
+        if path.is_absolute() or ".." in path.parts or not (item.isdir() or item.isfile()):
+            raise SystemExit(1)
+        target = (root / pathlib.Path(*path.parts)).resolve()
+        if root.resolve() not in target.parents and target != root.resolve():
+            raise SystemExit(1)
+    source.extractall(root)
+if not (root / "luthn-extension.dll").is_file():
+    raise SystemExit(1)
+PY
+  cat >"$build_file" <<EOF
+FROM $runtime_base_image
+WORKDIR /app
+COPY app/ .
+RUN mkdir -p /var/lib/luthn-extension && chown "\$APP_UID" /var/lib/luthn-extension
+ENV ASPNETCORE_ENVIRONMENT=Production ASPNETCORE_HTTP_PORTS=8080
+USER \$APP_UID
+ENTRYPOINT ["dotnet", "luthn-extension.dll"]
+EOF
+  image_tag="luthn-managed-addon:$(printf '%s' "$package_version" | tr -cd 'A-Za-z0-9_.-')"
+  docker build --pull=false --tag "$image_tag" "$extract_dir" >/dev/null || return 1
+
+  if [[ ! -f "$extension_state_key_file" ]]; then
+    openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n' >"$extension_state_key_file"
+    chmod 0600 "$extension_state_key_file"
+  fi
+  if [[ ! -f "$extension_token_file" ]]; then
+    openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n' >"$extension_token_file"
+    chmod 0600 "$extension_token_file"
+  fi
+
+  python3 - "$extension_compose_file" "$image_tag" "$service_origin" "$expires_at" \
+    "$extension_state_key_file" "$extension_token_file" "$extension_volume_name" <<'PY'
+import json, os, sys
+path, image, origin, enrollment_deadline, state_key, extension_token, volume_name = sys.argv[1:]
+image, origin, enrollment_deadline, state_key, extension_token, volume_name = map(
+    json.dumps,
+    (image, origin, enrollment_deadline, state_key, extension_token, volume_name),
+)
+content = f'''services:
+  luthn-extension:
+    image: {image}
+    environment:
+      LuthnManagedExtension__Enabled: "true"
+      LuthnManagedExtension__ServiceOrigin: {origin}
+      LuthnManagedExtension__EnrollmentDeadline: {enrollment_deadline}
+      LuthnManagedExtension__StateDirectory: /var/lib/luthn-extension
+      LuthnManagedExtension__StateEncryptionKeyFile: /run/secrets/extension-state-key
+      LuthnManagedExtension__LocalExtensionTokenFile: /run/secrets/extension-local-token
+    secrets:
+      - extension-state-key
+      - extension-local-token
+    volumes:
+      - extension-state:/var/lib/luthn-extension
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+  worker:
+    profiles: ["extensions"]
+    environment:
+      Luthn__Extensions__SafeProjection__Enabled: "true"
+      Luthn__Extensions__SafeProjection__Endpoint: http://luthn-extension:8080/v1/safe-projections
+      Luthn__Extensions__SafeProjection__SharedSecretFile: /run/secrets/extension-local-token
+    secrets:
+      - extension-local-token
+secrets:
+  extension-state-key:
+    file: {state_key}
+  extension-local-token:
+    file: {extension_token}
+volumes:
+  extension-state:
+    name: {volume_name}
+'''
+temporary = path + ".tmp"
+with open(temporary, "w", encoding="utf-8") as target:
+    target.write(content)
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+PY
+  printf '%s\n' "$image_tag" >"$extension_image_ref_file"
+  chmod 0600 "$extension_image_ref_file"
+  compose_with_extension_cmd --profile extensions up -d luthn-extension worker >/dev/null || return 1
+
+  attempts=30
+  while (( attempts > 0 )); do
+    status_json="$(compose_with_extension_cmd exec -T luthn-extension dotnet luthn-extension.dll status 2>/dev/null || true)"
+    verification_code="$(python3 - "$status_json" <<'PY'
+import json, sys
+try:
+    value = json.loads(sys.argv[1])
+except json.JSONDecodeError:
+    raise SystemExit(1)
+if value.get("status") == "verification_required" and isinstance(value.get("verificationCode"), str):
+    print(value["verificationCode"])
+PY
+    )" || true
+    if [[ -n "$verification_code" ]]; then
+      printf '%s' "$verification_code"
+      return 0
+    fi
+    attempts=$((attempts - 1))
+    sleep 1
+  done
+  return 1
+)
+
+host_helper_managed_extension_once() (
+  require_installation || return 1
+  require_command curl || return 1
+  require_command python3 || return 1
+  ensure_directories || return 1
+  auth_config="$(mktemp "$state_dir/host-helper-managed-extension-auth.XXXXXX")" || return 1
+  response="$(mktemp "$state_dir/host-helper-managed-extension-action.XXXXXX")" || return 1
+  trap 'rm -f "$auth_config" "$response"' EXIT
+  chmod 0600 "$auth_config" "$response"
+  host_helper_auth_config "$auth_config" || return 1
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  curl --config "$auth_config" --request POST \
+    "$base_url/api/host/managed-extensions/actions/claim" >"$response" || return 0
+  IFS=$'\t' read -r action_id operation < <(python3 - "$response" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        action = json.load(source).get("action")
+except (OSError, json.JSONDecodeError):
+    action = None
+if action and isinstance(action.get("id"), str):
+    print("\t".join((action["id"], action.get("operation") or "")))
+PY
+  )
+  [[ -n "$action_id" ]] || return 0
+
+  if [[ "$operation" == "remove" ]]; then
+    if host_helper_remove_extension true; then
+      host_helper_complete_extension_action "$action_id" succeeded "" "" "$auth_config" "$base_url" || true
+    else
+      host_helper_complete_extension_action "$action_id" failed extension.cleanup_failed "" "$auth_config" "$base_url" || true
+    fi
+    return 0
+  fi
+  if [[ "$operation" != "install" ]]; then
+    host_helper_complete_extension_action "$action_id" failed extension.operation_invalid "" "$auth_config" "$base_url" || true
+    return 0
+  fi
+
+  verification_code="$(host_helper_prepare_extension "$response")" || {
+    host_helper_remove_extension true || true
+    host_helper_complete_extension_action "$action_id" failed extension.bootstrap_failed "" "$auth_config" "$base_url" || true
+    return 0
+  }
+  host_helper_complete_extension_action "$action_id" succeeded "" "$verification_code" "$auth_config" "$base_url" || true
+)
+
+host_helper_once() (
+  require_installation || return 1
+  require_command curl || return 1
+  require_command python3 || return 1
+  ensure_directories || return 1
+  auth_config="$(mktemp "$state_dir/host-helper-auth.XXXXXX")" || return 1
+  response="$(mktemp "$state_dir/host-helper-action.XXXXXX")" || return 1
+  trap 'rm -f "$auth_config" "$response"' EXIT
+  host_helper_auth_config "$auth_config" || return 1
+  base_url="$(read_config LUTHN_BASE_URL http://127.0.0.1:8080)"
+  curl --config "$auth_config" --request POST \
+    "$base_url/api/operator/session/local/arm-requested" >/dev/null 2>&1 || true
+  curl --config "$auth_config" --request POST \
+    "$base_url/api/host/mcp-profiles/actions/claim" >"$response" || return 0
+  IFS=$'\t' read -r action_id agent_kind operation remote_url oauth_client_id oauth_resource < <(
+    python3 - "$response" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        action = json.load(source).get("action")
+except (OSError, json.JSONDecodeError):
+    action = None
+if action:
+    values = [action.get(key) or "-" for key in ("id", "agentKind", "operation", "remoteUrl", "oauthClientId", "oauthResource")]
+    print("\t".join(values))
+PY
+  )
+  [[ -n "${action_id:-}" ]] || return 0
+
+  profile_result=0
+  if [[ "$operation" == "activate-remote" ]]; then
+    profile_args=(--url "$remote_url")
+    [[ "$oauth_client_id" != "-" ]] && profile_args+=(--oauth-client-id "$oauth_client_id")
+    [[ "$oauth_resource" != "-" ]] && profile_args+=(--oauth-resource "$oauth_resource")
+    if [[ "$agent_kind" == "codex" ]]; then
+      activate_remote_codex_profile "${profile_args[@]}" || profile_result=$?
+    elif [[ "$agent_kind" == "claude" ]]; then
+      [[ "$oauth_resource" == "-" ]] || profile_result=2
+      (( profile_result != 0 )) || activate_remote_claude_profile "${profile_args[@]}" || profile_result=$?
+    else
+      profile_result=2
+    fi
+  elif [[ "$operation" == "restore-local" ]]; then
+    if [[ "$agent_kind" == "codex" ]]; then
+      restore_local_codex_profile || profile_result=$?
+    elif [[ "$agent_kind" == "claude" ]]; then
+      restore_local_claude_profile || profile_result=$?
+    else
+      profile_result=2
+    fi
+  else
+    profile_result=2
+  fi
+
+  if (( profile_result == 0 )); then
+    host_helper_complete_action "$action_id" succeeded "" "$auth_config" "$base_url" || true
+  else
+    host_helper_complete_action "$action_id" failed profile.change_failed "$auth_config" "$base_url" || true
+  fi
+  host_helper_report || true
+)
+
+host_helper_run() {
+  trap 'exit 0' TERM INT
+  last_report_at=0
+  while true; do
+    now="$(date +%s)"
+    if (( now - last_report_at >= 15 )); then
+      host_helper_report || true
+      last_report_at="$now"
+    fi
+    host_helper_managed_extension_once || true
+    host_helper_once || true
+    sleep 1
+  done
+}
+
+host_helper_install_autostart() {
+  platform="$(uname -s 2>/dev/null || true)"
+  if [[ "$platform" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
+    mkdir -p "$(dirname "$host_helper_launchd_file")" || return 1
+    plist_tmp="$(mktemp "${host_helper_launchd_file}.XXXXXX")" || return 1
+    if ! python3 - "$cli_path" "$host_helper_log_file" "$host_helper_launchd_label" >"$plist_tmp" <<'PY'
+import html, sys
+cli, log, label = (html.escape(value, quote=True) for value in sys.argv[1:])
+print(f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>{label}</string>
+<key>ProgramArguments</key><array><string>{cli}</string><string>host-helper</string><string>run</string></array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>{log}</string>
+<key>StandardErrorPath</key><string>{log}</string>
+</dict></plist>''')
+PY
+    then
+      rm -f "$plist_tmp"
+      return 1
+    fi
+    chmod 0600 "$plist_tmp" || { rm -f "$plist_tmp"; return 1; }
+    mv "$plist_tmp" "$host_helper_launchd_file" || { rm -f "$plist_tmp"; return 1; }
+    launchctl enable "gui/$UID/$host_helper_launchd_label" >/dev/null 2>&1 || true
+    if launchctl print "gui/$UID/$host_helper_launchd_label" >/dev/null 2>&1; then
+      launchctl kickstart -k "gui/$UID/$host_helper_launchd_label" >/dev/null || return 1
+    else
+      launchctl bootstrap "gui/$UID" "$host_helper_launchd_file" >/dev/null || return 1
+    fi
+    return 0
+  fi
+
+  if [[ "$platform" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
+    mkdir -p "$(dirname "$host_helper_systemd_file")" || return 1
+    unit_tmp="$(mktemp "${host_helper_systemd_file}.XXXXXX")" || return 1
+    cli_quoted="$(python3 - "$cli_path" <<'PY'
+import json, sys
+print(json.dumps(sys.argv[1]))
+PY
+)"
+    cat >"$unit_tmp" <<EOF
+[Unit]
+Description=Luthn Host Helper
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=$cli_quoted host-helper run
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+EOF
+    chmod 0600 "$unit_tmp" || { rm -f "$unit_tmp"; return 1; }
+    mv "$unit_tmp" "$host_helper_systemd_file" || { rm -f "$unit_tmp"; return 1; }
+    systemctl --user daemon-reload >/dev/null || return 1
+    systemctl --user enable --now luthn-host-helper.service >/dev/null || return 1
+    return 0
+  fi
+
+  return 1
+}
+
+host_helper_start() {
+  if [[ "${LUTHN_HOST_HELPER_DISABLE_AUTOSTART:-false}" == "true" ]]; then
+    echo "Luthn Host Helper autostart is disabled by configuration."
+    return 0
+  fi
+  require_installation || return 1
+  require_command python3 || return 1
+  ensure_directories || return 1
+  if host_helper_install_autostart; then
+    rm -f "$host_helper_pid_file"
+    echo "Luthn Host Helper is installed and running in the user session."
+    return 0
+  fi
+  if [[ -f "$host_helper_pid_file" ]]; then
+    existing_pid="$(tr -cd '0-9' <"$host_helper_pid_file")"
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+      echo "Luthn Host Helper is already running."
+      return 0
+    fi
+    rm -f "$host_helper_pid_file"
+  fi
+  nohup "$cli_path" host-helper run >>"$host_helper_log_file" 2>&1 &
+  helper_pid=$!
+  printf '%s\n' "$helper_pid" >"$host_helper_pid_file" || return 1
+  chmod 0600 "$host_helper_pid_file" || return 1
+  echo "Luthn Host Helper started."
+}
+
+host_helper_stop() {
+  platform="$(uname -s 2>/dev/null || true)"
+  if [[ "$platform" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1 &&
+      launchctl print "gui/$UID/$host_helper_launchd_label" >/dev/null 2>&1; then
+    launchctl bootout "gui/$UID/$host_helper_launchd_label" >/dev/null
+    launchctl disable "gui/$UID/$host_helper_launchd_label" >/dev/null 2>&1 || true
+    echo "Luthn Host Helper stopped."
+    return 0
+  fi
+  if [[ "$platform" == "Linux" ]] && command -v systemctl >/dev/null 2>&1 &&
+      systemctl --user is-active luthn-host-helper.service >/dev/null 2>&1; then
+    systemctl --user disable --now luthn-host-helper.service >/dev/null
+    echo "Luthn Host Helper stopped."
+    return 0
+  fi
+  if [[ ! -f "$host_helper_pid_file" ]]; then
+    echo "Luthn Host Helper is not running."
+    return 0
+  fi
+  helper_pid="$(tr -cd '0-9' <"$host_helper_pid_file")"
+  if [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null; then
+    kill "$helper_pid"
+  fi
+  rm -f "$host_helper_pid_file"
+  echo "Luthn Host Helper stopped."
+}
+
+host_helper_status() {
+  platform="$(uname -s 2>/dev/null || true)"
+  if [[ "$platform" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1 &&
+      launchctl print "gui/$UID/$host_helper_launchd_label" >/dev/null 2>&1; then
+    echo "Luthn Host Helper is running."
+    return 0
+  fi
+  if [[ "$platform" == "Linux" ]] && command -v systemctl >/dev/null 2>&1 &&
+      systemctl --user is-active luthn-host-helper.service >/dev/null 2>&1; then
+    echo "Luthn Host Helper is running."
+    return 0
+  fi
+  if [[ -f "$host_helper_pid_file" ]]; then
+    helper_pid="$(tr -cd '0-9' <"$host_helper_pid_file")"
+    if [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null; then
+      echo "Luthn Host Helper is running."
+      return 0
+    fi
+  fi
+  echo "Luthn Host Helper is not running."
+  return 1
+}
+
+manage_host_helper() {
+  case "${1:-}" in
+    start) host_helper_start ;;
+    stop) host_helper_stop ;;
+    status) host_helper_status ;;
+    once) host_helper_report || true; host_helper_once ;;
+    run) host_helper_run ;;
+    *) echo "usage: luthn host-helper start|stop|status" >&2; return 2 ;;
+  esac
+}
+
+manage_profile() {
+  mode="${1:-}"; agent="${2:-}"; shift 2 || true
+  case "$mode:$agent" in
+    remote:codex) activate_remote_codex_profile "$@" ;;
+    remote:claude) activate_remote_claude_profile "$@" ;;
+    local:codex) (( $# == 0 )) || { echo "usage: luthn profile local codex" >&2; return 2; }; restore_local_codex_profile ;;
+    local:claude) (( $# == 0 )) || { echo "usage: luthn profile local claude" >&2; return 2; }; restore_local_claude_profile ;;
+    *) echo "usage: luthn profile remote|local codex|claude [options]" >&2; return 2 ;;
+  esac
+}
+
 command="${1:-help}"
 case "$command" in
   install) shift; install_luthn "$@" ;;
   version) shift; show_version "$@" ;;
   status|check) show_status ;;
+  console) shift; open_console "$@" ;;
   update)
     shift
     if [[ "${1:-}" == "check" ]]; then
@@ -2760,6 +3861,9 @@ case "$command" in
     shift
     case "${1:-}" in codex) disconnect_codex;; claude) disconnect_claude;; *) echo "usage: luthn disconnect codex|claude" >&2; exit 2;; esac
     ;;
+  profile) shift; manage_profile "$@" ;;
+  __post-update-bootstrap) shift; post_update_bootstrap "$@" ;;
+  host-helper) shift; manage_host_helper "$@" ;;
   codex-hook) run_codex_hook ;;
   adapter) run_adapter ;;
   mcp) shift; run_mcp "$@" ;;

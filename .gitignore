@@ -20,7 +20,6 @@ credentials.*
 .hermes/
 .codex/
 .agents/
-.drig/
 # Keep the repository-local Codex development instructions on each developer's
 # machine. This file is intentionally untracked, not disposable: do not remove
 # or overwrite it as part of public-repository cleanup.
@@ -29,14 +28,4 @@ AGENTS.md
 .luthn/out/
 
 .DS_Store
-
-# BEGIN DRIG GENERATED ARTIFACTS
-.drig/
-docs/.drig-status.json
-docs/roadmap.md
-docs/01-plan/
-docs/02-architecture/
-docs/03-analysis/
-docs/04-qa/
-docs/05-report/
-# END DRIG GENERATED ARTIFACTS
+tmp/

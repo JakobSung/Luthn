@@ -13,6 +13,9 @@ public static class OperatorConfigurationEndpoints
 {
     public static IEndpointRouteBuilder MapOperatorConfiguration(this IEndpointRouteBuilder app)
     {
+        app.MapGet("/api/operator/console-profile", ReadConsoleProfile)
+            .WithName("ReadOperatorConsoleProfile");
+
         var group = app.MapGroup("/api/operator")
             .RequireServiceScope(ServiceScopes.ConfigWrite);
 
@@ -28,19 +31,28 @@ public static class OperatorConfigurationEndpoints
         return app;
     }
 
+    public static Ok<OperatorConsoleProfileResponse> ReadConsoleProfile(
+        IOptions<LuthnIdentityOptions> identityOptions)
+    {
+        return TypedResults.Ok(new OperatorConsoleProfileResponse(
+            identityOptions.Value.Mode == LuthnIdentityMode.MultiUser ? "MultiUser" : "Local",
+            "disabled",
+            "oss-console",
+            "authenticated-request",
+            true));
+    }
+
     public static async Task<Ok<ClassificationProviderConfigurationResponse>> ReadClassificationProvider(
         IOperatorClassificationSettingsStore settingsStore,
-        IOptions<ClassificationProviderOptions> options,
         CancellationToken cancellationToken)
     {
         var settings = await settingsStore.ReadAsync(cancellationToken);
-        return TypedResults.Ok(ToResponse(settings, options.Value));
+        return TypedResults.Ok(ToResponse(settings));
     }
 
     public static async Task<Results<Ok<ClassificationProviderConfigurationResponse>, BadRequest<ProblemDetails>>> SaveClassificationProvider(
         SaveClassificationProviderConfigurationRequest request,
         IOperatorClassificationSettingsStore settingsStore,
-        IOptions<ClassificationProviderOptions> options,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -54,7 +66,7 @@ public static class OperatorConfigurationEndpoints
                 settings.Provider.ToString(),
                 settings));
             await db.SaveChangesAsync(cancellationToken);
-            return TypedResults.Ok(ToResponse(settings, options.Value));
+            return TypedResults.Ok(ToResponse(settings));
         }
         catch (InvalidOperationException error)
         {
@@ -67,7 +79,6 @@ public static class OperatorConfigurationEndpoints
         IOperatorClassificationSettingsStore settingsStore,
         IContentClassifier classifier,
         IPolicyEngine policyEngine,
-        IOptions<ClassificationProviderOptions> options,
         LuthnDbContext db,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -98,7 +109,7 @@ public static class OperatorConfigurationEndpoints
             await db.SaveChangesAsync(cancellationToken);
 
             return TypedResults.Ok(new TestClassificationProviderConfigurationResponse(
-                ToResponse(settings, options.Value),
+                ToResponse(settings),
                 new ClassificationPreviewClassification(
                     classification.Sensitivity,
                     classification.Confidence,
@@ -113,8 +124,7 @@ public static class OperatorConfigurationEndpoints
     }
 
     private static ClassificationProviderConfigurationResponse ToResponse(
-        OperatorClassificationProviderSettings settings,
-        ClassificationProviderOptions options) =>
+        OperatorClassificationProviderSettings settings) =>
         new(
             settings.Provider.ToString(),
             settings.Model,
@@ -122,36 +132,29 @@ public static class OperatorConfigurationEndpoints
             settings.AuthHeaderName,
             settings.PayloadClass,
             settings.RedactionState,
-            settings.HasApiKey,
-            options.AllowMock,
-            StatusFor(settings, options),
-            StatusDetailFor(settings, options),
+            StatusFor(settings),
+            StatusDetailFor(settings),
             ProviderBoundaryFor(settings),
             true,
             DeterministicSensitiveDataDetector.Version);
 
-    private static string StatusFor(
-        OperatorClassificationProviderSettings settings,
-        ClassificationProviderOptions options) =>
+    private static string StatusFor(OperatorClassificationProviderSettings settings) =>
         settings.Provider switch
         {
             OperatorClassificationProviderKind.Unconfigured => "unconfigured",
-            OperatorClassificationProviderKind.Mock when !options.AllowMock => "mock-disabled",
-            OperatorClassificationProviderKind.Mock => "mock-ready",
+            OperatorClassificationProviderKind.LocalDeterministic => "local-deterministic-ready",
+            OperatorClassificationProviderKind.LocalHttp => "local-http-ready",
             _ => "configured"
         };
 
-    private static string StatusDetailFor(
-        OperatorClassificationProviderSettings settings,
-        ClassificationProviderOptions options) =>
+    private static string StatusDetailFor(OperatorClassificationProviderSettings settings) =>
         settings.Provider switch
         {
             OperatorClassificationProviderKind.Unconfigured => ClassificationProviderOptions.ProviderRequiredMessage,
-            OperatorClassificationProviderKind.Mock when !options.AllowMock => ClassificationProviderOptions.MockDisabledMessage,
-            OperatorClassificationProviderKind.Mock =>
-                "Local mock classification is ready. Replace it with a provider when provider-backed classification is required.",
-            OperatorClassificationProviderKind.ExternalHttp =>
-                "ExternalHttp classification is configured for a self-hosted or operator-approved endpoint. The local secret/PII guard is active.",
+            OperatorClassificationProviderKind.LocalDeterministic =>
+                "LocalDeterministic classification is ready and keeps source content inside Luthn.",
+            OperatorClassificationProviderKind.LocalHttp =>
+                "LocalHttp classification is configured for an allowed same-device endpoint. Redirects are rejected and the local deterministic guard remains active.",
             _ => $"{settings.Provider} classification is configured."
         };
 
@@ -159,9 +162,9 @@ public static class OperatorConfigurationEndpoints
         settings.Provider switch
         {
             OperatorClassificationProviderKind.Unconfigured => "unconfigured",
-            OperatorClassificationProviderKind.Mock => "local-default",
-            OperatorClassificationProviderKind.ExternalHttp => "self-hosted-capable-external-http",
-            _ => "operator-configured-remote"
+            OperatorClassificationProviderKind.LocalDeterministic => "local-only-deterministic",
+            OperatorClassificationProviderKind.LocalHttp => "same-device-local-http",
+            _ => "unconfigured"
         };
 
     private static AuditEventRecord CreateAudit(
@@ -217,3 +220,10 @@ public static class OperatorConfigurationEndpoints
         return null;
     }
 }
+
+public sealed record OperatorConsoleProfileResponse(
+    string ConsoleMode,
+    string OutboundTransport,
+    string SensitiveAuthority,
+    string TenancySource,
+    bool ServerDerived);

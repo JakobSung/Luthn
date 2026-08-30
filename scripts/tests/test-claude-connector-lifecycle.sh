@@ -14,6 +14,7 @@ fake_bin="$tmp_root/fake-bin"
 claude_home="$home_dir/.claude"
 claude_mcp_state="$tmp_root/claude-mcp-state"
 cli="$bin_dir/luthn"
+export LUTHN_HOST_HELPER_DISABLE_AUTOSTART=true
 
 mkdir -p "$home_dir" "$data_dir" "$config_dir" "$state_dir" "$bin_dir" "$fake_bin" "$claude_home"
 cp "$repo_root/scripts/luthn" "$cli"
@@ -120,7 +121,7 @@ assert handler["command"] == "python3", handler
 assert handler["args"][1:] == [
     "claude-hook-run", "--base-url", "http://127.0.0.1:1", "--token-file",
     f"{sys.argv[2]}/service-token", "--excluded-token-file",
-    f"{sys.argv[2]}/operator-token", "--connector-version", "4",
+    f"{sys.argv[2]}/operator-token", "--connector-version", "8",
 ], handler
 PY
 grep -q '<!-- luthn:auto-recall:start -->' "$claude_home/CLAUDE.md"
@@ -129,6 +130,13 @@ grep -q 'Never delete, modify, overwrite, approve, or deny Luthn memory' "$claud
 grep -q 'For every question about a named or specific agent' "$claude_home/CLAUDE.md"
 grep -q 'search_safe_context' "$claude_home/CLAUDE.md"
 grep -q 'could not verify the requested context' "$claude_home/CLAUDE.md"
+grep -q 'Protected information confirmation' "$claude_home/CLAUDE.md"
+grep -q 'specific detail that is not present' "$claude_home/CLAUDE.md"
+grep -q 'request_and_wait_for_protected_information_access' "$claude_home/CLAUDE.md"
+grep -q 'type names, field names' "$claude_home/CLAUDE.md"
+grep -q 'the detail in the same call' "$claude_home/CLAUDE.md"
+! grep -q 'operator console' "$claude_home/CLAUDE.md"
+grep -q 'Credential, access-key, and private-key material is never' "$claude_home/CLAUDE.md"
 
 status_output="$(run_luthn connection status claude 2>/dev/null)"
 grep -q '^Local connector: configured$' <<<"$status_output"

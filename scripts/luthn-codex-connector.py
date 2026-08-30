@@ -25,7 +25,7 @@ HOOK_MARKER = "luthn.agent-connector.v1"
 CLAUDE_HOOK_MARKER = "luthn.claude-agent-connector.v1"
 HOOK_STATUS_MESSAGE = "Luthn 메모리 저장 예약 중…"
 CLAUDE_HOOK_STATUS_MESSAGE = "Saving Luthn memory…"
-CONNECTOR_TEMPLATE_VERSION = "4"
+CONNECTOR_TEMPLATE_VERSION = "8"
 INSTRUCTION_START_MARKER = "<!-- luthn:auto-recall:start -->"
 INSTRUCTION_END_MARKER = "<!-- luthn:auto-recall:end -->"
 MAX_HOOK_INPUT_BYTES = 256 * 1024
@@ -83,6 +83,28 @@ under these rules:
   sensitive information in the commentary.
 - Do not put the recall status in a normal assistant response or final response.
 
+## Protected information confirmation
+
+When the user asks for a specific detail that is not present in one relevant
+safe recalled item, including a detail that may have been protected or omitted,
+do not claim that it is unavailable merely because the safe recall contains no
+internal access reference. If exactly one relevant recalled item can be
+identified safely, call
+`request_and_wait_for_protected_information_access` with `memoryItemId` set to
+that item's `id` and a short, non-sensitive reason. Never put the user's raw question,
+the protected value, credentials, customer identifiers, or inferred sensitive
+details in the reason. Do not guess between multiple possible items;
+ask the user to narrow the subject without listing internal identifiers.
+
+The tool waits for the bounded confirmation decision and, if approved, returns
+the detail in the same call. Do not call
+`request_protected_information_access`, `wait_for_protected_information_access`,
+or `get_protected_information_result` as follow-up steps. Tell the user only
+the human meaning in their language. Answer only the specific approved detail,
+or explain that it could not be confirmed now. Never show or repeat internal type names, field names,
+reference identifiers, MCP tool names, raw tool errors, or access handles in the user-facing response.
+Credential, access-key, and private-key material is never available even after approval.
+
 ## Agent memory mutation boundary
 
 Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
@@ -125,6 +147,28 @@ bounded to `maxItems`: 20. If that fallback is empty or fails, say that Luthn
 could not verify the requested context and do not guess or present an
 unverified agent history as fact. Do not substitute local memory files for
 Luthn MCP recall.
+
+## Protected information confirmation
+
+When the user asks for a specific detail that is not present in one relevant
+safe recalled item, including a detail that may have been protected or omitted,
+do not claim that it is unavailable merely because the safe recall contains no
+internal access reference. If exactly one relevant recalled item can be
+identified safely, call
+`request_and_wait_for_protected_information_access` with `memoryItemId` set to
+that item's `id` and a short, non-sensitive reason. Never put the user's raw question,
+the protected value, credentials, customer identifiers, or inferred sensitive
+details in the reason. Do not guess between multiple possible items;
+ask the user to narrow the subject without listing internal identifiers.
+
+The tool waits for the bounded confirmation decision and, if approved, returns
+the detail in the same call. Do not call
+`request_protected_information_access`, `wait_for_protected_information_access`,
+or `get_protected_information_result` as follow-up steps. Tell the user only
+the human meaning in their language. Answer only the specific approved detail,
+or explain that it could not be confirmed now. Never show or repeat internal type names, field names,
+reference identifiers, MCP tool names, raw tool errors, or access handles in the user-facing response.
+Credential, access-key, and private-key material is never available even after approval.
 
 ## Agent memory mutation boundary
 

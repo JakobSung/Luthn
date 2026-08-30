@@ -94,6 +94,46 @@ public static class LuthnMcpToolRegistry
                 IntegerProperty("expiresInSeconds", "Bounded request lifetime in seconds.", 3_600, 60)
             ], ["sensitiveReferenceId", "reason", "sessionId", "expiresInSeconds"])),
         new(
+            "request_protected_information_access",
+            "Ask the owner to confirm access to protected information related to a safe memory item. This tool cannot approve or deny requests.",
+            ToolSchema([
+                StringProperty("memoryItemId", "The id of the single safe recalled memory item.", 128),
+                StringProperty("reason", "Optional bounded explanation of what the user wants to confirm.", 1_000)
+            ], ["memoryItemId"])),
+        new(
+            "request_and_wait_for_protected_information_access",
+            "Ask the owner to confirm protected information, wait for a bounded decision, and return the approved detail in this same call. This tool cannot approve or deny requests.",
+            ToolSchema([
+                StringProperty("memoryItemId", "The id of the single safe recalled memory item.", 128),
+                StringProperty("reason", "Optional bounded explanation of what the user wants to confirm.", 1_000),
+                IntegerProperty("maxWaitSeconds", "Maximum bounded wait in seconds.", 60, 1),
+                IntegerProperty("pollIntervalMs", "Polling interval in milliseconds.", 5_000, 100)
+            ], ["memoryItemId"], allowAdditionalProperties: false)),
+        new(
+            "get_protected_information_result",
+            "Read approved protected memory with the requester-only access handle. A successful read consumes one approved use.",
+            ToolSchema([
+                BoundedStringProperty(
+                    "accessHandle",
+                    "Opaque requester-only access handle returned by the confirmation request.",
+                    64,
+                    "^[0-9a-f]{64}$",
+                    minimumLength: 64)
+            ], ["accessHandle"], allowAdditionalProperties: false)),
+        new(
+            "wait_for_protected_information_access",
+            "Wait for the requester-bound protected information lifecycle status without reading protected content or consuming an approved use.",
+            ToolSchema([
+                BoundedStringProperty(
+                    "accessHandle",
+                    "Opaque requester-only access handle returned by the confirmation request.",
+                    64,
+                    "^[0-9a-f]{64}$",
+                    minimumLength: 64),
+                IntegerProperty("maxWaitSeconds", "Maximum bounded wait in seconds.", 60, 1),
+                IntegerProperty("pollIntervalMs", "Polling interval in milliseconds.", 5_000, 100)
+            ], ["accessHandle"], allowAdditionalProperties: false)),
+        new(
             "get_sensitive_access_request",
             "Read the metadata-only status of a sensitive-access request.",
             ToolSchema([StringProperty("id", "Sensitive access request id.")], ["id"])),
@@ -123,7 +163,11 @@ public static class LuthnMcpToolRegistry
             new SubmitSearchFeedbackTool(client),
             new GetSharedMemoryItemTool(client),
             new CreateSensitiveAccessRequestTool(client),
-            new GetSensitiveAccessRequestTool(client, principalCachePartition),
+            new RequestProtectedInformationAccessTool(client),
+            new RequestAndWaitForProtectedInformationAccessTool(client),
+            new GetProtectedInformationResultTool(client),
+            new WaitForProtectedInformationAccessTool(client),
+            new GetSensitiveAccessRequestTool(client),
             new GetSensitiveAccessResultTool(client)
         ];
     }
@@ -149,25 +193,45 @@ public static class LuthnMcpToolRegistry
         return schema;
     }
 
-    private static KeyValuePair<string, object> StringProperty(string name, string description) =>
-        new(name, new Dictionary<string, object>
+    private static KeyValuePair<string, object> StringProperty(
+        string name,
+        string description,
+        int? maximumLength = null)
+    {
+        var schema = new Dictionary<string, object>
         {
             ["type"] = "string",
             ["description"] = description
-        });
+        };
+        if (maximumLength is not null)
+        {
+            schema["maxLength"] = maximumLength.Value;
+        }
+
+        return new(name, schema);
+    }
 
     private static KeyValuePair<string, object> BoundedStringProperty(
         string name,
         string description,
         int maximumLength,
-        string pattern) =>
-        new(name, new Dictionary<string, object>
+        string pattern,
+        int? minimumLength = null)
+    {
+        var schema = new Dictionary<string, object>
         {
             ["type"] = "string",
             ["description"] = description,
             ["maxLength"] = maximumLength,
             ["pattern"] = pattern
-        });
+        };
+        if (minimumLength is not null)
+        {
+            schema["minLength"] = minimumLength.Value;
+        }
+
+        return new(name, schema);
+    }
 
     private static KeyValuePair<string, object> EnumStringProperty(
         string name,

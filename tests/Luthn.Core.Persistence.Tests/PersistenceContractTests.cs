@@ -252,6 +252,21 @@ public sealed class PersistenceContractTests
         Assert.Contains(migrations, migration => migration.EndsWith("_InitialCreate", StringComparison.Ordinal));
         Assert.Contains(migrations, migration => migration.EndsWith("_AddWorkspaceScopedDataPlane", StringComparison.Ordinal));
         Assert.Contains(migrations, migration => migration.EndsWith("_AddAuditEventScopeAndCorrelation", StringComparison.Ordinal));
+        Assert.Contains(
+            migrations,
+            migration => migration.EndsWith(
+                "_AddExpiringSensitiveTurnSummaryReferences",
+                StringComparison.Ordinal));
+        Assert.Contains(
+            migrations,
+            migration => migration.EndsWith(
+                "_AddSensitiveAccessTombstones",
+                StringComparison.Ordinal));
+        Assert.Contains(
+            migrations,
+            migration => migration.EndsWith(
+                "_AddRequesterBoundProtectedMemoryAccess",
+                StringComparison.Ordinal));
     }
 
     [Fact]
@@ -268,6 +283,7 @@ public sealed class PersistenceContractTests
         Assert.Contains("shared_memory_items", script, StringComparison.Ordinal);
         Assert.Contains("agent_connection_channels", script, StringComparison.Ordinal);
         Assert.Contains("local_installation_state", script, StringComparison.Ordinal);
+        Assert.Contains("sensitive_access_tombstones", script, StringComparison.Ordinal);
         Assert.Contains("safe_projection_sync_outbox", script, StringComparison.Ordinal);
         Assert.Contains("safe_projection_sync_checkpoints", script, StringComparison.Ordinal);
         Assert.Contains("ExternalPublicationState", script, StringComparison.Ordinal);
@@ -289,6 +305,14 @@ public sealed class PersistenceContractTests
         Assert.Contains("IX_wiki_proposals_AllowsAgentContext_Sensitivity_CreatedAt", script, StringComparison.Ordinal);
         Assert.Contains("IX_sensitive_access_requests_Status_UpdatedAt", script, StringComparison.Ordinal);
         Assert.Contains("RedactedSummary", script, StringComparison.Ordinal);
+        Assert.Contains("AccessMode", script, StringComparison.Ordinal);
+        Assert.Contains("AccessHandleDigest", script, StringComparison.Ordinal);
+        Assert.Contains("RequesterBindingDigest", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "IX_sensitive_access_requests_WorkspaceId_OwnerUserId_AccessHandleDigest",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains("DEFAULT 'RedactedSummary'", script, StringComparison.Ordinal);
         Assert.Contains("UPDATE sensitive_access_requests AS request", script, StringComparison.Ordinal);
         Assert.Contains("SET \"RedactedSummary\" = reference.\"RedactedSummary\"", script, StringComparison.Ordinal);
         Assert.Contains("request.\"Status\" = 'Approved'", script, StringComparison.Ordinal);

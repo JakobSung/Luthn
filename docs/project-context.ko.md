@@ -17,9 +17,16 @@ Luthn은 AI 에이전트용 직접 호스팅 공유 기억 계층입니다. 민�
 
 - 에이전트는 기본적으로 Core로 걸러진 공유 기억, context pack, 위키 안전 Markdown을 읽습니다.
 - 원본·비공개 기록은 Vault, 정책, 통제된 접근, 감사 경계 뒤에 둡니다.
+- 로컬 운영자 화면은 Local과 다중 사용자 self-host mode의 민감 접근 검토 권한 정본입니다. 운영자 상세에는
+  제한된 안전 참조 metadata와 redacted summary만 표시하며, 승인·반려에는 명시적 사유가
+  필요하고 원본 Vault/source는 노출하지 않습니다.
+- 민감 접근 승인과 외부 공개 승인은 서로 다른 결정입니다. 감사는 metadata-only 조사
+  trail이며 내용 복구나 backup 경로가 아닙니다.
 - 위키 Markdown은 Core가 관리하는 지식의 투영이며 원본 사실 저장소가 아닙니다.
 - 로컬/PostgreSQL이 기본 직접 호스팅 기억 경로이고 외부 기억 서비스는 Luthn 정책 뒤의 선택적 adapter입니다.
-- 로컬 전용 동작은 불변 조건입니다. 외부 공개에는 운영자 동작이 필요하며, 버전이 지정된 공개 안전 투영만 로컬 durable outbox를 거칩니다. 공개 저장소에는 활성 cloud client가 없습니다.
+- 로컬 전용 동작은 불변 조건입니다. 외부 공개에는 운영자 동작이 필요하며, 버전이 지정된 공개 안전 투영만 로컬 durable outbox를 거칩니다. 공개 저장소에는 활성 외부 전송 client가 없습니다.
+- 다중 사용자 self-host는 server 설정 identity binding과 기본 비활성 ingress·외부 전송
+  경계를 사용합니다.
 - 로컬 직접 호스팅 확인 흐름은 provider 자격 증명 없이 실행할 수 있어야 합니다.
 - 저장소에는 자격 증명, 비공개 원본, 고객 원문, 로컬 에이전트 자료, 계획 상태, 실행 증거를 두지 않습니다.
 
@@ -33,15 +40,8 @@ Luthn은 AI 에이전트용 직접 호스팅 공유 기억 계층입니다. 민�
   -> 에이전트 API는 Core로 걸러진 위키 안전 기억과 맥락 반환
 ```
 
-선택적인 미래 팀 공유 경계:
-
-```text
-승인된 공유 기억
-  -> 명시적 외부 공개 승인
-  -> 로컬 durable outbox의 버전 지정 안전 투영
-  -> 비활성 전송 경계
-  -> 이 저장소 밖의 미래 상용 cloud adapter
-```
+선택적 다중 사용자 self-host는 server 설정의 identity binding과 기본 비활성 ingress·
+외부 전송 경계를 사용합니다.
 
 runtime 프로젝트는 `Luthn.Core`, `Luthn.Core.Persistence`, `Luthn.Host.Api`, `Luthn.Host.Worker`, `Luthn.Tools`, `Luthn.Sdk`, `Luthn.AgentConnector.Http`, `Luthn.McpServer`입니다.
 
@@ -49,7 +49,9 @@ runtime 프로젝트는 `Luthn.Core`, `Luthn.Core.Persistence`, `Luthn.Host.Api`
 
 - 구현된 지식 모형에는 `Core`, 맥락 선택에는 `coreTags`를 사용합니다.
 - 원본 Vault/source 조회 route, connector method, MCP tool을 기본으로 추가하지 않습니다.
-- 미래의 명시적 계획이 제한된 가림 출력을 구현하기 전까지 민감 접근·감사 응답은 메타데이터만 반환합니다.
+- 민감 접근·감사 응답은 기본적으로 metadata-only로 유지합니다. 제한적 출력 예외는
+  server가 재검증한 기존 redacted summary와 명시적 승인 뒤 요청자에게만 반환하는
+  protected-memory title·summary입니다. 자격증명과 key는 예외가 아닙니다.
 - 민감하거나 agent에 보이지 않는 shared-memory 사용자 필드는 인증된 보호 payload 저장소에 두고 key ring은 PostgreSQL 밖에 둡니다. 암호문을 agent, sync, publication, audit, log, metric 계약으로 노출하지 않습니다.
 - 모든 새 source event 또는 shared-memory item과 함께 버전이 지정된 불변 수집 출처 레코드 하나를 원자적으로 저장합니다. 호출자 주장은 서버가 확인한 actor·owner identity와 구분하고, 출처정보는 권한 있는 same-owner reader 또는 명시적 운영자에게만 제공합니다.
 - owner identity는 server가 정하는 인가 상태입니다. 모든 agent-safe 영속 query, ranking, idempotency key, publication, 민감 접근, retrieval cache는 반환하거나 재사용하기 전에 owner로 분리합니다.

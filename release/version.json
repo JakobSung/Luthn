@@ -1,6 +1,6 @@
 {
   "contractVersion": 1,
   "cliTemplateVersion": "4",
-  "connectorTemplateVersion": "4",
-  "mcpSchemaVersion": "3"
+  "connectorTemplateVersion": "8",
+  "mcpSchemaVersion": "6"
 }

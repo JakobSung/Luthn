@@ -1,5 +1,6 @@
 using System.Net;
 using System.Reflection;
+using System.Text.Json;
 using Luthn.AgentConnector.Http;
 using Luthn.Sdk.Access;
 using Luthn.Sdk.Agent;
@@ -236,6 +237,7 @@ public sealed class LuthnClientTests
               "sourceEventId": "turn-summary-1",
               "classificationResultId": "classification-1",
               "memoryItemId": "memory-turn-summary-1",
+              "sensitiveReferenceId": "sensitive-turn-summary-1",
               "auditEventId": "audit-1",
               "allowsAgentContext": true,
               "duplicate": false,
@@ -272,6 +274,7 @@ public sealed class LuthnClientTests
         Assert.Contains("\"summary\"", body, StringComparison.Ordinal);
         Assert.DoesNotContain("raw", body, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("turn-summary-1", response.SummaryId);
+        Assert.Equal("sensitive-turn-summary-1", response.SensitiveReferenceId);
         Assert.True(response.AllowsAgentContext);
         Assert.False(response.Duplicate);
     }
@@ -531,7 +534,8 @@ public sealed class LuthnClientTests
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
         var client = new LuthnClient(http);
 
-        var response = await client.GetSensitiveAccessResultAsync("access-1");
+        var response = Assert.IsType<SensitiveAccessResultDto>(
+            await client.GetSensitiveAccessResultAsync("access-1"));
 
         Assert.Equal(HttpMethod.Get, handler.Request!.Method);
         Assert.Equal("/api/access-requests/access-1/result", handler.Request.RequestUri!.AbsolutePath);
@@ -577,6 +581,99 @@ public sealed class LuthnClientTests
     }
 
     [Fact]
+    public async Task RequestProtectedInformationAccessPostsSafeCorrelationOnly()
+    {
+        using var handler = new CapturingHandler("""
+            {
+              "status": "requested",
+              "message": "A confirmation request is ready for the owner to review.",
+              "requestId": "access-1",
+              "accessHandle": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+            """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
+        var client = new LuthnClient(http);
+
+        var response = await client.RequestProtectedInformationAccessAsync(
+            new ProtectedInformationAccessRequestDto(
+                "memory-safe-1",
+                "Confirm the earlier amount."));
+        var body = await handler.RequestContent!.ReadAsStringAsync();
+
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal("/api/access-requests/resolve", handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal(
+            """{"memoryItemId":"memory-safe-1","reason":"Confirm the earlier amount."}""",
+            body);
+        Assert.Equal("requested", response.Status);
+        Assert.Equal("access-1", response.RequestId);
+        Assert.Equal(new string('a', 64), response.AccessHandle);
+        Assert.DoesNotContain("sensitiveReferenceId", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("raw", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetProtectedInformationResultPostsOnlyRequesterHandle()
+    {
+        using var handler = new CapturingHandler("""
+            {
+              "status": "protected-result-returned",
+              "contentAvailable": true,
+              "title": "퍼시스 견적",
+              "content": "퍼시스 가구회사에 견적 10억을 제시했어.",
+              "grantExpiresAt": "2026-08-14T01:00:00+00:00",
+              "remainingReads": 0,
+              "maxReads": 1,
+              "reasons": ["Approved protected memory was returned to the original requester."]
+            }
+            """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
+        var client = new LuthnClient(http);
+        var accessHandle = new string('b', 64);
+
+        var response = await client.GetProtectedInformationResultAsync(
+            new ProtectedInformationResultRequestDto(accessHandle));
+        var body = await handler.RequestContent!.ReadAsStringAsync();
+
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal("/api/access-requests/protected-result", handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal($$"""{"accessHandle":"{{accessHandle}}"}""", body);
+        Assert.True(response.ContentAvailable);
+        Assert.Equal("퍼시스 견적", response.Title);
+        Assert.Equal("퍼시스 가구회사에 견적 10억을 제시했어.", response.Content);
+        Assert.DoesNotContain("requestId", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("memoryItemId", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WaitForProtectedInformationAccessPostsBoundedStatusOnlyRequest()
+    {
+        using var handler = new CapturingHandler("""
+            {
+              "status": "approved",
+              "message": "The owner approved the protected information request."
+            }
+            """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
+        var client = new LuthnClient(http);
+        var accessHandle = new string('c', 64);
+
+        var response = await client.WaitForProtectedInformationAccessAsync(
+            new ProtectedInformationAccessWaitRequestDto(accessHandle, 5, 100));
+        var body = await handler.RequestContent!.ReadAsStringAsync();
+
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal("/api/access-requests/protected-wait", handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal(
+            $$"""{"accessHandle":"{{accessHandle}}","maxWaitSeconds":5,"pollIntervalMs":100}""",
+            body);
+        Assert.Equal("approved", response.Status);
+        Assert.DoesNotContain("content", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("requestId", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("memoryItemId", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GetSensitiveAccessRequestReadsMetadataOnlyStatus()
     {
         using var handler = new CapturingHandler("""
@@ -597,12 +694,37 @@ public sealed class LuthnClientTests
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
         var client = new LuthnClient(http);
 
-        var response = await client.GetSensitiveAccessRequestAsync("access-1");
+        var response = Assert.IsType<SensitiveAccessRequestDto>(
+            await client.GetSensitiveAccessRequestAsync("access-1"));
 
         Assert.Equal(HttpMethod.Get, handler.Request!.Method);
         Assert.Equal("/api/access-requests/access-1", handler.Request.RequestUri!.AbsolutePath);
         Assert.Equal("pending-approval", response.OutputPolicy);
         Assert.DoesNotContain("vault", handler.Request.RequestUri.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SensitiveAccessReadsReturnContentFreeTombstoneContract()
+    {
+        using var handler = new CapturingHandler("""
+            {
+              "id": "access-expired",
+              "status": "Expired",
+              "outputPolicy": "expired-no-output"
+            }
+            """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8080") };
+        var client = new LuthnClient(http);
+
+        var response = Assert.IsType<SensitiveAccessTombstoneDto>(
+            await client.GetSensitiveAccessRequestAsync("access-expired"));
+
+        Assert.Equal("Expired", response.Status);
+        Assert.Equal("expired-no-output", response.OutputPolicy);
+        var json = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain("sensitiveReferenceId", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("reason", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("summary", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -653,6 +775,9 @@ public sealed class LuthnClientTests
         Assert.Contains("GetSharedMemoryItemAsync", methodNames);
         Assert.Contains("GetSensitiveAccessResultAsync", methodNames);
         Assert.Contains("CreateSensitiveAccessRequestAsync", methodNames);
+        Assert.Contains("RequestProtectedInformationAccessAsync", methodNames);
+        Assert.Contains("GetProtectedInformationResultAsync", methodNames);
+        Assert.Contains("WaitForProtectedInformationAccessAsync", methodNames);
         Assert.Contains("GetSensitiveAccessRequestAsync", methodNames);
         Assert.Contains("ApproveSensitiveAccessRequestAsync", methodNames);
         Assert.Contains("DenySensitiveAccessRequestAsync", methodNames);
@@ -726,10 +851,10 @@ public sealed class LuthnClientTests
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        Task<SensitiveAccessResultDto> ILuthnClient.GetSensitiveAccessResultAsync(
+        Task<SensitiveAccessReadDto> ILuthnClient.GetSensitiveAccessResultAsync(
             string id,
             CancellationToken cancellationToken) =>
-            Task.FromResult(new SensitiveAccessResultDto(
+            Task.FromResult<SensitiveAccessReadDto>(new SensitiveAccessResultDto(
                 id,
                 "sensitive-ref-legacy",
                 "Approved",

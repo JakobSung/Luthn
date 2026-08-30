@@ -48,6 +48,7 @@ public static class SourceIntakeEndpoints
         }
 
         var sourceEventId = $"source-{Guid.NewGuid():N}";
+        var correlationId = AuditCorrelationIds.CreateOperationId();
         var receivedAt = DateTimeOffset.UtcNow;
         var actor = ServiceTokenAuthorization.GetActor(httpContext);
         var principal = ServiceTokenAuthorization.GetPrincipal(httpContext);
@@ -86,7 +87,8 @@ public static class SourceIntakeEndpoints
             classifier.Boundary.RedactionState,
             receivedAt,
             subjectType: "source_event",
-            outcome: "started",
+            outcome: AuditOutcomes.Started,
+            correlationId: correlationId,
             id: providerAuditEventId));
         await db.SaveChangesAsync(cancellationToken);
 
@@ -101,9 +103,32 @@ public static class SourceIntakeEndpoints
         }
         catch (ClassificationProviderException error)
         {
+            db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+                principal,
+                actor,
+                "classification.provider.failed",
+                sourceEventId,
+                "metadata-only",
+                classifier.Boundary.RedactionState,
+                DateTimeOffset.UtcNow,
+                subjectType: "source_event",
+                outcome: AuditOutcomes.Failed,
+                correlationId: correlationId));
+            await db.SaveChangesAsync(cancellationToken);
             return ApiProblems.ClassificationProviderUnavailable(error);
         }
         var decision = policyEngine.Decide(classification);
+        db.AuditEvents.Add(AuditEventFactory.ForWorkspace(
+            principal,
+            actor,
+            "classification.provider.completed",
+            sourceEventId,
+            classifier.Boundary.PayloadClass,
+            classifier.Boundary.RedactionState,
+            DateTimeOffset.UtcNow,
+            subjectType: "source_event",
+            outcome: AuditOutcomes.Completed,
+            correlationId: correlationId));
         db.SourceEvents.Add(new SourceEventRecord
         {
             Id = sourceEventId,
@@ -182,7 +207,8 @@ public static class SourceIntakeEndpoints
             decision.AllowsWikiProjection ? "safe-projection-only" : "sensitive-boundary-only",
             receivedAt,
             subjectType: "source_event",
-            outcome: "completed",
+            outcome: AuditOutcomes.Completed,
+            correlationId: correlationId,
             id: auditEventId));
 
         await db.SaveChangesAsync(cancellationToken);

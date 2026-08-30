@@ -46,8 +46,8 @@ agent context에 나중에 나타날 수 있는 전체 투영을 분류합니다
   `incident log`. `finance`에는 금액·매출·연봉·급여·가격·비용·수익·예산·
   수수료와 이에 대응하는 영어 표현이 포함됩니다.
 
-로컬 mock은 이 taxonomy에 대응하는 제한된 한국어·영어 표지를 인식합니다.
-이는 시험·실험용 동작이며 운영 품질을 보장하지 않습니다.
+`LocalDeterministic`은 모델 process나 network 호출 없이 이 taxonomy에 대응하는
+제한된 한국어·영어·혼합 언어 신호를 인식합니다.
 
 모든 운영용 provider 결과에는 로컬 민감데이터 guard 버전 `1`을 결합합니다.
 guard는 신뢰도가 높은 private key, access token, 값이 할당된 secret, email,
@@ -57,10 +57,10 @@ guard는 신뢰도가 높은 private key, access token, 값이 할당된 secret,
 결과, log, metric, audit, persistence metadata에 넣지 않습니다. provider 오류는
 기존처럼 저장 전에 실패하고 detector 단독 허용으로 대체하지 않습니다.
 
-`ExternalHttp`는 self-hosted 연결이 가능한 분류기 경계입니다. 로컬 또는 private
-network의 AI service를 연결할 수 있고, 로컬 밖 전송은 운영자가 명시적으로
-설정해야 합니다. 로컬 guard는 정상 provider 응답 뒤에 항상 적용되며 저장 경로를
-더 제한적으로만 바꿀 수 있습니다.
+선택적 `LocalHttp`는 `localhost`, IPv4·IPv6 loopback,
+`host.docker.internal`의 절대 HTTP(S) URL만 허용합니다. 임의 host, 사설 LAN,
+공용 주소, user information, redirect는 거부합니다. 로컬 guard는 정상 응답 뒤에
+항상 적용되며 저장 경로를 더 제한적으로만 바꿀 수 있습니다.
 
 provider 결과는 정책 평가 전에 정규화합니다. 민감 category는 taxonomy의
 최소 민감도까지 올리고, `containsSensitiveMaterial`이 참이면 최소
@@ -81,11 +81,10 @@ case 식별자, 표준 category 이름, 민감도와 저장 경로 기대값의 
 false-negative·false-positive·불일치 합계만 들어가며 corpus 원문은 복사하지
 않습니다.
 
-기본 평가는 로컬의 결정적 mock만 사용하고 network 요청을 하지 않습니다.
-`--provider guarded-mock`은 API client를 만들지 않고 같은 hybrid guard 경로를
-평가합니다.
-설정된 API 평가는 corpus가 API의 설정된 분류기로 전달될 수 있으므로
-`--provider configured-api`와 `--allow-external-provider`를 모두 명시해야 합니다.
+기본 평가는 `local-deterministic`을 사용하고 network 요청을 하지 않습니다.
+`--provider guarded-local`은 API client 없이 hybrid guard 경로를 평가합니다.
+`--provider local-http --api-url <same-device-url>`은 동일 장비 Host API만 평가하며
+원격 URL과 redirect를 거부합니다.
 선택적 bearer token은 `--token-env`로 지정한 환경 변수에서만 읽고 평가 결과에는
 token 값을 출력하지 않습니다.
 
@@ -212,16 +211,64 @@ provenance 식별자는 길이와 문자가 제한되고 정규화됩니다. 원
 payload, log, metric에는 포함하지 않습니다. audit는 행위·결정의 사건 이력이고,
 provenance는 불변 수집 기원 기록입니다.
 
+## 민감 접근 검토 경계
+
+민감 접근은 구조화된 목적, session correlation과 60~3600초 만료를 가진 제한된
+요청으로 시작합니다. 요청 생성·상태·결과 조회는 server가 정한 owner로 제한하고,
+목록·운영자 상세에는 `access.review`, 승인·반려에는 `access.decide` scope가 필요합니다.
+하위 호환을 위해 `access.decide`는 조회도 포함합니다. 운영자 상세 투영은 agent
+화면이 아닙니다. 기존의 안전한 label, source metadata와 redacted summary만 포함할 수
+있으며 원본 Vault/source, protected payload, credential, workspace·owner identity는
+포함하지 않습니다.
+
+에이전트는 안전하게 회상된 memory 항목 하나에서 같은 검토 lifecycle을 시작할 수도
+있습니다. 해석 route는 그 안전 항목 ID와 선택적인 짧은 비민감 사유만 받습니다.
+server는 호출자에게서 owner와 workspace를 정하고, 그 항목에 연결된 현재 유효한 보호
+정보가 하나일 때 요청자 전용 새 요청을 만듭니다. 응답의 opaque access handle은 요청한
+task 안에서만 보관하며 server에는 digest만 저장합니다. 보호 정보 참조 ID, 원문, 추론된
+민감 세부 내용, 무제한 후보 목록은 반환하지 않습니다. 연결 정보가 없거나 만료되었으면
+내용을 노출하지 않는 쉬운 상태 문구를 반환합니다. 요청 생성은 접근 승인이나 결정 권한을
+부여하지 않습니다.
+
+운영자는 상세를 확인한 뒤 명시적 승인·반려 사유를 기록해야 합니다. 기존 승인은 server가
+다시 분류해 공개·agent-safe라고 확인한 제한된 `redactedSummary`만 보존할 수 있습니다.
+protected-memory 승인은 60~3600초(기본 3600초), 성공 조회 1~3회(기본 1회)를 설정합니다.
+보호 결과는 인증된 요청자 binding과 opaque handle이 모두 일치할 때만 저장된 원본
+title·summary를 반환합니다. 자격증명·access key·private key는 조회 횟수를 소비하지 않고
+항상 차단합니다. 운영자 화면·로그·감사·cache·외부 계약에는 handle이나 보호 값을 넣지
+않습니다. 만료, 상세 조회, 결정과 결과 조회는 metadata-only 감사 사건을 남깁니다.
+민감 접근 승인이 외부 공개 승인을 의미하지는 않습니다.
+
+만료된 민감 turn-summary graph는 reference·payload·memory·source·provenance의 link,
+workspace, owner, expiry가 정확히 일치하고 safe-sync outbox가 없을 때만 system retention
+worker가 물리적으로 제거합니다. 관계형 저장소는 단일 database transaction을 사용하고,
+비관계형 저장소는 공유 process lifecycle gate와 한 번의 save unit을 사용합니다.
+cross-process commit 안전성은 database constraint와 transaction이 담당하며 process gate를
+분산 lock으로 설명하지 않습니다. 기존 감사 row는 불변으로 유지합니다. 각 request는
+`id`, `Expired`, `expired-no-output`만 읽을 수 있는 content-free tombstone으로 대체합니다.
+
+## 감사 사용과 보존 경계
+
+감사 사건은 `Access`, `Security`, `Configuration`, `Publication`, `Ingestion`,
+`Retention`으로 분류합니다. 요청 결정 timeline, 분류·provider 실패 조사, 설정 변경
+검토, Hub ingress·worker·publication 결과, 보존 정리 확인에 사용합니다. subject,
+action 계열, outcome, correlation과 UTC 시간 범위로 필터하고 opaque cursor로 다음
+page를 조회하며 정책상 별도 검토 기록이 필요할 때만 metadata-only export를 사용합니다.
+
+감사 응답·export에는 원본 source, Vault, 암호화 payload, credential, prompt, transcript,
+local path가 없습니다. 감사는 책임 추적·조사 trail이지 backup이나 원문 복구 수단이
+아닙니다. 보존 기간은 Access/Security/Publication 365일, Configuration/Retention
+730일, Ingestion 90일이며 물리 정리는 기본 비활성입니다. 활성화하면 정리 pass마다
+metadata-only retention 사건 하나를 남깁니다.
+
 ## Provider 경계
 
-- 새 배포 설치는 로컬 `mock` 분류기를 사용하므로 별도 provider 설정 없이 분류가 동작합니다.
-- mock 분류기는 로컬에서 자격 증명 없이 동작합니다. 설치 기본값이 `Provider=mock`과 `AllowMock=true`를 함께 설정하며, provider 기반 분류가 필요하면 운영자 설정으로 교체합니다.
-- 운영자가 설정한 provider 비밀 값은 server에만 두고, 화면/API에는 key 보유 여부만 표시합니다.
-- 외부 분류는 명시적으로 선택해야 합니다.
-- `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`는 Luthn이 민감도를 정하기 전에 분류 prompt로 원문을 받습니다. 운영자가 이 외부 전송을 허용할 때만 사용하고, 원본을 직접 호스팅 경계 안에 두어야 하면 통제 가능한 `External HTTP` provider를 사용합니다.
-- 직접 연결하는 제3자 LLM endpoint는 API key header를 보내기 전에 예상 provider host의 HTTPS URL인지 확인합니다.
+- 새 배포 설치는 자격 증명이 필요 없는 `LocalDeterministic`을 사용합니다.
+- 선택적 `LocalHttp`는 `localhost`, loopback IP, 정확한 container gateway host인 `host.docker.internal`만 허용합니다.
+- `LocalHttp`에는 model·credential·인증 설정이 없으며 redirect와 모든 원격 목적지는 실패 처리합니다.
+- 기존 상용 provider, `Mock`, `ExternalHttp`, 원격 `LocalHttp` 설정은 secret을 사용하지 않고 endpoint·model·인증·credential 값을 비운 `Unconfigured`가 됩니다.
 - provider 호출에는 payload 분류와 가림 상태를 포함하고, 감사 기록에는 경계 메타데이터와 저장 결정만 남기며 원문은 남기지 않습니다.
-- 일반 자동 시험은 운영자가 연동 시험을 명시적으로 켜지 않는 한 mock 또는 fake provider를 사용합니다.
+- 일반 자동 시험은 로컬 결정론적 분류기 또는 in-memory HTTP handler를 사용합니다.
 
 ## 외부 공개 경계
 
@@ -229,4 +276,4 @@ provenance는 불변 수집 기원 기록입니다.
 - 명시적으로 승인된 공개·미만료·에이전트 표시 가능 안전 투영만 외부 공개 outbox에 들어갈 수 있습니다.
 - 취소 기록에는 식별자, revision, 작업, 제한된 정책 메타데이터만 두며 투영 본문을 반복하지 않습니다.
 - 원본/Vault 데이터, 비공개 기억, 자격 증명, prompt, 대화 기록, 로컬 경로, 민감 접근 결과는 동기화 계약에 들어가면 안 됩니다.
-- 공개 직접 호스팅 build에는 활성 cloud 전송이 없으며 기본적으로 외부 동기화를 수행하지 않습니다.
+- 공개 직접 호스팅 build에는 활성 외부 전송이 없으며 기본적으로 외부 동기화를 수행하지 않습니다.

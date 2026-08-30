@@ -13,8 +13,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:LuthnWindowsCliVersion = "4"
-$script:CodexConnectorTemplateVersion = "4"
-$script:McpSchemaVersion = "3"
+$script:CodexConnectorTemplateVersion = "8"
+$script:McpSchemaVersion = "6"
 $script:ProjectName = if ($env:LUTHN_PROJECT_NAME) { $env:LUTHN_PROJECT_NAME } else { "luthn" }
 $script:RootDir = if ($env:LUTHN_WINDOWS_ROOT) {
     $env:LUTHN_WINDOWS_ROOT
@@ -112,6 +112,28 @@ under these rules:
   sensitive information in the commentary.
 - Do not put the recall status in a normal assistant response or final response.
 
+## Protected information confirmation
+
+When the user asks for a specific detail that is not present in one relevant
+safe recalled item, including a detail that may have been protected or omitted,
+do not claim that it is unavailable merely because the safe recall contains no
+internal access reference. If exactly one relevant recalled item can be
+identified safely, call
+``request_and_wait_for_protected_information_access`` with ``memoryItemId``
+set to that item's ``id`` and a short, non-sensitive reason. Never put the user's raw question,
+the protected value, credentials, customer identifiers, or inferred sensitive
+details in the reason. Do not guess between multiple possible items; ask the
+user to narrow the subject without listing internal identifiers.
+
+The tool waits for the bounded confirmation decision and, if approved, returns
+the detail in the same call. Do not call
+``request_protected_information_access``, ``wait_for_protected_information_access``,
+or ``get_protected_information_result`` as follow-up steps. Tell the user only
+the human meaning in their language. Answer only the specific approved detail,
+or explain that it could not be confirmed now. Never show or repeat internal type names, field names,
+reference identifiers, MCP tool names, raw tool errors, or access handles in the user-facing response.
+Credential, access-key, and private-key material is never available even after approval.
+
 ## Agent memory mutation boundary
 
 Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
@@ -141,6 +163,28 @@ with the same short query and bounded non-sensitive metadata using
 ``maxItems``: 20. If that fallback is empty or fails, say that Luthn could not verify the requested context and do not guess or present unverified history as
 fact. Do not substitute local memory files for Luthn MCP recall.
 
+## Protected information confirmation
+
+When the user asks for a specific detail that is not present in one relevant
+safe recalled item, including a detail that may have been protected or omitted,
+do not claim that it is unavailable merely because the safe recall contains no
+internal access reference. If exactly one relevant recalled item can be
+identified safely, call
+``request_and_wait_for_protected_information_access`` with ``memoryItemId``
+set to that item's ``id`` and a short, non-sensitive reason. Never put the user's raw question,
+the protected value, credentials, customer identifiers, or inferred sensitive
+details in the reason. Do not guess between multiple possible items; ask the
+user to narrow the subject without listing internal identifiers.
+
+The tool waits for the bounded confirmation decision and, if approved, returns
+the detail in the same call. Do not call
+``request_protected_information_access``, ``wait_for_protected_information_access``,
+or ``get_protected_information_result`` as follow-up steps. Tell the user only
+the human meaning in their language. Answer only the specific approved detail,
+or explain that it could not be confirmed now. Never show or repeat internal type names, field names,
+reference identifiers, MCP tool names, raw tool errors, or access handles in the user-facing response.
+Credential, access-key, and private-key material is never available even after approval.
+
 ## Agent memory mutation boundary
 
 Never delete, modify, overwrite, approve, or deny Luthn memory, source, turn, or
@@ -162,6 +206,7 @@ commands:
           [--connect-codex|--connect-claude]
                              Install Luthn and optionally connect one agent.
   status                     Show services, readiness, console, and image.
+  console                    Authorize once and open the local operator console.
   update check [--json]      Check the configured update channel without pulling.
   update [image]             Back up, pull, migrate, restart, and verify.
   doctor [--json]            Diagnose runtime, update, and Codex integration state.
@@ -461,13 +506,16 @@ function Ensure-ConfigValue {
     if (-not (Read-ConfigValue -Key $Key)) { Set-ConfigValue -Key $Key -Value $Value }
 }
 
-function Upgrade-LegacyClassificationDefault {
+function Normalize-ClassificationProvider {
     $provider = Read-ConfigValue "Luthn__Classification__Provider" ""
-    $allowMock = Read-ConfigValue "Luthn__Classification__AllowMock" ""
-    if ($provider -ceq "unconfigured" -and $allowMock -ceq "false") {
-        Set-ConfigValue "Luthn__Classification__Provider" "mock"
-        Set-ConfigValue "Luthn__Classification__AllowMock" "true"
+    if ($provider -cnotin @("LocalDeterministic", "LocalHttp", "Unconfigured")) {
+        Set-ConfigValue "Luthn__Classification__Provider" "Unconfigured"
     }
+    Remove-ConfigPrefix "Luthn__Classification__AllowMock"
+    Remove-ConfigPrefix "Luthn__Classification__Credential"
+    Remove-ConfigPrefix "Luthn__Classification__Model"
+    Remove-ConfigPrefix "Luthn__Classification__AuthHeaderName"
+    Remove-ConfigPrefix "Luthn__Classification__ExternalHttp__"
 }
 
 function Ensure-ServiceTokenScope {
@@ -956,12 +1004,13 @@ function Write-InitialConfig {
         "POSTGRES_DB=luthn",
         "POSTGRES_USER=luthn",
         "POSTGRES_HOST_AUTH_METHOD=trust",
-        "Luthn__Classification__Provider=mock",
-        "Luthn__Classification__AllowMock=true",
+        "Luthn__Classification__Provider=LocalDeterministic",
         "Luthn__Memory__AutomaticTurnRetentionDays=30",
         "Luthn__Memory__AutomaticTurnCleanupEnabled=true",
         "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes=60",
         "Luthn__Memory__AutomaticTurnCleanupBatchSize=100",
+        "Luthn__Console__LocalOnly=true",
+        "Luthn__Console__TrustedLocalBridge=true",
         "Luthn__Auth__RequireServiceToken=true",
         "Luthn__Identity__Mode=SingleOwner",
         "Luthn__Identity__SingleOwnerUserId=local-owner",
@@ -977,7 +1026,7 @@ function Write-InitialConfig {
         "Luthn__Auth__Tokens__0__Scopes__3=memory.read",
         "Luthn__Auth__Tokens__0__Scopes__4=classification.preview",
         "Luthn__Auth__Tokens__0__Scopes__5=agent.connection.read",
-        "Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write"
+        "Luthn__Auth__Tokens__0__Scopes__6=agent.connection.write",
         "Luthn__Auth__Tokens__0__Scopes__7=access.request",
         "Luthn__Auth__Tokens__0__Scopes__8=metrics.write",
         "Luthn__Auth__Tokens__1__Name=local-operator",
@@ -1091,16 +1140,12 @@ function Test-ClassificationSetupPending {
     param([int]$StatusCode, [string]$Body)
     return $StatusCode -eq 503 -and
         $Body -match '"dependency"\s*:\s*"classification-provider"' -and
-        ($Body -match "No classification provider is configured" -or
-         $Body -match "The mock classification provider is disabled" -or
-         $Body -match "Production classification requires an operator-configured non-mock provider")
+        $Body -match "No supported local classification provider is configured"
 }
 
 function Test-ClassificationSetupRequiredByConfig {
-    $provider = Read-ConfigValue "Luthn__Classification__Provider" "mock"
-    $allowMock = Read-ConfigValue "Luthn__Classification__AllowMock" "true"
-    return $provider -ceq "unconfigured" -or
-        ($provider -ceq "mock" -and $allowMock -ine "true")
+    $provider = Read-ConfigValue "Luthn__Classification__Provider" "LocalDeterministic"
+    return $provider -cnotin @("LocalDeterministic", "LocalHttp")
 }
 
 function Wait-ForApi {
@@ -1212,9 +1257,8 @@ function Install-Luthn {
         Ensure-ConfigValue "POSTGRES_DB" "luthn"
         Ensure-ConfigValue "POSTGRES_USER" "luthn"
         Ensure-ConfigValue "POSTGRES_HOST_AUTH_METHOD" "trust"
-        Ensure-ConfigValue "Luthn__Classification__Provider" "mock"
-        Ensure-ConfigValue "Luthn__Classification__AllowMock" "true"
-        Upgrade-LegacyClassificationDefault
+        Ensure-ConfigValue "Luthn__Classification__Provider" "LocalDeterministic"
+        Normalize-ClassificationProvider
         Ensure-ConfigValue "Luthn__Memory__AutomaticTurnRetentionDays" "30"
         Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupEnabled" "true"
         Ensure-ConfigValue "Luthn__Memory__AutomaticTurnCleanupIntervalMinutes" "60"
@@ -1315,6 +1359,38 @@ function Show-Status {
     if ($imageId -and $selectedImageId -and $imageId -cne $selectedImageId) {
         Write-Host "Runtime drift: a locally selected image is not running; run 'luthn update'."
     }
+}
+
+function Open-Console {
+    param([string[]]$Arguments)
+    if ($Arguments.Count -gt 0) {
+        throw "usage: luthn console"
+    }
+
+    Require-Installation
+    $baseUrl = Read-ConfigValue "LUTHN_BASE_URL" "http://127.0.0.1:8080"
+    $configuredOperatorTokenFile = Read-ConfigValue "LUTHN_OPERATOR_TOKEN_FILE" $script:OperatorTokenFile
+    if (-not [IO.File]::Exists($configuredOperatorTokenFile)) {
+        throw "Local operator credential is unavailable. Run: luthn update"
+    }
+    $operatorToken = [IO.File]::ReadAllText($configuredOperatorTokenFile).Trim()
+    if (-not $operatorToken) { throw "Local operator credential is empty. Run: luthn update" }
+
+    Start-Process "$baseUrl/"
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $response = Invoke-WebRequest -Method Post -Uri "$baseUrl/api/operator/session/local/arm" -Headers @{
+            Authorization = "Bearer $operatorToken"
+        } -SkipHttpErrorCheck
+        if ($response.StatusCode -eq 204) {
+            $operatorToken = $null
+            Write-Host "Opening the local console: $baseUrl/"
+            return
+        }
+        if ($response.StatusCode -ne 409) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    $operatorToken = $null
+    throw "Local console authorization failed. Keep one console window open and retry."
 }
 
 function Add-DoctorCheck {
@@ -2468,7 +2544,7 @@ function Get-ClaudeStopGroups {
     return @($hooks["Stop"])
 }
 
-function Get-ClaudeHookArguments { return @("-NoProfile", "-File", $script:BinDir + "\\luthn.ps1", "claude-hook") }
+function Get-ClaudeHookArguments { return @("-NoProfile", "-File", (Join-Path $script:BinDir "luthn.ps1"), "claude-hook") }
 
 function Test-ClaudeHookInstalled {
     param([string]$Path = $script:ClaudeSettingsFile, [string]$Command = (Get-PwshPath), [string[]]$Arguments = (Get-ClaudeHookArguments))
@@ -2721,6 +2797,7 @@ try {
         "manifest" { Get-CurrentWindowsCliManifest | ConvertTo-Json -Compress }
         "install" { Install-Luthn $CommandArguments }
         "status" { Show-Status }
+        "console" { Open-Console $CommandArguments }
         "update" {
             if ($CommandArguments.Count -ge 1 -and $CommandArguments[0] -ceq "check") {
                 Invoke-UpdateCheck @($CommandArguments | Select-Object -Skip 1)

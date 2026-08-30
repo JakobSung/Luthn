@@ -108,10 +108,9 @@ source-free Compose bundle, resolves `ghcr.io/jakobsung/luthn:stable` to an
 immutable digest, creates a
 local service token, starts PostgreSQL, applies migrations before API startup,
 seeds public-safe demo data, and waits until the API is healthy. A fresh install
-starts with the deterministic local `mock` classifier and `AllowMock=true`, so
-`/readyz` is ready without an external provider. It becomes `setup-required` or
-`not_ready` only if the operator changes the provider to `unconfigured` or
-disables mock classification.
+starts with `LocalDeterministic`, so `/readyz` is ready without a model process,
+credential, or network classification call. It becomes `setup-required` or
+`not_ready` when no supported local provider is configured.
 With `--connect-codex`, the same bootstrap also configures the Codex hook, MCP
 registration, and default auto-recall, then prints the required restart and
 `/hooks` Trust steps. To connect an installed Claude Code CLI instead, use
@@ -303,16 +302,52 @@ same fields for agents and automation without secret values.
 
 Open the operator console at <http://127.0.0.1:8080/>. PostgreSQL is kept on the
 internal Compose network and the console/API port is loopback-bound by default.
+The console is the local approval authority for sensitive-access requests and
+external-publication decisions. It loads bounded operator detail through the
+Host API and requires an explicit decision reason. Legacy approvals can return
+a server-validated redacted summary. Protected-memory approvals choose a 1–60
+minute window (60 by default) and 1–3 reads (one by default), but the protected
+title and summary are delivered only to the bound requester and never displayed
+in the console. Credentials and keys are never delivered.
+The audit center provides metadata-only decision, failure, configuration,
+ingress, publication, and retention investigation with bounded filters and
+export. It is not a raw-content viewer or a database administration surface.
+
+### Console access and menus
+
+Open `Console access` to inspect the current session. A packaged personal
+`SingleOwner` install is loopback-bound. On macOS and Linux, select `Connect local
+access`; the installed Host Helper approves exactly one explicit browser candidate
+and creates a bounded `LocalAuto` session without key entry or a terminal command.
+`luthn console` remains the local recovery path and is the current Windows console
+access path. Multiple or missing candidates fail closed. The helper and CLI never
+place the credential or a bootstrap token in the browser, URL, API body, or command
+arguments. The
+browser receives only an opaque HttpOnly, host-only,
+SameSite session cookie; mutation requests also require same-origin antiforgery
+proof. Service and decision credentials stay in protected server configuration
+for agents and non-console API clients and are never copied into the page, URL,
+browser storage, logs, or exports.
+
+Opening the URL alone does not authorize a new session; the user must select the
+local-access action. LocalAuto fails closed
+when the installation is multi-user, forwarded, or not explicitly local-only.
+The packaged loopback bridge is limited to its direct local HTTP origin. Packaged
+Compose sets `Luthn__Console__TrustedLocalBridge=true`; the Host accepts that bridge
+only with a loopback Host header, private container endpoints, and forwarded headers disabled.
+
+The menu remains divided into Overview, Access approvals, Publication,
+Classify & intake, Audit center, and Console access. Existing bearer clients and
+their least-privilege scopes remain compatible.
 
 ### Classification defaults
 
-New installations use the local `mock` classifier, so classification-dependent
-writes and `/readyz` work immediately without a separate provider setup. The
-mock is deterministic and local; replace it in the operator console with an
-operator-configured provider when you need provider-backed classification.
-`luthn install` and `luthn update` also replace the exact legacy default pair
-`unconfigured`/`false` with `mock`/`true`; any other configured value remains
-unchanged.
+New installations use `LocalDeterministic`, so classification-dependent writes
+and `/readyz` work immediately without a separate model runtime. `LocalHttp` is
+optional and accepts only `localhost`, loopback IP addresses, or
+`host.docker.internal`; redirects fail closed. Legacy commercial, `Mock`, and
+`ExternalHttp` runtime values migrate to `Unconfigured`, and legacy endpoint,
+model, authentication, and credential values are removed.
 
 ### Automatic turn memory retention
 
@@ -532,7 +567,7 @@ summary limit, with deterministic hashed session/turn identifiers. It does not
 read or upload the Codex transcript, user prompts, working-directory path, or
 transcript path. Delivery failure does not block the Codex turn.
 If the message contains a recognized credential pattern, including URI
-user-info, Basic/Bearer authentication, JWTs, cloud credentials, secret
+user-info, Basic/Bearer authentication, JWTs, provider credentials, secret
 assignments, or private keys, the entire capsule is dropped before delivery.
 The server classification and policy boundary still applies to every delivered
 capsule.
@@ -574,13 +609,17 @@ classify_preview
 create_shared_memory
 query_shared_memory
 get_shared_memory_item
+request_protected_information_access
+get_protected_information_result
 create_sensitive_access_request
 get_sensitive_access_request
 get_sensitive_access_result
 ```
 
-The default connector token includes `access.request`, so these request/status/result
-tools work after a new install or update. Approval and denial remain outside MCP.
+The default connector token includes `access.request`, so these bounded
+request/status/result tools work after a new install or update. Approval and
+denial remain outside MCP. Requester handles must never be shown or persisted by
+the agent.
 
 ### Additional Agents
 
@@ -591,9 +630,11 @@ tools work after a new install or update. Approval and denial remain outside MCP
   MemoryProvider interface, with MCP only where that provider does not cover an
   active operation.
 
-Neither integration is installed by the current Codex command. The operator
-console is a read-only status surface; it cannot install, reconfigure, or
-disconnect host agents.
+Neither integration is installed by the current Codex command. For agent
+configuration the operator console remains an observation surface: it cannot
+install, reconfigure, trust, or disconnect host agents. Its separate approval
+and audit sections still operate through the Host API and do not access the
+database directly.
 
 ## Secrets
 

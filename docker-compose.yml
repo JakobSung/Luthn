@@ -6,17 +6,30 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__LuthnDb: ${LUTHN_DOCKER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=luthn;Username=luthn}
-      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-mock}
-      Luthn__Classification__AllowMock: ${Luthn__Classification__AllowMock:-true}
+      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-LocalDeterministic}
+      Luthn__Classification__LocalHttp__Endpoint: ${Luthn__Classification__LocalHttp__Endpoint:-}
       Luthn__Memory__AutomaticTurnRetentionDays: ${Luthn__Memory__AutomaticTurnRetentionDays:-30}
       Luthn__Memory__AutomaticTurnCleanupEnabled: ${Luthn__Memory__AutomaticTurnCleanupEnabled:-true}
       Luthn__Memory__AutomaticTurnCleanupIntervalMinutes: ${Luthn__Memory__AutomaticTurnCleanupIntervalMinutes:-60}
       Luthn__Memory__AutomaticTurnCleanupBatchSize: ${Luthn__Memory__AutomaticTurnCleanupBatchSize:-100}
+      Luthn__Audit__Retention__CleanupEnabled: ${Luthn__Audit__Retention__CleanupEnabled:-false}
+      Luthn__Audit__Retention__CleanupIntervalMinutes: ${Luthn__Audit__Retention__CleanupIntervalMinutes:-60}
+      Luthn__Audit__Retention__CleanupBatchSize: ${Luthn__Audit__Retention__CleanupBatchSize:-100}
+      Luthn__Audit__Retention__AccessDays: ${Luthn__Audit__Retention__AccessDays:-365}
+      Luthn__Audit__Retention__SecurityDays: ${Luthn__Audit__Retention__SecurityDays:-365}
+      Luthn__Audit__Retention__ConfigurationDays: ${Luthn__Audit__Retention__ConfigurationDays:-730}
+      Luthn__Audit__Retention__PublicationDays: ${Luthn__Audit__Retention__PublicationDays:-365}
+      Luthn__Audit__Retention__IngestionDays: ${Luthn__Audit__Retention__IngestionDays:-90}
+      Luthn__Audit__Retention__RetentionDays: ${Luthn__Audit__Retention__RetentionDays:-730}
       Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
       Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
       Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
       Luthn__OperatorConfig__Directory: ${Luthn__OperatorConfig__Directory:-/var/lib/luthn/operator}
       Luthn__Host__RequestTimeoutSeconds: ${Luthn__Host__RequestTimeoutSeconds:-65}
+      Luthn__Console__LocalOnly: ${Luthn__Console__LocalOnly:-true}
+      Luthn__Console__TrustedLocalBridge: ${Luthn__Console__TrustedLocalBridge:-true}
+      Luthn__Identity__Mode: ${Luthn__Identity__Mode:-SingleOwner}
+      Luthn__Identity__SingleOwnerUserId: ${Luthn__Identity__SingleOwnerUserId:-local-owner}
       Luthn__Auth__RequireServiceToken: ${Luthn__Auth__RequireServiceToken:-true}
       Luthn__Auth__Tokens__0__Name: ${Luthn__Auth__Tokens__0__Name:-local-agent}
       Luthn__Auth__Tokens__0__Sha256Digest: ${Luthn__Auth__Tokens__0__Sha256Digest:-}
@@ -38,10 +51,15 @@ services:
       Luthn__Auth__Tokens__0__Scopes__15: ${Luthn__Auth__Tokens__0__Scopes__15:-}
       Luthn__Auth__Tokens__1__Name: ${Luthn__Auth__Tokens__1__Name:-local-operator}
       Luthn__Auth__Tokens__1__Sha256Digest: ${Luthn__Auth__Tokens__1__Sha256Digest:-}
+      Luthn__Auth__Tokens__1__WorkspaceId: ${Luthn__Auth__Tokens__1__WorkspaceId:-default}
+      Luthn__Auth__Tokens__1__ActorKind: ${Luthn__Auth__Tokens__1__ActorKind:-Service}
+      Luthn__Auth__Tokens__1__IsOperator: ${Luthn__Auth__Tokens__1__IsOperator:-true}
       Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
-      Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-}
+      Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-config.write}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

@@ -12,6 +12,10 @@ public sealed class DeterministicSensitiveDataDetectorTests
         { "token ghp_1234567890abcdefghijklmnopqrstuvwxyz", "access key", SensitivityLevel.Restricted },
         { "AWS access AKIA1234567890ABCDEF", "access key", SensitivityLevel.Restricted },
         { "API 키 = abcdefghijklmnop12345678", "access key", SensitivityLevel.Restricted },
+        { "client_secret = client-secret-value-123", "credential", SensitivityLevel.Restricted },
+        { "JWT eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature-value-123", "credential", SensitivityLevel.Restricted },
+        { "postgresql://app:password@example.internal:5432/app", "credential", SensitivityLevel.Restricted },
+        { "protected handle 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "access handle", SensitivityLevel.Restricted },
         { "비밀번호: correct-horse-battery-staple", "credential", SensitivityLevel.Restricted },
         { "담당자 person@example.com", "email", SensitivityLevel.Confidential },
         { "연락처 010-1234-5678", "personal identifier", SensitivityLevel.Confidential },
@@ -20,7 +24,25 @@ public sealed class DeterministicSensitiveDataDetectorTests
         { "견적금액은 1,000원입니다.", "finance", SensitivityLevel.Confidential },
         { "홍길동 사원의 연봉은 5,000만원입니다.", "finance", SensitivityLevel.Confidential },
         { "Annual salary is USD 12000.", "finance", SensitivityLevel.Confidential },
-        { "Revenue was $12000.", "finance", SensitivityLevel.Confidential }
+        { "Revenue was KRW12000.", "finance", SensitivityLevel.Confidential },
+        { "Refund due: 50 cents.", "finance", SensitivityLevel.Confidential },
+        { "환불 예정액은 500센트입니다.", "finance", SensitivityLevel.Confidential },
+        { "The invoice total is USD12000.", "finance", SensitivityLevel.Confidential },
+        { "The invoice total is KRW5000.", "finance", SensitivityLevel.Confidential },
+        { "Revenue was $12000.", "finance", SensitivityLevel.Confidential },
+        { "프로젝트 비용은 오천만원입니다.", "finance", SensitivityLevel.Confidential },
+        { "The fee was twelve thousand dollars.", "finance", SensitivityLevel.Confidential },
+        { "예산은 KRW 2.5m입니다.", "finance", SensitivityLevel.Confidential },
+        { "정산액은 3억 원입니다.", "finance", SensitivityLevel.Confidential },
+        { "The contract value was EUR 3bn.", "finance", SensitivityLevel.Confidential },
+        { "The bonus was £2.5m.", "finance", SensitivityLevel.Confidential },
+        { "출장비는 20,000엔입니다.", "finance", SensitivityLevel.Confidential },
+        { "지급액은 1200 JPY입니다.", "finance", SensitivityLevel.Confidential },
+        { "보너스는 ₩750k입니다.", "finance", SensitivityLevel.Confidential },
+        { "Balance: 50 cents.", "finance", SensitivityLevel.Confidential },
+        { "잔액은 50센트입니다.", "finance", SensitivityLevel.Confidential },
+        { "정산액은 5백원입니다.", "finance", SensitivityLevel.Confidential },
+        { "정산액은 5백 원입니다.", "finance", SensitivityLevel.Confidential }
     };
 
     [Theory]
@@ -52,6 +74,13 @@ public sealed class DeterministicSensitiveDataDetectorTests
     [InlineData("홍길동 사원이 업무를 진행했다")]
     [InlineData("홍길동 사원이 공개 견적을 발행했다")]
     [InlineData("2026-08-04에 v1.2.3을 배포했고 3개 항목을 처리했다")]
+    [InlineData("USD")]
+    [InlineData("$")]
+    [InlineData("const USDValue = 12000;")]
+    [InlineData("echo $HOME")]
+    [InlineData("홍길동 조원이 업무를 진행했다")]
+    [InlineData("가격 계산 로직을 개선했다")]
+    [InlineData("예산 문서를 검토했다")]
     public void DetectorRejectsBenignNearMisses(string content)
     {
         var result = new DeterministicSensitiveDataDetector().Detect(
@@ -89,6 +118,21 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.Contains("credential", result.Categories);
     }
 
+    [Theory]
+    [InlineData("client_secret=client-secret-value-123", "client-secret-value-123")]
+    [InlineData("JWT: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature-value-123", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature-value-123")]
+    [InlineData("postgresql://app:password@example.internal:5432/app", "postgresql://app:password@example.internal:5432/app")]
+    [InlineData("protected handle 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]
+    public void RedactorRemovesCredentialAndProtectedAccessHandleShapes(string content, string secret)
+    {
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.DoesNotContain(secret, result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RedactorRemovesMonetaryAmountWithoutRemovingPersonNameOrEvent()
     {
@@ -102,6 +146,54 @@ public sealed class DeterministicSensitiveDataDetectorTests
         Assert.Contains("신규 견적을 발행했다", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("1,000원", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("금액", result.Text, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+        Assert.Contains("finance", result.Categories);
+    }
+
+    [Theory]
+    [InlineData("Revenue was KRW12000", "KRW12000")]
+    [InlineData("Refund due: 50 cents", "50 cents")]
+    [InlineData("환불 예정액은 500센트입니다.", "500센트")]
+    public void RedactorRemovesCompactAndCentDenominatedAmounts(string content, string amount)
+    {
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.DoesNotContain(amount, result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("finance", result.Categories);
+    }
+
+    [Fact]
+    public void RedactorRemovesTextualMonetaryPhraseWithoutRemovingPersonNameOrEvent()
+    {
+        const string content = "홍길동 사원이 오천만원을 확인하고 신규 견적을 발행했다.";
+
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.Contains("홍길동 사원", result.Text, StringComparison.Ordinal);
+        Assert.Contains("신규 견적을 발행했다", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("오천만원", result.Text, StringComparison.Ordinal);
+        Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
+        Assert.Contains("finance", result.Categories);
+    }
+
+    [Theory]
+    [InlineData("USD12000")]
+    [InlineData("KRW5000")]
+    [InlineData("50 cents")]
+    [InlineData("50센트")]
+    [InlineData("5백원")]
+    [InlineData("5백 원")]
+    public void RedactorRemovesPreviouslySupportedCompactMonetaryFormats(string content)
+    {
+        var result = new DeterministicSensitiveDataDetector().Redact(content);
+
+        Assert.True(result.Changed);
+        Assert.True(result.IsComplete);
+        Assert.DoesNotContain(content, result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(DeterministicSensitiveDataDetector.RedactionMarker, result.Text, StringComparison.Ordinal);
         Assert.Contains("finance", result.Categories);
     }

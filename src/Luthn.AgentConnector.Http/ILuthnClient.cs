@@ -91,12 +91,27 @@ public interface ILuthnAgentClient
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access requests.");
 
-    Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+    Task<ProtectedInformationAccessResponseDto> RequestProtectedInformationAccessAsync(
+        ProtectedInformationAccessRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information confirmation requests.");
+
+    Task<ProtectedInformationResultDto> GetProtectedInformationResultAsync(
+        ProtectedInformationResultRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information result reads.");
+
+    Task<ProtectedInformationAccessWaitResponseDto> WaitForProtectedInformationAccessAsync(
+        ProtectedInformationAccessWaitRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information access waits.");
+
+    Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access status reads.");
 
-    Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
+    Task<SensitiveAccessReadDto> GetSensitiveAccessResultAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access result reads.");
@@ -269,22 +284,52 @@ public interface ILuthnClient : ILuthnAgentClient
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access requests.");
 
-    Task<SensitiveAccessRequestDto> ILuthnAgentClient.GetSensitiveAccessRequestAsync(
+    Task<ProtectedInformationAccessResponseDto> ILuthnAgentClient.RequestProtectedInformationAccessAsync(
+        ProtectedInformationAccessRequestDto request,
+        CancellationToken cancellationToken) =>
+        RequestProtectedInformationAccessAsync(request, cancellationToken);
+
+    new Task<ProtectedInformationAccessResponseDto> RequestProtectedInformationAccessAsync(
+        ProtectedInformationAccessRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information confirmation requests.");
+
+    Task<ProtectedInformationResultDto> ILuthnAgentClient.GetProtectedInformationResultAsync(
+        ProtectedInformationResultRequestDto request,
+        CancellationToken cancellationToken) =>
+        GetProtectedInformationResultAsync(request, cancellationToken);
+
+    new Task<ProtectedInformationResultDto> GetProtectedInformationResultAsync(
+        ProtectedInformationResultRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information result reads.");
+
+    Task<ProtectedInformationAccessWaitResponseDto> ILuthnAgentClient.WaitForProtectedInformationAccessAsync(
+        ProtectedInformationAccessWaitRequestDto request,
+        CancellationToken cancellationToken) =>
+        WaitForProtectedInformationAccessAsync(request, cancellationToken);
+
+    new Task<ProtectedInformationAccessWaitResponseDto> WaitForProtectedInformationAccessAsync(
+        ProtectedInformationAccessWaitRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This connector does not implement protected information access waits.");
+
+    Task<SensitiveAccessReadDto> ILuthnAgentClient.GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken) =>
         GetSensitiveAccessRequestAsync(id, cancellationToken);
 
-    new Task<SensitiveAccessRequestDto> GetSensitiveAccessRequestAsync(
+    new Task<SensitiveAccessReadDto> GetSensitiveAccessRequestAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access status reads.");
 
-    Task<SensitiveAccessResultDto> ILuthnAgentClient.GetSensitiveAccessResultAsync(
+    Task<SensitiveAccessReadDto> ILuthnAgentClient.GetSensitiveAccessResultAsync(
         string id,
         CancellationToken cancellationToken) =>
         GetSensitiveAccessResultAsync(id, cancellationToken);
 
-    new Task<SensitiveAccessResultDto> GetSensitiveAccessResultAsync(
+    new Task<SensitiveAccessReadDto> GetSensitiveAccessResultAsync(
         string id,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("This connector does not implement sensitive access result reads.");

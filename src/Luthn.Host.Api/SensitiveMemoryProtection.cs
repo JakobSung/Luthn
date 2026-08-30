@@ -155,7 +155,7 @@ internal static class SensitiveMemoryPersistence
         }
 
         ApplyInertProjection(record);
-        return CreateProtectedPayloadRecord(record.Id, payload, protector, now);
+        return CreateProtectedPayloadRecord(record, payload, protector, now);
     }
 
     public static SensitiveMemoryPayloadRecord ProtectOriginalForSafeProjection(
@@ -170,7 +170,7 @@ internal static class SensitiveMemoryPersistence
             throw new InvalidOperationException("Only an agent-visible safe projection can retain an encrypted original.");
         }
 
-        return CreateProtectedPayloadRecord(record.Id, payload, protector, now);
+        return CreateProtectedPayloadRecord(record, payload, protector, now);
     }
 
     public static bool HasValidProjectionForProtectedPayload(
@@ -179,18 +179,19 @@ internal static class SensitiveMemoryPersistence
         IsInertProjection(record) || IsAgentVisibleSafeProjection(record, sensitiveDataDetector);
 
     private static SensitiveMemoryPayloadRecord CreateProtectedPayloadRecord(
-        string memoryItemId,
+        SharedMemoryItemRecord record,
         SensitiveMemoryPayload payload,
         ISensitiveMemoryPayloadProtector protector,
         DateTimeOffset now)
     {
-        var protectedPayload = protector.Protect(memoryItemId, payload);
+        var protectedPayload = protector.Protect(record.Id, payload);
         return new SensitiveMemoryPayloadRecord
         {
-            MemoryItemId = memoryItemId,
+            MemoryItemId = record.Id,
             ContractVersion = payload.ContractVersion,
             ProtectionScheme = protector.ProtectionScheme,
             ProtectedPayload = protectedPayload,
+            ExpiresAt = record.ExpiresAt,
             CreatedAt = now,
             UpdatedAt = now
         };

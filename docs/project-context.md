@@ -27,13 +27,22 @@ context.
 - Agents read Core-filtered shared memory, context packs, and wiki-safe Markdown
   by default.
 - Raw/private records stay behind Vault, policy, controlled access, and audit.
+- The local operator console is the authority for sensitive-access review in
+  Local and multi-user self-host modes. Operator detail may show only bounded safe reference
+  metadata and redacted summaries; approve/deny decisions require an explicit
+  reason and never expose raw Vault/source content.
+- Sensitive-access approval and external-publication approval are independent
+  decisions. Audit is a metadata-only investigation trail, not a content
+  recovery or backup surface.
 - Wiki Markdown is a projection over Core-managed knowledge, not the source of
   truth.
 - Local/PostgreSQL storage is the default self-host memory path; external memory
   services are optional adapters behind Luthn policy.
 - Local-only operation is the invariant. External publication requires an
   operator action and exports only a versioned public-safe projection through a
-  durable local outbox. The public repository contains no active cloud client.
+  durable local outbox. The public repository contains no active outbound client.
+- Multi-user self-host deployments use server-configured identity bindings and
+  disabled-by-default ingress and outbound relay boundaries.
 - Local self-host smoke flows should run without provider credentials.
 - The repository must remain safe to expose: no credentials, private source
   records, customer originals, local agent artifacts, local planning state, or
@@ -47,16 +56,6 @@ Raw/private source
   -> Classification + policy
   -> Vault / Core graph / shared memory / Wiki projection / Ignore / NeedsReview
   -> Agent API returns Core-filtered, wiki-safe memory and context
-```
-
-Optional future team sharing follows a separate boundary:
-
-```text
-Approved shared memory
-  -> explicit external-publication approval
-  -> versioned safe projection in local durable outbox
-  -> disabled transport boundary
-  -> future commercial cloud adapter outside this repository
 ```
 
 Runtime projects:
@@ -76,8 +75,10 @@ Runtime projects:
 - Use `coreTags` for Core-filtered context selection.
 - Do not add raw Vault/source read routes, connector methods, or MCP tools by
   default.
-- Keep sensitive-access and audit responses metadata-only unless a future
-  generated plan explicitly implements limited redacted output.
+- Keep sensitive-access and audit responses metadata-only by default. Limited
+  output exceptions are the server-validated legacy redacted summary and the
+  requester-bound protected-memory title/summary after explicit approval.
+  Credentials and keys are never an exception.
 - Keep sensitive or non-agent-visible shared-memory user fields in the
   authenticated protected payload store. Keep its key ring outside PostgreSQL,
   and never expose ciphertext through agent, sync, publication, audit, log, or

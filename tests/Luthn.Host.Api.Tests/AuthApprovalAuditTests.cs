@@ -93,6 +93,32 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var audit = await db.AuditEvents.SingleAsync(record => record.Action == "authorization.scope_denied");
+        Assert.Equal(ServiceScopes.AgentRead, audit.SubjectId);
+        Assert.Equal("denied", audit.Outcome);
+        Assert.Equal("metadata-only", audit.PayloadClass);
+        Assert.DoesNotContain(RequestBearer, JsonSerializer.Serialize(audit), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidPresentedCredentialCreatesInstallationScopedMetadataOnlyAudit()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        client.SetBearer("invalid-presented-credential");
+
+        using var response = await client.GetAsync("/api/audit-events");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var audit = await db.AuditEvents.SingleAsync(record => record.Action == "authorization.credential_rejected");
+        Assert.Equal(AuditEventScopeKind.Installation, audit.ScopeKind);
+        Assert.Equal(ServiceScopes.AuditRead, audit.SubjectId);
+        Assert.Equal("credential-not-retained", audit.RedactionState);
+        Assert.DoesNotContain("invalid-presented-credential", JsonSerializer.Serialize(audit), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -123,6 +149,82 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         Assert.Equal(HttpStatusCode.OK, operatorList.StatusCode);
         Assert.Equal(HttpStatusCode.OK, operatorDecision.StatusCode);
         Assert.Equal("Approved", body.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task OperatorDetailRequiresDecideScopeAndAuditsWithoutContent()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        client.SetBearer(RequestBearer);
+        using var forbidden = await client.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+        using var agentStatus = await client.GetAsync($"/api/access-requests/{requestId}");
+        using var agentStatusBody = await JsonDocument.ParseAsync(await agentStatus.Content.ReadAsStreamAsync());
+
+        client.SetBearer(DeciderBearer);
+        using var pending = await client.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+        using var pendingBody = await JsonDocument.ParseAsync(await pending.Content.ReadAsStreamAsync());
+        using var approval = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Approved after reviewing the local redacted context."
+        });
+        using var decided = await client.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+        using var decidedBody = await JsonDocument.ParseAsync(await decided.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, agentStatus.StatusCode);
+        Assert.False(agentStatusBody.RootElement.TryGetProperty("requestReason", out _));
+        Assert.False(agentStatusBody.RootElement.TryGetProperty("decisionReason", out _));
+        Assert.False(agentStatusBody.RootElement.TryGetProperty("reference", out _));
+
+        Assert.Equal(HttpStatusCode.OK, pending.StatusCode);
+        Assert.True(pending.Headers.CacheControl?.NoStore == true);
+        Assert.Equal(
+            "Need approval for a redacted operational summary.",
+            pendingBody.RootElement.GetProperty("requestReason").GetString());
+        Assert.Equal(JsonValueKind.Null, pendingBody.RootElement.GetProperty("decisionReason").ValueKind);
+        Assert.Equal("local", pendingBody.RootElement.GetProperty("reference").GetProperty("sourceSystem").GetString());
+        Assert.Equal("note", pendingBody.RootElement.GetProperty("reference").GetProperty("sourceType").GetString());
+        Assert.Equal(
+            "Redacted reference context.",
+            pendingBody.RootElement.GetProperty("reference").GetProperty("redactedSummary").GetString());
+        Assert.Equal("operator-sensitive-metadata", pendingBody.RootElement.GetProperty("payloadClass").GetString());
+        Assert.Equal("local-operator-only", pendingBody.RootElement.GetProperty("redactionState").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, decided.StatusCode);
+        Assert.True(decided.Headers.CacheControl?.NoStore == true);
+        Assert.Equal("Approved", decidedBody.RootElement.GetProperty("decision").GetString());
+        Assert.Equal(
+            "Approved after reviewing the local redacted context.",
+            decidedBody.RootElement.GetProperty("decisionReason").GetString());
+        Assert.False(decidedBody.RootElement.GetProperty("redactedOutputAvailable").GetBoolean());
+        Assert.False(decidedBody.RootElement.TryGetProperty("redactedOutput", out _));
+        Assert.False(decidedBody.RootElement.TryGetProperty("workspaceId", out _));
+        Assert.False(decidedBody.RootElement.TryGetProperty("ownerUserId", out _));
+        Assert.DoesNotContain("private customer", decidedBody.RootElement.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("raw vault", decidedBody.RootElement.GetRawText(), StringComparison.OrdinalIgnoreCase);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var detailAudits = await db.AuditEvents
+            .Where(record => record.Action == "sensitive_access.operator_detail_read")
+            .ToArrayAsync();
+        Assert.Equal(2, detailAudits.Length);
+        Assert.All(detailAudits, audit =>
+        {
+            Assert.Equal(requestId, audit.SubjectId);
+            Assert.Equal("metadata-only", audit.PayloadClass);
+            Assert.Equal("operator-detail-read-no-content", audit.RedactionState);
+            Assert.DoesNotContain("approval", audit.Actor, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("redacted context", audit.Actor, StringComparison.OrdinalIgnoreCase);
+        });
+        var auditJson = JsonSerializer.Serialize(detailAudits);
+        Assert.DoesNotContain("Need approval for a redacted operational summary.", auditJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Approved after reviewing the local redacted context.", auditJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Redacted reference context.", auditJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -310,7 +412,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     [InlineData(60, HttpStatusCode.Created)]
     [InlineData(3600, HttpStatusCode.Created)]
     [InlineData(3601, HttpStatusCode.BadRequest)]
-    public async Task SensitiveAccessRequestValidatesExplicitExpiryBoundaries(
+    public async Task SensitiveAccessRequestValidatesLegacyExpiryShapeButUsesServerPolicy(
         int expiresInSeconds,
         HttpStatusCode expectedStatus)
     {
@@ -334,8 +436,8 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
             var expiresAt = body.RootElement.GetProperty("expiresAt").GetDateTimeOffset();
             Assert.InRange(
                 expiresAt - createdAt,
-                TimeSpan.FromSeconds(expiresInSeconds - 1),
-                TimeSpan.FromSeconds(expiresInSeconds + 1));
+                TimeSpan.FromSeconds(SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds - 1),
+                TimeSpan.FromSeconds(SensitiveAccessPolicyLimits.DefaultRequestTimeoutSeconds + 1));
         }
     }
 
@@ -482,7 +584,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var client = factory.CreateClient();
 
         var approveId = await CreateSensitiveAccessRequestAsync(client);
-        var denyId = await CreateSensitiveAccessRequestAsync(client);
+        var denyId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
 
         client.SetBearer(DeciderBearer);
         using var approveResponse = await client.PostAsJsonAsync($"/api/access-requests/{approveId}/approve", new
@@ -518,7 +620,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var factory = CreateAuthFactory();
         using var client = factory.CreateClient();
         var approveId = await CreateSensitiveAccessRequestAsync(client);
-        var denyId = await CreateSensitiveAccessRequestAsync(client);
+        var denyId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
 
         client.SetBearer(RequestBearer);
         using var pendingResponse = await client.GetAsync($"/api/access-requests/{approveId}/result");
@@ -658,7 +760,6 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         using var factory = CreateAuthFactory();
         using var client = factory.CreateClient();
         var firstRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
-        var secondRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
 
         client.SetBearer(DeciderBearer);
         using var firstApproval = await client.PostAsJsonAsync($"/api/access-requests/{firstRequestId}/approve", new
@@ -668,6 +769,12 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         });
         Assert.Equal(HttpStatusCode.OK, firstApproval.StatusCode);
 
+        client.SetBearer(RequestBearer);
+        using var firstResult = await client.GetAsync($"/api/access-requests/{firstRequestId}/result");
+        using var firstBody = await JsonDocument.ParseAsync(await firstResult.Content.ReadAsStreamAsync());
+        Assert.Equal("First public-safe result.", firstBody.RootElement.GetProperty("redactedOutput").GetString());
+
+        var secondRequestId = await CreateSensitiveAccessRequestAsync(client, "sensitive-ref-without-safe-output");
         client.SetBearer(RequestBearer);
         using var pendingSecondResult = await client.GetAsync($"/api/access-requests/{secondRequestId}/result");
         using var pendingSecondBody = await JsonDocument.ParseAsync(await pendingSecondResult.Content.ReadAsStreamAsync());
@@ -684,12 +791,9 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         Assert.Equal(HttpStatusCode.OK, secondApproval.StatusCode);
 
         client.SetBearer(RequestBearer);
-        using var firstResult = await client.GetAsync($"/api/access-requests/{firstRequestId}/result");
-        using var firstBody = await JsonDocument.ParseAsync(await firstResult.Content.ReadAsStreamAsync());
         using var secondResult = await client.GetAsync($"/api/access-requests/{secondRequestId}/result");
         using var secondBody = await JsonDocument.ParseAsync(await secondResult.Content.ReadAsStreamAsync());
 
-        Assert.Equal("First public-safe result.", firstBody.RootElement.GetProperty("redactedOutput").GetString());
         Assert.Equal("Second public-safe result.", secondBody.RootElement.GetProperty("redactedOutput").GetString());
 
         using var scope = factory.Services.CreateScope();
@@ -850,6 +954,48 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task AuditEventsEndpointConnectsSensitiveAccessLifecycleTimeline()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        var requestId = await CreateSensitiveAccessRequestAsync(client);
+
+        client.SetBearer(DeciderBearer);
+        using var detailResponse = await client.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+        using var approvalResponse = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Approved for a bounded metadata timeline."
+        });
+
+        client.SetBearer(RequestBearer);
+        using var resultResponse = await client.GetAsync($"/api/access-requests/{requestId}/result");
+
+        client.SetBearer(AuditBearer);
+        using var auditResponse = await client.GetAsync(
+            $"/api/audit-events?subjectId={requestId}&category=access&limit=20");
+        using var auditBody = await JsonDocument.ParseAsync(await auditResponse.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, detailResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, approvalResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, auditResponse.StatusCode);
+        var events = auditBody.RootElement.GetProperty("events").EnumerateArray().ToArray();
+        var actions = events.Select(item => item.GetProperty("action").GetString()).ToArray();
+        Assert.Contains("sensitive_access.requested", actions);
+        Assert.Contains("sensitive_access.operator_detail_read", actions);
+        Assert.Contains("sensitive_access.approved", actions);
+        Assert.Contains("sensitive_access.result_read", actions);
+        Assert.All(events, item => Assert.Equal("Access", item.GetProperty("category").GetString()));
+        Assert.True(events.Zip(events.Skip(1)).All(pair =>
+            pair.First.GetProperty("occurredAt").GetDateTimeOffset() >=
+            pair.Second.GetProperty("occurredAt").GetDateTimeOffset()));
+        Assert.DoesNotContain(
+            "Approved for a bounded metadata timeline.",
+            auditBody.RootElement.GetRawText(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AuditEventsEndpointReturnsMetadataOnly()
     {
         using var factory = CreateAuthFactory();
@@ -868,6 +1014,69 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         Assert.Equal("sensitive-boundary-only", auditEvent.GetProperty("redactionState").GetString());
         Assert.DoesNotContain("private customer", body.RootElement.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("raw vault", body.RootElement.GetRawText(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AuditEventsEndpointAppliesBoundedMetadataFilters()
+    {
+        using var factory = CreateAuthFactory();
+        var occurredAt = new DateTimeOffset(2026, 8, 6, 8, 30, 0, TimeSpan.Zero);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            db.AuditEvents.AddRange(
+                AuditEventFactory.ForWorkspace(
+                    "default", "operator-1", "service", "decider", "sensitive_access.approved",
+                    "request-filtered", "metadata-only", "approved-no-content", occurredAt,
+                    subjectType: "sensitive_access_request", outcome: "approved", correlationId: "corr-filtered"),
+                AuditEventFactory.ForWorkspace(
+                    "default", "operator-1", "service", "decider", "sensitive_access.denied",
+                    "request-other", "metadata-only", "denied-no-content", occurredAt.AddMinutes(1),
+                    subjectType: "sensitive_access_request", outcome: "denied", correlationId: "corr-other"),
+                AuditEventFactory.ForWorkspace(
+                    "other-workspace", "operator-2", "service", "other", "sensitive_access.approved",
+                    "request-other-workspace", "metadata-only", "approved-no-content", occurredAt,
+                    subjectType: "sensitive_access_request", outcome: "approved", correlationId: "corr-filtered"));
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        client.SetBearer(AuditBearer);
+        var from = Uri.EscapeDataString(occurredAt.AddMinutes(-1).ToString("O"));
+        var to = Uri.EscapeDataString(occurredAt.AddMinutes(1).ToString("O"));
+        using var response = await client.GetAsync(
+            $"/api/audit-events?action=sensitive_access.approved&actionPrefix=sensitive_access." +
+            $"&outcome=approved&subjectType=sensitive_access_request&actorKind=service" +
+            $"&correlationId=corr-filtered&from={from}&to={to}");
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var auditEvent = Assert.Single(body.RootElement.GetProperty("events").EnumerateArray());
+        Assert.Equal("request-filtered", auditEvent.GetProperty("subjectId").GetString());
+        Assert.Equal("corr-filtered", auditEvent.GetProperty("correlationId").GetString());
+        Assert.DoesNotContain("request-other-workspace", body.RootElement.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AuditEventsEndpointRejectsUnsafeOrUnboundedFilters()
+    {
+        using var factory = CreateAuthFactory();
+        using var client = factory.CreateClient();
+        client.SetBearer(AuditBearer);
+
+        using var prefixResponse = await client.GetAsync("/api/audit-events?actionPrefix=unbounded.");
+        using var oversizedResponse = await client.GetAsync($"/api/audit-events?subjectId={new string('a', 129)}");
+        using var controlResponse = await client.GetAsync("/api/audit-events?subjectId=%0Arequest-filtered");
+        using var offsetResponse = await client.GetAsync(
+            $"/api/audit-events?from={Uri.EscapeDataString("2026-08-06T09:00:00+09:00")}");
+        using var rangeResponse = await client.GetAsync(
+            "/api/audit-events?from=2026-08-06T10%3A00%3A00Z&to=2026-08-06T09%3A00%3A00Z");
+
+        Assert.Equal(HttpStatusCode.BadRequest, prefixResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, oversizedResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, controlResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, offsetResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, rangeResponse.StatusCode);
     }
 
     [Fact]
@@ -930,7 +1139,7 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
         {
             sensitiveReferenceId,
             reason = "Need approval for a redacted operational summary.",
-            sessionId = "session-sensitive-access",
+            sessionId = $"session-sensitive-access-{Guid.NewGuid():N}",
             expiresInSeconds = 600
         });
         using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
@@ -1013,7 +1222,8 @@ public sealed class AuthApprovalAuditTests : IClassFixture<WebApplicationFactory
             SourceType = "note",
             ReceivedAt = DateTimeOffset.UtcNow,
             ContainsSensitiveMaterial = true,
-            ReferenceLabel = "sensitive-record:source-sensitive-1"
+            ReferenceLabel = "sensitive-record:source-sensitive-1",
+            RedactedSummary = "Redacted reference context."
         });
         db.SensitiveRecordReferences.Add(new SensitiveRecordReferenceRecord
         {

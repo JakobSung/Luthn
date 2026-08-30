@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Luthn.Core.Classification;
 using Luthn.Core.Common;
@@ -9,8 +11,10 @@ using Luthn.Core.Policy;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Luthn.Host.Api.Tests;
@@ -22,6 +26,46 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
     public TurnSummaryEndpointTests(WebApplicationFactory<Program> factory)
     {
         _factory = factory;
+    }
+
+    [Fact]
+    public async Task ClassificationProviderFailureCreatesMetadataOnlyFailureAudit()
+    {
+        using var factory = CreateFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IContentClassifier>();
+                services.AddSingleton<IContentClassifier, UnavailableContentClassifier>();
+            }));
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-provider-failure",
+            turnId = "turn-provider-failure",
+            sourceAgent = "codex",
+            summary = "Public release summary.",
+            coreTags = new[] { "release" },
+            idempotencyKey = "summary-provider-failure"
+        });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var audits = await db.AuditEvents.ToArrayAsync();
+        Assert.Equal(2, audits.Length);
+        var failedAudit = Assert.Single(
+            audits,
+            audit => audit.Action == "turn_summary.classification_provider.failed");
+        var invokedAudit = Assert.Single(
+            audits,
+            audit => audit.Action == "turn_summary.classification_provider.invoked");
+        Assert.Equal("failed", failedAudit.Outcome);
+        Assert.Equal("metadata-only", failedAudit.PayloadClass);
+        Assert.Equal(invokedAudit.CorrelationId, failedAudit.CorrelationId);
+        Assert.False(string.IsNullOrWhiteSpace(failedAudit.CorrelationId));
+        Assert.Empty(await db.SourceEvents.ToArrayAsync());
+        Assert.Empty(await db.SharedMemoryItems.ToArrayAsync());
     }
 
     [Fact]
@@ -122,7 +166,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
-        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        var request = new
         {
             sessionId = "session-redacted-1",
             turnId = "turn-1",
@@ -131,13 +175,21 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
             coreTags = new[] { "sales", "quote" },
             title = "홍길동 견적 기록",
             idempotencyKey = "summary-redacted-1"
-        });
+        };
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", request);
         var responseJson = await response.Content.ReadAsStringAsync();
         using var body = JsonDocument.Parse(responseJson);
+        using var retry = await client.PostAsJsonAsync("/api/agent/turn-summaries", request);
+        using var retryBody = await JsonDocument.ParseAsync(await retry.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.True(body.RootElement.GetProperty("allowsAgentContext").GetBoolean());
         Assert.Equal("Public", body.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.True(retryBody.RootElement.GetProperty("duplicate").GetBoolean());
+        Assert.Equal(
+            body.RootElement.GetProperty("sensitiveReferenceId").GetString(),
+            retryBody.RootElement.GetProperty("sensitiveReferenceId").GetString());
         Assert.DoesNotContain(sensitiveEmail, responseJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(sensitiveAmount, responseJson, StringComparison.Ordinal);
 
@@ -179,6 +231,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         var classification = await db.ClassificationResults.SingleAsync();
         var memory = await db.SharedMemoryItems.SingleAsync();
         var encrypted = await db.SensitiveMemoryPayloads.SingleAsync();
+        var reference = await db.SensitiveRecordReferences.SingleAsync();
 
         Assert.True(source.ContainsSensitiveMaterial);
         Assert.Equal(SensitivityLevel.Public, classification.Sensitivity);
@@ -192,6 +245,14 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.DoesNotContain(sensitiveAmount, memory.SafeSummary, StringComparison.Ordinal);
         Assert.DoesNotContain(sensitiveEmail, encrypted.ProtectedPayload, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(sensitiveAmount, encrypted.ProtectedPayload, StringComparison.Ordinal);
+        Assert.Equal(memory.Id, reference.MemoryItemId);
+        Assert.Equal(memory.ExpiresAt, reference.ExpiresAt);
+        Assert.Equal(memory.ExpiresAt, encrypted.ExpiresAt);
+        Assert.Equal(memory.SafeSummary, reference.RedactedSummary);
+        Assert.Equal(1, await db.SourceEvents.CountAsync());
+        Assert.Equal(1, await db.SharedMemoryItems.CountAsync());
+        Assert.Equal(1, await db.SensitiveMemoryPayloads.CountAsync());
+        Assert.Equal(1, await db.SensitiveRecordReferences.CountAsync());
 
         var protector = factory.Services.GetRequiredService<ISensitiveMemoryPayloadProtector>();
         var plaintext = protector.Unprotect(memory.Id, encrypted.ProtectedPayload);
@@ -201,9 +262,196 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         var audit = await db.AuditEvents.SingleAsync(record => record.Action == "turn_summary.intake.classified");
         Assert.Equal("metadata-only", audit.PayloadClass);
         Assert.Equal("safe-projection-with-encrypted-original", audit.RedactionState);
+        var providerAudit = await db.AuditEvents.SingleAsync(record => record.Action == "turn_summary.classification_provider.invoked");
+        var completedProviderAudit = await db.AuditEvents.SingleAsync(record => record.Action == "turn_summary.classification_provider.completed");
+        Assert.Equal(providerAudit.CorrelationId, completedProviderAudit.CorrelationId);
+        Assert.Equal(providerAudit.CorrelationId, audit.CorrelationId);
         var auditJson = JsonSerializer.Serialize(await db.AuditEvents.AsNoTracking().ToArrayAsync());
         Assert.DoesNotContain(sensitiveEmail, auditJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(sensitiveAmount, auditJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EnglishShortQuotationWithoutQuoteTagCreatesSearchableSafeProjection()
+    {
+        const string vendor = "Acme";
+        const string amount = "$1,000";
+        const string originalSummary = $"{vendor} quote amount is {amount}.";
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var intake = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-short-quotation",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = originalSummary,
+            coreTags = new[] { "sales" },
+            idempotencyKey = "summary-short-quotation"
+        });
+        var intakeJson = await intake.Content.ReadAsStringAsync();
+        using var intakeBody = JsonDocument.Parse(intakeJson);
+
+        Assert.Equal(HttpStatusCode.Created, intake.StatusCode);
+        Assert.True(intakeBody.RootElement.GetProperty("allowsAgentContext").GetBoolean());
+        Assert.Equal(
+            "Public",
+            intakeBody.RootElement.GetProperty("classification").GetProperty("sensitivity").GetString());
+        Assert.DoesNotContain(vendor, intakeJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(amount, intakeJson, StringComparison.Ordinal);
+
+        using var search = await client.PostAsJsonAsync("/api/agent/context-packs", new
+        {
+            query = $"{vendor} quote",
+            maxItems = 10
+        });
+        var searchJson = await search.Content.ReadAsStringAsync();
+        using var searchBody = JsonDocument.Parse(searchJson);
+        var item = Assert.Single(searchBody.RootElement.GetProperty("items").EnumerateArray());
+        var memoryItemId = item.GetProperty("id").GetString()!;
+
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        Assert.Equal(AgentSafeMemoryProjectionSelector.QuotationFallbackTitle, item.GetProperty("title").GetString());
+        Assert.Equal(
+            AgentSafeMemoryProjectionSelector.QuotationFallbackSummary,
+            item.GetProperty("safeSummary").GetString());
+        Assert.DoesNotContain(vendor, searchJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(amount, searchJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(originalSummary, searchJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("sensitiveReferenceId", searchJson, StringComparison.OrdinalIgnoreCase);
+
+        using var resolution = await client.PostAsJsonAsync("/api/access-requests/resolve", new
+        {
+            memoryItemId,
+            reason = "견적 정보 확인"
+        });
+        using var resolutionBody = await JsonDocument.ParseAsync(await resolution.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, resolution.StatusCode);
+        Assert.Equal("requested", resolutionBody.RootElement.GetProperty("status").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(resolutionBody.RootElement.GetProperty("requestId").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(resolutionBody.RootElement.GetProperty("accessHandle").GetString()));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var source = await db.SourceEvents.SingleAsync();
+        var memory = await db.SharedMemoryItems.SingleAsync();
+        var encrypted = await db.SensitiveMemoryPayloads.SingleAsync();
+        var request = await db.SensitiveAccessRequests.SingleAsync();
+
+        Assert.True(source.ContainsSensitiveMaterial);
+        Assert.True(memory.AllowsAgentContext);
+        Assert.Equal(AgentSafeMemoryProjectionSelector.QuotationFallbackTitle, memory.Title);
+        Assert.Equal(AgentSafeMemoryProjectionSelector.QuotationFallbackSummary, memory.SafeSummary);
+        Assert.Equal(SensitiveAccessRequestStatus.Pending, request.Status);
+        var protector = factory.Services.GetRequiredService<ISensitiveMemoryPayloadProtector>();
+        var plaintext = protector.Unprotect(memory.Id, encrypted.ProtectedPayload);
+        Assert.Equal(originalSummary, plaintext.SafeSummary);
+    }
+
+    [Theory]
+    [InlineData("한샘 매출은 1,000만원입니다.", "매출")]
+    [InlineData("한샘 견적금액은 1,000만원이고 api key=abcdefghijklmnop", "견적")]
+    [InlineData("견적 업무. 직원 연봉은 1,000만원입니다.", "견적")]
+    public async Task QuotationFallbackKeepsIneligibleSensitiveContentPrivate(
+        string originalSummary,
+        string query)
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var intake = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = $"session-private-{Guid.NewGuid():N}",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = originalSummary,
+            coreTags = new[] { "finance", "quote" },
+            idempotencyKey = $"summary-private-{Guid.NewGuid():N}"
+        });
+        using var intakeBody = await JsonDocument.ParseAsync(await intake.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, intake.StatusCode);
+        Assert.False(intakeBody.RootElement.GetProperty("allowsAgentContext").GetBoolean());
+
+        using var search = await client.PostAsJsonAsync("/api/agent/context-packs", new
+        {
+            query,
+            maxItems = 10
+        });
+        using var searchBody = await JsonDocument.ParseAsync(await search.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        Assert.Empty(searchBody.RootElement.GetProperty("items").EnumerateArray());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        var memory = await db.SharedMemoryItems.SingleAsync();
+        Assert.Equal(MemoryVisibility.PrivateToOwner, memory.Visibility);
+        Assert.False(memory.AllowsAgentContext);
+        Assert.True(SensitiveMemoryPersistence.IsInertProjection(memory));
+        Assert.Empty(await db.SensitiveAccessRequests.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task ReturnedSensitiveReferenceReusesPendingRequestAndReturnsOnlySafeProjection()
+    {
+        const string sensitiveEmail = "person@example.com";
+        const string originalSummary =
+            $"홍길동 사원의 주소는 {sensitiveEmail}이고 신규 견적을 발행했다.";
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var intake = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-reference-workflow",
+            turnId = "turn-1",
+            sourceAgent = "codex",
+            summary = originalSummary,
+            coreTags = new[] { "sales", "quote" },
+            idempotencyKey = "summary-reference-workflow"
+        });
+        using var intakeBody = await JsonDocument.ParseAsync(await intake.Content.ReadAsStreamAsync());
+        var sensitiveReferenceId = intakeBody.RootElement
+            .GetProperty("sensitiveReferenceId")
+            .GetString();
+        Assert.False(string.IsNullOrWhiteSpace(sensitiveReferenceId));
+
+        var accessRequest = new
+        {
+            sensitiveReferenceId,
+            reason = "Need the approved public-safe turn summary.",
+            sessionId = "session-reference-request"
+        };
+        using var first = await client.PostAsJsonAsync("/api/access-requests", accessRequest);
+        using var firstBody = await JsonDocument.ParseAsync(await first.Content.ReadAsStreamAsync());
+        using var retry = await client.PostAsJsonAsync("/api/access-requests", accessRequest);
+        using var retryBody = await JsonDocument.ParseAsync(await retry.Content.ReadAsStreamAsync());
+        var requestId = firstBody.RootElement.GetProperty("id").GetString();
+
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        Assert.Equal("Pending", firstBody.RootElement.GetProperty("status").GetString());
+        Assert.Equal(requestId, retryBody.RootElement.GetProperty("id").GetString());
+
+        using var approval = await client.PostAsJsonAsync($"/api/access-requests/{requestId}/approve", new
+        {
+            reason = "Approved for the stored public-safe projection."
+        });
+        using var result = await client.GetAsync($"/api/access-requests/{requestId}/result");
+        var resultJson = await result.Content.ReadAsStringAsync();
+        using var resultBody = JsonDocument.Parse(resultJson);
+
+        Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal(
+            SensitiveAccessStatusCodes.ResultReturned,
+            resultBody.RootElement.GetProperty("statusCode").GetString());
+        Assert.Contains(
+            DeterministicSensitiveDataDetector.RedactionMarker,
+            resultBody.RootElement.GetProperty("redactedOutput").GetString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveEmail, resultJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(originalSummary, resultJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -382,6 +630,7 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
                 new PolicyEngine()),
             TestSensitiveMemoryProtection.Create(),
             Options.Create(new LuthnMemoryOptions()),
+            TimeProvider.System,
             db,
             new DefaultHttpContext(),
             CancellationToken.None);
@@ -425,6 +674,56 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         Assert.Equal(1, await db.SourceEvents.CountAsync());
         Assert.Equal(1, await db.ClassificationResults.CountAsync());
         Assert.Equal(1, await db.SharedMemoryItems.CountAsync());
+    }
+
+    [Fact]
+    public async Task TurnSummaryRetryFindsLegacyPreOwnerScopedIdempotencyId()
+    {
+        const string idempotencyKey = "summary-legacy-retry";
+        var legacyId = CreateLegacyExplicitSummaryId("default", idempotencyKey);
+        using var factory = CreateFactory();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+            db.SourceEvents.Add(new SourceEventRecord
+            {
+                Id = legacyId,
+                SourceSystem = "codex",
+                SourceType = "turn-summary",
+                ReceivedAt = DateTimeOffset.UtcNow,
+                ContentDigest = "sha256:legacy",
+                WorkspaceId = "default",
+                OwnerUserId = "local-owner"
+            });
+            db.ClassificationResults.Add(new ClassificationResultRecord
+            {
+                Id = $"classification-{legacyId}",
+                SourceEventId = legacyId,
+                Sensitivity = SensitivityLevel.Public,
+                Confidence = 1,
+                StorageDecision = StorageDecisionKind.WikiCandidate
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsJsonAsync("/api/agent/turn-summaries", new
+        {
+            sessionId = "session-legacy-retry",
+            turnId = "turn-legacy-retry",
+            sourceAgent = "codex",
+            summary = "Legacy public summary retry.",
+            coreTags = new[] { "legacy" },
+            idempotencyKey
+        });
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(body.RootElement.GetProperty("duplicate").GetBoolean());
+        Assert.Equal(legacyId, body.RootElement.GetProperty("summaryId").GetString());
+        using var verifyScope = factory.Services.CreateScope();
+        var verify = verifyScope.ServiceProvider.GetRequiredService<LuthnDbContext>();
+        Assert.Equal(1, await verify.SourceEvents.CountAsync());
     }
 
     [Fact]
@@ -565,6 +864,15 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
         return count;
     }
 
+    private static string CreateLegacyExplicitSummaryId(string workspaceId, string idempotencyKey)
+    {
+        var stableInput = string.Concat(
+            new[] { "explicit", workspaceId, idempotencyKey }
+                .Select(part => $"{part.Length}:{part}"));
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(stableInput));
+        return $"turn-summary-{Convert.ToHexString(digest).ToLowerInvariant()[..32]}";
+    }
+
     private sealed class CapturingPublicClassifier : IContentClassifier
     {
         public ClassificationProviderBoundary Boundary { get; } =
@@ -586,5 +894,19 @@ public sealed class TurnSummaryEndpointTests : IClassFixture<WebApplicationFacto
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                 ContainsSensitiveMaterial: false));
         }
+    }
+
+    private sealed class UnavailableContentClassifier : IContentClassifier
+    {
+        public ClassificationProviderBoundary Boundary { get; } =
+            new("unavailable", "metadata-only", "provider-unavailable");
+
+        public ValueTask<ClassificationResult> ClassifyAsync(
+            PublicRecordId sourceId,
+            string content,
+            string? sourceType,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<ClassificationResult>(
+                new ClassificationProviderException("Classification provider request failed."));
     }
 }

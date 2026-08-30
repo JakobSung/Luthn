@@ -1,17 +1,20 @@
 <p align="center">
-  <img src="docs/assets/luthn-brand.png" alt="Luthn - Safe context for AI agents." width="920">
-</p>
-
-<p align="center">
   <strong>Self-hosted shared memory for AI agents, with a clear data boundary.</strong>
 </p>
 
 <p align="center">
+  <a href="https://luthn.com">Landing page</a> ·
   <a href="README.ko.md">한국어</a> ·
   <a href="docs/installation.md">Installation</a> ·
   <a href="docs/agent-quickstart.md">Agent connection and memory</a> ·
   <a href="docs/data-boundaries.md">Data boundaries</a> ·
   <a href="docs/local-development.md">Development</a>
+</p>
+
+<p align="center">
+  <a href="https://luthn.com">
+    <img src="docs/assets/luthn-readme-hero.png" alt="Luthn — Safe Context for Agents." width="920">
+  </a>
 </p>
 
 # Luthn
@@ -21,7 +24,10 @@ raw private data part of the model's default context.
 
 - Run it in infrastructure you manage with Docker and PostgreSQL.
 - Classify and redact intake before exposing agent-safe summaries and context.
-- Audit what was stored, shared, and retrieved.
+- Review sensitive-access requests and external-publication approvals in the
+  local operator console.
+- Audit metadata about storage, sharing, retrieval, decisions, and failures
+  without turning the audit trail into a content store.
 
 ## How The Memory Loop Works
 
@@ -87,12 +93,43 @@ agent connections, see the [detailed installation guide](docs/installation.md).
 ## Data Boundary
 
 Raw customer records, private messages, credentials, and unredacted operational
-data stay behind the private boundary. Agents receive only policy-approved safe
-projections such as reviewed summaries, redacted references, and approved
-project context. External publication is a separate, explicit approval path.
+data stay behind the private boundary by default. Agents normally receive only
+policy-approved safe projections. A separate requester-bound approval can reveal
+the encrypted original title and summary for a limited time and read count;
+credentials and keys are never revealed. External publication remains a separate,
+explicit approval path.
 
 Read [Data boundaries](docs/data-boundaries.md) for classification examples,
 provider-transfer implications, agent visibility, and publication rules.
+
+## Operator Approval And Audit
+
+The local operator console is the authority for sensitive-data decisions in
+both personal Local mode and the opt-in central OSS Hub mode. A request is
+reviewed with bounded purpose, session, expiry, and safe reference metadata;
+the operator must inspect the detail and provide an explicit reason before
+approving or denying it. Legacy requests can return only a server-validated
+redacted summary. Protected-memory requests can return the encrypted original
+title and summary only to the requester holding the one-time capability, for a
+bounded duration (60 minutes by default) and 1–3 reads (one by default).
+Credentials, access keys, and private keys are always blocked, and the console
+never loads the protected value.
+
+Sensitive-access approval and external-publication approval are separate
+decisions. The console uses Host API contracts, never direct database access,
+and the public runtime keeps outbound transport disabled by default. Personal
+On macOS and Linux, `SingleOwner` installs use the installed Host Helper to authorize
+one explicit, bounded server-side browser session on the loopback console. `luthn
+console` remains the local recovery path and is the current Windows path. Browser
+JavaScript never receives the service or decision credential.
+
+Audit data is metadata-only. Use it to reconstruct a decision timeline, trace
+classification or provider failures, review configuration changes, investigate
+ingress/processing outcomes, and verify retention cleanup. Cursor pagination,
+bounded filters, and metadata-only export support operations; audit records are
+not a backup, a prompt/transcript store, or a raw-data recovery path. See the
+[API audit and approval contracts](docs/api.md) and the
+[operations retention model](docs/operations.md).
 
 ## Documentation
 

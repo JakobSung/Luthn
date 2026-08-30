@@ -17,6 +17,7 @@ public sealed class OwnershipIsolationTests
 {
     private const string AliceBearer = "ownership-alice-token";
     private const string BobBearer = "ownership-bob-token";
+    private const string BobDeciderBearer = "ownership-bob-decider-token";
     private const string OperatorBearer = "ownership-operator-token";
     private const string UnboundBearer = "ownership-unbound-token";
 
@@ -382,6 +383,79 @@ public sealed class OwnershipIsolationTests
     }
 
     [Fact]
+    public async Task SensitiveOperatorDetailStaysWithinOwnerAndWorkspaceBoundaries()
+    {
+        using (var sharedFactory = CreateFactory(sharedWorkspace: true))
+        {
+            using var alice = Client(sharedFactory, AliceBearer);
+            using var bobDecider = Client(sharedFactory, BobDeciderBearer);
+            using var operatorClient = Client(sharedFactory, OperatorBearer);
+
+            using var source = await alice.PostAsJsonAsync("/api/sources", new
+            {
+                sourceSystem = "local",
+                sourceType = "note",
+                content = "Internal recovery note contains a private key.",
+                title = "Sensitive recovery note",
+                safeSummary = "Recovery procedure metadata.",
+                coreTags = new[] { "recovery" }
+            });
+            using var sourceBody = await JsonDocument.ParseAsync(await source.Content.ReadAsStreamAsync());
+            var sensitiveReferenceId = sourceBody.RootElement.GetProperty("sensitiveReferenceId").GetString();
+            using var request = await alice.PostAsJsonAsync("/api/access-requests", new
+            {
+                sensitiveReferenceId,
+                reason = "Need a redacted recovery summary.",
+                sessionId = "shared-owner-boundary-session",
+                expiresInSeconds = 600
+            });
+            using var requestBody = await JsonDocument.ParseAsync(await request.Content.ReadAsStreamAsync());
+            var requestId = requestBody.RootElement.GetProperty("id").GetString();
+
+            using var otherOwnerDetail = await bobDecider.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+            using var operatorDetail = await operatorClient.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+
+            Assert.Equal(HttpStatusCode.Created, source.StatusCode);
+            Assert.Equal(HttpStatusCode.Created, request.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, otherOwnerDetail.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, operatorDetail.StatusCode);
+        }
+
+        using (var isolatedFactory = CreateFactory())
+        {
+            using var bob = Client(isolatedFactory, BobBearer);
+            using var operatorClient = Client(isolatedFactory, OperatorBearer);
+
+            using var source = await bob.PostAsJsonAsync("/api/sources", new
+            {
+                sourceSystem = "local",
+                sourceType = "note",
+                content = "Internal finance note contains a private key.",
+                title = "Sensitive finance note",
+                safeSummary = "Finance procedure metadata.",
+                coreTags = new[] { "finance" }
+            });
+            using var sourceBody = await JsonDocument.ParseAsync(await source.Content.ReadAsStreamAsync());
+            var sensitiveReferenceId = sourceBody.RootElement.GetProperty("sensitiveReferenceId").GetString();
+            using var request = await bob.PostAsJsonAsync("/api/access-requests", new
+            {
+                sensitiveReferenceId,
+                reason = "Need a redacted finance summary.",
+                sessionId = "workspace-boundary-session",
+                expiresInSeconds = 600
+            });
+            using var requestBody = await JsonDocument.ParseAsync(await request.Content.ReadAsStreamAsync());
+            var requestId = requestBody.RootElement.GetProperty("id").GetString();
+
+            using var crossWorkspaceDetail = await operatorClient.GetAsync($"/api/access-requests/{requestId}/operator-detail");
+
+            Assert.Equal(HttpStatusCode.Created, source.StatusCode);
+            Assert.Equal(HttpStatusCode.Created, request.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, crossWorkspaceDetail.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task AgentMutationRequestsAreRejectedWithoutChangingMemoryOrSensitiveState()
     {
         using var factory = CreateFactory();
@@ -478,7 +552,17 @@ public sealed class OwnershipIsolationTests
         Assert.Equal(before.SensitiveReferences, await afterDb.SensitiveRecordReferences.CountAsync());
         Assert.Equal(before.AccessRequests, await afterDb.SensitiveAccessRequests.CountAsync());
         Assert.Equal(before.AccessDecisions, await afterDb.SensitiveAccessDecisions.CountAsync());
-        Assert.Equal(before.AuditEvents, await afterDb.AuditEvents.CountAsync());
+        var authorizationDenials = await afterDb.AuditEvents
+            .Where(item => item.Action == "authorization.scope_denied")
+            .ToArrayAsync();
+        Assert.Equal(before.AuditEvents + 2, await afterDb.AuditEvents.CountAsync());
+        Assert.Equal(2, authorizationDenials.Length);
+        Assert.All(authorizationDenials, item =>
+        {
+            Assert.Equal("metadata-only", item.PayloadClass);
+            Assert.Equal("authorization-metadata-only", item.RedactionState);
+            Assert.Equal("denied", item.Outcome);
+        });
         Assert.Equal(before.MemoryTitle, afterMemory.Title);
         Assert.Equal(before.MemorySummary, afterMemory.SafeSummary);
         Assert.Equal(before.AccessStatus, afterAccess.Status);
@@ -524,9 +608,12 @@ public sealed class OwnershipIsolationTests
             ConfigureToken(builder, 2, "operator-token", OperatorBearer, null, true,
                 sharedWorkspace ? "team-alpha" : "personal:alice",
                 "audit.read", "access.decide", "external-publication.read", "external-publication.write");
+            ConfigureToken(builder, 3, "bob-decider-token", BobDeciderBearer, "bob", false,
+                sharedWorkspace ? "team-alpha" : bobWorkspaceId,
+                "access.decide");
             if (includeUnboundToken)
             {
-                ConfigureToken(builder, 3, "unbound-token", UnboundBearer, null, false, null, "memory.write");
+                ConfigureToken(builder, 4, "unbound-token", UnboundBearer, null, false, null, "memory.write");
             }
         });
 

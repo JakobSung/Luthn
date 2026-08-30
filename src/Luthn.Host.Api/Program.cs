@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,10 +21,6 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var operatorConfigDirectory = builder.Configuration["Luthn:OperatorConfig:Directory"] ?? ".luthn/operator";
-var classificationOptions = builder.Configuration
-    .GetSection("Luthn:Classification")
-    .Get<ClassificationProviderOptions>() ?? new ClassificationProviderOptions();
-classificationOptions.ResolveProvider();
 var hostOptions = builder.Configuration
     .GetSection("Luthn:Host")
     .Get<LuthnHostOperationalOptions>() ?? new LuthnHostOperationalOptions();
@@ -31,6 +28,7 @@ var hostOptions = builder.Configuration
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(operatorConfigDirectory, "keys")));
 builder.Services.AddSingleton<ISensitiveMemoryPayloadProtector, DataProtectionSensitiveMemoryPayloadProtector>();
+builder.Services.AddSingleton<IHubIngressCapsuleProtector, DataProtectionHubIngressCapsuleProtector>();
 builder.Services.AddSingleton<SensitiveMemoryProtectionState>();
 builder.Services.AddScoped<SensitiveMemoryPayloadMigrator>();
 builder.Services.Configure<OperatorConfigOptions>(builder.Configuration.GetSection("Luthn:OperatorConfig"));
@@ -52,11 +50,30 @@ builder.Services.AddScoped<
     IAutomaticTurnRetentionCleanupProcessor,
     AutomaticTurnRetentionCleanupProcessor>();
 builder.Services.AddHostedService<AutomaticTurnRetentionCleanupHostedService>();
+builder.Services.AddOptions<AuditRetentionOptions>()
+    .Bind(builder.Configuration.GetSection("Luthn:Audit:Retention"))
+    .Validate(
+        options => options.HasValidCleanupInterval,
+        "Audit cleanup interval must be between 1 and 1440 minutes.")
+    .Validate(
+        options => options.HasValidCleanupBatch,
+        "Audit cleanup batch size must be between 1 and 1000.")
+    .Validate(
+        options => options.HasValidRetentionDays,
+        "Audit retention days must be between 1 and 3650 for every category.")
+    .ValidateOnStart();
+builder.Services.AddScoped<IAuditRetentionCleanupProcessor, AuditRetentionCleanupProcessor>();
+builder.Services.AddHostedService<AuditRetentionCleanupHostedService>();
 builder.Services.Configure<ClassificationProviderRuntimeOptions>(builder.Configuration.GetSection("Luthn:Classification:Runtime"));
-builder.Services.AddHttpClient(nameof(ConfiguredContentClassifier), client =>
+builder.Services.AddHttpClient(ConfiguredContentClassifier.HttpClientName, client =>
 {
     client.Timeout = Timeout.InfiniteTimeSpan;
-});
+})
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+        UseProxy = false
+    });
 builder.Services.AddScoped<ConfiguredContentClassifier>();
 builder.Services.AddSingleton<DeterministicSensitiveDataDetector>();
 builder.Services.AddScoped<IContentClassifier>(provider =>
@@ -74,7 +91,10 @@ builder.Services.AddSingleton<ContextPackBuilder>();
 builder.Services.AddSingleton<WikiMarkdownRenderer>();
 builder.Services.AddSingleton<IOperationalMetrics, OperationalMetrics>();
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSafeProjectionSyncFoundation();
+builder.Services.AddScoped<ISensitiveAccessWorkflow, SensitiveAccessWorkflow>();
+builder.Services.AddScoped<ISensitiveAccessSystemWorkflow, SensitiveAccessWorkflow>();
+builder.Services.AddHostedService<SensitiveAccessExpiryCleanupHostedService>();
+builder.Services.AddSafeProjectionSyncFoundation(builder.Configuration);
 builder.Services.AddProblemDetails();
 builder.Services.AddRequestTimeouts(options =>
 {
@@ -113,6 +133,32 @@ if (hostOptions.EnableForwardedHeaders)
 }
 builder.Services.Configure<LuthnAuthOptions>(builder.Configuration.GetSection("Luthn:Auth"));
 builder.Services.Configure<LuthnIdentityOptions>(builder.Configuration.GetSection("Luthn:Identity"));
+builder.Services.Configure<ConsoleAccessOptions>(builder.Configuration.GetSection(ConsoleAccessOptions.SectionName));
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = ConsoleAccessOptions.AntiforgeryHeaderName;
+    options.Cookie.Name = "LuthnConsoleCsrf";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+});
+builder.Services.AddSingleton<IConsoleLocalAccessArmStore, InMemoryConsoleLocalAccessArmStore>();
+builder.Services.AddSingleton<IConsoleSessionStore, InMemoryConsoleSessionStore>();
+builder.Services.AddSingleton<HostMcpProfileStore>();
+builder.Services.AddOptions<HostManagedExtensionOptions>()
+    .Bind(builder.Configuration.GetSection(HostManagedExtensionOptions.SectionName));
+builder.Services.AddSingleton<HostManagedExtensionVerifier>();
+builder.Services.AddSingleton<HostManagedExtensionStore>();
+builder.Services.AddOptions<HubIngressOptions>()
+    .Bind(builder.Configuration.GetSection("Luthn:Hub:Ingress"))
+    .Validate(options => options.IsValid, "Luthn Hub ingress limits are invalid.")
+    .ValidateOnStart();
+builder.Services.AddScoped<HubIngressQueueService>();
+builder.Services.AddScoped<HubIngressQueueProcessor>();
+builder.Services.AddSingleton<IHubIngressAdmissionCoordinator, HubIngressAdmissionCoordinator>();
+builder.Services.AddSingleton<IHubOperationalMetrics, HubOperationalMetrics>();
+builder.Services.AddScoped<HubOperationalStatusService>();
+builder.Services.AddHostedService<HubIngressWorkerHostedService>();
 if (builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddDbContext<LuthnDbContext>(options =>
@@ -171,9 +217,14 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 
 app.MapLuthnApi();
+app.MapConsoleSessions();
 app.MapOperatorConfiguration();
 app.MapOperationalMetrics();
 app.MapSearchTelemetry();
+app.MapHubIngress();
+app.MapHubOperationalStatus();
+app.MapHostMcpProfiles();
+app.MapHostManagedExtension();
 
 app.Run();
 

@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luthn Operator Console</title>
-  <link rel="stylesheet" href="/assets/operator.css?v=dark-3">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/operator.css?v=console-nav-7">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to console</a>
@@ -12,26 +13,137 @@
     <header class="topbar" aria-label="Luthn operator console header">
       <div class="brand">
         <div>
-          <p class="eyebrow">Local control plane</p>
-          <h1>Luthn Operator Console</h1>
+          <p class="eyebrow" data-i18n="console.eyebrow">OSS control plane</p>
+          <h1 data-i18n="console.title">Luthn Operator Console</h1>
         </div>
       </div>
-      <div class="token-control">
-        <label for="serviceToken">Service token</label>
-        <div class="token-row">
-          <input id="serviceToken" name="serviceToken" type="password" autocomplete="off" placeholder="Optional in Testing mode">
-          <button id="saveToken" type="button">Save</button>
-          <button id="clearToken" type="button" class="secondary">Clear</button>
+      <label class="language-control" for="consoleLanguage">
+        <span data-i18n="console.language">Language</span>
+        <select id="consoleLanguage" name="consoleLanguage">
+          <option value="en">English</option>
+          <option value="ko">한국어</option>
+        </select>
+      </label>
+      <div class="topbar-actions">
+        <div class="auth-summary" aria-live="polite">
+          <span class="eyebrow" data-i18n="auth.summaryLabel">Console access</span>
+          <strong id="authStatus" data-i18n="auth.starting">Starting secure session</strong>
         </div>
-        <label for="decisionToken">Decision token</label>
-        <input id="decisionToken" name="decisionToken" type="password" autocomplete="off" placeholder="Local operator token for approve or deny">
-        <label for="operatorIdentity">Operator identity</label>
-        <input id="operatorIdentity" name="operatorIdentity" maxlength="64" autocomplete="off" placeholder="Optional audit label">
+        <button id="openSettings" type="button" class="secondary" data-console-nav="settings" data-i18n="auth.openSettings">Set up access</button>
       </div>
     </header>
 
     <main id="main" class="workspace">
-      <section class="status-strip" aria-label="Runtime status">
+      <nav class="console-nav" aria-label="Console sections">
+        <div class="console-nav-intro">
+          <p class="eyebrow" data-i18n="nav.eyebrow">Operator workspace</p>
+          <strong data-i18n="nav.prompt">Choose a task</strong>
+        </div>
+        <div class="console-nav-tabs" role="list">
+          <button type="button" class="nav-tab active" data-console-nav="overview" aria-current="page" data-i18n="nav.overview">Overview</button>
+          <button type="button" class="nav-tab" data-console-nav="access" data-i18n="nav.access">Access approvals</button>
+          <button type="button" class="nav-tab" data-console-nav="publication" data-i18n="nav.publication">Publication</button>
+          <button type="button" class="nav-tab" data-console-nav="intake" data-i18n="nav.intake">Classify &amp; intake</button>
+          <button type="button" class="nav-tab" data-console-nav="audit" data-i18n="nav.audit">Audit center</button>
+          <button type="button" class="nav-tab" data-console-nav="settings" data-i18n="nav.settings">Console access</button>
+        </div>
+      </nav>
+
+      <section class="panel wide orientation-panel" data-console-view="overview" aria-labelledby="orientationTitle">
+        <div class="orientation-copy">
+          <p class="eyebrow" data-i18n="orientation.eyebrow">Start here</p>
+          <h2 id="orientationTitle" data-i18n="orientation.title">Use the console by task</h2>
+          <p data-i18n="orientation.description">This console is for operators. Start with access setup, then choose one workflow. Approved protected memory is delivered only to the bound requester; credentials are never delivered.</p>
+        </div>
+        <ol class="orientation-steps">
+          <li>
+            <span>01</span>
+            <strong data-i18n="orientation.stepAccessTitle">Set up access</strong>
+            <p data-i18n="orientation.stepAccessBody">Use Console access to connect one bounded Personal Local session.</p>
+            <button type="button" class="text-button" data-console-nav="settings" data-i18n="orientation.stepAccessAction">Open access settings</button>
+          </li>
+          <li>
+            <span>02</span>
+            <strong data-i18n="orientation.stepReviewTitle">Review a decision</strong>
+            <p data-i18n="orientation.stepReviewBody">Select a pending sensitive-access request. Only allowlisted metadata and a redacted summary are shown.</p>
+            <button type="button" class="text-button" data-console-nav="access" data-i18n="orientation.stepReviewAction">Open approvals</button>
+          </li>
+          <li>
+            <span>03</span>
+            <strong data-i18n="orientation.stepAuditTitle">Investigate the trail</strong>
+            <p data-i18n="orientation.stepAuditBody">Use a preset to trace access, failures, configuration, publication, or retention metadata.</p>
+            <button type="button" class="text-button" data-console-nav="audit" data-i18n="orientation.stepAuditAction">Open audit center</button>
+          </li>
+        </ol>
+      </section>
+
+      <section class="panel wide auth-panel" data-console-view="settings" aria-labelledby="authPanelTitle" hidden>
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow" data-i18n="auth.eyebrow">Access setup</p>
+            <h2 id="authPanelTitle" data-i18n="auth.title">How this console authenticates</h2>
+          </div>
+          <span id="authPanelStatus" class="inline-status" aria-live="polite" data-i18n="auth.starting">Starting secure session</span>
+        </div>
+        <p class="auth-intro" data-i18n="auth.description">The Host keeps the credential server-side. The browser receives only a bounded HttpOnly session cookie and never reads a service or decision token.</p>
+        <p class="auth-scope-note" data-i18n="auth.scopeNote">LocalAuto is available only for a SingleOwner installation bound to loopback. The installed Host Helper authorizes one explicit browser request without a terminal command.</p>
+        <div class="auth-explainer">
+          <article>
+            <span class="auth-step">01</span>
+            <strong data-i18n="auth.serviceTitle">Personal Local = one-time authorized session</strong>
+            <p data-i18n="auth.serviceBody">No key entry is needed. The server permits it only on the hardened personal installation.</p>
+          </article>
+          <article>
+            <span class="auth-step">02</span>
+            <strong data-i18n="auth.identityTitle">Agent credentials stay separate</strong>
+            <p data-i18n="auth.identityBody">Existing service tokens continue to authenticate agents and API clients, never a human console session.</p>
+          </article>
+        </div>
+        <dl class="mode-boundaries session-boundaries">
+          <div>
+            <dt data-i18n="auth.modeLabel">Session mode</dt>
+            <dd id="sessionMode">Checking</dd>
+          </div>
+          <div>
+            <dt data-i18n="auth.expiryLabel">Idle expiry</dt>
+            <dd id="sessionExpiry">Checking</dd>
+          </div>
+        </dl>
+        <section class="local-access-card" aria-labelledby="localAccessTitle">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="auth.localEyebrow">Personal Local access</p>
+              <h3 id="localAccessTitle" data-i18n="auth.localTitle">Connect local access</h3>
+            </div>
+          </div>
+          <p id="localAccessDetail" class="security-note" data-i18n="auth.localReadyDetail">Local access is ready to connect from this console.</p>
+          <button id="connectLocal" type="button" data-i18n="auth.connectLocal">Connect local access</button>
+        </section>
+        <div class="row-actions auth-actions">
+          <button id="logoutSession" type="button" class="secondary" data-i18n="auth.logout">End this session</button>
+        </div>
+        <p class="security-note" data-i18n="auth.securityNote">No console credential is placed in the page, URL, browser storage, logs, or exports.</p>
+      </section>
+
+      <section class="mode-banner" data-console-view="overview" aria-labelledby="consoleModeLabel">
+        <div class="mode-primary">
+          <span id="consoleModeLabel" data-i18n="mode.label">Deployment mode</span>
+          <strong id="consoleMode" data-i18n="mode.checking">Checking</strong>
+        </div>
+        <p id="consoleModeDetail">Loading the server-derived console profile.</p>
+        <dl class="mode-boundaries">
+          <div>
+            <dt data-i18n="mode.transport">Outbound transport</dt>
+            <dd id="consoleTransport" data-i18n="mode.transportDisabled">Disabled — zero outbound</dd>
+          </div>
+          <div>
+            <dt data-i18n="mode.authority">Sensitive authority</dt>
+            <dd id="consoleAuthority" data-i18n="mode.authorityOss">OSS console</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="status-strip" data-console-view="overview" aria-label="Runtime status">
         <article class="metric">
           <span class="metric-label">Liveness</span>
           <strong id="healthStatus">checking</strong>
@@ -49,7 +161,7 @@
         </article>
       </section>
 
-      <section class="panel wide readiness-panel">
+      <section class="panel wide readiness-panel" data-console-view="overview">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">First-run gate</p>
@@ -61,7 +173,7 @@
         </div>
       </section>
 
-      <section class="panel wide connections-panel" aria-labelledby="agentConnectionsTitle">
+      <section class="panel wide connections-panel" data-console-view="overview" aria-labelledby="agentConnectionsTitle">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Connector status</p>
@@ -93,11 +205,62 @@
         </div>
       </section>
 
-      <section class="panel wide" aria-labelledby="externalPublicationTitle">
+      <section class="panel wide mcp-profiles-panel" data-console-view="overview" aria-labelledby="mcpProfilesTitle">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Cloud-ready local foundation</p>
-            <h2 id="externalPublicationTitle">External publication</h2>
+            <p class="eyebrow">MCP profile</p>
+            <h2 id="mcpProfilesTitle">Active MCP connections</h2>
+          </div>
+          <div class="panel-heading-actions">
+            <span id="mcpProfilesStatus" class="inline-status" role="status" aria-live="polite">Waiting for the local helper.</span>
+            <button id="refreshMcpProfiles" type="button" class="secondary">Refresh</button>
+          </div>
+        </div>
+        <p class="security-note">Only bounded MCP names, transport types, authentication state, and remote host names are shown. Commands, environment variables, tokens, and local paths never appear here.</p>
+        <div id="mcpProfileCards" class="mcp-profile-grid" aria-live="polite">
+          <p class="empty-state">No host MCP observation is available yet.</p>
+        </div>
+      </section>
+
+      <section id="remoteProfileOffer" class="panel wide remote-profile-offer" data-console-view="remote-profile-offer" aria-labelledby="remoteProfileOfferTitle" hidden>
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Browser-confirmed transition</p>
+            <h2 id="remoteProfileOfferTitle">Connect this Agent to a team MCP</h2>
+          </div>
+          <span id="remoteProfileOfferStatus" class="inline-status" role="status" aria-live="polite">Review required</span>
+        </div>
+        <dl class="mode-boundaries remote-profile-boundaries">
+          <div>
+            <dt>Service</dt>
+            <dd id="remoteProfileService">Not received</dd>
+          </div>
+          <div>
+            <dt>Remote host</dt>
+            <dd id="remoteProfileHost">Not received</dd>
+          </div>
+          <div>
+            <dt>Agent</dt>
+            <dd>
+              <select id="remoteProfileAgent" aria-label="Agent to switch">
+                <option value="codex">Codex</option>
+                <option value="claude">Claude Code</option>
+              </select>
+            </dd>
+          </div>
+        </dl>
+        <p class="security-note">The remote connection is verified before the Luthn-owned local MCP is disabled. A failed verification keeps the local profile unchanged.</p>
+        <div class="row-actions">
+          <button id="approveRemoteProfile" type="button">Connect</button>
+          <button id="rejectRemoteProfile" type="button" class="secondary">Cancel</button>
+        </div>
+      </section>
+
+      <section class="panel wide" data-console-view="publication" aria-labelledby="externalPublicationTitle" hidden>
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow" data-i18n="publication.eyebrow">Separate publication boundary</p>
+            <h2 id="externalPublicationTitle" data-i18n="publication.title">External publication</h2>
           </div>
           <div class="panel-heading-actions">
             <span id="syncStatus" class="inline-status" role="status" aria-live="polite">Checking local outbox.</span>
@@ -121,10 +284,10 @@
             <button id="revokePublication" type="button" class="secondary">Revoke</button>
           </div>
         </form>
-        <pre id="publicationOutput" class="result compact" aria-live="polite">Cloud transport is disabled by default. Approved envelopes remain in the local durable outbox.</pre>
+        <pre id="publicationOutput" class="result compact" aria-live="polite">Outbound transport is disabled by default. Approved envelopes remain in the local durable outbox.</pre>
       </section>
 
-      <section class="panel wide">
+      <section class="panel wide" data-console-view="intake" hidden>
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Runtime settings</p>
@@ -138,37 +301,20 @@
               Provider
               <select name="provider">
                 <option value="Unconfigured" disabled>Unconfigured — choose a provider</option>
-                <option value="Mock">Mock — local default</option>
-                <option value="OpenAi">ChatGPT API</option>
-                <option value="Anthropic">Claude API</option>
-                <option value="GoogleAi">Google AI API</option>
-                <option value="OpenRouter">OpenRouter API</option>
-                <option value="ExternalHttp">Self-hosted / external HTTP</option>
+                <option value="LocalDeterministic">LocalDeterministic — local default</option>
+                <option value="LocalHttp">LocalHttp — same-device endpoint</option>
               </select>
             </label>
             <label>
-              Model
-              <input name="model" placeholder="gpt-4.1-mini">
-            </label>
-            <label>
-              Endpoint
-              <input name="endpoint" placeholder="Provider default">
-            </label>
-            <label>
-              Auth header
-              <input name="authHeaderName" value="Authorization">
+              Same-device endpoint
+              <input name="endpoint" placeholder="http://127.0.0.1:11434/classify">
             </label>
           </div>
-          <div class="form-grid provider-grid">
-            <label>
-              API key
-              <input name="apiKey" type="password" autocomplete="off" placeholder="Leave blank to keep current key">
-            </label>
-            <label class="checkbox-row">
-              <input name="clearApiKey" type="checkbox">
-              Clear saved key
-            </label>
-          </div>
+          <p class="field-help">
+            LocalHttp accepts only localhost, loopback IP addresses, or
+            <code>host.docker.internal</code>. Redirects and all other hosts are rejected.
+            LocalDeterministic never sends source content to another process.
+          </p>
           <div class="row-actions provider-actions">
             <button type="submit">Save provider</button>
             <span id="providerStatus" class="inline-status">Loading provider configuration.</span>
@@ -177,7 +323,7 @@
         <pre id="providerOutput" class="result compact" aria-live="polite">Waiting for provider settings.</pre>
       </section>
 
-      <section class="grid-two">
+      <section class="grid-two" data-console-view="intake" hidden>
         <article class="panel">
           <div class="panel-heading">
             <div>
@@ -245,13 +391,13 @@
         </article>
       </section>
 
-      <section class="panel wide">
+      <section class="panel wide" data-console-view="access" hidden>
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Sensitive access</p>
-            <h2>Access requests</h2>
+            <p class="eyebrow" data-i18n="access.eyebrow">Sensitive access authority</p>
+            <h2 data-i18n="access.title">Access requests</h2>
           </div>
-          <form id="accessForm" class="audit-filter">
+          <form id="accessForm" class="access-filter">
             <label>
               Status
               <select name="status">
@@ -259,23 +405,41 @@
                 <option value="">All</option>
                 <option value="Approved">Approved</option>
                 <option value="Denied">Denied</option>
+                <option value="Expired">Expired</option>
               </select>
             </label>
             <label>
               Limit
               <input name="limit" type="number" min="1" max="100" value="25">
             </label>
-            <label>
-              Decision reason
-              <input name="reason" value="Reviewed in operator console.">
-            </label>
-            <label class="decision-output">
-              Reviewed output
-              <textarea name="redactedSummary" rows="2" maxlength="4000" placeholder="Optional public-safe output for approvals only"></textarea>
-            </label>
             <button type="submit">Refresh</button>
           </form>
         </div>
+        <form id="accessPolicyForm" class="access-policy-form" aria-labelledby="accessPolicyHeading">
+          <div class="access-policy-heading">
+            <div>
+              <p class="eyebrow" data-i18n="access.policyEyebrow">Common bounded policy</p>
+              <h3 id="accessPolicyHeading" data-i18n="access.policyTitle">Sensitive access settings</h3>
+            </div>
+            <span id="accessPolicyStatus" class="inline-status" aria-live="polite" data-i18n="access.policyLoading">Loading policy…</span>
+          </div>
+          <div class="access-policy-fields">
+            <label>
+              <span data-i18n="access.requestTimeout">Approval wait (minutes)</span>
+              <input name="requestTimeoutMinutes" type="number" min="1" max="60" step="any" required>
+            </label>
+            <label>
+              <span data-i18n="access.grantDuration">Result availability (minutes)</span>
+              <input name="grantDurationMinutes" type="number" min="1" max="60" step="any" required>
+            </label>
+            <label>
+              <span data-i18n="access.maxReads">Maximum successful reads</span>
+              <input name="maximumSuccessfulReads" type="number" min="1" max="10" required>
+            </label>
+            <button id="saveAccessPolicy" type="submit" data-i18n="access.savePolicy">Save policy</button>
+          </div>
+          <p class="security-note" data-i18n="access.policyNote">Changes apply to new requests and later approvals. Existing grants are never extended.</p>
+        </form>
         <div class="table-wrap">
           <table>
             <thead>
@@ -285,55 +449,235 @@
                 <th>Reference</th>
                 <th>Status</th>
                 <th>Result</th>
-                <th>Actor</th>
-                <th>Decision</th>
+                <th>Review</th>
               </tr>
             </thead>
             <tbody id="accessRows">
-              <tr><td colspan="7">No access requests loaded.</td></tr>
+              <tr><td colspan="6">No access requests loaded.</td></tr>
             </tbody>
           </table>
         </div>
+        <div class="access-workbench" aria-labelledby="accessDetailHeading">
+          <div class="access-detail">
+            <div class="workbench-heading">
+              <div>
+                <p class="eyebrow">Allowlisted metadata only</p>
+                <h3 id="accessDetailHeading" data-i18n="access.review">Request review</h3>
+              </div>
+              <span id="accessDetailStatus" class="inline-status" aria-live="polite">Select a request to review.</span>
+            </div>
+            <dl id="accessDetailFields" class="access-detail-fields">
+              <div><dt>Request</dt><dd data-access-field="id">Not selected</dd></div>
+              <div><dt>Status</dt><dd data-access-field="status">—</dd></div>
+              <div data-tombstone-hidden><dt>Access mode</dt><dd data-access-field="accessMode">—</dd></div>
+              <div data-tombstone-hidden><dt>Lifecycle</dt><dd data-access-field="statusCode">—</dd></div>
+              <div data-tombstone-hidden><dt>Requested</dt><dd data-access-field="createdAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Expires</dt><dd data-access-field="expiresAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Grant expires</dt><dd data-access-field="grantExpiresAt">—</dd></div>
+              <div data-tombstone-hidden><dt>Reads used / remaining</dt><dd data-access-field="readUsage">—</dd></div>
+              <div data-tombstone-hidden><dt>Request reason</dt><dd data-access-field="requestReason">—</dd></div>
+              <div data-tombstone-hidden><dt>Decision reason</dt><dd data-access-field="decisionReason">—</dd></div>
+              <div data-tombstone-hidden><dt>Decision time</dt><dd data-access-field="decidedAt">—</dd></div>
+              <div><dt>Output policy</dt><dd data-access-field="outputPolicy">—</dd></div>
+              <div data-tombstone-hidden><dt>Reference</dt><dd data-access-field="referenceLabel">—</dd></div>
+              <div data-tombstone-hidden><dt>Reference source</dt><dd data-access-field="referenceSource">—</dd></div>
+              <div class="detail-summary" data-tombstone-hidden><dt>Redacted summary</dt><dd data-access-field="redactedSummary">—</dd></div>
+            </dl>
+          </div>
+          <form id="accessDecisionForm" class="access-decision-form">
+            <p class="security-note">Protected content and credentials are never loaded into this console.</p>
+            <label>
+              Decision reason
+              <textarea name="reason" rows="3" maxlength="1000" required placeholder="Required for approve or deny"></textarea>
+            </label>
+            <label data-access-redacted-control>
+              Reviewed output
+              <textarea name="redactedSummary" rows="3" maxlength="4000" placeholder="Optional public-safe output for approvals only"></textarea>
+            </label>
+            <div data-access-protected-control hidden>
+              <p class="security-note">Approval releases the encrypted memory title and summary only to the requester that holds the private access handle. Credentials remain blocked.</p>
+              <label>
+                Approval duration (minutes)
+                <input name="protectedGrantDurationMinutes" type="number" min="1" max="60" value="60" required>
+              </label>
+              <label>
+                Maximum successful reads
+                <input name="protectedMaximumSuccessfulReads" type="number" min="1" max="3" value="1" required>
+              </label>
+            </div>
+            <div class="row-actions">
+              <button id="approveAccess" type="button" disabled>Approve</button>
+              <button id="denyAccess" type="button" class="secondary" disabled>Deny</button>
+              <button id="viewAccessAudit" type="button" class="secondary" disabled>View audit trail</button>
+            </div>
+          </form>
+        </div>
       </section>
 
-      <section class="panel wide">
+      <section class="panel wide" data-console-view="audit" hidden>
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Metadata-only trail</p>
-            <h2>Audit events</h2>
+            <p class="eyebrow" data-i18n="audit.eyebrow">Metadata-only trail</p>
+            <h2 data-i18n="audit.title">Audit center</h2>
           </div>
-          <form id="auditForm" class="audit-filter">
+          <span id="auditStatus" class="inline-status" aria-live="polite">Choose an investigation purpose or custom filters.</span>
+        </div>
+        <div class="audit-guidance">
+          <div>
+            <strong>Investigate access decisions</strong>
+            <span>Trace request, review, decision, and result-read metadata around sensitive access.</span>
+          </div>
+          <div>
+            <strong>Diagnose classification failures</strong>
+            <span>Find failed classification operations, then narrow the timeline with a correlation id.</span>
+          </div>
+          <div>
+            <strong>Review configuration changes</strong>
+            <span>Use installation scope to review provider updates and tests by authorized operators.</span>
+          </div>
+        </div>
+        <div class="audit-toolbar">
+          <div class="audit-presets" aria-label="Audit investigation presets">
+            <button type="button" class="secondary" data-audit-preset="sensitive">Sensitive access</button>
+            <button type="button" class="secondary" data-audit-preset="failures">Classification failures</button>
+            <button type="button" class="secondary" data-audit-preset="hub">Hub ingestion</button>
+            <button type="button" class="secondary" data-audit-preset="configuration">Configuration changes</button>
+            <button type="button" class="secondary" data-audit-preset="clear">Clear filters</button>
+          </div>
+          <p class="security-note">Audit records support investigation and accountability. They never provide protected content.</p>
+        </div>
+        <form id="auditForm" class="audit-filter audit-filter-expanded">
+            <label>
+              Scope
+              <select name="scope">
+                <option value="workspace">Workspace</option>
+                <option value="installation">Installation (operator)</option>
+              </select>
+            </label>
+            <label>
+              <span data-i18n="audit.category">Category</span>
+              <select name="category">
+                <option value="">Any</option>
+                <option value="Access">Access</option>
+                <option value="Security">Security</option>
+                <option value="Configuration">Configuration</option>
+                <option value="Publication">Publication</option>
+                <option value="Ingestion">Ingestion</option>
+                <option value="Retention">Retention</option>
+              </select>
+            </label>
             <label>
               Subject id
               <input name="subjectId" placeholder="optional">
+            </label>
+            <label>
+              Action
+              <input name="action" maxlength="128" placeholder="exact action">
+            </label>
+            <label>
+              Action family
+              <select name="actionPrefix">
+                <option value="">Any</option>
+                <option value="sensitive_access.">Sensitive access</option>
+                <option value="authorization.">Authorization</option>
+                <option value="operator.classification_provider.">Provider configuration</option>
+                <option value="classification.provider.">Provider invocation</option>
+                <option value="source.intake.">Source intake</option>
+                <option value="turn_summary.">Turn summary</option>
+                <option value="hub.ingress.">Hub ingestion</option>
+                <option value="console.">Console lifecycle</option>
+                <option value="memory.">Memory</option>
+                <option value="retrieval.">Retrieval</option>
+                <option value="processing.">Processing</option>
+                <option value="transport.">Transport</option>
+                <option value="audit.">Audit retention</option>
+              </select>
+            </label>
+            <label>
+              Outcome
+              <select name="outcome">
+                <option value="">Any</option>
+                <option value="started">Started</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+                <option value="denied">Denied</option>
+                <option value="approved">Approved</option>
+                <option value="requested">Requested</option>
+                <option value="expired">Expired</option>
+                <option value="rejected">Rejected</option>
+                <option value="unavailable">Unavailable</option>
+                <option value="requeued">Requeued</option>
+              </select>
+            </label>
+            <label>
+              Subject type
+              <input name="subjectType" maxlength="64" placeholder="optional">
+            </label>
+            <label>
+              Actor kind
+              <input name="actorKind" maxlength="32" placeholder="optional">
+            </label>
+            <label>
+              Correlation id
+              <input name="correlationId" maxlength="128" placeholder="optional">
+            </label>
+            <label>
+              From
+              <input name="from" type="datetime-local">
+            </label>
+            <label>
+              To
+              <input name="to" type="datetime-local">
             </label>
             <label>
               Limit
               <input name="limit" type="number" min="1" max="100" value="25">
             </label>
             <button type="submit">Refresh</button>
-          </form>
+        </form>
+        <div class="audit-page-actions">
+          <button id="nextAuditPage" type="button" class="secondary" disabled data-i18n="audit.next">Next page</button>
+          <button id="exportAudit" type="button" class="secondary" data-i18n="audit.export">Export metadata</button>
         </div>
-        <div class="table-wrap">
-          <table>
+        <div class="audit-workbench">
+          <div class="table-wrap">
+            <table>
             <thead>
               <tr>
-                <th>Occurred</th>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Subject</th>
-                <th>Payload</th>
-                <th>Redaction</th>
+                <th data-i18n="audit.occurred">Occurred</th>
+                <th data-i18n="audit.action">Action</th>
+                <th data-i18n="audit.outcome">Outcome</th>
+                <th data-i18n="audit.category">Category</th>
+                <th data-i18n="audit.subject">Subject</th>
+                <th data-i18n="audit.correlation">Correlation</th>
               </tr>
             </thead>
             <tbody id="auditRows">
               <tr><td colspan="6">No audit events loaded.</td></tr>
             </tbody>
-          </table>
+            </table>
+          </div>
+          <aside class="audit-detail" aria-live="polite" aria-label="Selected audit event details">
+            <div class="workbench-heading">
+              <div>
+                <p class="eyebrow">Investigation detail</p>
+                <h3>Selected audit event</h3>
+              </div>
+              <span id="auditDetailStatus" class="inline-status">Select a timeline event.</span>
+            </div>
+            <dl id="auditDetailFields" class="access-detail-fields">
+              <div class="detail-summary"><dt>Detail</dt><dd>Select an audit event to inspect metadata and continue the investigation.</dd></div>
+            </dl>
+            <div class="row-actions">
+              <button id="viewAuditSubject" type="button" class="secondary" disabled>View subject trail</button>
+              <button id="viewAuditCorrelation" type="button" class="secondary" disabled>View correlation</button>
+            </div>
+          </aside>
         </div>
       </section>
     </main>
   </div>
-  <script src="/assets/operator.js" defer></script>
+  <script src="/assets/operator-i18n.js?v=console-nav-7" defer></script>
+  <script src="/assets/operator.js?v=console-nav-7" defer></script>
 </body>
 </html>

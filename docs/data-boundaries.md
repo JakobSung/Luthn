@@ -58,9 +58,8 @@ Category taxonomy version `1` uses stable canonical category names:
   `incident log`. The `finance` category includes monetary amounts, revenue,
   salary, price, cost, profit, budget, fee, and their Korean equivalents.
 
-The local mock recognizes bounded English and Korean marker phrases for this
-taxonomy. It remains a test and experiment classifier, not a production
-quality claim.
+`LocalDeterministic` recognizes bounded English, Korean, and mixed-language
+signals for this taxonomy without a model process or network call.
 
 Every configured operational provider is combined with local sensitive-data
 guard version `1`. The guard recognizes bounded high-confidence private-key,
@@ -72,10 +71,11 @@ matched values and excerpts are not added to classification results, logs,
 metrics, audits, or persistence metadata. Provider errors still fail before
 storage and never fall back to detector-only acceptance.
 
-`ExternalHttp` is the self-hosted-capable classifier boundary. Operators may
-point it at a local or private-network AI service; any non-local transfer is an
-explicit operator configuration decision. The local guard applies after every
-valid provider response and can only make routing more restrictive.
+Optional `LocalHttp` accepts only absolute HTTP(S) URLs on `localhost`, IPv4 or
+IPv6 loopback, or `host.docker.internal`. Arbitrary hosts, private LAN and
+public addresses, user information, and redirects are rejected. The local
+guard applies after every valid response and can only make routing more
+restrictive.
 
 Provider output is normalized before policy evaluation. A sensitive category
 raises sensitivity to at least its taxonomy minimum; `containsSensitiveMaterial`
@@ -98,11 +98,10 @@ identifiers, expected and actual classifications, routing decisions, and
 aggregate false-negative, false-positive, and mismatch counts. Raw corpus text
 is not copied into the report.
 
-Evaluation uses the local deterministic mock by default and performs no network
-request. `--provider guarded-mock` exercises the same local hybrid guard without
-creating an API client. Testing a configured API requires both `--provider configured-api` and
-the explicit `--allow-external-provider` acknowledgement because the API may
-relay corpus text to its configured classifier. An optional bearer token can be
+Evaluation uses `local-deterministic` by default and performs no network
+request. `--provider guarded-local` exercises the hybrid guard without creating
+an API client. `--provider local-http --api-url <same-device-url>` evaluates a
+local Host API and rejects remote URLs and redirects. An optional bearer token can be
 read only from the named environment variable supplied with `--token-env`; the
 token value is never included in evaluator output.
 
@@ -269,29 +268,84 @@ recall, search indexes, encrypted user payloads, safe sync, publication, audit
 payloads, logs, and metrics. Audit remains the event history of actions and
 decisions; provenance remains the immutable origin statement.
 
+## Sensitive-access review boundary
+
+Sensitive access starts as a bounded request with a structured purpose, session
+correlation, and 60–3600 second expiry. Request creation, status, and result
+reads are scoped to the server-derived owner; listing and decisions require the
+separate `access.review` scope, while approval and denial require `access.decide`.
+For backward compatibility, `access.decide` also implies review. The operator-detail projection is a local
+operator surface, not an agent surface: it may contain an existing safe label,
+source metadata, and a redacted summary, but never raw Vault/source content,
+protected payloads, credentials, workspace identity, or owner identity.
+
+An agent may also start the same lifecycle from one safe recalled memory item.
+The resolve route accepts only that safe item ID plus an optional bounded,
+non-sensitive reason. The server derives owner and workspace from the caller,
+requires one current protected record linked to that item, and creates a fresh
+requester-bound request. The response includes an opaque access handle that must
+remain inside the requesting task; only its digest is persisted. It does not
+return the protected record reference, content, inferred sensitive details, or
+an unrestricted candidate list. Missing and expired links fail with a
+human-readable no-output status. Creating the request never grants access or
+decision authority.
+
+An operator must inspect that detail and record an explicit approve or deny
+reason. Legacy approval can retain a bounded `redactedSummary` only after the
+server reclassifies it as public and agent-safe. Protected-memory approval sets
+a 60–3600 second grant (3600 by default) and 1–3 successful reads (one by
+default). The protected result is returned only when both the authenticated
+requester binding and opaque handle match. It contains only the encrypted
+original title and summary; credentials, access keys, and private keys are
+blocked without consuming a read. The operator console, logs, audit, cache, and
+External contracts never receive the handle or protected value. Expiry, detail
+reads, decisions, and result reads emit metadata-only audit events.
+Sensitive-access approval never implies external-publication approval.
+
+Expired sensitive turn-summary graphs are physically removed by the system
+retention worker only when the reference, payload, memory, source, provenance,
+workspace, owner, link, and expiry agree exactly and no safe-sync outbox exists.
+The worker uses one database transaction for relational storage and the shared
+process lifecycle gate plus one save unit for non-relational storage. Database
+constraints and transactions protect cross-process commits; the process gate is
+not presented as a distributed lock. Existing audit rows remain immutable. Each
+request is replaced by a content-free tombstone whose read contract contains
+only its id, `Expired`, and `expired-no-output`.
+
+## Audit use and retention boundary
+
+Audit events are grouped into `Access`, `Security`, `Configuration`,
+`Publication`, `Ingestion`, and `Retention`. Use them for a request decision
+timeline, classification/provider failure investigation, configuration-change
+review, Hub ingress/worker and publication outcomes, and retention-cleanup
+verification. Filter by subject, action family, outcome, correlation, and UTC
+time range; use the opaque cursor for subsequent pages and metadata-only export
+when policy requires an external review record.
+
+Audit responses and exports intentionally exclude raw source, Vault data,
+encrypted payloads, credentials, prompts, transcripts, and local paths. Audit is
+an accountability and investigation trail, not a backup or content-recovery
+surface. Retention is category-specific (Access/Security/Publication 365 days,
+Configuration/Retention 730 days, Ingestion 90 days) and physical cleanup is
+disabled by default; enabling it writes one metadata-only retention event per
+cleanup pass.
+
 ## Provider Boundary
 
-- Fresh packaged installs use the local `mock` classifier, so classification
-  works without a separate provider setup.
-- The mock classifier is local and credential-free. Both `Provider=mock` and
-  `AllowMock=true` are set by the installation default; replace it with an
-  operator-configured provider when provider-backed classification is required.
-- Operator-configured provider secrets are server-side only; console/API
-  responses expose only whether a key is present.
-- External classification is explicit opt-in configuration.
-- Direct third-party LLM providers (`ChatGPT API`, `Claude API`, `Google AI
-  API`, and `OpenRouter API`) receive raw source content in the classification
-  prompt before Luthn assigns sensitivity. Use them only when the operator
-  accepts that external transfer; use a controlled `External HTTP` provider when
-  raw intake content must stay in a self-hosted boundary.
-- Direct third-party LLM provider endpoints must be HTTPS URLs on the expected
-  provider host before Luthn sends the API key header.
+- Fresh packaged installs use credential-free `LocalDeterministic`.
+- `LocalHttp` is optional and limited to `localhost`, loopback IP addresses, or
+  the exact container gateway host `host.docker.internal`.
+- `LocalHttp` carries no model, credential, or authentication configuration;
+  redirects and all remote destinations fail closed.
+- Legacy commercial, `Mock`, `ExternalHttp`, and remote `LocalHttp` settings
+  become `Unconfigured` with endpoint, model, authentication, and credential
+  values cleared without secret use.
 - Provider calls carry payload class and redaction state metadata so intake
   remains auditable.
 - Audit rows record provider boundary metadata and storage decisions, not raw
   source content.
-- Normal automated tests must use mock or fake providers unless an integration
-  test is explicitly enabled by an operator.
+- Normal automated tests use local deterministic classifiers or in-memory HTTP
+  handlers.
 
 ## External Publication Boundary
 
@@ -302,5 +356,5 @@ decisions; provenance remains the immutable origin statement.
   metadata only; they do not repeat the projection body.
 - Raw source/Vault data, private memory, credentials, prompts, transcripts,
   local paths, and sensitive-access output must never enter the sync contract.
-- The public self-host build has no active cloud transport and performs no
+- The public self-host build has no active outbound transport and performs no
   external sync by default.

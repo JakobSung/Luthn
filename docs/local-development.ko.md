@@ -38,7 +38,46 @@ dotnet test Luthn.sln
 DOTNET_ENVIRONMENT=Testing dotnet run --project src/Luthn.Host.Api/Luthn.Host.Api.csproj --urls http://127.0.0.1:5089
 ```
 
-운영자 화면은 <http://127.0.0.1:5089/>입니다. health/readiness, 읽기 전용 에이전트 연결 상태, 분류 미리 보기, 통제된 source intake, 민감 접근 요청 검토·승인·거절, 메타데이터 감사 조회를 제공합니다. 에이전트 설치·재설정·연결 해제는 host CLI에서 수행합니다.
+운영자 화면은 <http://127.0.0.1:5089/>입니다. health/readiness, 읽기 전용 에이전트 연결 상태, 분류 미리 보기, 통제된 source intake, 민감 접근 요청 검토·승인·거절, 목적 중심 메타데이터 감사 조사를 제공합니다. 민감 요청은 먼저 선택해 허용된 operator detail만 조회해야 하며 명시적 결정 사유 없이는 승인·반려할 수 없습니다. 감사 센터는 민감 접근, 분류 실패, 설정 변경, publication, ingress, worker, retention preset과 제한된 사용자 필터를 제공하지만 원문 조회 화면이 아닙니다.
+
+선택 활성화 OSS Hub 기준선은 기본 비활성입니다. 로컬에서 시험할 때는 server-bound Hub scope를 가진 `MultiUser` identity를 사용한 뒤 `Luthn__Hub__Ingress__Enabled=true`와 필요하면 `Luthn__Hub__Ingress__WorkerEnabled=true`를 설정합니다. Ingress는 제한된 capsule을 암호화하고 trusted token에서 organization/workspace/member/agent/session identity를 정하며 metadata receipt만 반환합니다. disabled/fake relay는 외부 요청을 보내지 않습니다.
+
+에이전트 설치·재설정·연결 해제는 host CLI에서 수행합니다.
+
+## 운영자 콘솔 사용법
+
+먼저 `콘솔 접근` 탭에서 세션 상태를 확인한 뒤 작업 메뉴를 선택합니다. 개발·패키지형
+개인 설치는 `Luthn__Console__LocalOnly=true`를 명시하고 공개 port를 `127.0.0.1`에
+바인딩합니다. 미등록 `SingleOwner`의 macOS와 Linux에서는 설치된 Host Helper가 명시적으로
+요청한 HttpOnly 브라우저 후보 하나만 승인한 뒤 제한된 서버측 LocalAuto 세션을 발급합니다.
+터미널 명령은 필요하지 않습니다. `luthn console`은 로컬 복구 경로이며 현재 Windows
+콘솔 접근 경로입니다. 자격이나 bootstrap
+값을 URL·API 본문에 전달하지 않으며 URL 직접 접속만으로는 발급하지 않습니다.
+브라우저는 service/decision bearer 값을 읽거나 저장하거나 전송하지 않으며, cookie 인증
+변경 요청에는 Host가 반환한 same-origin CSRF header가 필요합니다.
+
+원본 기반 self-host 설치는 Git에서 무시되며 권한이 제한된 `.env`에
+`LUTHN_SERVICE_VALUE`와 `LUTHN_OPERATOR_VALUE`를 만듭니다. source 설치의 operator
+token은 기본적으로 결정 전용입니다. 패키지 설치는 같은 secret을
+`~/.config/luthn/service-token`, `~/.config/luthn/operator-token`에 보관합니다(Windows는
+`%LOCALAPPDATA%\\Luthn\\config\\service-token`, `operator-token`). 이 파일을 출력하거나
+커밋하지 않습니다.
+
+이 자격 증명은 Agent와 직접 API client에는 계속 필요하지만 사람의 콘솔 세션으로
+승격되지 않습니다.
+
+메뉴는 작업별로 사용합니다.
+
+- **개요**: 배포 경계, health/readiness, connector 상태를 확인합니다.
+- **민감 접근 승인**: 제한된 operator detail을 확인한 뒤 명시적인 사유로 승인·반려합니다.
+  Vault/source 원문은 표시하지 않습니다.
+- **외부 공개**: 민감 접근과 분리된 외부 공개 결정 경로입니다.
+- **분류·수집**: 분류 미리 보기와 안전한 source intake를 수행합니다.
+- **감사 센터**: preset·filter·cursor pagination·metadata-only export로 이벤트를 조사합니다.
+
+직접 bearer client에서 `403`이 나오면 서버 설정의 해당 token에 필요한 scope를
+추가하세요. 권한 오류를 해결하려고 agent connector에 더 넓은 token을
+넣지 않습니다.
 
 ## Docker 직접 호스팅 stack
 
@@ -59,7 +98,7 @@ printf '%s' "$LUTHN_SERVICE_VALUE" \
   | dotnet run --project src/Luthn.Tools -- token-digest --stdin
 ```
 
-`X-Luthn-Operator`는 감사 actor를 구분하는 선택적 메타데이터이며 권한을 주지 않습니다. 지원 scope는 `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `external-publication.read`, `external-publication.write`, `source.write`, `memory.read`, `memory.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, `metrics.write`, 운영자용 `*`입니다.
+`X-Luthn-Operator`는 감사 actor를 구분하는 선택적 메타데이터이며 권한을 주지 않습니다. 지원 scope는 `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `external-publication.read`, `external-publication.write`, `source.write`, `memory.read`, `memory.write`, `access.request`, `access.review`, `access.decide`, `audit.read`, `metrics.read`, `metrics.write`, 운영자용 `*`입니다.
 
 새 설치의 기본 identity 경계는 기존과 호환되는 단일 owner입니다.
 
@@ -98,13 +137,10 @@ user 또는 connector마다 별도 최소권한 token을 사용합니다. 같은
 
 ## 분류 Provider 설정
 
-운영자 화면의 `/api/operator/classification-provider`에서 `Mock`, `ChatGPT API`, `Claude API`, `Google AI API`, `OpenRouter API`, `External HTTP`를 선택하고 model·API key·연결 시험을 설정할 수 있습니다. API key는 server에 저장하며 응답이나 화면에 되돌려 보내지 않습니다.
-
-직접 제3자 LLM provider는 민감도 판정 전에 원문을 받습니다. 이 전송이 허용될 때만 사용하고, 원문을 통제된 경계에 남겨야 하면 `External HTTP`를 사용합니다. API key를 보내는 endpoint는 HTTPS여야 합니다. 기본 설정은 새 설치가 바로 동작하도록 로컬 `mock`을 선택합니다. `mock`은 결정적 keyword 분류기이므로 provider 기반의 안전성 또는 다국어 분류가 필요하면 외부 provider로 교체하세요. 수동으로 로컬 설정을 지정할 때는 두 값을 함께 설정할 수 있습니다.
+운영자 화면의 `/api/operator/classification-provider`에서 `LocalDeterministic` 또는 선택적 `LocalHttp`를 설정하고 연결 시험을 실행할 수 있습니다. 상용 provider, credential, model, 인증 header는 지원하지 않습니다. `LocalHttp`는 `localhost`, IPv4·IPv6 loopback, `host.docker.internal`의 절대 HTTP(S) endpoint만 허용하며 redirect는 실패 처리합니다.
 
 ```bash
-Luthn__Classification__Provider=mock
-Luthn__Classification__AllowMock=true
+Luthn__Classification__Provider=LocalDeterministic
 Luthn__Classification__Runtime__TimeoutSeconds=30
 Luthn__Classification__Runtime__MaxAttempts=2
 Luthn__Classification__Runtime__RetryDelayMilliseconds=200
@@ -114,7 +150,7 @@ Luthn__Classification__Runtime__RetryDelayMilliseconds=200
 
 ### 분류 Golden 평가
 
-버전이 지정된 한국어 중심 합성 corpus를 network 요청 없이 로컬 mock으로
+버전이 지정된 한국어 중심 합성 corpus를 network 요청 없이 `LocalDeterministic`으로
 평가합니다.
 
 ```bash
@@ -128,43 +164,38 @@ dotnet run --project src/Luthn.Tools -- classification-eval \
   --output artifacts/classification-eval.json
 ```
 
-network 요청 없이 mock 기준값과 로컬 결정론적 guard를 결합한 경로도 평가할 수
+network 요청 없이 로컬 기준값과 결정론적 guard를 결합한 경로도 평가할 수
 있습니다.
 
 ```bash
 dotnet run --project src/Luthn.Tools -- classification-eval \
-  --provider guarded-mock
+  --provider guarded-local
 ```
 
-API에 현재 설정된 분류기를 평가하려면 API를 실행하고 외부 전송 가능성을
-명시적으로 허용해야 합니다. 보호 API token 값은 command line에 넣지 말고
-환경 변수 이름만 전달합니다.
+동일 장비 Host API를 평가하려면 허용된 로컬 URL에서 API를 실행합니다. 보호 API
+token 값은 command line에 넣지 말고 환경 변수 이름만 전달합니다.
 
 ```bash
 export LUTHN_EVAL_TOKEN='<운영자가 제공한 token>'
 dotnet run --project src/Luthn.Tools -- classification-eval \
-  --provider configured-api \
+  --provider local-http \
   --api-url http://127.0.0.1:5089 \
-  --allow-external-provider \
   --token-env LUTHN_EVAL_TOKEN
 ```
 
 결과에는 corpus 원문을 넣지 않고 제한된 case ID, case별 분류·저장 경로 비교,
 불일치 합계만 기록합니다.
 
-runtime은 모든 설정된 provider 결과에 로컬 secret/PII guard 버전 `1`을
-결합합니다. `ExternalHttp`는 self-hosted 연결이 가능한 provider 경계이고,
+runtime은 모든 `LocalHttp` 결과에 로컬 결정론적 guard 버전 `1`을 결합하며,
 provider 실패를 detector 단독 저장으로 대체하지 않습니다.
 
 ```bash
-Luthn__Classification__Provider=external-http
-Luthn__Classification__ExternalHttp__Endpoint=https://provider.example/classify
-Luthn__Classification__ExternalHttp__CredentialEnvironmentVariable=LUTHN_PROVIDER_AUTH
-Luthn__Classification__ExternalHttp__AuthHeaderName=Authorization
+Luthn__Classification__Provider=LocalHttp
+Luthn__Classification__LocalHttp__Endpoint=http://host.docker.internal:11434/classify
 Luthn__OperatorConfig__Directory=/var/lib/luthn/operator
 ```
 
-설정에는 자격 증명 환경 변수 이름만 두고 값은 secret manager 또는 runtime 환경에서 제공합니다. 응답은 `sensitivity`, `confidence`, `categories`, `containsSensitiveMaterial`을 반환해야 합니다.
+기존 상용 provider, `Mock`, `ExternalHttp`, 원격 `LocalHttp` 설정은 secret을 복호화하거나 사용하지 않고 endpoint·model·인증·credential을 비운 `Unconfigured`로 전환합니다. 응답은 `sensitivity`, `confidence`, `categories`, `containsSensitiveMaterial`을 반환해야 합니다.
 
 ## PostgreSQL Migration
 

@@ -47,7 +47,9 @@ POST /api/agent/turn-summaries
 기본 API runtime은 정리 조건을 충족한 만료 자동 turn capsule도 물리적으로 정리합니다.
 기본값은 활성화, 60분 간격, batch당 최대 100개입니다. 불변 provenance로
 `turn-summary` source event와 연결된 `Ephemeral` memory 중 `LocalOnly`이고 safe-sync
-outbox 이력이 없는 항목만 대상입니다. memory 행, 암호화 payload, provenance,
+outbox 이력과 민감 record reference가 없는 항목만 대상입니다. reference가 연결된
+turn 요약은 전용 민감 접근 lifecycle cleanup 전까지 만료 후 fail-closed 상태로
+남습니다. 정리 가능한 비참조 capsule은 memory 행, 암호화 payload, provenance,
 classification, source event를 한 transaction에서 삭제합니다. 기존 audit event는
 남기고 metadata-only `turn_summary.retention.pruned` event 하나를 추가합니다.
 `Luthn__Memory__AutomaticTurnCleanupEnabled`,
@@ -76,7 +78,7 @@ record도 자동 물리 정리에서 제외합니다.
 
 원본 프로젝트 경로와 자유 형식 `sourceMetadata`는 거부합니다. 대신 제한된 `projectKey`, `taskKey`, `topicTags`와 구조화된 `provenance` 필드를 사용합니다.
 
-응답은 `summaryId`, `sourceEventId`, `classificationResultId`, `memoryItemId`, `auditEventId`, `allowsAgentContext`, `duplicate`, `classification`, `storageDecision`을 반환합니다. 공개 안전 요약은 `SharedAcrossAgents` 기억이 될 수 있고, 민감 요약은 기본 에이전트 API에서 반환하지 않습니다. `idempotencyKey`가 재시도 중복 쓰기를 막습니다.
+응답은 `summaryId`, `sourceEventId`, `classificationResultId`, `memoryItemId`, `sensitiveReferenceId`, `auditEventId`, `allowsAgentContext`, `duplicate`, `classification`, `storageDecision`을 반환합니다. 암호화 payload가 생긴 turn 요약은 부모 memory와 연결되고 같은 `expiresAt`을 공유하는 민감 reference 하나를 멱등 생성하며, 재시도는 같은 `sensitiveReferenceId`를 반환합니다. 공개 안전 요약은 `SharedAcrossAgents` 기억이 될 수 있고, 민감 요약은 기본 에이전트 API에서 반환하지 않습니다. `idempotencyKey`가 재시도 중복 쓰기를 막습니다.
 
 결정적 필드 마스킹으로 탐지된 고신뢰 민감 값을 모두 제거하면서 의미 있는 업무
 사건을 보존할 수 있으면, Luthn은 안전 투영을 다시 분류해 `SharedAcrossAgents`로
@@ -162,27 +164,27 @@ PUT  /api/operator/classification-provider
 POST /api/operator/classification-provider/test
 ```
 
-현재 분류 provider 설정을 조회·저장·시험하는 운영자 전용 endpoint입니다. 세 endpoint 모두 서비스 token에 `config.write` scope가 있어야 합니다. 지원 값은 `Mock`, `ExternalHttp`, `OpenAi`, `Anthropic`, `GoogleAi`, `OpenRouter`입니다.
+현재 분류 provider 설정을 조회·저장·시험하는 운영자 전용 endpoint입니다. 세 endpoint 모두 서비스 token에 `config.write` scope가 있어야 합니다. 지원 값은 `LocalDeterministic`, `LocalHttp`이며 `Unconfigured`는 fail-closed system 상태입니다. `LocalHttp`는 `localhost`, loopback IP, `host.docker.internal`만 허용하고 model·credential·인증 설정을 받지 않습니다.
 
 ```json
 {
-  "provider": "ExternalHttp",
-  "model": "",
-  "endpoint": "https://provider.example/classify",
-  "authHeaderName": "Authorization",
-  "apiKey": "operator-supplied-secret",
-  "clearApiKey": false
+  "provider": "LocalHttp",
+  "endpoint": "http://host.docker.internal:11434/classify"
 }
 ```
 
-응답은 `provider`, `model`, `endpoint`, `authHeaderName`, `payloadClass`,
-`redactionState`, `hasApiKey`, `providerBoundary`,
+응답은 `provider`, 비워진 호환 필드 `model`·`authHeaderName`, `endpoint`, `payloadClass`,
+`redactionState`, `providerBoundary`,
 `localSensitiveDataGuardActive`, `localSensitiveDataGuardVersion`을 반환하고
-API key나 detector 일치값은 절대 돌려주지 않습니다. `ExternalHttp`는
-`self-hosted-capable-external-http` 경계로 표시됩니다. 시험 endpoint는 선택적
+credential이나 detector 일치값은 절대 돌려주지 않습니다. `LocalHttp`는
+`same-device-local-http` 경계로 표시되고 redirect를 거부합니다. 시험 endpoint는 선택적
 `content`, `sourceType`을 받아 현재 provider와 정책 engine을 실행하고 안전한 설정
 보기, 분류, 저장 결정을 반환합니다. 저장과 시험은 메타데이터 전용 감사 사건을
 기록합니다.
+
+기존 상용 provider, `Mock`, `ExternalHttp`, 원격 `LocalHttp` 저장/runtime 설정은
+secret을 사용하지 않고 endpoint·model·인증·credential을 비운 `Unconfigured`로
+표시합니다.
 
 ## 운영 관측 지표 내보내기
 
@@ -361,27 +363,317 @@ GET /api/wiki/proposals/{id}
 
 ```http
 GET  /api/access-requests?status=Pending&limit=25
+GET  /api/access-requests/policy
+PUT  /api/access-requests/policy
 POST /api/access-requests
+POST /api/access-requests/resolve
+POST /api/access-requests/protected-result
 GET  /api/access-requests/{id}
+GET  /api/access-requests/{id}/operator-detail
 GET  /api/access-requests/{id}/result
 POST /api/access-requests/{id}/approve
 POST /api/access-requests/{id}/deny
 ```
 
-기존 민감 참조에 대한 메타데이터 전용 요청을 만들고 결정합니다. 원본 Vault/source
-payload는 반환하지 않습니다. 요청자는 server가 정한 자기 owner의 요청만 생성·조회할
-수 있습니다. 목록·결정에는 별도의 신뢰된 `access.decide`가 필요하며, 명시적 운영자는
+두 가지 additive mode를 지원합니다. 기존 요청은 server 재분류를 통과한 제한된 redacted
+output을 선택적으로 반환합니다. protected-memory 요청은 요청자 전용 승인 뒤 암호화해
+저장한 원본 title·summary만 반환할 수 있으며 자격증명과 key는 항상 차단합니다. 요청자는
+server가 정한 자기 owner의 요청만 생성·조회할
+수 있습니다. 목록·운영자 상세에는 `access.review`, 승인·반려에는 별도의 신뢰된
+`access.decide`가 필요합니다. 기존 client의 하위 호환을 위해 `access.decide`는 조회도
+포함합니다. 명시적 운영자는
 metadata-only audit를 남기면서 다른 owner 요청을 제한적으로 관리할 수 있습니다.
 생성·조회에는 `access.request` scope가 필요합니다. MCP는 생성·상태·결과만 제공하며
 승인·거절 도구를 노출하지 않습니다.
 
-새 호출자는 `sessionId`와 60–3600초 범위의 `expiresInSeconds`를 보내야 합니다. 만료 필드 도입 전의 버전 없는 계약과 호환하기 위해 두 값을 생략한 기존 호출에는 서버가 `legacy-...` session id와 600초 만료를 부여합니다. 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한, 재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. 거부된 승인 요약은 메타데이터 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며 `pending-approval`, `expired-no-output`, `denied-no-output`, `approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를 사용하고 원문은 반환하지 않습니다. 만료는 `sensitive_access.expired` 메타데이터 감사 사건으로 기록되며 결과 조회는 `sensitive_access.result_read` 감사 사건을 만듭니다.
+`POST /api/access-requests/resolve`는 공개 안전 memory 항목에서 기존 확인 요청
+lifecycle로 연결하는 에이전트 안전 경계입니다.
+
+```json
+{
+  "memoryItemId": "memory-item-...",
+  "reason": "사용자가 요청한 보호된 세부 정보를 확인합니다."
+}
+```
+
+선택적인 사유는 길이가 제한되며 사용자의 원문 질문이나 민감한 값을 포함하면 안 됩니다.
+server는 인증된 owner와 workspace 안에서만 관련 보호 정보를 해석하고, 사람이 이해할 수
+있는 `message`와 함께 `requested`, `not-found`, `expired` 중 하나를 반환합니다.
+`requestId`와 새 64자 소문자 hexadecimal `accessHandle`은 `requested`일 때만 포함하고 보호
+정보 참조나 내용은 반환하지 않습니다. server에는 handle의 SHA-256 digest만 저장합니다.
+handle은 요청한 task 안에서만 보관하고 사용자 출력·로그·감사·cache·recall metadata·
+동기화·운영자 응답에 넣으면 안 됩니다. 잃어버리면 새 요청을 만들어야 합니다.
+resolve와 protected-result 응답은 `Cache-Control: no-store`, `Pragma: no-cache`를 사용합니다.
+
+### 권한과 정책 계약
+
+로컬/self-hosted 운영자 기능은 검토, 결정, 정책 설정 권한을 분리합니다.
+
+| Scope | 허용되는 민감 접근 작업 |
+| --- | --- |
+| `access.request` | owner 범위 요청 생성과 현재 상태, 기존 제한 결과 또는 요청자 전용 보호 결과의 동기 조회 |
+| `access.review` | 인증된 workspace 안의 요청 목록과 운영자 상세 조회 |
+| `access.decide` | 만료되지 않은 Pending 요청 승인·반려. 하위 호환을 위해 review를 포함하지만 정책 설정 권한은 포함하지 않음 |
+| `access.configure` | workspace 공통 승인 대기시간, 승인 결과 노출시간, 최대 성공 조회 횟수 조회·개정. 검토·결정 권한은 포함하지 않음 |
+
+새 service token은 두 정책 route 모두 `access.configure`를 사용합니다. 기존 로컬 console
+session의 `config.write`는 호환성 연결로만 허용하며 review나 decide 권한을 부여하지
+않습니다.
+
+기존 정책은 승인 대기시간 600초, 이와 분리된 승인 결과 grant 600초, 성공 결과 조회
+1회가 기본입니다. 기존 두 시간값은 60–3600초, 기존 최대 성공 조회 횟수는 1–10회입니다.
+protected-memory 승인은 요청마다 별도로 3600초·1회가 기본이며 60–3600초·1–3회만
+허용합니다. 무제한 값은 없습니다. 잘못되거나 권한 없는 변경은 fail-closed 처리하고 기존
+request나 grant를 연장하거나 복원하지 않습니다.
+
+정책 변경 요청:
+
+```json
+{
+  "requestTimeoutSeconds": 600,
+  "grantDurationSeconds": 600,
+  "maximumSuccessfulReads": 1
+}
+```
+
+정책 응답:
+
+```json
+{
+  "revision": 3,
+  "requestTimeoutSeconds": 600,
+  "grantDurationSeconds": 600,
+  "maximumSuccessfulReads": 1,
+  "createdAt": "2026-07-04T00:00:00Z"
+}
+```
+
+`GET /api/access-requests/policy`와 `PUT /api/access-requests/policy`는 workspace 범위를
+강제하고 `Cache-Control: no-store`로 응답하며 제한된 정책 metadata만 노출합니다. 변경이
+성공하면 기존 revision을 덮어쓰지 않고 새 revision을 생성합니다.
+
+요청 생성 시 활성 승인 대기시간과 정책 revision을 snapshot하고 계산된 만료시각을
+`requestExpiresAt`으로 노출합니다. 승인 시점에는 당시의 grant 노출시간, 최대 성공 조회
+횟수, 정책 revision을 별도의 `grantExpiresAt`과 조회 제한 상태에 snapshot합니다. 두
+만료시각의 의미는 다릅니다.
+request expiry는 결정 가능 시간을 끝내고 grant expiry는 승인 결과의 사용 가능 시간을
+끝냅니다. 백그라운드 만료 materialization이 아직 실행되지 않았어도 모든 결정과 결과
+조회에서 현재 server 시각과 원자적 조회 counter를 다시 검사합니다. 상태 조회와 결과가
+없는 응답은 성공 조회를 소비하지 않고, 승인된 제한 결과를 실제 반환할 때만 1회를
+소비합니다.
+
+`expiresInSeconds`는 기존 create JSON 형식의 호환성을 위해 계속 받고 범위도 검사하지만,
+현재 요청 수명을 caller가 정하는 권한은 아닙니다. 활성 server 정책이 snapshot될 실제
+request expiry를 결정합니다. `sessionId`를 생략하면 기존과 같이 server가 `legacy-...`
+식별자를 생성합니다.
+
+### 로컬 동기 수명주기 조회
+
+`status`는 저장된 요청 결정 상태(`Pending`, `Approved`, `Denied`, `Expired`)이고,
+추가 필드 `statusCode`는 현재 server 시각의 request/grant/read 수명주기를 나타냅니다.
+
+| `statusCode` | 의미와 결과 동작 |
+| --- | --- |
+| `request-created` | 새 Pending 요청을 생성함 |
+| `request-pending` | 같은 owner/workspace/reference의 Pending 요청이 유효하여 기존 요청을 재사용함 |
+| `request-denied` | 요청이 반려되어 결과를 반환하지 않음 |
+| `request-expired` | 결정 가능 시간이 만료되어 결과를 반환하지 않음 |
+| `grant-active` | 승인 grant가 만료되지 않았고 조회 횟수가 남아 있어 결과 endpoint가 검토된 제한 결과를 반환할 수 있음 |
+| `grant-expired` | 승인 결과 grant가 만료되어 결과를 반환하지 않음 |
+| `grant-consumed` | 성공 조회 횟수를 모두 사용하여 결과를 반환하지 않음 |
+| `result-returned` | 이번 결과 호출이 승인된 제한 결과를 반환하고 성공 조회 1회를 원자적으로 소비함 |
+| `protected-result-returned` | 요청자 전용 호출이 원본 title·summary를 반환하고 성공 조회 1회를 원자적으로 소비함 |
+| `protected-result-not-found` | handle과 인증된 요청자 binding이 일치하지 않아 내용을 반환하지 않음 |
+| `protected-result-unavailable` | 보호 payload를 안전하게 열 수 없어 내용을 반환하지 않음 |
+| `credential-blocked` | 자격증명·access key·private key를 감지해 조회 횟수 소비 없이 차단함 |
+
+목록, request, operator detail, result 응답에는 적용 가능한 경우 `requestExpiresAt`,
+`grantExpiresAt`, `remainingReads`, `maxReads`, `usedReads`가 추가됩니다. `usedReads`는
+최대 횟수와 남은 횟수의 차이로 server가 계산한 제한된 값입니다. server가 정한 같은
+workspace, owner, 민감 reference로 create를 반복하면 중복 요청을 만들지 않고 기존
+Pending 요청이나 active grant를 반환합니다. terminal 상태는 새 요청을 조용히 만들지
+않고 그대로 반환하며, 이후의 별도 명시적 create 요청에서 새 Pending 수명주기를 시작할
+수 있습니다.
+
+이는 로컬 동기 재조회 계약입니다. Agent는 기존 create/status/result 작업을 다시 호출할
+때만 승인, 반려, 만료, 소진 상태를 확인합니다. SignalR, SSE, WebSocket, webhook, email,
+Slack, mobile push 또는 Agent의 선제 메시지는 보내지 않습니다. `grant-active`를 받은
+Agent는 같은 사용자 turn에서 기존 result 작업을 이어서 호출할 수 있습니다. 승인 결과는
+동기화 또는 외부 공개 outbox로 전송하지 않습니다.
+
+### Workflow, 감사, 우회 차단 경계
+
+`SensitiveAccessWorkflow`만 request resolution, 결정, 정책 revision, grant, 만료, 조회
+counter를 조회하거나 변경할 수 있는 application 경계입니다. 기존 승인 결과 조회에는 이
+Workflow가 발급한 직렬화 불가능한 일회성 내부 permit이 필요합니다. protected-memory
+조회에는 인증된 요청자 binding과 opaque handle이 모두 필요하며 plaintext handle은
+저장하지 않습니다. permit과 handle은 로그·감사·cache·운영자 계약에 노출하지
+않습니다. Agent용 API/MCP에는 approve, deny, 정책/grant 변경, 제한 없는 Vault/source
+조회나 자격증명 조회 작업이 없습니다.
+
+백그라운드 만료 materializer도 Workflow 소유 system operation을 호출하며 request나 grant
+row를 직접 변경하지 않습니다. materialization은 멱등이고 수명주기 근거를 기록하지만,
+동기 조회와 결정이 항상 현재 server 시각과 counter를 다시 검사하므로 authorization
+경계로 사용하지 않습니다.
+
+직접 payload 조회, 민감 상태 직접 변경, 잘못된 상태 전이, scope 불일치, 만료 grant,
+소진된 조회 제한, 잘못되거나 재사용된 permit은 결과와 비인가 상태 변경 없이 fail-closed
+처리합니다. 요청 재사용, 결정, 정책 revision, grant 생성·만료·소진, 결과 조회, 만료
+materialization, 우회 차단은 제한된 metadata-only audit와 저카디널리티 metric을
+남깁니다. prompt·reason 본문, reference label, redacted output 본문, credential, secret,
+owner path, workspace/owner 화면 식별자, 민감 원문은 포함하지 않습니다.
+
+`GET /api/access-requests/{id}/operator-detail`은 로컬 또는 self-hosted
+콘솔을 위한 별도 `access.review` 계약입니다. 요청·결정 사유와 민감 참조에 이미
+저장된 label, source metadata, redacted summary만 반환합니다. 응답은
+`operator-sensitive-metadata`, `local-operator-only`로 표시되며 Agent-safe 데이터가
+아니므로 동기화, 로그, metric, 일반 감사 payload에 넣으면 안 됩니다.
+항상 인증된 workspace를 강제하고, 비운영자 decider는 server가 정한 자기 owner로도
+제한합니다. 명시적 operator도 같은 workspace 안에서만 다른 owner를 검토할 수
+있습니다. 성공한 조회는 내용 없는 metadata-only
+`sensitive_access.operator_detail_read` 감사 사건을 남깁니다. 원본 source/Vault,
+protected payload, credential, workspace id, owner id는 응답하지 않습니다.
+
+새 호출자는 `sessionId`를 보내야 합니다. `expiresInSeconds`는 버전 없는 JSON 형식의
+호환성을 위해 유지하고 60–3600초 밖의 값은 거절하지만, 실제 request 만료는 활성 server
+정책이 결정합니다. 기존 승인 시 선택적 `redactedSummary`를 받을 수 있으며 4000자 제한,
+재분류, 공개 에이전트 안전 조건을 모두 만족해야 저장합니다. turn-summary reference는
+이 값을 생략하면 저장된 공개 안전 투영이 있을 때 server가 다시 검증해 사용합니다.
+protected-memory 승인은 `redactedSummary`를 거절하고 대신 보호 범위 안의 선택적
+`grantDurationSeconds`, `maximumSuccessfulReads`를 받습니다.
+reference 만료는 요청 생성, 결정, permit/grant 사용, 결과 조회에서 모두 현재 server
+시각으로 재검사하며 항상 출력 없이 거절합니다. 거부된 승인 요약은
+metadata-only 감사 사건만 만듭니다. `/result`는 명시적 출력 정책 계약이며
+`pending-approval`, `expired-no-output`, `denied-no-output`,
+`approved-redacted-output-available`, `approved-redacted-output-unavailable` 중 하나를
+사용하고 원문은 반환하지 않습니다. request와 grant 시간은 server 정책으로 각각
+60–3600초 범위에 제한됩니다. 만료와 결과 조회 감사에는 결과 본문을 복사하지 않습니다.
+
+protected-memory 승인과 결과 예시:
+
+```json
+{
+  "reason": "요청자에게 공개하도록 승인합니다.",
+  "grantDurationSeconds": 3600,
+  "maximumSuccessfulReads": 1
+}
+```
+
+```http
+POST /api/access-requests/protected-result
+Cache-Control: no-store
+
+{"accessHandle":"<64자 소문자 hexadecimal>"}
+```
+
+```json
+{
+  "status": "protected-result-returned",
+  "contentAvailable": true,
+  "title": "견적",
+  "content": "승인된 견적 금액은 10억입니다.",
+  "grantExpiresAt": "2026-08-14T01:00:00Z",
+  "remainingReads": 0,
+  "maxReads": 1,
+  "reasons": ["Approved protected memory was returned to the original requester."]
+}
+```
+
+보호 결과 endpoint는 `POST`, `Cache-Control: no-store`이며 내용을 성공적으로 반환할 때만
+조회 1회를 소비합니다. 저장된 원본 title·summary만 복호화하고 tag·provenance·session
+metadata·자격증명·access key·private key는 반환하지 않습니다.
+
+만료되는 민감 turn-summary reference가 보존 정리 시점에 도달하면 암호화 payload,
+live reference, 연결된 memory/source graph, request, decision, grant를 하나의 원자 작업으로
+제거합니다. 이후 상태·운영자 상세·결과 조회와 `Expired` 목록은 다음과 같은 content-free
+tombstone만 반환합니다.
+
+```json
+{
+  "id": "access-...",
+  "status": "Expired",
+  "outputPolicy": "expired-no-output"
+}
+```
+
+tombstone에는 reference, actor/session, 요청·결정 사유, summary, payload, ciphertext,
+result 속성이 없습니다. 기존 감사 이력은 불변으로 보존하며, cleanup은 제거된 요청마다
+결정적 metadata-only `sensitive_access.content_pruned` 사건 하나만 추가합니다. 운영자
+콘솔은 tombstone의 content·결정 control을 숨기고 metadata-only 감사 링크만 유지합니다.
+Agent나 operator가 호출할 수 있는 cleanup mutation API는 추가하지 않습니다. SDK/connector
+상태·결과 조회는 `SensitiveAccessReadDto` live-or-tombstone 계약을 반환하고, MCP는
+결정 tool을 추가하지 않은 채 실제 content-free tombstone 타입을 전달합니다.
+목록 응답은 기존 호환성을 위해 live 항목을 `requests`에 유지하고, 제거된 항목은 별도의
+강타입 `tombstones` 배열로 제공합니다.
+
+## 운영 콘솔 profile
+
+```http
+GET /api/operator/console-profile
+```
+
+read-only profile은 같은 OSS console에 `SingleOwner`를 `Local`,
+`MultiUser`를 `MultiUser` mode로 알려 줍니다. 또한 `outboundTransport: disabled`,
+`sensitiveAuthority: oss-console`, `tenancySource: authenticated-request` 경계를
+고정해 반환합니다. 요청 body나 호출자가 선택한 tenant/mode identity를 받지 않으며
+workspace, organization, installation, owner, credential 필드를 반환하지 않습니다.
+
+browser는 정적 label에 allowlist된 `en`, `ko` 언어 preference만 사용합니다. 언어
+선택은 authorization, identity, audit, transport 상태를 바꾸지 않습니다. 민감 접근
+승인과 외부 공개 승인은 별도 API·console section으로 유지되며 DB가 아니라 Host API만
+사용합니다.
+
+## 로컬 콘솔 세션 경계
+
+```http
+GET  /api/operator/session
+POST /api/operator/session/local/arm
+POST /api/operator/session/local
+POST /api/operator/session/local/connect
+POST /api/operator/session/logout
+```
+
+브라우저는 먼저 권한 없는 HttpOnly 후보 cookie를 받습니다. 설치된 CLI는 운영체제에서
+보호하는 운영자 bearer로 `/local/arm`을 호출해 활성 후보가 정확히 하나일 때만 승인합니다.
+후보가 없거나 둘 이상이면 차단하며 bearer나 raw bootstrap 값은 브라우저·URL·API 본문에
+전달하지 않습니다.
+세션 cookie는 불투명한 서버측 식별자이며 유휴·절대 만료, HttpOnly, host-only,
+SameSite를 적용합니다. Cookie 인증 변경 요청에는 same-origin `X-Luthn-CSRF` proof가
+필요합니다. LocalAuto는 명시적 local-only·loopback `SingleOwner`로 제한합니다.
+원격 또는 forwarded 배포에서는 LocalAuto 세션을 발급하지 않습니다.
+
+JSON 계약은 제한된 상태·capability·만료·작업·server-derived label만 노출합니다.
+Service credential, recovery proof 값, caller-selected tenant identity, raw/Vault content,
+prompt, transcript, local path는 받거나 반환하지 않습니다. 기존 bearer API client는
+독립적으로 하위 호환을 유지합니다.
 
 ## 감사 사건
 
 ```http
 GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
+GET /api/audit-events?category=Access&actionPrefix=sensitive_access.&outcome=approved&from=2026-08-06T00%3A00%3A00Z&to=2026-08-06T23%3A59%3A59Z
+GET /api/audit-events/export?category=Access&subjectId=access-...
 ```
+
+`subjectId`, `action`, `outcome`, `subjectType`, `actorKind`, `correlationId`는
+정확히 일치하는 메타데이터 필터입니다. `from`, `to`는 양 끝을 포함하는 UTC
+시각입니다. `actionPrefix`는 알려진 사건 계열인 `sensitive_access.`,
+`operator.classification_provider.`, `classification.provider.`, `source.intake.`,
+`turn_summary.`, `memory.`, `retrieval.`, `processing.`, `transport.`, `hub.ingress.`,
+`console.`, `authorization.`만 허용합니다. `audit.`도 retention 사건 조회에 허용됩니다.
+`category`는 `Access`, `Security`,
+`Configuration`, `Publication`, `Ingestion`, `Retention` 중 하나입니다.
+필터는 인증된 workspace 또는 installation 범위를 넓히지 않습니다. 잘못된 UTC,
+과도한 길이, 허용되지 않은 접두사는 database 조회 전에 `400`으로 거절합니다.
+
+`hub.ingress.*` 사건은 `Ingestion` category로, provider 호출·실패 사건은 `Security`
+category로 분류합니다. Hub ingress는 `actionPrefix=hub.ingress.`로 바로 조회할 수
+있습니다. `authorization.*` 사건에는 거부된 필요 scope만 남기며 credential, header,
+request content, network identifier를 기록하지 않습니다.
+
+page는 `occurredAt` 내림차순, `id` 오름차순입니다. `nextCursor`가 null이 아니면
+같은 filter와 함께 다음 요청에 전달합니다. opaque cursor에는 내용이나 credential이
+없으며 변조된 cursor나 다른 filter에 재사용한 cursor는 `400`으로 거절합니다.
 
 ```json
 {
@@ -399,12 +691,38 @@ GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
     "correlationId": null,
     "payloadVersion": 1,
     "payloadClass": "metadata-only",
-    "redactionState": "sensitive-boundary-only"
-  }]
+    "redactionState": "sensitive-boundary-only",
+    "category": "Access",
+    "retentionClass": "access-365d",
+    "retainedUntil": "2027-08-06T08:30:00Z"
+  }],
+  "nextCursor": null
 }
 ```
 
+`GET /api/audit-events/export`는 같은 authorization과 제한된 filter를 재사용해
+최대 1000개의 사건을 JSON attachment로 반환합니다. export에는 workspace,
+actor user, owner 식별자가 없고 `metadata-only-no-protected-content` 경계를 명시합니다.
+원본 source, Vault·암호화 payload, credential, prompt, transcript, local path는
+내보내지 않습니다.
+
 현재 `payloadVersion`은 `1`입니다. 미래의 알 수 없는 version도 메타데이터로 보존해야 하며 원본을 포함한다고 가정하면 안 됩니다.
+
+감사 메타데이터는 다음과 같이 목적을 정한 뒤 사용합니다.
+
+- 민감 접근 승인·반려 전후에는 요청 `subjectId` 또는 `sensitive_access.` 계열로
+  요청, 검토, 결정, 결과 조회 순서를 확인합니다.
+- 분류 실패 조사에는 `category=Security&outcome=failed`로 시작한 뒤
+  `correlationId`와 UTC 시각 범위로 좁힙니다. 분류 요청마다 서버가 만든 correlation
+  값은 시작·완료 또는 실패·최종 intake 사건을 연결합니다. Provider 실패 감사 사건은
+  metadata-only이며 분류 대상 내용이나 provider 오류 본문을 포함하지 않습니다.
+- 분류 동작 변경 조사에는 installation 범위와
+  `operator.classification_provider.` 계열로 provider 설정 변경·시험을 확인합니다.
+  installation 범위는 계속 명시적 운영자만 조회할 수 있습니다.
+
+감사 기록은 책임 추적과 운영 조사 수단이며 내용 복구 수단이 아닙니다. prompt,
+transcript, credential, 원본 source, Vault payload, 보호 memory를 감사 기록에 넣거나
+감사 API로 조회하지 않습니다.
 
 ## 운영 인증 경계
 
@@ -414,8 +732,54 @@ GET /api/audit-events?subjectId=access-...&limit=50&scope=workspace
 dotnet run --project src/Luthn.Tools -- token-digest --stdin
 ```
 
-지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.decide`, `audit.read`, `metrics.read`, `*`.
+지원 scope: `agent.read`, `agent.write.summary`, `agent.connection.read`, `agent.connection.write`, `classification.preview`, `config.write`, `source.write`, `memory.write`, `memory.read`, `external-publication.read`, `external-publication.write`, `access.request`, `access.review`, `access.decide`, `access.configure`, `audit.read`, `metrics.read`, `hub.ingress.write`, `hub.ingress.operate`, `*`.
+
+## 중앙 OSS Hub ingress (선택 활성화)
+
+공개 runtime에는 선택적으로 켜는 Hub data-plane 기반이 있습니다. 기본값은
+비활성이며 외부 HTTP transport는 구현하지 않습니다. Hub ingress token은 server
+설정에서 `HubOrganizationId`, `WorkspaceId`, `UserId`,
+`HubAgentConnectionId`, `HubAgentId`, `HubSessionId`를 바인딩해야 합니다.
+요청 body는 이 identity를 선택하거나 덮어쓸 수 없습니다.
+
+```http
+POST /api/hub/ingress/capsules
+Authorization: Bearer <hub-ingress-token>
+```
+
+```json
+{
+  "idempotencyKey": "turn-event-42",
+  "contentDigest": "sha256:<64-lowercase-hex>",
+  "capsule": "bounded agent lifecycle capsule"
+}
+```
+
+server는 digest와 byte 제한을 확인하고 OSS Data Protection key ring으로 capsule을
+보호한 뒤 queue row와 metadata-only audit를 원자적으로 저장하고 `202 Accepted`를
+반환합니다. receipt에는 `receiptId`, state, duplicate 여부, 수신 시각,
+`payloadClass=metadata-only`만 있습니다. 같은 digest 재전송은 같은 receipt를
+반환하고 다른 digest의 key 재사용은 `409`입니다. scope 용량·rate 포화는
+acknowledge하거나 버리지 않고 안정된 `code`, `retryAfterSeconds`, `Retry-After`가
+있는 `429`를 반환합니다.
+
+로컬 worker는 Workspace 공정성이 있는 제한 batch, lease, retry/backoff,
+dead-letter, 현재 정책 재적용 replay를 사용합니다. `hub.ingress.operate` scope와
+같은 Workspace의 운영자만 다음 API를 사용할 수 있습니다.
+
+```http
+POST /api/hub/ingress/dead-letter/{receiptId}/replay
+GET /api/hub/status
+```
+
+Hub status는 aggregate metadata-only입니다. admission outcome, 보호 queue
+byte/depth/oldest age, processing/retry/dead-letter, safe-projection outbox
+age/checkpoint, 제한된 worker duration과 relay state만 반환합니다. Workspace,
+구성원, Agent, session identity와 capsule 내용, credential, prompt, transcript,
+local path는 반환하지 않습니다.
 
 ## Vault 경계
 
-원본 Vault 조회는 기본적으로 제공하지 않습니다. 미래의 제한 접근도 제한된 가림 출력을 반환하기 전에 승인과 감사 기록을 거쳐야 합니다.
+원본 Vault 조회는 제공하지 않습니다. 구현된 제한 접근 흐름은 위에서 설명한 제한된
+server 검증 redacted output을 반환하기 전에 운영자 승인과 감사 기록을 요구하며,
+승인도 보호된 Vault payload 자체를 반환하지 않습니다.

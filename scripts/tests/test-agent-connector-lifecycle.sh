@@ -18,6 +18,7 @@ docker_log="$tmp_root/docker.log"
 docker_fail_marker="$tmp_root/docker-api-recreate-failed"
 docker_stop_count="$tmp_root/docker-stop-count"
 no_codex_bin="$tmp_root/no-codex-bin"
+export LUTHN_HOST_HELPER_DISABLE_AUTOSTART=true
 mkdir -p "$home_dir" "$data_dir" "$config_dir" "$state_dir" "$bin_dir" "$fake_bin" "$codex_home"
 
 cli="$bin_dir/luthn"
@@ -155,7 +156,7 @@ import subprocess
 import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "version":
-    print("4")
+    print("8")
     raise SystemExit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == "helper-digest":
@@ -344,6 +345,16 @@ grep -q 'Never send a raw workspace path' "$codex_home/AGENTS.md"
 grep -q 'at most once per user turn' "$codex_home/AGENTS.md"
 grep -q 'memory titles, content, IDs, queries, scores, sources' "$codex_home/AGENTS.md"
 grep -q 'normal assistant response or final response' "$codex_home/AGENTS.md"
+grep -q 'Protected information confirmation' "$codex_home/AGENTS.md"
+grep -q 'specific detail that is not present' "$codex_home/AGENTS.md"
+grep -q 'request_and_wait_for_protected_information_access' "$codex_home/AGENTS.md"
+grep -q '\`memoryItemId\` set to' "$codex_home/AGENTS.md"
+grep -q '\`id\` and a short, non-sensitive reason' "$codex_home/AGENTS.md"
+grep -q "Never put the user's raw question" "$codex_home/AGENTS.md"
+grep -q 'type names, field names' "$codex_home/AGENTS.md"
+grep -q 'the detail in the same call' "$codex_home/AGENTS.md"
+! grep -q 'operator console' "$codex_home/AGENTS.md"
+grep -q 'Credential, access-key, and private-key material is never' "$codex_home/AGENTS.md"
 hook_hash="$(shasum -a 256 "$codex_home/hooks.json" | awk '{print $1}')"
 recall_hash="$(shasum -a 256 "$codex_home/AGENTS.md" | awk '{print $1}')"
 run_luthn connect codex >/dev/null
@@ -534,11 +545,11 @@ echo "[12/18] missing helper self-heals from the installed runtime revision"
 rm -f "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
 [[ -x "$tmp_root/connector-helper.py" ]]
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "7" ]]
 [[ -f "$state_dir/connectors/codex.env" ]]
 expected_helper_digest="$(awk -F= '$1 == "HELPER_DIGEST" { print $2 }' "$state_dir/connectors/codex.env")"
 printf '\n# same-version stale helper\n' >>"$tmp_root/connector-helper.py"
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "7" ]]
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" != "$expected_helper_digest" ]]
 run_luthn connect codex >/dev/null
 [[ "$(python3 "$tmp_root/connector-helper.py" helper-digest)" == "$expected_helper_digest" ]]
@@ -555,7 +566,7 @@ raise SystemExit(1)
 EOF
 chmod 0700 "$tmp_root/connector-helper.py"
 run_luthn connect codex >/dev/null
-[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "4" ]]
+[[ "$(python3 "$tmp_root/connector-helper.py" version)" == "7" ]]
 cp "$tmp_root/connector-helper-fixture.py" "$tmp_root/connector-helper.py"
 run_luthn disconnect codex >/dev/null
 run_luthn connection status codex >/dev/null
@@ -819,7 +830,7 @@ EOF
   [[ "$reconcile_output" == *"Restart required: Luthn MCP compatibility changed"* ]]
   [[ "$reconcile_output" == *"Agent notice: restart the current Codex host before invoking Luthn tools again."* ]]
 )
-grep -q '^CONNECTOR_VERSION=4$' "$reconcile_state/connectors/codex.env"
+grep -q '^CONNECTOR_VERSION=8$' "$reconcile_state/connectors/codex.env"
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
 import sys
@@ -839,7 +850,7 @@ import sys
 path = sys.argv[1]
 content = open(path, encoding="utf-8").read()
 with open(path, "w", encoding="utf-8") as stream:
-    stream.write(content.replace("CONNECTOR_VERSION=4\n", "CONNECTOR_VERSION=1\n"))
+    stream.write(content.replace("CONNECTOR_VERSION=8\n", "CONNECTOR_VERSION=1\n"))
 PY
 python3 - "$reconcile_codex/hooks.json" <<'PY'
 import json
@@ -997,7 +1008,7 @@ EOF
     case "$2" in
       org.opencontainers.image.revision) printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
       org.opencontainers.image.version) printf '%s' main ;;
-      io.luthn.mcp-schema.version) printf '%s' 3 ;;
+      io.luthn.mcp-schema.version) printf '%s' 6 ;;
     esac
   }
   read_remote_image_metadata() {
@@ -1024,8 +1035,8 @@ assert set(version) == {
 }
 assert version["updateChannel"] == "ghcr.io/jakobsung/luthn:main"
 assert version["cliTemplateVersion"] == "4"
-assert version["connectorTemplateVersion"] == "4"
-assert version["mcpSchemaVersion"] == "3"
+assert version["connectorTemplateVersion"] == "8"
+assert version["mcpSchemaVersion"] == "6"
 assert update["status"] == "current"
 assert update["candidateRevision"] == "a" * 40
 assert available["status"] == "update-available"
@@ -1080,6 +1091,116 @@ assert doctor["status"] == "ready"
 names = {check["name"] for check in doctor["checks"]}
 assert {"docker", "compose", "docker-daemon", "installation", "api-health", "api-readiness", "migrations", "runtime-drift", "update-check"} <= names
 PY
+)
+
+echo "[bootstrap] update hands post-update bootstrap to the replaced CLI"
+bootstrap_root="$tmp_root/update-bootstrap-handoff"
+bootstrap_data="$bootstrap_root/data"
+bootstrap_config="$bootstrap_root/config"
+bootstrap_state="$bootstrap_root/state"
+bootstrap_bin="$bootstrap_root/bin"
+bootstrap_marker="$bootstrap_root/target-bootstrap-ran"
+caller_marker="$bootstrap_root/caller-bootstrap-ran"
+mkdir -p "$bootstrap_data/runtime" "$bootstrap_config" \
+  "$bootstrap_state/connectors" "$bootstrap_bin"
+cp "$repo_root/scripts/luthn" "$bootstrap_bin/luthn"
+chmod 0755 "$bootstrap_bin/luthn"
+printf 'services: {}\n' >"$bootstrap_data/compose.yaml"
+cat >"$bootstrap_config/luthn.env" <<EOF
+LUTHN_IMAGE=test/luthn:old
+LUTHN_BASE_URL=http://127.0.0.1:8080
+EOF
+cat >"$bootstrap_state/connectors/codex.env" <<'EOF'
+AGENT_ID=codex
+SETUP_STATE=configured
+EOF
+(
+  export HOME="$home_dir"
+  export PATH="$fake_bin:$PATH"
+  export LUTHN_DATA_DIR="$bootstrap_data"
+  export LUTHN_CONFIG_DIR="$bootstrap_config"
+  export LUTHN_STATE_DIR="$bootstrap_state"
+  export LUTHN_BIN_DIR="$bootstrap_bin"
+  export LUTHN_COMPOSE_FILE="$bootstrap_data/compose.yaml"
+  export LUTHN_CONFIG_FILE="$bootstrap_config/luthn.env"
+  export LUTHN_CLI_PATH="$bootstrap_bin/luthn"
+  export LUTHN_TEST_BOOTSTRAP_MARKER="$bootstrap_marker"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  require_installation() { :; }
+  require_docker() { :; }
+  require_command() { :; }
+  pull_image() { :; }
+  image_id_for_container() { printf '%s' sha256:running; }
+  image_label() { :; }
+  probe_image_mcp_schema_version() { :; }
+  operator_credential_slot_available() { :; }
+  ensure_connector_scopes() { :; }
+  ensure_operator_credential() { :; }
+  download_runtime() {
+    cat >"$cli_path" <<'TARGET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "__post-update-bootstrap" && $# == 1 ]]; then
+  printf '%s\n' target-cli >"${LUTHN_TEST_BOOTSTRAP_MARKER:?}"
+  exit 0
+fi
+exit 91
+TARGET
+    chmod 0755 "$cli_path"
+  }
+  reconcile_codex_managed_configuration() { :; }
+  compose_cmd() {
+    if [[ " $* " == *" pg_dump "* ]]; then
+      printf '%s\n' backup
+    fi
+  }
+  wait_for_postgres() { :; }
+  stop_write_paths() { :; }
+  wait_for_api() { :; }
+  record_state() { :; }
+  refresh_codex_connection_observation() { :; }
+  host_helper_start() { touch "$caller_marker"; }
+  docker() {
+    if [[ " $* " == *"{{.Id}}"* ]]; then
+      printf '%s\n' sha256:target
+    fi
+  }
+  update_output="$(update_luthn test/luthn:new)"
+  [[ "$update_output" == *"Luthn update completed"* ]]
+)
+grep -q '^target-cli$' "$bootstrap_marker"
+[[ ! -e "$caller_marker" ]]
+
+cat >"$bootstrap_bin/luthn" <<'TARGET'
+#!/usr/bin/env bash
+exit 2
+TARGET
+chmod 0755 "$bootstrap_bin/luthn"
+(
+  export LUTHN_CLI_PATH="$bootstrap_bin/luthn"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  legacy_output="$(run_post_update_bootstrap 2>&1)"
+  grep -q 'target CLI predates post-update bootstrap' <<<"$legacy_output"
+)
+
+cat >"$bootstrap_bin/luthn" <<'TARGET'
+#!/usr/bin/env bash
+exit 73
+TARGET
+chmod 0755 "$bootstrap_bin/luthn"
+(
+  export LUTHN_CLI_PATH="$bootstrap_bin/luthn"
+  set -- help
+  # shellcheck disable=SC1090
+  source "$repo_root/scripts/luthn" >/dev/null
+  if run_post_update_bootstrap; then
+    echo "expected target bootstrap failure" >&2
+    exit 1
+  fi
 )
 
 echo "Agent connector lifecycle tests passed."

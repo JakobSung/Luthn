@@ -162,10 +162,8 @@ static async Task RunPreview(string[] args)
     var sourceId = args.ElementAtOrDefault(1) ?? "local-source";
     var content = args.ElementAtOrDefault(2) ?? "Public implementation note.";
     var service = new ClassificationPreviewService(
-        new MockContentClassifier(),
+        new LocalContextualContentClassifier(),
         new PolicyEngine());
-
-    Console.Error.WriteLine(MockContentClassifier.UsageNotice);
 
     var response = await service.PreviewAsync(new ClassificationPreviewRequest(sourceId, content, "cli"));
 
@@ -221,7 +219,7 @@ static void PrintUsage()
     Console.WriteLine("Usage:");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- preview [source-id] [content]");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- classification-eval [--dataset path] [--output path]");
-    Console.WriteLine("    [--provider mock|guarded-mock|configured-api] [--api-url url] [--allow-external-provider] [--token-env name]");
+    Console.WriteLine("    [--provider local-deterministic|guarded-local|local-http] [--api-url same-device-url] [--token-env name]");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- context");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- wiki-render");
     Console.WriteLine("  dotnet run --project src/Luthn.Tools -- seed-demo");

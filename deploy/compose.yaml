@@ -36,8 +36,8 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: ${LUTHN_ENVIRONMENT:-Production}
       ConnectionStrings__LuthnDb: *luthn-database
-      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-mock}
-      Luthn__Classification__AllowMock: ${Luthn__Classification__AllowMock:-true}
+      Luthn__Classification__Provider: ${Luthn__Classification__Provider:-LocalDeterministic}
+      Luthn__Classification__LocalHttp__Endpoint: ${Luthn__Classification__LocalHttp__Endpoint:-}
       Luthn__Memory__AutomaticTurnRetentionDays: ${Luthn__Memory__AutomaticTurnRetentionDays:-30}
       Luthn__Memory__AutomaticTurnCleanupEnabled: ${Luthn__Memory__AutomaticTurnCleanupEnabled:-true}
       Luthn__Memory__AutomaticTurnCleanupIntervalMinutes: ${Luthn__Memory__AutomaticTurnCleanupIntervalMinutes:-60}
@@ -47,6 +47,8 @@ services:
       Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
       Luthn__OperatorConfig__Directory: /var/lib/luthn/operator
       Luthn__Host__RequestTimeoutSeconds: ${Luthn__Host__RequestTimeoutSeconds:-65}
+      Luthn__Console__LocalOnly: ${Luthn__Console__LocalOnly:-true}
+      Luthn__Console__TrustedLocalBridge: ${Luthn__Console__TrustedLocalBridge:-true}
       Luthn__Auth__RequireServiceToken: ${Luthn__Auth__RequireServiceToken:-true}
       Luthn__Identity__Mode: ${Luthn__Identity__Mode:-SingleOwner}
       Luthn__Identity__SingleOwnerUserId: ${Luthn__Identity__SingleOwnerUserId:-local-owner}
@@ -82,9 +84,11 @@ services:
       Luthn__Auth__Tokens__1__ActorKind: ${Luthn__Auth__Tokens__1__ActorKind:-Service}
       Luthn__Auth__Tokens__1__IsOperator: ${Luthn__Auth__Tokens__1__IsOperator:-true}
       Luthn__Auth__Tokens__1__Scopes__0: ${Luthn__Auth__Tokens__1__Scopes__0:-access.decide}
-      Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-}
+      Luthn__Auth__Tokens__1__Scopes__1: ${Luthn__Auth__Tokens__1__Scopes__1:-config.write}
     ports:
       - "127.0.0.1:${LUTHN_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
       interval: 5s
@@ -96,6 +100,26 @@ services:
     restart: unless-stopped
     volumes:
       - operator-data:/var/lib/luthn/operator
+
+  # This worker is deliberately opt-in. A separate, provider-neutral Compose
+  # overlay may attach a local extension service on the internal network; the
+  # base installation keeps safe-projection delivery disabled.
+  worker:
+    profiles: ["extensions"]
+    image: *luthn-image
+    command: worker
+    environment:
+      ConnectionStrings__LuthnDb: *luthn-database
+      Luthn__Database__EnableRetries: ${Luthn__Database__EnableRetries:-true}
+      Luthn__Database__MaxRetryCount: ${Luthn__Database__MaxRetryCount:-5}
+      Luthn__Database__MaxRetryDelaySeconds: ${Luthn__Database__MaxRetryDelaySeconds:-10}
+      Luthn__Extensions__SafeProjection__Enabled: ${Luthn__Extensions__SafeProjection__Enabled:-false}
+      Luthn__Extensions__SafeProjection__Endpoint: ${Luthn__Extensions__SafeProjection__Endpoint:-http://luthn-extension:8080/v1/safe-projections}
+      Luthn__Extensions__SafeProjection__SharedSecretFile: ${Luthn__Extensions__SafeProjection__SharedSecretFile:-/run/secrets/local-extension-token}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
   seed:
     profiles: ["tools"]
