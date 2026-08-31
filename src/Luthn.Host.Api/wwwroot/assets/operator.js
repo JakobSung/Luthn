@@ -873,19 +873,24 @@ const receiveRemoteProfileOffer = (event) => {
 
   try {
     const remote = new URL(value.remoteUrl);
+    const hasOfferedAgentKind = value.agentKind !== undefined;
     if (remote.protocol !== "https:" || remote.origin !== event.origin ||
         remote.username || remote.password || remote.search || remote.hash ||
         typeof value.displayName !== "string" || !value.displayName.trim() ||
-        value.displayName.length > 128) return;
+        value.displayName.length > 128 ||
+        (hasOfferedAgentKind && !["codex", "claude"].includes(value.agentKind))) return;
 
     state.remoteProfileOffer = {
       nonce,
       sourceOrigin: event.origin,
       displayName: value.displayName.trim(),
       remoteUrl: remote.href,
+      agentKind: hasOfferedAgentKind ? value.agentKind : null,
       oauthClientId: typeof value.oauthClientId === "string" ? value.oauthClientId : null,
       oauthResource: typeof value.oauthResource === "string" ? value.oauthResource : null
     };
+    $("#remoteProfileAgent").value = state.remoteProfileOffer.agentKind || "codex";
+    $("#remoteProfileAgent").disabled = hasOfferedAgentKind;
     $("#remoteProfileService").textContent = state.remoteProfileOffer.displayName;
     $("#remoteProfileHost").textContent = remote.host;
     $("#remoteProfileOfferStatus").textContent = "Review required";
