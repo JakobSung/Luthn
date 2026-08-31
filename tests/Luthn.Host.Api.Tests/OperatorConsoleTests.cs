@@ -84,6 +84,10 @@ public sealed class OperatorConsoleContractTests
         Assert.Contains("/api/operator/console-profile", script, StringComparison.Ordinal);
         Assert.Contains("/api/operator/mcp-profiles", script, StringComparison.Ordinal);
         Assert.Contains("luthn.remote-profile.offer", script, StringComparison.Ordinal);
+        Assert.Contains("value.agentKind !== undefined", script, StringComparison.Ordinal);
+        Assert.Contains("hasOfferedAgentKind && ![\"codex\", \"claude\"].includes(value.agentKind)", script, StringComparison.Ordinal);
+        Assert.Contains("remoteProfileAgent\").disabled = hasOfferedAgentKind", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("id=\"remoteProfileAgent\" aria-label=\"Agent to switch\" disabled", index, StringComparison.Ordinal);
         Assert.Contains("luthn.managed-extension.offer", script, StringComparison.Ordinal);
         Assert.Contains("/api/operator/managed-extensions/actions", script, StringComparison.Ordinal);
         Assert.Contains("/api/access-requests/", script, StringComparison.Ordinal);
