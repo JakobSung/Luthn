@@ -15,6 +15,16 @@ public sealed class HostManagedExtensionTests
     private const string ProvisioningToken = "bootstrap-token-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
     [Fact]
+    public void DefaultCloudSigningKeyIsAValidP256PublicKey()
+    {
+        using var key = ECDsa.Create();
+
+        key.ImportFromPem(HostManagedExtensionOptions.DefaultTrustedSigningPublicKeyPem);
+
+        Assert.Equal(256, key.KeySize);
+    }
+
+    [Fact]
     public async Task SignedOfferRequiresLocalApprovalAndAuthenticatedActivationBeforeSuccess()
     {
         using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
