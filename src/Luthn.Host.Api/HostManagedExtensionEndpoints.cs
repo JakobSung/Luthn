@@ -184,8 +184,8 @@ public sealed class HostManagedExtensionOptions
     public const string SectionName = "Luthn:ManagedExtensions";
     public const string DefaultTrustedSigningPublicKeyPem = """
         -----BEGIN PUBLIC KEY-----
-        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6VdIO2gbjn02fB5FSw3XljoicJe6
-        lTHnsdu/xHb0FVOp8UVZnJMOA0XDQA2x6+IPnIFklXYGOgRF9xj/Mu5jRw==
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEd0k5SdeYkZD5WwWQWpfDGq2ld/cK
+        cjk5K0BeeAC8JUcBzVtdJaNNawOpIBKbi2bGPvbwK4z25lHQDwFtmMcm9g==
         -----END PUBLIC KEY-----
         """;
 
